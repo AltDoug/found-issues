@@ -10,7 +10,7 @@
 <!-- TODO: record + embed demo GIF per docs/demo-storyboard.md before public launch -->
 
 When Claude notices a bug, error, or warning while working on something
-else, it usually shrugs and moves on — *"pre-existing, not our problem,
+else, it usually shrugs and moves on — *"pre-existing, not our code,
 let's continue."* found-issues makes it stop, log the observation, and
 surface it later. Automatically. Across sessions. **Without the user
 lifting a finger.**
