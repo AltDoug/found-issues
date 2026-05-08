@@ -97,5 +97,5 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/DougBTW/found-issues/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/DougBTW/found-issues/releases/tag/v0.1.0
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.0

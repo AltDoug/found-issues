@@ -2,7 +2,7 @@
 
 > Your AI agent has a blind spot. This fixes it.
 
-[![tests](https://github.com/DougBTW/found-issues/actions/workflows/test.yml/badge.svg)](https://github.com/DougBTW/found-issues/actions/workflows/test.yml)
+[![tests](https://github.com/AltDoug/found-issues/actions/workflows/test.yml/badge.svg)](https://github.com/AltDoug/found-issues/actions/workflows/test.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
@@ -17,7 +17,7 @@ lifting a finger.**
 ## Install
 
 ```
-/plugin marketplace add DougBTW/found-issues
+/plugin marketplace add AltDoug/found-issues
 /plugin install found-issues
 ```
 
@@ -176,4 +176,4 @@ MIT — see [LICENSE](LICENSE).
 
 ## Author
 
-[DougBTW](https://github.com/DougBTW)
+[AltDoug](https://github.com/AltDoug)

@@ -90,4 +90,4 @@ Tell them the rules file is auto-loaded into context (no further action
 needed) and that the system is ready.
 
 If they want to read more, point them at the project README:
-<https://github.com/DougBTW/found-issues>.
+<https://github.com/AltDoug/found-issues>.
