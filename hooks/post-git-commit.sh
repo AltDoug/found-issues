@@ -3,7 +3,7 @@
 #
 # Fires after every Bash invocation. If the command was `git commit`,
 # scans the new HEAD commit's diff for files referenced by [open]
-# entries and prompts Claude to run /fi annotate-commit if any match.
+# entries and prompts Claude to run /found-issues:annotate-commit if any match.
 #
 # Especially load-bearing in `github-direct` mode where commits ARE
 # the closure mechanism (no PR workflow).
@@ -39,20 +39,25 @@ if [[ -n "$exit_code" && "$exit_code" != "0" ]]; then
   exit 0
 fi
 
-# Locate CLI + lib
+# Locate CLI binary
 FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
 if ! command -v "$FI_BIN" >/dev/null 2>&1; then
-  if [[ -x "$HOME/.local/bin/found-issues" ]]; then
-    FI_BIN="$HOME/.local/bin/found-issues"
-  elif [[ -x "$HOME/.found-issues/cli/found-issues" ]]; then
-    FI_BIN="$HOME/.found-issues/cli/found-issues"
+  if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/found-issues" ]]; then
+    FI_BIN="$CLAUDE_PLUGIN_ROOT/bin/found-issues"
   else
     exit 0
   fi
 fi
 
-cli_dir="$(dirname "$(readlink -f "$FI_BIN" 2>/dev/null || echo "$FI_BIN")")"
-lib_dir="${FOUND_ISSUES_LIB_DIR:-$cli_dir/../lib}"
+# Locate lib
+if [[ -n "${FOUND_ISSUES_LIB_DIR:-}" ]]; then
+  lib_dir="$FOUND_ISSUES_LIB_DIR"
+elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  lib_dir="$CLAUDE_PLUGIN_ROOT/lib"
+else
+  cli_dir="$(dirname "$(readlink -f "$FI_BIN" 2>/dev/null || echo "$FI_BIN")")"
+  lib_dir="$cli_dir/../lib"
+fi
 
 if [[ -f "$lib_dir/parse-entries.sh" ]]; then
   # shellcheck source=../lib/parse-entries.sh
@@ -110,9 +115,9 @@ cat <<EOF
 ## found-issues — commit $short_sha touches files referenced by [open] entries
 
 $matching
-If your commit addresses any of these, run \`/fi annotate-commit\` now
+If your commit addresses any of these, run \`/found-issues:annotate-commit\` now
 (defaults to HEAD; pass a different SHA if needed).
 
 When the commit lands on the default branch (or already has, for direct
-pushes), \`/fi sync\` will auto-flip these to [fixed].
+pushes), \`/found-issues:sync\` will auto-flip these to [fixed].
 EOF

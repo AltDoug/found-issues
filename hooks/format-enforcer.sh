@@ -89,7 +89,7 @@ while IFS= read -r line; do
 
   # 1. Bare 'PR #N' — must be canonical (PR: org/repo#N)
   if [[ "$line" =~ PR[[:space:]]+#[0-9]+ ]] && [[ "$line" != *"(PR: "* ]]; then
-    reason="bare 'PR #N' — use canonical '(PR: org/repo#N)' form (or run /fi annotate-pr)"
+    reason="bare 'PR #N' — use canonical '(PR: org/repo#N)' form (or run /found-issues:annotate-pr)"
   fi
 
   # 2. Wrong-case status
@@ -128,9 +128,15 @@ fi
 # === Determine action based on mode ===
 
 mode="local"
-# Try to source detect-mode for accurate detection
-cli_dir="$(dirname "$(readlink -f "${FOUND_ISSUES_BIN:-found-issues}" 2>/dev/null || command -v "${FOUND_ISSUES_BIN:-found-issues}" 2>/dev/null || echo "")")"
-lib_dir="${FOUND_ISSUES_LIB_DIR:-$cli_dir/../lib}"
+# Locate lib for detect-mode (plugin root preferred)
+if [[ -n "${FOUND_ISSUES_LIB_DIR:-}" ]]; then
+  lib_dir="$FOUND_ISSUES_LIB_DIR"
+elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  lib_dir="$CLAUDE_PLUGIN_ROOT/lib"
+else
+  cli_dir="$(dirname "$(readlink -f "${FOUND_ISSUES_BIN:-found-issues}" 2>/dev/null || command -v "${FOUND_ISSUES_BIN:-found-issues}" 2>/dev/null || echo "")")"
+  lib_dir="$cli_dir/../lib"
+fi
 if [[ -f "$lib_dir/detect-mode.sh" ]]; then
   # shellcheck source=../lib/detect-mode.sh
   source "$lib_dir/detect-mode.sh"
@@ -145,7 +151,7 @@ while IFS=$'\t' read -r bad_line reason; do
   report+="  Issue:  $reason"$'\n\n'
 done <<< "$violations"
 
-report+="Use /fi log to add entries — it handles format automatically and prevents these errors."
+report+="Use /found-issues:log to add entries — it handles format automatically and prevents these errors."
 
 case "$mode" in
   local)

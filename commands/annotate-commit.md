@@ -26,10 +26,10 @@ Pass through the CLI's output:
 ## When to invoke
 
 The `post-git-commit` hook surfaces relevant entries automatically right
-after `git commit` succeeds. **Run `/fi annotate-commit` immediately** —
+after `git commit` succeeds. **Run `/found-issues:annotate-commit` immediately** —
 do not defer.
 
-For fixes spread across multiple commits, run `/fi annotate-commit <sha>`
+For fixes spread across multiple commits, run `/found-issues:annotate-commit <sha>`
 once per relevant commit. The CLI is idempotent — running it twice with
 the same SHA is safe (the second pass detects the existing annotation
 and skips).

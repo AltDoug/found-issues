@@ -84,7 +84,7 @@ $count_status
 $open_entries
 
 These entries are tracked in \`$display_path\`. If your work addresses any of
-them, run \`/fi annotate-pr <N>\` after opening a PR or \`/fi annotate-commit\`
+them, run \`/found-issues:annotate-pr <N>\` after opening a PR or \`/found-issues:annotate-commit\`
 after a direct commit. Sync will auto-flip them when the PR merges or the
 commit lands on the default branch.
 EOF

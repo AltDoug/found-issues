@@ -43,7 +43,7 @@ For each one:
 ## Conservative bias is mandatory
 
 False-positive closures (marking a real bug as fixed) are worse than
-stale opens. The user can always run `/fi sync` again later. When in
+stale opens. The user can always run `/found-issues:sync` again later. When in
 doubt, leave the entry alone.
 
 Do **not** flip on:

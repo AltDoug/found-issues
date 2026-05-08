@@ -99,7 +99,7 @@ fi
     echo "  Issue:  $reason"
     echo
   done <<< "$violations"
-  echo "Use \`found-issues log\` (or /fi log inside Claude Code) to add entries —"
+  echo "Use \`found-issues log\` (or /found-issues:log inside Claude Code) to add entries —"
   echo "the format is handled automatically and these errors don't happen."
   echo
   echo "To skip this hook for one commit: git commit --no-verify"

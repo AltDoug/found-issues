@@ -6,7 +6,7 @@
 # referenced by [open] entries, and surfaces a one-shot prompt to Claude
 # telling it which entries it should annotate.
 #
-# This is the enforcement layer that makes /fi annotate-pr happen
+# This is the enforcement layer that makes /found-issues:annotate-pr happen
 # reliably — without it, Claude relies on memory of the rule.
 #
 # Hook event: PostToolUse (matcher: Bash)
@@ -42,20 +42,25 @@ if [[ "$stdout" =~ /pull/([0-9]+) ]]; then
 fi
 [[ -z "$pr_num" ]] && exit 0
 
-# Locate CLI + lib
+# Locate CLI binary
 FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
 if ! command -v "$FI_BIN" >/dev/null 2>&1; then
-  if [[ -x "$HOME/.local/bin/found-issues" ]]; then
-    FI_BIN="$HOME/.local/bin/found-issues"
-  elif [[ -x "$HOME/.found-issues/cli/found-issues" ]]; then
-    FI_BIN="$HOME/.found-issues/cli/found-issues"
+  if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/found-issues" ]]; then
+    FI_BIN="$CLAUDE_PLUGIN_ROOT/bin/found-issues"
   else
-    exit 0  # no CLI; nothing we can do
+    exit 0
   fi
 fi
 
-cli_dir="$(dirname "$(readlink -f "$FI_BIN" 2>/dev/null || echo "$FI_BIN")")"
-lib_dir="${FOUND_ISSUES_LIB_DIR:-$cli_dir/../lib}"
+# Locate lib
+if [[ -n "${FOUND_ISSUES_LIB_DIR:-}" ]]; then
+  lib_dir="$FOUND_ISSUES_LIB_DIR"
+elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  lib_dir="$CLAUDE_PLUGIN_ROOT/lib"
+else
+  cli_dir="$(dirname "$(readlink -f "$FI_BIN" 2>/dev/null || echo "$FI_BIN")")"
+  lib_dir="$cli_dir/../lib"
+fi
 
 if [[ -f "$lib_dir/parse-entries.sh" ]]; then
   # shellcheck source=../lib/parse-entries.sh
@@ -113,7 +118,7 @@ cat <<EOF
 ## found-issues — PR #$pr_num touches files referenced by [open] entries
 
 $matching
-If your PR addresses any of these, run \`/fi annotate-pr $pr_num\` now.
+If your PR addresses any of these, run \`/found-issues:annotate-pr $pr_num\` now.
 The format-enforcer hook will block bare \`PR #$pr_num\` references — only
 the canonical \`(PR: $repo_id#$pr_num)\` annotation is accepted.
 EOF

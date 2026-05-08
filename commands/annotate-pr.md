@@ -29,7 +29,7 @@ Pass the result through to the user. The CLI prints either:
 
 The `post-pr-create` hook should surface relevant entries automatically
 right after `gh pr create` runs. That output includes the suggested
-command line. **Run the suggested `/fi annotate-pr <N>` immediately** —
+command line. **Run the suggested `/found-issues:annotate-pr <N>` immediately** —
 do not defer.
 
 If the hook didn't fire (e.g., user opened the PR via the GitHub web UI
@@ -39,7 +39,7 @@ the PR number.
 ## Multi-PR entries
 
 A single entry can be addressed by multiple PRs (e.g., partial fix → revert
-→ re-fix). Running `/fi annotate-pr` multiple times with different PR
+→ re-fix). Running `/found-issues:annotate-pr` multiple times with different PR
 numbers is safe — both annotations get appended:
 
 ```

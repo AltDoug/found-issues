@@ -1,0 +1,15 @@
+{
+  "version": "1",
+  "plugins": [
+    {
+      "name": "found-issues",
+      "description": "Markdown-based issue tracker for AI agents. Claude logs out-of-scope issues; entries auto-flip to fixed on PR merge or commit-fix.",
+      "version": "0.1.0",
+      "source": {
+        "type": "github",
+        "owner": "DougBTW",
+        "repo": "found-issues"
+      }
+    }
+  ]
+}
