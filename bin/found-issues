@@ -21,8 +21,17 @@ fi_script_dir() {
 }
 
 readonly FI_BIN_DIR="$(fi_script_dir)"
-# lib/ lives at the project root (one level up from cli/)
-readonly FI_LIB_DIR="${FOUND_ISSUES_LIB_DIR:-$FI_BIN_DIR/../lib}"
+# lib/ resolution priority:
+#   1. $FOUND_ISSUES_LIB_DIR (explicit override; useful for tests)
+#   2. $CLAUDE_PLUGIN_ROOT/lib (when running as a Claude Code plugin)
+#   3. $FI_BIN_DIR/../lib (when running from source checkout)
+if [[ -n "${FOUND_ISSUES_LIB_DIR:-}" ]]; then
+  readonly FI_LIB_DIR="$FOUND_ISSUES_LIB_DIR"
+elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  readonly FI_LIB_DIR="$CLAUDE_PLUGIN_ROOT/lib"
+else
+  readonly FI_LIB_DIR="$FI_BIN_DIR/../lib"
+fi
 
 # Source libraries
 # shellcheck source=../lib/canonicalize.sh

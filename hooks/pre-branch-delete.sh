@@ -3,7 +3,7 @@
 #
 # Hard-blocks branch deletions if the branch has [open] found-issues entries
 # that aren't on the default branch. Reason: deleting a branch with
-# unpromoted entries silently loses them — the whole point of /fi promote
+# unpromoted entries silently loses them — the whole point of /found-issues:promote
 # is to prevent that.
 #
 # Patterns matched:
@@ -137,7 +137,7 @@ fi
     done <<< "$entries"
     echo
   done
-  echo "Run /fi promote on the branch first, open a PR to '$default_branch',"
+  echo "Run /found-issues:promote on the branch first, open a PR to '$default_branch',"
   echo "and re-attempt the delete after merge. This prevents silent loss of"
   echo "tracked observations when feature branches get pruned."
   echo

@@ -64,7 +64,7 @@ Tell the user:
 ## When to invoke
 
 Typically triggered by the `pre-branch-delete` hook blocking a deletion
-and instructing the user to run `/fi promote`. The user can also invoke
+and instructing the user to run `/found-issues:promote`. The user can also invoke
 it proactively before deleting a feature branch.
 
 Not applicable in `local` mode (no branches) or `git`-without-GitHub

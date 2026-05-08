@@ -56,6 +56,6 @@ Add ONE of these as an HTML comment anywhere in your response:
   <!-- found-issues-checked: deferred -->
 
 The marker forces conscious consideration; it does not auto-detect issues.
-Use /fi log to log items frictionlessly.
+Use /found-issues:log to log items frictionlessly.
 EOF
 exit 2

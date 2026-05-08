@@ -28,18 +28,18 @@ Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract
 | Path | Repo-relative path | `lib/foo.py` | When location is concrete |
 | Line | `:N` (after path, no space) | `:42` | When line is concrete |
 | Suggested fix | `(suggested: ...)` | `(suggested: add zero-check)` | Encouraged but optional |
-| PR annotation | `(PR: ORG/REPO#N)` | `(PR: DougBTW/found-issues#5)` | Added by `/fi annotate-pr` |
-| Commit annotation | `(commit: SHA)` (7+ hex chars) | `(commit: a1b2c3d)` | Added by `/fi annotate-commit` |
-| Fixed date | `(fixed: YYYY-MM-DD)` | `(fixed: 2026-05-08)` | Added by `/fi sync` on closure |
+| PR annotation | `(PR: ORG/REPO#N)` | `(PR: DougBTW/found-issues#5)` | Added by `/found-issues:annotate-pr` |
+| Commit annotation | `(commit: SHA)` (7+ hex chars) | `(commit: a1b2c3d)` | Added by `/found-issues:annotate-commit` |
+| Fixed date | `(fixed: YYYY-MM-DD)` | `(fixed: 2026-05-08)` | Added by `/found-issues:sync` on closure |
 | Verification | `(verified: ai)` or `(verified: review)` | `(verified: ai)` | Added when sync verifies via AI |
 
 ## Status semantics
 
 | Status | Meaning | Set by |
 |---|---|---|
-| `open` | Active issue, not yet addressed | `/fi log` (only path) |
+| `open` | Active issue, not yet addressed | `/found-issues:log` (only path) |
 | `deferred` | Intentionally postponed | User edit; system never auto-flips to deferred |
-| `fixed` | Addressed and verified | `/fi sync` (annotation match, tombstone, or AI verification); user edit |
+| `fixed` | Addressed and verified | `/found-issues:sync` (annotation match, tombstone, or AI verification); user edit |
 
 Once `[fixed]`, an entry is historical. Don't auto-revert; if a bug regresses, log a fresh `[open]` entry.
 
@@ -50,7 +50,7 @@ Once `[fixed]`, an entry is historical. Don't auto-revert; if a bug regresses, l
 | `github-pr`, `github-direct`, `git` | `<repo-root>/docs/found-issues.md` |
 | `local` (no `.git/`) | `<cwd>/.found-issues.md` |
 
-If the file doesn't exist when `/fi log` runs, it's created with this header:
+If the file doesn't exist when `/found-issues:log` runs, it's created with this header:
 
 ```markdown
 # found-issues
@@ -146,7 +146,7 @@ Each is rendered only when > 0. Order: `critical · issues · in PR · stale`.
 
 ## Dedup rules
 
-`/fi log` deduplicates against existing `[open]` entries:
+`/found-issues:log` deduplicates against existing `[open]` entries:
 
 1. Paths are canonicalized: resolve to repo-relative, normalize separators, strip trailing whitespace.
 2. **Dedup key**: `(canonical_path, line, first 50 chars of symptom)`.
