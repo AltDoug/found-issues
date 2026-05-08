@@ -12,6 +12,18 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.1] — 2026-05-08
+
+### Fixed
+
+- `marketplace.json` source schema corrected (`source: github, repo: owner/name` per Claude Code spec — previous `type/owner/repo` form failed install)
+- `marketplace.json` missing required top-level `name` and `owner` fields
+- `plugin.json` removed redundant `"hooks": "./hooks/hooks.json"` field — the standard `hooks/hooks.json` auto-loads via convention; explicit reference caused duplicate-load error on `/reload-plugins`
+
+### Changed
+
+- GitHub owner renamed `DougBTW` → `AltDoug` in all canonical refs (URLs, badges, LICENSE copyright, format-spec examples)
+
 ## [0.1.0] — 2026-05-08
 
 Initial release. Built across 7 PRs in a single design + implementation
@@ -97,5 +109,6 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.1
 [0.1.0]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.0
