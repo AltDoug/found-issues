@@ -12,6 +12,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.2] — 2026-05-08
+
+### Fixed
+
+- **Stop-hook smart-fire**: only requires the `<!-- found-issues-checked: ... -->` marker on assistant turns that included substantive tool use (Edit/Write/MultiEdit/Bash/NotebookEdit). Pure-conversation turns (greetings, Q&A, brainstorm) no longer get blocked. This was the right behavior all along — a "Hello" reply has no code-change context to notice issues against.
+- `bin/found-issues` `FI_VERSION` constant synced to manifest version (was hardcoded `0.1.0` regardless of release)
+
 ## [0.1.1] — 2026-05-08
 
 ### Fixed
@@ -109,6 +116,7 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.2
 [0.1.1]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.1
 [0.1.0]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.0

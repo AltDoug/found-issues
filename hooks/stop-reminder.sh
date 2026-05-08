@@ -39,6 +39,29 @@ if [[ -z "$transcript_path" || ! -f "$transcript_path" ]]; then
   exit 0
 fi
 
+# Smart-fire: only block when the most recent assistant turn included a
+# substantive tool use (Edit/Write/MultiEdit/Bash). Pure-conversation turns
+# (greetings, Q&A, brainstorm) skip the marker requirement — those don't
+# create code-change opportunities to notice issues against.
+#
+# Logic: walk back through the last ~16KB of transcript, find the most
+# recent user message boundary, then check if any tool_use of a
+# substantive type appears between that boundary and end-of-transcript.
+recent_tail="$(tail -c 16384 "$transcript_path" 2>/dev/null || true)"
+if [[ -n "$recent_tail" ]]; then
+  # Take everything after the last user message marker
+  last_turn="$(printf '%s' "$recent_tail" | awk '
+    /"type":"user"/ { buf=""; next }
+    { buf = buf "\n" $0 }
+    END { print buf }
+  ')"
+  # If no substantive tool use in the most recent assistant turn, allow stop
+  if ! printf '%s' "$last_turn" \
+     | grep -qE '"name":"(Edit|Write|MultiEdit|Bash|NotebookEdit)"'; then
+    exit 0
+  fi
+fi
+
 # Check the last ~8KB of the transcript for the marker.
 # 8KB is enough to capture the most recent assistant turn even with long output.
 if tail -c 8192 "$transcript_path" 2>/dev/null \
