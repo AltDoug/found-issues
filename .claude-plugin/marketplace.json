@@ -9,9 +9,8 @@
       "description": "Markdown-based issue tracker for AI agents. Claude logs out-of-scope issues; entries auto-flip to fixed on PR merge or commit-fix.",
       "version": "0.1.0",
       "source": {
-        "type": "github",
-        "owner": "AltDoug",
-        "repo": "found-issues"
+        "source": "github",
+        "repo": "AltDoug/found-issues"
       }
     }
   ]
