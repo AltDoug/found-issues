@@ -12,6 +12,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.5] — 2026-05-08
+
+### Removed
+
+- **Auto-firing onboarding** in SessionStart hook (added in v0.1.3, made visible in v0.1.4). Forcing every user's first prompt to be hijacked by an orientation block is bad UX. Onboarding belongs in the install ritual, not in a context hijack.
+
+### Changed
+
+- **Install ritual now four commands:** `/plugin marketplace add`, `/plugin install`, `/reload-plugins`, `/found-issues:setup`. Setup is the canonical onboarding moment — run during install, not later. README and AGENTS.md updated to make this explicit.
+- AGENTS.md tells installing AIs to run all four steps; if the user already installed the first two themselves, the AI recommends `/found-issues:setup` immediately rather than waiting.
+
 ## [0.1.4] — 2026-05-08
 
 ### Fixed
@@ -137,7 +148,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.5
 [0.1.4]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.4
 [0.1.3]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.3
 [0.1.2]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.2

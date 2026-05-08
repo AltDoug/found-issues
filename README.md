@@ -19,17 +19,25 @@ lifting a finger.**
 ```
 /plugin marketplace add AltDoug/found-issues
 /plugin install found-issues
+/reload-plugins
+/found-issues:setup
 ```
 
-Two commands inside Claude Code. That's it. The plugin:
+The first two install the plugin. `/reload-plugins` activates it.
+`/found-issues:setup` walks you through orientation in ~30 seconds and
+offers optional polish (statusline integration, shorter `/fi` alias,
+per-repo git pre-commit hook).
 
-- Auto-loads the agent rules into context every session
-- Registers all 7 lifecycle hooks
-- Adds the `found-issues` CLI to your PATH
-- Works in any repo (auto-detects mode: local / git / github-direct / github-pr)
+The setup command is **optional** — the plugin is fully active without
+it — but running it once gets the polish wired up and removes the
+guesswork. You can always re-run it later.
 
-No configuration required. For optional polish (statusline integration,
-short alias for `/fi *`), run `/found-issues:setup`.
+The plugin handles:
+
+- Auto-loading the agent rules into context every session
+- Registering all 7 lifecycle hooks
+- Adding the `found-issues` CLI to your PATH
+- Working in any repo (auto-detects mode: local / git / github-direct / github-pr)
 
 ## What it does
 
