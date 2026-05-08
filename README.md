@@ -6,8 +6,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-<!-- ![demo](demo.gif) -->
-<!-- TODO: record + embed demo GIF per docs/demo-storyboard.md before public launch -->
+![demo](hero.png)
 
 When Claude notices a bug, error, or warning while working on something
 else, it usually shrugs and moves on — *"pre-existing, not our problem,
