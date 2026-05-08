@@ -2,11 +2,18 @@
 
 > Your AI agent has a blind spot. This fixes it.
 
+[![tests](https://github.com/DougBTW/found-issues/actions/workflows/test.yml/badge.svg)](https://github.com/DougBTW/found-issues/actions/workflows/test.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
+
+<!-- ![demo](demo.gif) -->
+<!-- TODO: record + embed demo GIF per docs/demo-storyboard.md before public launch -->
+
 When Claude notices a bug, error, or warning while working on something
 else, it usually shrugs and moves on — *"pre-existing, not our problem,
-let's continue."* `found-issues` makes it stop, log the observation, and
-surface it later. Automatically. Across sessions. Without the user lifting
-a finger.
+let's continue."* found-issues makes it stop, log the observation, and
+surface it later. Automatically. Across sessions. **Without the user
+lifting a finger.**
 
 ## Install
 
@@ -15,17 +22,17 @@ a finger.
 /plugin install found-issues
 ```
 
-Two commands inside Claude Code. That's it. The plugin auto-loads its
-rules into context every session, registers all hooks, and adds the CLI
-to PATH. No configuration required.
+Two commands inside Claude Code. That's it. The plugin:
 
-For optional polish (statusline integration, short alias):
+- Auto-loads the agent rules into context every session
+- Registers all 7 lifecycle hooks
+- Adds the `found-issues` CLI to your PATH
+- Works in any repo (auto-detects mode: local / git / github-direct / github-pr)
 
-```
-/found-issues:setup
-```
+No configuration required. For optional polish (statusline integration,
+short alias for `/fi *`), run `/found-issues:setup`.
 
-## How it works
+## What it does
 
 The agent maintains a `docs/found-issues.md` file in each repo:
 
@@ -36,19 +43,43 @@ The agent maintains a `docs/found-issues.md` file in each repo:
 - [fixed] 2026-05-06 src/auth.ts:88 — race on session refresh (PR: org/repo#41) (fixed: 2026-05-08)
 ```
 
-The closure loop runs automatically:
+The closure loop runs **on its own**:
 
 | When | What happens |
 |---|---|
-| Claude notices an out-of-scope issue | Logs it via `/found-issues:log` per the [rules](skills/rules/SKILL.md) |
-| Claude opens a PR addressing an entry | PostToolUse hook prompts `/found-issues:annotate-pr <N>` |
-| The PR merges to main | Next session's `SessionStart` hook flips `[open]` → `[fixed]` |
-| The referenced file/line is deleted | Tombstone detection auto-closes the entry |
+| Claude notices an out-of-scope issue | Logs it via `/found-issues:log` per the auto-loaded [rules](skills/rules/SKILL.md) |
+| Claude opens a PR addressing an entry | Hook surfaces matching entries, prompts `/found-issues:annotate-pr <N>` |
+| Claude commits a fix directly to main | Hook prompts `/found-issues:annotate-commit` |
+| PR merges or commit lands on main | Next `SessionStart` flips `[open]` → `[fixed]` automatically |
+| Referenced file/line is deleted | Tombstone detection auto-closes the entry |
 | Branch with un-promoted entries about to be deleted | `pre-branch-delete` hook blocks until `/found-issues:promote` runs |
 
-The user does almost nothing. The count appears at session start, the
-file stays accurate, and `[fixed]` history accumulates as a record of
-what got addressed.
+You see a count at session start. The file stays accurate. `[fixed]`
+history accumulates as a record. Nothing requires manual bookkeeping.
+
+## Why this exists
+
+Most AI coding agents have a **proactive blindspot**: they notice
+defects in code they're reading, judge those defects as out-of-scope,
+and silently move on. Sometimes they say "I noticed X but it's
+pre-existing, not our problem." Then the bug stays in the codebase
+forever — invisible to the user who'd never have spotted it themselves.
+
+found-issues changes the contract. The agent maintains a tiny markdown
+file as it works. Issues never disappear into the void. Eventually they
+either get fixed (and auto-closed) or stay visible until they do.
+
+## How is this different from…?
+
+| | found-issues | GitHub Issues / Linear / Jira | Backlog.md / claude-mem |
+|---|---|---|---|
+| Tracks | Defects the AI noticed but didn't fix | Anything (features, bugs, tasks) | Generic markdown tasks / session memory |
+| Created by | The AI agent (proactively) | Humans | Either |
+| Storage | Plain markdown in your repo | Cloud DB | Markdown |
+| Closure | Auto via PR/commit/tombstone | Manual | Manual |
+| AI verification of unannotated entries | Yes | No | No |
+
+You can run all of these together — they don't overlap functionally.
 
 ## Slash commands
 
@@ -64,48 +95,81 @@ All namespaced under `/found-issues:` (Claude Code plugin convention):
 | `/found-issues:status` | Print current counts |
 | `/found-issues:setup` | Optional first-run orientation |
 
-Want shorter typing? Add `~/.claude/commands/fi.md` with `Run /found-issues:$ARGUMENTS` and use `/fi log` etc.
+**Want shorter typing?** Add `~/.claude/commands/fi.md` with the content
+`Run /found-issues:$ARGUMENTS`. Then `/fi log src/foo.py:42 — bug` works
+as a shortcut for `/found-issues:log src/foo.py:42 — bug`.
 
-## Format spec
+## Format
 
 ```
 - [STATUS] [!] YYYY-MM-DD path:line — symptom (suggested: fix) (PR: org/repo#N) (fixed: YYYY-MM-DD)
 ```
 
-- Statuses: `open` / `deferred` / `fixed`
-- `[!]` optional critical flag
-- ` — ` is U+2014 em-dash, **not** a hyphen
-- Annotations are optional but enable auto-flipping; both `(PR: ...)` and `(commit: ...)` are supported and can coexist on one entry
+- **Statuses**: `open` / `deferred` / `fixed`
+- **`[!]`** optional critical flag (drop-everything priority)
+- **` — `** is U+2014 em-dash with spaces, *not* a hyphen
+- **Annotations** are optional but enable auto-flipping; `(PR: ...)` and
+  `(commit: ...)` can coexist on one entry
 
-Full grammar, regex patterns, and edge cases: [`docs/format-spec.md`](docs/format-spec.md).
+Full grammar, regex patterns, and invalid examples: [`docs/format-spec.md`](docs/format-spec.md).
 
 ## Workflow modes
 
-found-issues auto-detects which mode each repo is in. You don't configure this — it just does the right thing per repo:
+found-issues auto-detects which mode each repo is in:
 
 | Mode | Detected when | Closure mechanism |
 |---|---|---|
-| `local` | No `.git/` directory | Manual `[open]` → `[fixed]` edits + tombstone |
-| `git` | Git repo, no GitHub remote | `(commit: <sha>)` annotations + tombstone |
-| `github-direct` | GitHub remote, no recent merged PRs (push-to-main workflow) | `(commit: <sha>)` annotations + tombstone |
-| `github-pr` | GitHub remote with recent merged PRs | `(PR: org/repo#N)` annotations + commit + tombstone |
+| `local` | No `.git/` directory | Manual + tombstone |
+| `git` | Git repo, no GitHub remote | `(commit: <sha>)` + tombstone |
+| `github-direct` | GitHub remote, no recent merged PRs | `(commit: <sha>)` + tombstone |
+| `github-pr` | GitHub remote with recent merged PRs | `(PR: org/repo#N)` + commit + tombstone |
 
-Mixed workflow (sometimes PR, sometimes direct push) is fully supported — both annotation forms always work; mode just sets the default.
+Mixed workflow (sometimes PR, sometimes direct push) is fully
+supported — both annotation forms always work; mode just sets the
+default.
 
-## Status
+Details + edge cases: [`docs/modes.md`](docs/modes.md).
 
-🚧 **Pre-release.** Private repo while v1 is built. Will go public when
-ready to launch.
+## Status & roadmap
+
+**v0.1.0 — initial release.**
+
+- 122 tests passing in CI on Linux + macOS
+- 7 hooks + 6 slash commands + a CLI binary, all wired through the
+  Claude Code plugin spec
+- Auto-detected modes; no per-repo configuration
+- Optional per-repo git pre-commit hook for format validation outside
+  Claude Code
+
+Roadmap things being considered (not committed):
+
+- Universal layer that works with Codex / Cursor / Aider
+- AI-assisted dedup for semantic-similar entries
+- Configurable stale threshold per repo
+- Web dashboard / browser extension for non-terminal users
+
+Open an issue if you have a use case for any of these.
+
+## Docs
+
+- [`docs/architecture.md`](docs/architecture.md) — how the pieces fit together
+- [`docs/format-spec.md`](docs/format-spec.md) — canonical entry format
+- [`docs/modes.md`](docs/modes.md) — workflow modes and detection
+- [`docs/faq.md`](docs/faq.md) — common questions
+- [`AGENTS.md`](AGENTS.md) — instructions for AI agents installing this
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to propose changes
+- [`CHANGELOG.md`](CHANGELOG.md) — version history
+
+## Contributing
+
+Issues and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+process. Quick PRs (typo fixes, small bugs) ship faster than big
+proposals — for those, please open an issue first to discuss the design.
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT — see [LICENSE](LICENSE).
 
 ## Author
 
 [DougBTW](https://github.com/DougBTW)
-
-## For AI agents installing this
-
-See [AGENTS.md](AGENTS.md). TL;DR: use `/plugin install found-issues`,
-do not copy files manually.
