@@ -17,6 +17,5 @@
     "markdown",
     "agents",
     "found-issues"
-  ],
-  "hooks": "./hooks/hooks.json"
+  ]
 }
