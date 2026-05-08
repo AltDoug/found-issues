@@ -1,5 +1,8 @@
 {
-  "version": "1",
+  "name": "found-issues",
+  "owner": {
+    "name": "DougBTW"
+  },
   "plugins": [
     {
       "name": "found-issues",
