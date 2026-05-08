@@ -27,21 +27,35 @@ Then check the user's environment and surface only the relevant options.
 
 ## Optional 1 — Statusline integration
 
-Run:
+The plugin can append a colored counter segment to the user's statusline
+showing `N critical · N issues · N in PR · N stale` (each shown only when
+> 0).
+
+**Detect the user's statusline first:**
 
 ```bash
-found-issues status --format=plain
+ls "$HOME/.claude/statusline.sh" 2>/dev/null
 ```
 
-If the output is non-empty, the system has open entries already. Tell the
-user they can pipe this into their statusline by adding a single line to
-their `~/.claude/statusline.sh` (or wherever their statusline lives):
+If it exists, ask the user: *"I can add a found-issues counter segment to
+your statusline. Want me to wire it up? It's a single line append."* If they
+say yes, append this to the file (don't overwrite, append):
 
 ```bash
-$(found-issues status --format=segment 2>/dev/null)
+echo '' >> "$HOME/.claude/statusline.sh"
+echo '# found-issues counter (added by /found-issues:setup)' >> "$HOME/.claude/statusline.sh"
+echo 'echo -n "$(found-issues status --format=segment 2>/dev/null)"' >> "$HOME/.claude/statusline.sh"
 ```
 
-This gives a colored counter like `1 critical · 3 issues · 2 in PR · 1 stale`.
+If the user already has a found-issues counter (search for `found-issues`
+in the statusline file), tell them: *"You already have a counter. The
+plugin's segment would duplicate. Skip this step or remove the existing
+counter first."*
+
+If they don't have a `~/.claude/statusline.sh`, they likely use the
+default Claude Code statusline. Tell them: *"You'll see the count via the
+SessionStart hook on session start regardless. To wire up a statusline
+yourself, set up `~/.claude/statusline.sh` first then re-run setup."*
 
 If the user has **claude-hud** installed, statusline integration won't work
 (claude-hud owns the slot). Tell them: the SessionStart hook still prints
