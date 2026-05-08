@@ -53,8 +53,13 @@ The closure loop runs **on its own**:
 | Referenced file/line is deleted | Tombstone detection auto-closes the entry |
 | Branch with un-promoted entries about to be deleted | `pre-branch-delete` hook blocks until `/found-issues:promote` runs |
 
-You see a count at session start. The file stays accurate. `[fixed]`
-history accumulates as a record. Nothing requires manual bookkeeping.
+You see a count at session start, and in your statusline if you have
+one wired up:
+
+![statusline showing 1 issue count](statusline.png)
+
+The file stays accurate. `[fixed]` history accumulates as a record.
+Nothing requires manual bookkeeping.
 
 ## Why this exists
 
