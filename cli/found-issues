@@ -1,0 +1,773 @@
+#!/usr/bin/env bash
+# found-issues — markdown-based issue tracker for AI agents
+# https://github.com/DougBTW/found-issues
+#
+# Single binary with subcommands. See `found-issues --help` for usage.
+
+set -euo pipefail
+
+readonly FI_VERSION="0.1.0"
+
+# Resolve script directory, following symlinks.
+fi_script_dir() {
+  local source="${BASH_SOURCE[0]}"
+  while [[ -h "$source" ]]; do
+    local dir
+    dir="$( cd -P "$( dirname "$source" )" && pwd )"
+    source="$(readlink "$source")"
+    [[ "$source" != /* ]] && source="$dir/$source"
+  done
+  cd -P "$( dirname "$source" )" && pwd
+}
+
+readonly FI_BIN_DIR="$(fi_script_dir)"
+# lib/ lives at the project root (one level up from cli/)
+readonly FI_LIB_DIR="${FOUND_ISSUES_LIB_DIR:-$FI_BIN_DIR/../lib}"
+
+# Source libraries
+# shellcheck source=../lib/canonicalize.sh
+source "$FI_LIB_DIR/canonicalize.sh"
+# shellcheck source=../lib/parse-entries.sh
+source "$FI_LIB_DIR/parse-entries.sh"
+# shellcheck source=../lib/detect-mode.sh
+source "$FI_LIB_DIR/detect-mode.sh"
+
+# === Utilities ===
+
+fi_today() { date +%Y-%m-%d; }
+
+# Print to stderr.
+fi_err() { printf '%s\n' "$@" >&2; }
+
+# Find or create the issues file based on detected mode.
+# Echoes the path. Creates parent directory + initial header if missing.
+fi_resolve_issues_file() {
+  local mode
+  mode="$(fi_detect_mode)"
+
+  local target=""
+  if [[ "$mode" == "local" ]]; then
+    target="$PWD/.found-issues.md"
+  else
+    local repo_root
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    target="$repo_root/docs/found-issues.md"
+  fi
+
+  if [[ ! -f "$target" ]]; then
+    mkdir -p "$(dirname "$target")"
+    cat >"$target" <<'EOF'
+# found-issues
+
+Issues noticed outside the current task scope. Format: `- [status] YYYY-MM-DD path:line — symptom (suggested: fix)`. Statuses: `open`, `deferred`, `fixed`.
+
+Maintained automatically by Claude. See <https://github.com/DougBTW/found-issues> for docs.
+
+EOF
+  fi
+
+  printf '%s' "$target"
+}
+
+# Get the GitHub repo identifier (org/repo) from the current repo's origin.
+# Echoes empty if not on GitHub.
+fi_repo_id() {
+  local remote_url
+  remote_url="$(git remote get-url origin 2>/dev/null || true)"
+  if [[ "$remote_url" != *"github.com"* ]]; then
+    return 1
+  fi
+  printf '%s' "$remote_url" \
+    | sed -E 's|.*github\.com[:/]([^/]+/[^/.]+)(\.git)?.*|\1|'
+}
+
+# === Subcommand: help ===
+
+cmd_help() {
+  cat <<EOF
+found-issues v$FI_VERSION — markdown-based issue tracker for AI agents
+
+USAGE
+  found-issues <command> [options]
+
+COMMANDS
+  log <location> — <symptom>            Append an [open] entry
+                                        (Use /fi log inside Claude Code)
+  sync                                  Annotation-driven flip + tombstone close
+  status [--format=segment|plain|json]  Print counts (for statusline integration)
+  annotate-pr <N>                       Annotate matching [open] entries with PR
+  annotate-commit [<sha>]               Annotate matching [open] entries with commit
+  promote                               List entries that need promotion to main
+
+  --version                             Print version
+  --help                                Print this help
+
+OPTIONS for log
+  --critical                            Mark entry as critical ([!] flag)
+
+EXAMPLES
+  found-issues log src/foo.py:42 — null check missing (suggested: add guard)
+  found-issues log --critical src/auth.ts:88 — leaks session token in error
+  found-issues status --format=json
+  found-issues annotate-pr 42
+  found-issues annotate-commit HEAD
+
+DOCS
+  https://github.com/DougBTW/found-issues
+EOF
+}
+
+cmd_version() { printf 'found-issues version %s\n' "$FI_VERSION"; }
+
+# === Subcommand: log ===
+#
+# Usage: found-issues log [--critical] <location> — <symptom>
+#
+# location can be:
+#   - path/file.ext:42  (concrete file:line)
+#   - path/file.ext     (concrete file, no line)
+#   - any-topic         (abstract; no path:line)
+#
+# Symptom may include "(suggested: ...)" inline.
+
+cmd_log() {
+  local critical="no"
+  if [[ "${1:-}" == "--critical" ]]; then
+    critical="yes"
+    shift
+  fi
+
+  if [[ $# -eq 0 ]]; then
+    fi_err "found-issues log: missing arguments"
+    fi_err "Usage: found-issues log [--critical] <location> — <symptom>"
+    return 2
+  fi
+
+  # Reassemble full input from remaining args
+  local input="$*"
+
+  # Split on the first ' — ' (em-dash with spaces)
+  local location symptom
+  if [[ "$input" != *" — "* ]]; then
+    fi_err "found-issues log: missing ' — ' separator"
+    fi_err "Usage: found-issues log [--critical] <location> — <symptom>"
+    return 2
+  fi
+  location="${input%% — *}"
+  symptom="${input#* — }"
+
+  # Strip leading/trailing whitespace
+  location="${location#"${location%%[![:space:]]*}"}"
+  location="${location%"${location##*[![:space:]]}"}"
+  symptom="${symptom#"${symptom%%[![:space:]]*}"}"
+  symptom="${symptom%"${symptom##*[![:space:]]}"}"
+
+  if [[ -z "$symptom" ]]; then
+    fi_err "found-issues log: empty symptom"
+    return 2
+  fi
+
+  # Parse location: path:line, path, or abstract
+  local path="" line_num=""
+  if [[ "$location" =~ ^([^:[:space:]]+):([0-9]+)$ ]]; then
+    path="${BASH_REMATCH[1]}"
+    line_num="${BASH_REMATCH[2]}"
+  elif [[ "$location" == */* || "$location" == *.* ]]; then
+    # Looks like a file path
+    path="$location"
+  else
+    # Abstract topic — keep as-is in path field
+    path="$location"
+  fi
+
+  # Canonicalize path
+  if [[ "$path" == */* || "$path" == *.* ]]; then
+    path="$(fi_canonicalize_path "$path")"
+  fi
+
+  # Resolve issues file
+  local file
+  file="$(fi_resolve_issues_file)"
+
+  # Dedup check
+  local new_key
+  if [[ -n "$line_num" ]]; then
+    new_key="$(fi_dedup_key "$path" "$line_num" "$symptom")"
+  elif [[ "$path" == */* || "$path" == *.* ]]; then
+    new_key="$(fi_dedup_key "$path" "" "$symptom")"
+  else
+    new_key="$(fi_dedup_key_abstract "$symptom")"
+  fi
+
+  while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    # Compute key for existing entry
+    local e_data e_path e_line e_symptom existing_key
+    e_data="$(fi_parse_entry "$entry")" || continue
+    e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+    e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+    e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
+
+    if [[ -n "$e_line" ]]; then
+      existing_key="$(fi_dedup_key "$e_path" "$e_line" "$e_symptom")"
+    elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
+      existing_key="$(fi_dedup_key "$e_path" "" "$e_symptom")"
+    else
+      existing_key="$(fi_dedup_key_abstract "$e_symptom")"
+    fi
+
+    if [[ "$existing_key" == "$new_key" ]]; then
+      printf 'Skipped — already logged: %s\n' "$entry"
+      cmd_status plain
+      return 0
+    fi
+  done < <(fi_entries "$file" open 2>/dev/null || true)
+
+  # Build new entry
+  local crit_flag=""
+  [[ "$critical" == "yes" ]] && crit_flag=" [!]"
+
+  local location_str=""
+  if [[ -n "$line_num" ]]; then
+    location_str=" $path:$line_num"
+  elif [[ -n "$path" ]]; then
+    location_str=" $path"
+  fi
+
+  local entry="- [open]${crit_flag} $(fi_today)${location_str} — $symptom"
+
+  # Append (with leading newline if file doesn't end in one).
+  # Note: command substitution strips trailing newlines, so an empty result
+  # from `tail -c 1` means the file already ends in \n.
+  if [[ -s "$file" ]]; then
+    local last_char
+    last_char="$(tail -c 1 "$file")"
+    if [[ -n "$last_char" ]]; then
+      printf '\n' >>"$file"
+    fi
+  fi
+  printf '%s\n' "$entry" >>"$file"
+
+  printf 'Logged: %s\n' "$entry"
+  cmd_status plain
+}
+
+# === Subcommand: status ===
+
+cmd_status() {
+  local format="${1:-segment}"
+  local file
+  file="$(fi_find_issues_file)" || true
+
+  local critical=0 issues=0 in_pr=0 stale=0 total_open=0
+  if [[ -n "$file" && -f "$file" ]]; then
+    critical="$(fi_count_critical "$file")"
+    total_open="$(fi_count "$file" open)"
+    in_pr="$(fi_count_in_pr "$file")"
+    issues=$((total_open - in_pr - critical))
+    [[ "$issues" -lt 0 ]] && issues=0
+    stale="$(fi_count_stale "$file" "${FOUND_ISSUES_STALE_DAYS:-30}")"
+  fi
+
+  case "$format" in
+    json)
+      printf '{"critical":%d,"issues":%d,"in_pr":%d,"stale":%d,"total_open":%d}\n' \
+        "$critical" "$issues" "$in_pr" "$stale" "$total_open"
+      ;;
+    plain)
+      local issues_word
+      issues_word="$([[ "$issues" -eq 1 ]] && echo "issue" || echo "issues")"
+      local parts=()
+      [[ "$critical" -gt 0 ]] && parts+=("$critical critical")
+      [[ "$issues" -gt 0 ]] && parts+=("$issues $issues_word")
+      [[ "$in_pr" -gt 0 ]] && parts+=("$in_pr in PR")
+      [[ "$stale" -gt 0 ]] && parts+=("$stale stale")
+      if [[ ${#parts[@]} -gt 0 ]]; then
+        local out=""
+        local first=1
+        for p in "${parts[@]}"; do
+          if [[ $first -eq 1 ]]; then
+            out="$p"; first=0
+          else
+            out="$out · $p"
+          fi
+        done
+        printf '%s\n' "$out"
+      fi
+      ;;
+    segment)
+      # ANSI-colored, with leading separator (for inline statusline injection)
+      local issues_word
+      issues_word="$([[ "$issues" -eq 1 ]] && echo "issue" || echo "issues")"
+      local parts=()
+      [[ "$critical" -gt 0 ]] && parts+=($'\033[1;31m'"$critical critical"$'\033[0m')
+      [[ "$issues" -gt 0 ]] && parts+=($'\033[31m'"$issues $issues_word"$'\033[0m')
+      [[ "$in_pr" -gt 0 ]] && parts+=($'\033[33m'"$in_pr in PR"$'\033[0m')
+      [[ "$stale" -gt 0 ]] && parts+=($'\033[2m'"$stale stale"$'\033[0m')
+      if [[ ${#parts[@]} -gt 0 ]]; then
+        local out=""
+        local first=1
+        for p in "${parts[@]}"; do
+          if [[ $first -eq 1 ]]; then
+            out="$p"; first=0
+          else
+            out="$out"$' · '"$p"
+          fi
+        done
+        printf ' | %s' "$out"
+      fi
+      ;;
+    *)
+      fi_err "Unknown format: $format (expected segment|plain|json)"
+      return 2
+      ;;
+  esac
+}
+
+# === Subcommand: annotate-pr ===
+#
+# Usage: found-issues annotate-pr <PR-number>
+#
+# Scans the PR's diff for files referenced by [open] entries,
+# appends (PR: org/repo#N) to each matching entry.
+
+cmd_annotate_pr() {
+  if [[ $# -eq 0 ]]; then
+    fi_err "Usage: found-issues annotate-pr <PR-number>"
+    return 2
+  fi
+
+  local pr_num="$1"
+  if ! [[ "$pr_num" =~ ^[0-9]+$ ]]; then
+    fi_err "annotate-pr: PR number must be numeric, got: $pr_num"
+    return 2
+  fi
+
+  local repo_id
+  if ! repo_id="$(fi_repo_id)"; then
+    fi_err "annotate-pr: not in a GitHub repo"
+    return 1
+  fi
+
+  if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+    fi_err "annotate-pr: gh CLI not available or not authenticated"
+    return 1
+  fi
+
+  # Verify PR exists
+  if ! gh pr view "$pr_num" --json number >/dev/null 2>&1; then
+    fi_err "annotate-pr: PR #$pr_num not found in $repo_id"
+    return 1
+  fi
+
+  local file
+  file="$(fi_find_issues_file)" || {
+    fi_err "annotate-pr: no found-issues.md found in this repo"
+    return 1
+  }
+
+  # Get list of files touched by the PR
+  local touched_files
+  touched_files="$(gh pr view "$pr_num" --json files --jq '.files[].path' 2>/dev/null || true)"
+
+  if [[ -z "$touched_files" ]]; then
+    printf 'annotate-pr: PR #%s touches no files (or fetch failed). Nothing to do.\n' "$pr_num"
+    return 0
+  fi
+
+  local annotation="(PR: $repo_id#$pr_num)"
+  local matched=0
+  local tmp
+  tmp="$(mktemp -t found-issues.XXXXXX)"
+  trap "rm -f '$tmp'" EXIT
+
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^-\ \[open\] ]]; then
+      # Skip if annotation already present
+      if [[ "$line" == *"$annotation"* ]]; then
+        printf '%s\n' "$line" >>"$tmp"
+        continue
+      fi
+
+      # Extract path from entry
+      local e_data e_path
+      e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
+      e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+
+      if [[ -n "$e_path" ]]; then
+        # Match if any touched file matches the entry path
+        local hit=0
+        while IFS= read -r tf; do
+          [[ -z "$tf" ]] && continue
+          if [[ "$tf" == "$e_path" || "$tf" == */"$e_path" || "$e_path" == */"$tf" ]]; then
+            hit=1
+            break
+          fi
+        done <<<"$touched_files"
+
+        if [[ "$hit" -eq 1 ]]; then
+          printf '%s %s\n' "$line" "$annotation" >>"$tmp"
+          matched=$((matched + 1))
+          continue
+        fi
+      fi
+      printf '%s\n' "$line" >>"$tmp"
+    else
+      printf '%s\n' "$line" >>"$tmp"
+    fi
+  done <"$file"
+
+  if [[ "$matched" -eq 0 ]]; then
+    printf 'annotate-pr: no [open] entries match files touched by PR #%s. No changes.\n' "$pr_num"
+    rm -f "$tmp"
+    return 0
+  fi
+
+  mv "$tmp" "$file"
+  trap - EXIT
+
+  printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
+  cmd_status plain
+}
+
+# === Subcommand: annotate-commit ===
+#
+# Usage: found-issues annotate-commit [<sha>]  (default HEAD)
+#
+# Scans the commit's diff for files referenced by [open] entries,
+# appends (commit: <short-sha>) to each matching entry.
+
+cmd_annotate_commit() {
+  local target="${1:-HEAD}"
+
+  local full_sha short_sha
+  full_sha="$(git rev-parse --verify "$target" 2>/dev/null || true)"
+  if [[ -z "$full_sha" ]]; then
+    fi_err "annotate-commit: not a valid commit: $target"
+    return 1
+  fi
+  short_sha="$(git rev-parse --short=7 "$full_sha")"
+
+  local file
+  file="$(fi_find_issues_file)" || {
+    fi_err "annotate-commit: no found-issues.md found"
+    return 1
+  }
+
+  # Files touched by the commit
+  local touched_files
+  touched_files="$(git show --name-only --format= "$full_sha" 2>/dev/null | grep -v '^$' || true)"
+
+  if [[ -z "$touched_files" ]]; then
+    printf 'annotate-commit: commit %s touches no files. Nothing to do.\n' "$short_sha"
+    return 0
+  fi
+
+  local annotation="(commit: $short_sha)"
+  local matched=0
+  local tmp
+  tmp="$(mktemp -t found-issues.XXXXXX)"
+  trap "rm -f '$tmp'" EXIT
+
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^-\ \[open\] ]]; then
+      if [[ "$line" == *"$annotation"* ]]; then
+        printf '%s\n' "$line" >>"$tmp"
+        continue
+      fi
+
+      local e_data e_path
+      e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
+      e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+
+      if [[ -n "$e_path" ]]; then
+        local hit=0
+        while IFS= read -r tf; do
+          [[ -z "$tf" ]] && continue
+          if [[ "$tf" == "$e_path" || "$tf" == */"$e_path" || "$e_path" == */"$tf" ]]; then
+            hit=1
+            break
+          fi
+        done <<<"$touched_files"
+
+        if [[ "$hit" -eq 1 ]]; then
+          printf '%s %s\n' "$line" "$annotation" >>"$tmp"
+          matched=$((matched + 1))
+          continue
+        fi
+      fi
+      printf '%s\n' "$line" >>"$tmp"
+    else
+      printf '%s\n' "$line" >>"$tmp"
+    fi
+  done <"$file"
+
+  if [[ "$matched" -eq 0 ]]; then
+    printf 'annotate-commit: no [open] entries match files in commit %s. No changes.\n' "$short_sha"
+    rm -f "$tmp"
+    return 0
+  fi
+
+  mv "$tmp" "$file"
+  trap - EXIT
+
+  printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
+  cmd_status plain
+}
+
+# === Subcommand: sync ===
+#
+# Annotation-driven flip + tombstone close.
+# Does NOT do AI verification — that lives in the /fi sync slash command.
+
+cmd_sync() {
+  local file
+  file="$(fi_find_issues_file)" || {
+    fi_err "sync: no found-issues.md found"
+    return 1
+  }
+
+  local mode
+  mode="$(fi_detect_mode)"
+
+  local repo_id=""
+  if [[ "$mode" == "github-pr" || "$mode" == "github-direct" ]]; then
+    repo_id="$(fi_repo_id 2>/dev/null || true)"
+  fi
+
+  local default_branch=""
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    default_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+      | sed 's|^refs/remotes/origin/||' || true)"
+    [[ -z "$default_branch" ]] && default_branch="main"
+  fi
+
+  local closed_pr=0 closed_commit=0 closed_tomb=0
+  local today
+  today="$(fi_today)"
+  local tmp
+  tmp="$(mktemp -t found-issues.XXXXXX)"
+  trap "rm -f '$tmp'" EXIT
+
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^-\ \[open\] ]]; then
+      local e_data e_path e_line e_prs e_commits
+      e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
+      e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+      e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+      e_prs="$(printf '%s' "$e_data" | grep '^prs=' | head -1 | cut -d= -f2-)"
+      e_commits="$(printf '%s' "$e_data" | grep '^commits=' | head -1 | cut -d= -f2-)"
+
+      local closure_kind="" closure_label=""
+
+      # Check PR annotations
+      if [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1; then
+        local IFS_old="$IFS"
+        IFS=','
+        for pr_ref in $e_prs; do
+          IFS="$IFS_old"
+          # pr_ref is org/repo#N
+          local pr_num="${pr_ref##*#}"
+          local pr_repo="${pr_ref%#*}"
+          local pr_state pr_branch
+          pr_state="$(gh pr view "$pr_num" --repo "$pr_repo" \
+            --json state,baseRefName --jq '.state' 2>/dev/null || true)"
+          pr_branch="$(gh pr view "$pr_num" --repo "$pr_repo" \
+            --json baseRefName --jq '.baseRefName' 2>/dev/null || true)"
+          if [[ "$pr_state" == "MERGED" && ( -z "$default_branch" || "$pr_branch" == "$default_branch" ) ]]; then
+            closure_kind="pr"
+            closure_label="(fixed: $today)"
+            closed_pr=$((closed_pr + 1))
+            break
+          fi
+        done
+        IFS="$IFS_old"
+      fi
+
+      # Check commit annotations (only if not already closed via PR)
+      if [[ -z "$closure_kind" && -n "$e_commits" && -n "$default_branch" ]]; then
+        local IFS_old="$IFS"
+        IFS=','
+        for sha in $e_commits; do
+          IFS="$IFS_old"
+          if git rev-parse --verify "$sha" >/dev/null 2>&1; then
+            if git merge-base --is-ancestor "$sha" "$default_branch" 2>/dev/null \
+               || git merge-base --is-ancestor "$sha" "origin/$default_branch" 2>/dev/null; then
+              closure_kind="commit"
+              closure_label="(fixed: $today)"
+              closed_commit=$((closed_commit + 1))
+              break
+            fi
+          fi
+        done
+        IFS="$IFS_old"
+      fi
+
+      # Tombstone check (only if no annotations resolved AND path looks like a file)
+      if [[ -z "$closure_kind" && -n "$e_path" ]]; then
+        if [[ "$e_path" == */* || "$e_path" == *.* ]]; then
+          local repo_root
+          repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+          local full_path="$repo_root/$e_path"
+          if [[ ! -f "$full_path" ]]; then
+            closure_kind="tombstone"
+            closure_label="(closure: tombstone) (fixed: $today)"
+            closed_tomb=$((closed_tomb + 1))
+          elif [[ -n "$e_line" ]]; then
+            local file_lines
+            file_lines="$(wc -l <"$full_path" 2>/dev/null | tr -d ' ' || echo 0)"
+            if [[ "$file_lines" -lt "$e_line" ]]; then
+              closure_kind="tombstone"
+              closure_label="(closure: tombstone) (fixed: $today)"
+              closed_tomb=$((closed_tomb + 1))
+            fi
+          fi
+        fi
+      fi
+
+      if [[ -n "$closure_kind" ]]; then
+        # Flip [open] -> [fixed], append closure_label
+        local fixed_line="${line/\[open\]/[fixed]}"
+        printf '%s %s\n' "$fixed_line" "$closure_label" >>"$tmp"
+      else
+        printf '%s\n' "$line" >>"$tmp"
+      fi
+    else
+      printf '%s\n' "$line" >>"$tmp"
+    fi
+  done <"$file"
+
+  mv "$tmp" "$file"
+  trap - EXIT
+
+  local total_closed=$((closed_pr + closed_commit + closed_tomb))
+  if [[ "$total_closed" -gt 0 ]]; then
+    printf 'Synced. Closed: %d (%d PR + %d commit + %d tombstone).\n' \
+      "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb"
+  else
+    printf 'Synced. Nothing to close.\n'
+  fi
+  cmd_status plain
+}
+
+# === Subcommand: promote ===
+#
+# Lists [open] entries on current branch that are not yet on the default branch.
+# Does NOT auto-edit the default branch — prints entries for the user/agent
+# to consolidate manually (consistent with "no direct push to main").
+
+cmd_promote() {
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    fi_err "promote: not in a git repo"
+    return 1
+  fi
+
+  local current_branch default_branch
+  current_branch="$(git branch --show-current 2>/dev/null || true)"
+  default_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+    | sed 's|^refs/remotes/origin/||' || true)"
+  [[ -z "$default_branch" ]] && default_branch="main"
+
+  if [[ -z "$current_branch" ]]; then
+    fi_err "promote: detached HEAD; check out a branch first"
+    return 1
+  fi
+  if [[ "$current_branch" == "$default_branch" ]]; then
+    fi_err "promote: already on $default_branch — nothing to promote"
+    return 1
+  fi
+
+  local file
+  file="$(fi_find_issues_file)" || {
+    fi_err "promote: no found-issues.md found on this branch"
+    return 1
+  }
+
+  # Get default branch's version of the file (if any).
+  # Use `pwd -P` (physical, resolves symlinks) on BOTH paths so /var vs
+  # /private/var on macOS doesn't break the prefix subtraction.
+  local repo_root file_dir_real repo_real rel_dir rel_path main_content
+  repo_root="$(git rev-parse --show-toplevel)"
+  file_dir_real="$(cd "$(dirname "$file")" 2>/dev/null && pwd -P)"
+  repo_real="$(cd "$repo_root" 2>/dev/null && pwd -P)"
+  rel_dir="${file_dir_real#"$repo_real"}"
+  rel_dir="${rel_dir#/}"
+  if [[ -n "$rel_dir" ]]; then
+    rel_path="$rel_dir/$(basename "$file")"
+  else
+    rel_path="$(basename "$file")"
+  fi
+  main_content="$(git show "origin/$default_branch:$rel_path" 2>/dev/null \
+    || git show "$default_branch:$rel_path" 2>/dev/null \
+    || true)"
+
+  # Get [open] entries on current branch that don't appear verbatim on main
+  local needs_promotion=0
+  printf 'Entries on %s not yet on %s:\n\n' "$current_branch" "$default_branch"
+
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^-\ \[open\] ]]; then
+      if [[ -z "$main_content" ]] || ! printf '%s' "$main_content" | grep -Fxq -- "$line"; then
+        printf '%s\n' "$line"
+        needs_promotion=$((needs_promotion + 1))
+      fi
+    fi
+  done <"$file"
+
+  if [[ "$needs_promotion" -eq 0 ]]; then
+    printf '(none — branch is in sync with %s for [open] entries)\n' "$default_branch"
+    return 0
+  fi
+
+  local subj_verb
+  if [[ "$needs_promotion" -eq 1 ]]; then
+    subj_verb="entry needs"
+  else
+    subj_verb="entries need"
+  fi
+  printf '\n%d %s promotion. To consolidate:\n' "$needs_promotion" "$subj_verb"
+  printf '  1. Open a PR from %s to %s with these entries added to %s\n' \
+    "$current_branch" "$default_branch" "$rel_path"
+  printf '  2. After merge, the pre-branch-delete hook will allow deletion of %s\n' \
+    "$current_branch"
+}
+
+# === Main dispatch ===
+
+main() {
+  if [[ $# -eq 0 ]]; then
+    cmd_help
+    return 0
+  fi
+
+  local cmd="$1"
+  shift
+
+  case "$cmd" in
+    log)              cmd_log "$@" ;;
+    sync)             cmd_sync "$@" ;;
+    status)
+      local format="segment"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --format=*) format="${1#--format=}"; shift ;;
+          --format)   format="${2:-segment}"; shift 2 ;;
+          *)          shift ;;
+        esac
+      done
+      cmd_status "$format"
+      ;;
+    annotate-pr)      cmd_annotate_pr "$@" ;;
+    annotate-commit)  cmd_annotate_commit "$@" ;;
+    promote)          cmd_promote "$@" ;;
+    -v|--version)     cmd_version ;;
+    -h|--help|help)   cmd_help ;;
+    *)
+      fi_err "Unknown command: $cmd"
+      cmd_help >&2
+      return 1
+      ;;
+  esac
+}
+
+main "$@"
