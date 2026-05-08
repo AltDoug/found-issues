@@ -28,7 +28,7 @@ Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract
 | Path | Repo-relative path | `lib/foo.py` | When location is concrete |
 | Line | `:N` (after path, no space) | `:42` | When line is concrete |
 | Suggested fix | `(suggested: ...)` | `(suggested: add zero-check)` | Encouraged but optional |
-| PR annotation | `(PR: ORG/REPO#N)` | `(PR: DougBTW/found-issues#5)` | Added by `/found-issues:annotate-pr` |
+| PR annotation | `(PR: ORG/REPO#N)` | `(PR: AltDoug/found-issues#5)` | Added by `/found-issues:annotate-pr` |
 | Commit annotation | `(commit: SHA)` (7+ hex chars) | `(commit: a1b2c3d)` | Added by `/found-issues:annotate-commit` |
 | Fixed date | `(fixed: YYYY-MM-DD)` | `(fixed: 2026-05-08)` | Added by `/found-issues:sync` on closure |
 | Verification | `(verified: ai)` or `(verified: review)` | `(verified: ai)` | Added when sync verifies via AI |
@@ -57,7 +57,7 @@ If the file doesn't exist when `/found-issues:log` runs, it's created with this 
 
 Issues noticed outside the current task scope. Format: `- [status] YYYY-MM-DD path:line — symptom (suggested: fix)`. Statuses: `open`, `deferred`, `fixed`.
 
-Maintained automatically by Claude. See <https://github.com/DougBTW/found-issues> for docs.
+Maintained automatically by Claude. See <https://github.com/AltDoug/found-issues> for docs.
 ```
 
 ## Examples
@@ -68,8 +68,8 @@ Maintained automatically by Claude. See <https://github.com/DougBTW/found-issues
 - [open] 2026-05-06 lib/foo.py:42 — null check missing
 - [open] [!] 2026-05-06 src/auth.ts:88 — leaks session token in error message (suggested: redact in logger)
 - [open] 2026-05-06 dispatch/shutdown — SIGTERM kills sessions silently (suggested: pre-shutdown check)
-- [open] 2026-05-06 src/auth.ts:88 — race on session refresh (PR: DougBTW/found-issues#5)
-- [fixed] 2026-05-06 src/auth.ts:88 — race on session refresh (PR: DougBTW/found-issues#5) (fixed: 2026-05-08)
+- [open] 2026-05-06 src/auth.ts:88 — race on session refresh (PR: AltDoug/found-issues#5)
+- [fixed] 2026-05-06 src/auth.ts:88 — race on session refresh (PR: AltDoug/found-issues#5) (fixed: 2026-05-08)
 - [fixed] 2026-05-06 lib/foo.py:42 — null check missing (commit: a1b2c3d) (fixed: 2026-05-08)
 - [fixed] 2026-05-06 lib/bar.py:99 — typo in error message (verified: ai) (fixed: 2026-05-09)
 - [deferred] 2026-05-06 docs/README.md — outdated API examples (suggested: regenerate from schema)
@@ -169,7 +169,7 @@ Both annotations are preserved through closure for traceability.
 A single entry may be addressed by multiple PRs over time (e.g., partial fix → revert → re-fix). All annotations are preserved:
 
 ```markdown
-- [open] 2026-05-06 src/auth.ts:88 — race on session refresh (PR: DougBTW/found-issues#5) (PR: DougBTW/found-issues#7)
+- [open] 2026-05-06 src/auth.ts:88 — race on session refresh (PR: AltDoug/found-issues#5) (PR: AltDoug/found-issues#7)
 ```
 
 Sync checks each PR independently. Closure happens when any one merges to default branch.

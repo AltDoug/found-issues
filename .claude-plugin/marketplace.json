@@ -1,7 +1,7 @@
 {
   "name": "found-issues",
   "owner": {
-    "name": "DougBTW"
+    "name": "AltDoug"
   },
   "plugins": [
     {
@@ -10,7 +10,7 @@
       "version": "0.1.0",
       "source": {
         "type": "github",
-        "owner": "DougBTW",
+        "owner": "AltDoug",
         "repo": "found-issues"
       }
     }

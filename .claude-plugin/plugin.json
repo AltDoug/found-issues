@@ -4,11 +4,11 @@
   "version": "0.1.0",
   "description": "Markdown-based issue tracker for AI agents. Claude logs out-of-scope issues it spots while working; entries auto-flip to fixed on PR merge or commit-fix.",
   "author": {
-    "name": "DougBTW",
-    "url": "https://github.com/DougBTW"
+    "name": "AltDoug",
+    "url": "https://github.com/AltDoug"
   },
-  "homepage": "https://github.com/DougBTW/found-issues",
-  "repository": "https://github.com/DougBTW/found-issues",
+  "homepage": "https://github.com/AltDoug/found-issues",
+  "repository": "https://github.com/AltDoug/found-issues",
   "license": "MIT",
   "keywords": [
     "issues",

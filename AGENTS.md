@@ -8,7 +8,7 @@ follow these instructions exactly. **Do not improvise.**
 This is a Claude Code plugin. Install via the plugin marketplace:
 
 ```
-/plugin marketplace add DougBTW/found-issues
+/plugin marketplace add AltDoug/found-issues
 /plugin install found-issues
 ```
 
@@ -44,7 +44,7 @@ This plugin requires Claude Code. If the user is using a different agent
 > `found-issues` is currently a Claude Code plugin. The markdown format
 > (`docs/found-issues.md`) is portable, but the slash commands and hooks
 > require Claude Code. You can adopt the format manually — see the format
-> spec at <https://github.com/DougBTW/found-issues/blob/main/docs/format-spec.md>
+> spec at <https://github.com/AltDoug/found-issues/blob/main/docs/format-spec.md>
 > — but the automated logging/sync/annotation flow won't work without
 > Claude Code.
 

@@ -123,7 +123,7 @@ The body should explain *why*. The diff explains *what*.
 ## Security
 
 If you find a security issue, please **don't** open a public issue.
-Email the maintainer directly (find via [DougBTW's GitHub profile](https://github.com/DougBTW))
+Email the maintainer directly (find via [AltDoug's GitHub profile](https://github.com/AltDoug))
 and we'll coordinate disclosure.
 
 ## License
