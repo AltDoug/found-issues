@@ -5,14 +5,23 @@ follow these instructions exactly. **Do not improvise.**
 
 ## How to install
 
-This is a Claude Code plugin. Install via the plugin marketplace:
+This is a Claude Code plugin. Install via the plugin marketplace,
+then run setup as the final step:
 
 ```
 /plugin marketplace add AltDoug/found-issues
 /plugin install found-issues
+/reload-plugins
+/found-issues:setup
 ```
 
-That's it. Two commands inside Claude Code. The plugin handles:
+**Run all four commands.** The first two install the plugin, the third
+activates it, and the fourth walks the user through orientation +
+offers optional polish (statusline integration, shorter alias, per-repo
+pre-commit hook). Skipping setup is fine functionally, but the user
+loses the polish prompts.
+
+The plugin handles:
 
 - File copying into the user's plugin cache
 - Hook registration into their settings
@@ -31,14 +40,14 @@ That's it. Two commands inside Claude Code. The plugin handles:
 
 ## After installation
 
-**Tell the user to run `/found-issues:setup`** for orientation. It's
-optional — the plugin is fully active without it — but it explains the
-system and surfaces the few optional polish items (statusline integration,
-short alias, per-repo pre-commit hook).
+`/found-issues:setup` was the fourth install command above — running it
+during install is the canonical onboarding moment. If you got through
+install without it (e.g. the user ran the first two commands themselves
+before asking you), recommend they run it now.
 
-The plugin's SessionStart hook will also auto-print a first-run nudge in
-the next session, so they'll see the prompt either way. Recommending it
-explicitly during install is faster.
+There is intentionally **no auto-firing onboarding** at session start.
+Hijacking the user's first prompt with a banner is sloppy UX. Setup is
+explicit, opt-in, and discoverable via `/found-issues:setup`.
 
 ## If the user is NOT using Claude Code
 

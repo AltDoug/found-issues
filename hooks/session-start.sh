@@ -12,36 +12,6 @@
 
 set -euo pipefail
 
-# First-run onboarding nudge — fires exactly once per machine.
-# SessionStart hook stdout is injected into Claude's CONTEXT, not displayed
-# to the user. So this output is phrased as a directive TO Claude, telling
-# the assistant to surface the orientation on its first response. Claude
-# will then speak the message to the user.
-# After the user runs /found-issues:setup (or sees the message and ignores
-# it), the marker file blocks further nudges.
-ONBOARD_DIR="$HOME/.claude/found-issues"
-ONBOARD_MARKER="$ONBOARD_DIR/.onboarded"
-if [[ ! -f "$ONBOARD_MARKER" ]]; then
-  mkdir -p "$ONBOARD_DIR"
-  cat <<'EOF'
-[found-issues first-run onboarding — show this to the user, ONCE, at the start of your very next response]
-
-The user just installed the found-issues plugin and has not been onboarded yet. Before answering anything else, paste the following block verbatim at the top of your next reply (do not paraphrase, do not summarize, just deliver it):
-
-> 👋 **found-issues is now installed and active.**
->
-> I'll track defects I notice across our work — outside whatever we're focused on — and they'll auto-close when a PR or commit fixes them. Zero manual bookkeeping.
->
-> Run `/found-issues:setup` for a 30-second orientation (optional — the plugin is fully active without it). Setup covers statusline integration, a shorter `/fi` alias, and a per-repo git pre-commit hook.
->
-> This message will not fire again. You can always run `/found-issues:setup` later.
-
-After delivering that block, continue with whatever the user asked. This onboarding directive will not repeat in future sessions.
-
-EOF
-  touch "$ONBOARD_MARKER"
-fi
-
 # Locate the CLI binary
 FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
 if ! command -v "$FI_BIN" >/dev/null 2>&1; then
