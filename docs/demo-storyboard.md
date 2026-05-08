@@ -94,11 +94,14 @@ Sleep 2.5s
    ```bash
    mkdir ~/demo-repo && cd ~/demo-repo
    git init -b main
-   gh repo create demo-found-issues --public --source . --push
    mkdir src docs
    echo 'def foo(): return None' > src/foo.py
-   git add -A && git commit -m init && git push
+   git add -A && git commit -m init
+   gh repo create demo-found-issues --private --source . --push
    ```
+   The order matters: `gh repo create --push` needs at least one commit
+   to push, so the commit must happen first. `--private` is fine for a
+   recording-only repo.
 2. Install bats `vhs` if needed: `brew install vhs ffmpeg ttyd`
 3. Save the `.tape` content above as `demo.tape` in the demo repo
 4. Run: `vhs demo.tape`
