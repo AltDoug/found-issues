@@ -12,6 +12,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.3] — 2026-05-08
+
+### Added
+
+- **First-run onboarding nudge**: SessionStart hook prints a one-time orientation message inviting the user to run `/found-issues:setup`. Marker at `~/.claude/found-issues/.onboarded` blocks repeats. Without this, new users had no signal that `/found-issues:setup` existed.
+
+### Changed
+
+- `AGENTS.md`: install instructions now tell the installing AI to recommend `/found-issues:setup` after install (covers the agentic-install path; the SessionStart nudge covers the manual-install path)
+- `commands/setup.md`: setup explicitly writes the onboarding marker on completion
+
 ## [0.1.2] — 2026-05-08
 
 ### Fixed
@@ -116,7 +127,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.3
 [0.1.2]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.2
 [0.1.1]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.1
 [0.1.0]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.0

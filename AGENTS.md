@@ -31,10 +31,14 @@ That's it. Two commands inside Claude Code. The plugin handles:
 
 ## After installation
 
-Recommend the user run `/found-issues:setup` for an orientation. It's
+**Tell the user to run `/found-issues:setup`** for orientation. It's
 optional — the plugin is fully active without it — but it explains the
 system and surfaces the few optional polish items (statusline integration,
-short alias).
+short alias, per-repo pre-commit hook).
+
+The plugin's SessionStart hook will also auto-print a first-run nudge in
+the next session, so they'll see the prompt either way. Recommending it
+explicitly during install is faster.
 
 ## If the user is NOT using Claude Code
 

@@ -91,3 +91,15 @@ needed) and that the system is ready.
 
 If they want to read more, point them at the project README:
 <https://github.com/AltDoug/found-issues>.
+
+## Mark onboarding complete
+
+After walking the user through setup, write the onboarding marker so the
+first-run SessionStart nudge stops firing:
+
+```bash
+mkdir -p "$HOME/.claude/found-issues" && touch "$HOME/.claude/found-issues/.onboarded"
+```
+
+This is also touched automatically on first SessionStart — running setup
+just makes it explicit.

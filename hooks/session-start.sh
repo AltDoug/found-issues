@@ -12,6 +12,35 @@
 
 set -euo pipefail
 
+# First-run onboarding nudge — fires exactly once per machine.
+# After the user runs /found-issues:setup (or sees the message and
+# ignores it), the marker file blocks further nudges.
+ONBOARD_DIR="$HOME/.claude/found-issues"
+ONBOARD_MARKER="$ONBOARD_DIR/.onboarded"
+if [[ ! -f "$ONBOARD_MARKER" ]]; then
+  mkdir -p "$ONBOARD_DIR"
+  cat <<'EOF'
+## found-issues — installed and active
+
+This plugin makes me track defects I notice while working — outside the current
+task scope — so they don't disappear into the void. Entries auto-flip to fixed
+when a PR or commit addresses them. No manual bookkeeping.
+
+**Run `/found-issues:setup` for a 30-second orientation** (optional — the
+plugin is fully active without it). Setup covers:
+
+- How the system works
+- Statusline integration (if you have one)
+- Optional: shorter `/fi` alias instead of `/found-issues:`
+- Optional: per-repo git pre-commit hook for non-Claude-Code editors
+
+This message fires only once. If you skip setup now, you can always run
+`/found-issues:setup` later.
+
+EOF
+  touch "$ONBOARD_MARKER"
+fi
+
 # Locate the CLI binary
 FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
 if ! command -v "$FI_BIN" >/dev/null 2>&1; then
