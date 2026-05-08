@@ -1,0 +1,177 @@
+#!/usr/bin/env bats
+# Tests for lib/parse-entries.sh
+
+load 'helpers'
+
+setup() {
+  fi_source_lib parse-entries
+  fi_setup_tmp
+}
+
+teardown() {
+  fi_teardown_tmp
+}
+
+# === fi_find_issues_file ===
+
+@test "find_issues_file: finds docs/found-issues.md in cwd" {
+  mkdir -p docs
+  echo "# found-issues" > docs/found-issues.md
+  result="$(fi_find_issues_file)"
+  [[ "$result" == */docs/found-issues.md ]]
+}
+
+@test "find_issues_file: finds .found-issues.md in cwd" {
+  echo "# found-issues" > .found-issues.md
+  result="$(fi_find_issues_file)"
+  [[ "$result" == */.found-issues.md ]]
+}
+
+@test "find_issues_file: walks up directory tree" {
+  mkdir -p docs sub/dir
+  echo "# found-issues" > docs/found-issues.md
+  cd sub/dir
+  result="$(fi_find_issues_file)"
+  [[ "$result" == */docs/found-issues.md ]]
+}
+
+@test "find_issues_file: prefers docs/ over .found-issues.md when both present" {
+  mkdir -p docs
+  echo "# A" > docs/found-issues.md
+  echo "# B" > .found-issues.md
+  result="$(fi_find_issues_file)"
+  [[ "$result" == */docs/found-issues.md ]]
+}
+
+@test "find_issues_file: returns nonzero when not found" {
+  run fi_find_issues_file
+  [ "$status" -ne 0 ]
+}
+
+# === fi_parse_entry ===
+
+@test "parse_entry: extracts status open" {
+  out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — bug')"
+  [[ "$out" == *"status=open"* ]]
+}
+
+@test "parse_entry: extracts status fixed" {
+  out="$(fi_parse_entry '- [fixed] 2026-05-08 src/foo.py:42 — bug')"
+  [[ "$out" == *"status=fixed"* ]]
+}
+
+@test "parse_entry: extracts critical flag" {
+  out="$(fi_parse_entry '- [open] [!] 2026-05-08 src/foo.py:42 — bug')"
+  [[ "$out" == *"critical=yes"* ]]
+}
+
+@test "parse_entry: critical=no when no [!]" {
+  out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — bug')"
+  [[ "$out" == *"critical=no"* ]]
+}
+
+@test "parse_entry: extracts date" {
+  out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — bug')"
+  [[ "$out" == *"date=2026-05-08"* ]]
+}
+
+@test "parse_entry: extracts path and line" {
+  out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — bug')"
+  [[ "$out" == *"path=src/foo.py"* ]]
+  [[ "$out" == *"line=42"* ]]
+}
+
+@test "parse_entry: extracts path-only when no line" {
+  out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py — bug')"
+  [[ "$out" == *"path=src/foo.py"* ]]
+  [[ "$out" == *"line="*$'\n'* ]] || [[ "$(printf '%s' "$out" | grep '^line=')" == "line=" ]]
+}
+
+@test "parse_entry: extracts symptom (without parentheticals)" {
+  out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — null check (suggested: add guard)')"
+  [[ "$out" == *"symptom=null check"* ]]
+}
+
+@test "parse_entry: extracts suggested fix" {
+  out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — bug (suggested: do X)')"
+  [[ "$out" == *"fix=do X"* ]]
+}
+
+@test "parse_entry: extracts single PR annotation" {
+  out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — bug (PR: org/repo#42)')"
+  [[ "$out" == *"prs=org/repo#42"* ]]
+}
+
+@test "parse_entry: extracts multiple PR annotations" {
+  out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — bug (PR: org/repo#5) (PR: org/repo#7)')"
+  [[ "$out" == *"prs=org/repo#5,org/repo#7"* ]]
+}
+
+@test "parse_entry: extracts commit annotation" {
+  out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — bug (commit: a1b2c3d)')"
+  [[ "$out" == *"commits=a1b2c3d"* ]]
+}
+
+@test "parse_entry: extracts fixed date" {
+  out="$(fi_parse_entry '- [fixed] 2026-05-08 src/foo.py:42 — bug (PR: org/repo#5) (fixed: 2026-05-09)')"
+  [[ "$out" == *"fixed_date=2026-05-09"* ]]
+}
+
+@test "parse_entry: extracts verified source" {
+  out="$(fi_parse_entry '- [fixed] 2026-05-08 src/foo.py:42 — bug (verified: ai)')"
+  [[ "$out" == *"verified=ai"* ]]
+}
+
+@test "parse_entry: returns nonzero on non-entry line" {
+  run fi_parse_entry "this is not an entry"
+  [ "$status" -ne 0 ]
+}
+
+# === fi_entries / fi_count ===
+
+@test "entries: filters by status open" {
+  fi_seed_sample docs/found-issues.md
+  result="$(fi_entries docs/found-issues.md open | wc -l | tr -d ' ')"
+  [ "$result" = "4" ]
+}
+
+@test "entries: filters by status fixed" {
+  fi_seed_sample docs/found-issues.md
+  result="$(fi_entries docs/found-issues.md fixed | wc -l | tr -d ' ')"
+  [ "$result" = "1" ]
+}
+
+@test "entries: filters by status deferred" {
+  fi_seed_sample docs/found-issues.md
+  result="$(fi_entries docs/found-issues.md deferred | wc -l | tr -d ' ')"
+  [ "$result" = "1" ]
+}
+
+@test "entries: 'all' returns every entry" {
+  fi_seed_sample docs/found-issues.md
+  result="$(fi_entries docs/found-issues.md all | wc -l | tr -d ' ')"
+  [ "$result" = "6" ]
+}
+
+@test "count: open returns 4" {
+  fi_seed_sample docs/found-issues.md
+  result="$(fi_count docs/found-issues.md open)"
+  [ "$result" = "4" ]
+}
+
+@test "count: returns 0 when file missing" {
+  result="$(fi_count nonexistent.md open)"
+  [ "$result" = "0" ]
+}
+
+@test "count_in_pr: only counts open entries with PR annotation" {
+  fi_seed_sample docs/found-issues.md
+  result="$(fi_count_in_pr docs/found-issues.md)"
+  [ "$result" = "1" ]
+}
+
+@test "count_critical: counts open [!] entries" {
+  fi_seed_sample docs/found-issues.md
+  result="$(fi_count_critical docs/found-issues.md)"
+  [ "$result" = "1" ]
+}

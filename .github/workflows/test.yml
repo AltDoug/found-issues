@@ -1,0 +1,68 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  bats:
+    name: bats (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats-core
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install bats-core jq
+          else
+            sudo apt-get update
+            sudo apt-get install -y bats jq
+          fi
+
+      - name: Verify dependencies
+        run: |
+          bash --version
+          bats --version
+          jq --version
+          git --version
+
+      - name: Configure git identity (required for tests that commit)
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+
+      - name: Run test suite
+        run: bats tests/
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck on hooks and CLI
+        uses: ludeeus/action-shellcheck@master
+        with:
+          severity: warning
+          scandir: '.'
+          additional_files: 'bin/found-issues'
+        continue-on-error: true  # Advisory; don't block PR on shellcheck warnings
+
+  json-lint:
+    name: json validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate plugin manifests
+        run: |
+          for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
+            echo "Validating $f..."
+            jq empty "$f"
+          done
