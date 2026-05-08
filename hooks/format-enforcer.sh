@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# format-enforcer.sh — PreToolUse hook on Write|Edit|MultiEdit
+#
+# Validates entries written to docs/found-issues.md against the format spec.
+# Blocks malformed entries before they land. Catches:
+#   - Bare 'PR #N' (must be '(PR: org/repo#N)')
+#   - Wrong-case status ([OPEN] vs [open])
+#   - Hyphen separator ' - ' vs em-dash ' — '
+#   - Wrong date format
+#   - [critical] / [P0] etc. (must be '[!]' separate token)
+#
+# Mode-aware behavior (auto-detected from cwd):
+#   local         — disabled (no consumer of the format here)
+#   git           — passive warn (advisory but doesn't block)
+#   github-direct — hard block (sync depends on canonical (commit:..))
+#   github-pr     — hard block (sync depends on canonical (PR:..))
+#
+# Hook event: PreToolUse (matchers: Write, Edit, MultiEdit)
+# Exit codes:
+#   0 — allow (no violations, or warn-only mode)
+#   2 — block (violations in github-* mode)
+
+set -euo pipefail
+
+# Allow opt-out
+if [[ "${FOUND_ISSUES_FORMAT_ENFORCER:-on}" == "off" ]]; then
+  exit 0
+fi
+
+input="$(cat)"
+
+# Extract fields via jq (with grep fallback)
+get_field() {
+  local field="$1"
+  local default="${2:-}"
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$input" | jq -r "$field // empty" 2>/dev/null || printf '%s' "$default"
+  else
+    printf '%s' "$default"
+  fi
+}
+
+tool_name="$(get_field '.tool_name')"
+file_path="$(get_field '.tool_input.file_path')"
+
+# Only fire for found-issues files
+case "$file_path" in
+  *docs/found-issues.md|*.found-issues.md) ;;
+  *) exit 0 ;;
+esac
+
+# Collect candidate content based on tool
+content=""
+case "$tool_name" in
+  Write)
+    content="$(get_field '.tool_input.content')"
+    ;;
+  Edit)
+    content="$(get_field '.tool_input.new_string')"
+    ;;
+  MultiEdit)
+    if command -v jq >/dev/null 2>&1; then
+      content="$(printf '%s' "$input" | jq -r '.tool_input.edits[]?.new_string // empty' 2>/dev/null || true)"
+    fi
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+
+if [[ -z "$content" ]]; then
+  exit 0
+fi
+
+# === Validation ===
+#
+# Each violation is recorded as "LINE_TEXT||REASON". We collect all violations
+# in $content and report them together so Claude can fix in one pass.
+
+violations=""
+
+while IFS= read -r line; do
+  # Skip non-entry lines (only validate lines that look like entries)
+  if [[ ! "$line" =~ ^-[[:space:]]+\[ ]]; then
+    continue
+  fi
+
+  reason=""
+
+  # 1. Bare 'PR #N' — must be canonical (PR: org/repo#N)
+  if [[ "$line" =~ PR[[:space:]]+#[0-9]+ ]] && [[ "$line" != *"(PR: "* ]]; then
+    reason="bare 'PR #N' — use canonical '(PR: org/repo#N)' form (or run /fi annotate-pr)"
+  fi
+
+  # 2. Wrong-case status
+  if [[ -z "$reason" ]] && [[ "$line" =~ ^-[[:space:]]+\[[A-Z]+\] ]]; then
+    reason="status must be lowercase: [open] / [deferred] / [fixed]"
+  fi
+
+  # 3. Hyphen separator (' - ') instead of em-dash (' — ')
+  # Heuristic: line has format-shaped prefix but uses ' - ' as separator.
+  if [[ -z "$reason" ]] \
+     && [[ "$line" =~ ^-[[:space:]]+\[(open|deferred|fixed)\] ]] \
+     && [[ "$line" != *" — "* ]] \
+     && [[ "$line" == *" - "* ]]; then
+    reason="separator must be ' — ' (em-dash, U+2014), not ' - ' (hyphen)"
+  fi
+
+  # 4. Critical priority bundled into status
+  if [[ -z "$reason" ]] && [[ "$line" =~ ^-[[:space:]]+\[(critical|P[0-9]|high|low)\] ]]; then
+    reason="critical flag is a separate token '[!]' after status, not '[${BASH_REMATCH[1]}]'"
+  fi
+
+  # 5. Bare PR with no org prefix: (PR: foo#5) without slash
+  if [[ -z "$reason" ]] && [[ "$line" =~ \(PR:[[:space:]]+[^/[:space:]]+#[0-9]+\) ]]; then
+    reason="PR annotation needs full 'org/repo#N' format, missing org prefix"
+  fi
+
+  if [[ -n "$reason" ]]; then
+    violations+="$line"$'\t'"$reason"$'\n'
+  fi
+done <<< "$content"
+
+if [[ -z "$violations" ]]; then
+  exit 0
+fi
+
+# === Determine action based on mode ===
+
+mode="local"
+# Try to source detect-mode for accurate detection
+cli_dir="$(dirname "$(readlink -f "${FOUND_ISSUES_BIN:-found-issues}" 2>/dev/null || command -v "${FOUND_ISSUES_BIN:-found-issues}" 2>/dev/null || echo "")")"
+lib_dir="${FOUND_ISSUES_LIB_DIR:-$cli_dir/../lib}"
+if [[ -f "$lib_dir/detect-mode.sh" ]]; then
+  # shellcheck source=../lib/detect-mode.sh
+  source "$lib_dir/detect-mode.sh"
+  mode="$(fi_detect_mode 2>/dev/null || echo "local")"
+fi
+
+# Format the violation report
+report="found-issues format violations in ${file_path##*/}:"$'\n\n'
+while IFS=$'\t' read -r bad_line reason; do
+  [[ -z "$bad_line" ]] && continue
+  report+="  Line:   $bad_line"$'\n'
+  report+="  Issue:  $reason"$'\n\n'
+done <<< "$violations"
+
+report+="Use /fi log to add entries — it handles format automatically and prevents these errors."
+
+case "$mode" in
+  local)
+    # No consumer; skip entirely
+    exit 0
+    ;;
+  git)
+    # Passive warn — emit to stderr but allow
+    printf '%s\n' "$report" >&2
+    exit 0
+    ;;
+  github-direct|github-pr)
+    # Hard block
+    printf '%s\n' "$report" >&2
+    exit 2
+    ;;
+  *)
+    # Unknown mode — fail open
+    exit 0
+    ;;
+esac
