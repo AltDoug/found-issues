@@ -1,0 +1,65 @@
+#!/usr/bin/env bats
+# Tests for hooks/pre-commit.sh — git pre-commit hook (per-repo, opt-in)
+
+load 'helpers'
+
+HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/hooks/pre-commit.sh"
+
+setup() {
+  fi_setup_tmp
+  fi_init_git
+}
+
+teardown() {
+  fi_teardown_tmp
+  unset FOUND_ISSUES_PRE_COMMIT
+}
+
+@test "pre-commit: blocks bare PR in staged content" {
+  mkdir -p docs
+  echo "- [open] 2026-05-08 src/foo.py:42 — bug PR #5" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bare 'PR #N'"* ]]
+}
+
+@test "pre-commit: allows canonical PR annotation" {
+  mkdir -p docs
+  echo "- [open] 2026-05-08 src/foo.py:42 — bug (PR: org/repo#5)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit: passes when found-issues.md not staged" {
+  echo "unrelated" > other.txt
+  git add other.txt
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit: blocks uppercase status" {
+  mkdir -p docs
+  echo "- [OPEN] 2026-05-08 src/foo.py:42 — bug" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lowercase"* ]]
+}
+
+@test "pre-commit: respects FOUND_ISSUES_PRE_COMMIT=off" {
+  export FOUND_ISSUES_PRE_COMMIT=off
+  mkdir -p docs
+  echo "- [OPEN] PR #5 — garbage" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit: handles .found-issues.md (local mode)" {
+  echo "- [open] 2026-05-08 src/foo.py:42 — bug PR #5" > .found-issues.md
+  git add .found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 1 ]
+}
