@@ -13,15 +13,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    # Force bash on Windows runners (default is PowerShell). Git Bash ships
+    # on windows-latest and provides bash + GNU coreutils — the same
+    # toolchain the plugin expects on real Windows installs (Git for Windows
+    # is a near-universal install for any Windows dev box).
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install bats-core
+      - name: Install bats-core + jq
         run: |
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             brew install bats-core jq
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            # bats-core ships an npm package that drops a Windows-compatible
+            # bats wrapper on PATH. jq is preinstalled on windows-latest.
+            npm install -g bats
+            jq --version
           else
             sudo apt-get update
             sudo apt-get install -y bats jq

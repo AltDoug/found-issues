@@ -82,6 +82,36 @@ one wired up:
 The file stays accurate. `[fixed]` history accumulates as a record.
 Nothing requires manual bookkeeping.
 
+## How to use it day-to-day
+
+Once installed, the plugin runs on its own — Claude logs as it works,
+the statusline shows the count, entries auto-flip on PR/commit. But
+the value compounds when you treat the log as a queue:
+
+**Ask Claude what's open.** The file is auto-loaded into context every
+session, so plain-English queries work:
+
+> *"What's open in found-issues?"*
+> *"Show me the critical ones."*
+> *"What's the oldest unfixed entry?"*
+
+No special command needed — Claude already has `docs/found-issues.md`
+in context.
+
+**Have an agent triage the easy ones.** When the queue gets long:
+
+> *"Read docs/found-issues.md, pick three entries you can fix in under
+> 10 minutes, and do them. Open a PR for each."*
+
+The auto-loaded rules teach Claude to annotate entries it fixes (via
+`/found-issues:annotate-pr` and the post-pr-create hook). When the PRs
+merge, the entries flip to `[fixed]` automatically.
+
+**Use the count as soft pressure.** When the statusline reads
+`12 issues · 3 critical`, it's a constant reminder that there's known
+work waiting. The critical flag (`[!]`) bubbles drop-everything items
+to the top.
+
 ## Why this exists
 
 Most AI coding agents have a **proactive blindspot**: they notice
@@ -159,11 +189,25 @@ default.
 
 Details + edge cases: [`docs/modes.md`](docs/modes.md).
 
+## Platform support
+
+Tested in CI on:
+
+| OS | Shell | Status |
+|---|---|---|
+| Linux (Ubuntu) | bash | ✅ Supported |
+| macOS | bash | ✅ Supported |
+| Windows | Git Bash | ✅ Supported |
+
+**Windows note**: the plugin's CLI and hooks are bash-based (`#!/usr/bin/env bash`), so they need a bash interpreter to run. On Windows, that's provided by [Git for Windows](https://gitforwindows.org/) (Git Bash) — a near-universal install for any Windows dev box. CI runs the full test suite on `windows-latest` under Git Bash and passes. WSL works too.
+
+If you're on a Windows install without Git Bash or WSL, install Git for Windows first.
+
 ## Status & roadmap
 
-**v1.0.0 — first stable public release.**
+**v1.0.1 — Windows support added.**
 
-- 165 tests passing in CI on Linux + macOS
+- 165 tests passing in CI on **Linux + macOS + Windows** (Git Bash)
 - 7 hooks + 9 slash commands + a CLI binary, all wired through the
   Claude Code plugin spec
 - Auto-detected modes; no per-repo configuration

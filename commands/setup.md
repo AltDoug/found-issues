@@ -23,7 +23,36 @@ Print a short, friendly intro along these lines (adapt tone to the user):
 > You don't need to do anything — the system runs on its own. Below are a
 > few optional polish items if you want them.
 
-Then check the user's environment and surface only the relevant options.
+Then check the user's environment and surface the relevant options.
+
+## How to present the optional integrations
+
+Use a **single multi-select picker** (Claude Code's `AskUserQuestion` tool
+with `multiSelect: true`) — not sequential one-by-one prompts. This lets the
+user see all options at once, pick what they want, and submit in one step.
+
+**Picker order and labels (this matters):**
+
+1. `Statusline segment (Recommended)` — list FIRST, with the `(Recommended)`
+   suffix exactly as written. Without it users habitually tab through the
+   picker and miss the highest-signal integration. Per Claude Code
+   convention, recommended options go first with `(Recommended)` appended
+   to the label.
+2. `/fi short alias` — list second. Pure ergonomics; the recommendation
+   doesn't apply.
+
+**Pre-flight checks** — omit options already installed so the picker only
+shows actionable items:
+
+- `~/.claude/statusline.sh` contains `# === found-issues plugin segment ===` → omit option 1
+- `~/.claude/commands/fi.md` contains `Run /found-issues:$ARGUMENTS` → omit option 2
+
+If **both** are already installed, do not show the picker at all. Tell the
+user "all polish items already done" and skip to the reporting step. This
+is what users see when re-running setup after an upgrade.
+
+The detailed install mechanics for each option are below — those describe
+the CLI subcommand to invoke once the user picks.
 
 ## Optional 1 — Statusline integration
 
