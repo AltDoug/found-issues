@@ -27,57 +27,40 @@ Then check the user's environment and surface only the relevant options.
 
 ## Optional 1 — Statusline integration
 
-The plugin can append a colored counter segment to the user's statusline
+The plugin offers a counter segment for the user's Claude Code statusline
 showing `N critical · N issues · N in PR · N stale` (each shown only when
 > 0).
 
-**Detect the user's statusline first:**
+**Use the deterministic CLI subcommand — do NOT edit the file yourself.**
+The plugin ships `found-issues install-statusline` for this. It's
+idempotent (marker-based), uses `|| true` so it's safe under `set -e`,
+and adds a clearly-bracketed block that's trivially removable.
 
-```bash
-ls "$HOME/.claude/statusline.sh" 2>/dev/null
-```
+Flow:
 
-If it exists, ask the user: *"I can add a found-issues counter segment to
-your statusline. Want me to wire it up?"* If they say yes:
+1. Check if the user has a statusline: `ls ~/.claude/statusline.sh`
+2. If yes, ask: *"Want me to add the found-issues counter segment to
+   your statusline? It appends a small marker-bracketed block — fully
+   reversible with `found-issues uninstall-statusline`."*
+3. On yes, run `found-issues install-statusline`. The command:
+   - Detects an existing install via marker (idempotent — re-running is safe)
+   - Appends a single segment block at the end of the file
+   - Adds **one** new line to the rendered statusline (the counter)
+   - Doesn't modify any existing logic
+4. Tell the user to restart their session to see the segment render.
 
-1. Read the statusline file first (`Read ~/.claude/statusline.sh`).
-2. Find where the output lines are assembled (look for `LINE1=`, `printf`,
-   or `echo` calls that build the statusline output).
-3. Insert these **two lines** into the LINE1 assembly section, right after
-   the last segment that builds LINE1 (before peers, before LINE2):
+If `~/.claude/statusline.sh` doesn't exist, the user uses the default
+Claude Code statusline. Tell them: *"You'll see the count via the
+SessionStart hook on session start regardless. If you want a custom
+statusline with the counter inline, create `~/.claude/statusline.sh`
+first, then run `found-issues install-statusline`."*
 
-```bash
-# found-issues counter (added by /found-issues:setup)
-FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
-[[ -n "$FI_SEG" ]] && LINE1="$LINE1 ${DIM}|${RESET} $FI_SEG"
-```
+If the user has **claude-hud** or another statusline tool that owns the
+slot, integration won't show. Tell them the SessionStart hook still
+prints the count once per session.
 
-**CRITICAL: the `|| true` is mandatory.** Many statusline scripts use
-`set -e` or `set -euo pipefail`. Without `|| true`, the `found-issues`
-command-not-found exit code kills the entire statusline script (the
-statusline runs as a raw shell exec, not inside Claude Code, so the
-plugin's CLI may not be on PATH). The `|| true` makes the segment
-silently absent when the CLI isn't available, instead of breaking
-everything.
-
-If the statusline doesn't use a `LINE1`-style variable assembly pattern
-(e.g., it uses direct `printf` output), adapt the insertion to match the
-file's existing structure — but ALWAYS use `|| true` on the command
-substitution.
-
-If the user already has a found-issues counter (search for `found-issues`
-in the statusline file), tell them: *"You already have a counter. The
-plugin's segment would duplicate. Skip this step or remove the existing
-counter first."*
-
-If they don't have a `~/.claude/statusline.sh`, they likely use the
-default Claude Code statusline. Tell them: *"You'll see the count via the
-SessionStart hook on session start regardless. To wire up a statusline
-yourself, set up `~/.claude/statusline.sh` first then re-run setup."*
-
-If the user has **claude-hud** installed, statusline integration won't work
-(claude-hud owns the slot). Tell them: the SessionStart hook still prints
-the count once per session, so they'll still see it just less constantly.
+To uninstall later: `found-issues uninstall-statusline` removes the
+block cleanly without touching the rest of the file.
 
 ## Optional 2 — Per-repo pre-commit hook
 
