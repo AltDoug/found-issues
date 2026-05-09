@@ -12,6 +12,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.6] — 2026-05-08
+
+### Fixed
+
+- **Statusline integration safety**: `setup.md` now enforces `|| true` on the `found-issues status` command substitution. Prevents a `set -e` / `set -euo pipefail` statusline script from dying when the found-issues CLI isn't on PATH (the statusline runs as a raw shell exec outside Claude Code, where the plugin's auto-PATH doesn't apply). Also instructs Claude to insert inline at the LINE1 assembly point rather than appending, so the segment renders in the correct position.
+
 ## [0.1.5] — 2026-05-08
 
 ### Removed
@@ -148,7 +154,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.6
 [0.1.5]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.5
 [0.1.4]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.4
 [0.1.3]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.3
