@@ -9,8 +9,18 @@ active `docs/found-issues.md` to `docs/found-issues-archive.md`.
 
 ## When to run this
 
-The plugin's active file accumulates `[fixed]` entries as a closure record. Over
-time (especially during heavy work — 25+ entries/day is normal during active
+**Usually you don't need to.** Auto-archive runs after every `/found-issues:sync`
+by default, so old fixed entries get moved without you thinking about it. Run
+this command manually when you want to:
+
+- Use custom thresholds: `/found-issues:archive --days=14 --count=20`
+- Preview what's eligible: `/found-issues:archive --dry-run`
+- Force a one-time cleanup if you've disabled auto-archive
+
+Disable auto-archive with `export FOUND_ISSUES_AUTO_ARCHIVE=off` in your shell rc.
+
+The active file accumulates `[fixed]` entries as a closure record. Over time
+(especially during heavy work — 25+ entries/day is normal during active
 development), this can grow to hundreds of entries. The archive command keeps
 the active file focused on what's still actionable while preserving the closure
 history.

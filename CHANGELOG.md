@@ -12,6 +12,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.9] — 2026-05-09
+
+### Changed
+
+- **Archive is now enforced by default.** Sync auto-runs `archive` after the closure pass, surfacing output only when entries actually moved. Without enforcement, users forgot the command existed and active files grew unboundedly. Matches the rest of the plugin's "just works" model (sync auto-flips, format-enforcer auto-blocks, stop-reminder auto-fires).
+- Opt-out via `export FOUND_ISSUES_AUTO_ARCHIVE=off`. When disabled, sync prints a hint instead so users still discover the command.
+
+### Added
+
+- 3 new bats tests covering auto-archive behavior (default-on, opt-out, no spurious output).
+
 ## [0.1.8] — 2026-05-09
 
 ### Added
@@ -183,7 +194,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.9
 [0.1.8]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.8
 [0.1.7]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.7
 [0.1.6]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.6

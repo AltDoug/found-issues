@@ -188,6 +188,7 @@ You can also disable individual hooks:
 - `FOUND_ISSUES_FORMAT_ENFORCER=off`
 - `FOUND_ISSUES_PROMOTE_GUARD=off`
 - `FOUND_ISSUES_PRE_COMMIT=off`
+- `FOUND_ISSUES_AUTO_ARCHIVE=off` — disables the auto-archive of old `[fixed]` entries that runs after each sync. Default behavior moves fixed entries older than 30 days (or oldest entries when count exceeds 50) to `docs/found-issues-archive.md` to keep the active file lean. Setting this off means the active file accumulates indefinitely; you'll need to run `/found-issues:archive` manually to reclaim space.
 
 ## How do I update?
 
