@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="0.1.6"
+readonly FI_VERSION="0.1.7"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -107,6 +107,8 @@ COMMANDS
   annotate-pr <N>                       Annotate matching [open] entries with PR
   annotate-commit [<sha>]               Annotate matching [open] entries with commit
   promote                               List entries that need promotion to main
+  install-statusline                    Append the counter segment to ~/.claude/statusline.sh
+  uninstall-statusline                  Remove the counter segment block
 
   --version                             Print version
   --help                                Print this help
@@ -741,6 +743,91 @@ cmd_promote() {
     "$current_branch"
 }
 
+# === Subcommand: install-statusline ===
+#
+# Append the found-issues counter segment block to ~/.claude/statusline.sh.
+# Idempotent: marker comment lets us detect existing installs and skip.
+# Safe under set -e: the inserted block uses `|| true` so command-not-found
+# from `found-issues` (when the CLI isn't on PATH) won't kill the host
+# script. The block adds one new line of statusline output (the counter
+# segment), no inline edits to existing logic.
+
+readonly FI_STATUSLINE_FILE="$HOME/.claude/statusline.sh"
+readonly FI_STATUSLINE_START_MARKER="# === found-issues plugin segment ==="
+readonly FI_STATUSLINE_END_MARKER="# === end found-issues plugin segment ==="
+
+cmd_install_statusline() {
+  if [[ ! -f "$FI_STATUSLINE_FILE" ]]; then
+    fi_err "install-statusline: $FI_STATUSLINE_FILE does not exist"
+    fi_err ""
+    fi_err "You don't have a Claude Code statusline configured. Either:"
+    fi_err "  1. Create $FI_STATUSLINE_FILE first, then re-run this"
+    fi_err "  2. Or skip statusline integration — the SessionStart hook"
+    fi_err "     prints the count once per session regardless"
+    return 1
+  fi
+
+  if grep -Fq "$FI_STATUSLINE_START_MARKER" "$FI_STATUSLINE_FILE"; then
+    printf 'install-statusline: already installed in %s\n' "$FI_STATUSLINE_FILE"
+    printf '(remove the existing block first or run uninstall-statusline)\n'
+    return 0
+  fi
+
+  # Ensure the existing file ends with a newline before we append, so the
+  # marker starts cleanly at the beginning of a new line.
+  if [[ -n "$(tail -c 1 "$FI_STATUSLINE_FILE")" ]]; then
+    printf '\n' >>"$FI_STATUSLINE_FILE"
+  fi
+
+  cat >>"$FI_STATUSLINE_FILE" <<EOF
+$FI_STATUSLINE_START_MARKER
+# Added by \`found-issues install-statusline\`. Remove this entire block to
+# disable. The \`|| true\` is critical: it prevents \`set -e\` (common in
+# statusline scripts) from killing the script when the found-issues CLI
+# isn't on PATH (plugin uninstalled, raw-shell exec context, etc).
+# Use if/fi (not && chains) so the block's last command always exits 0
+# even when the segment is empty — otherwise the host script's final
+# exit code becomes 1 and Claude Code may discard its output.
+__FI_SEG=\$(found-issues status --format=segment 2>/dev/null || true)
+if [[ -n "\$__FI_SEG" ]]; then echo "\$__FI_SEG"; fi
+$FI_STATUSLINE_END_MARKER
+EOF
+
+  printf 'install-statusline: appended found-issues segment to %s\n' "$FI_STATUSLINE_FILE"
+  printf 'Restart your Claude Code session to see the segment render.\n'
+}
+
+# === Subcommand: uninstall-statusline ===
+#
+# Remove the marker-bracketed block added by install-statusline. Idempotent:
+# silently no-ops when the block is absent. Preserves everything outside
+# the markers byte-for-byte.
+
+cmd_uninstall_statusline() {
+  if [[ ! -f "$FI_STATUSLINE_FILE" ]]; then
+    fi_err "uninstall-statusline: $FI_STATUSLINE_FILE does not exist"
+    return 1
+  fi
+
+  if ! grep -Fq "$FI_STATUSLINE_START_MARKER" "$FI_STATUSLINE_FILE"; then
+    printf 'uninstall-statusline: not installed (no marker in %s)\n' "$FI_STATUSLINE_FILE"
+    return 0
+  fi
+
+  local tmp
+  tmp="$(mktemp -t found-issues-statusline.XXXXXX)"
+  # Delete every line from the start marker through the end marker, inclusive.
+  # No blank-line tracking needed because install no longer inserts one.
+  awk -v start="$FI_STATUSLINE_START_MARKER" -v endm="$FI_STATUSLINE_END_MARKER" '
+    $0 == start { skip = 1; next }
+    skip && $0 == endm { skip = 0; next }
+    !skip { print }
+  ' "$FI_STATUSLINE_FILE" > "$tmp"
+
+  mv "$tmp" "$FI_STATUSLINE_FILE"
+  printf 'uninstall-statusline: removed found-issues segment from %s\n' "$FI_STATUSLINE_FILE"
+}
+
 # === Main dispatch ===
 
 main() {
@@ -769,6 +856,8 @@ main() {
     annotate-pr)      cmd_annotate_pr "$@" ;;
     annotate-commit)  cmd_annotate_commit "$@" ;;
     promote)          cmd_promote "$@" ;;
+    install-statusline)   cmd_install_statusline "$@" ;;
+    uninstall-statusline) cmd_uninstall_statusline "$@" ;;
     -v|--version)     cmd_version ;;
     -h|--help|help)   cmd_help ;;
     *)

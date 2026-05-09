@@ -12,6 +12,18 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.7] — 2026-05-09
+
+### Added
+
+- **`found-issues install-statusline`** — deterministic CLI subcommand that appends a marker-bracketed segment block to `~/.claude/statusline.sh`. Replaces the prior approach of asking Claude to read and edit the file in setup.md, which introduced variability across users (some got the `|| true` guard, some didn't). Idempotent (re-runs detect existing install via marker), uses `if/fi` not `&& chains` (so the block's final exit code is always 0), pre-pads the file's trailing newline if missing.
+- **`found-issues uninstall-statusline`** — removes the marker block cleanly. Verified byte-identical-to-original via test.
+- 8 new bats tests covering install/uninstall edge cases (missing file, idempotency, set -e survival, byte-identical roundtrip).
+
+### Changed
+
+- `commands/setup.md` no longer asks Claude to edit the statusline file. Setup just calls `found-issues install-statusline` after the user opts in. Removes the variability where Claude could miss the `|| true` guard and brick the user's statusline.
+
 ## [0.1.6] — 2026-05-08
 
 ### Fixed
@@ -154,7 +166,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.7
 [0.1.6]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.6
 [0.1.5]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.5
 [0.1.4]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.4
