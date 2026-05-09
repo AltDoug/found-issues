@@ -174,3 +174,33 @@ echo "repo | branch | tokens"
   new_hash=$(shasum "$HOME/.claude/statusline.sh" | awk '{print $1}')
   [ "$orig_hash" = "$new_hash" ]
 }
+
+@test "install-statusline: preserves executable permission" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+LINE1="repo"
+LINE1="$LINE1 | branch"
+echo "$LINE1"
+SL
+  chmod 755 "$HOME/.claude/statusline.sh"
+
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  [[ -x "$HOME/.claude/statusline.sh" ]]
+}
+
+@test "uninstall-statusline: preserves executable permission" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+LINE1="repo"
+LINE1="$LINE1 | branch"
+echo "$LINE1"
+SL
+  chmod 755 "$HOME/.claude/statusline.sh"
+
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  fi_run uninstall-statusline
+  [ "$status" -eq 0 ]
+  [[ -x "$HOME/.claude/statusline.sh" ]]
+}
