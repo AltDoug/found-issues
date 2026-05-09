@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="0.1.11"
+readonly FI_VERSION="0.1.12"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -975,9 +975,20 @@ cmd_install_statusline_inline() {
       if (NR == insert_after) {
         print start
         print "# Inline-appended to LINE1 by `found-issues install-statusline`."
-        print "# The `|| true` guards against `set -e` killing the statusline when the"
-        print "# found-issues CLI isn'"'"'t on PATH. Remove this entire block to disable."
-        print "__FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)"
+        print "# Robust against PATH variability — statusline runs in a raw shell exec"
+        print "# context where the plugin'"'"'s auto-PATH may not apply. Tries"
+        print "# `found-issues` on PATH first; falls back to globbing the plugin cache"
+        print "# for the latest installed binary."
+        print "__FI_CLI=\"\""
+        print "if command -v found-issues >/dev/null 2>&1; then"
+        print "  __FI_CLI=found-issues"
+        print "else"
+        print "  for __fi_candidate in \"$HOME\"/.claude/plugins/cache/*/found-issues/*/bin/found-issues; do"
+        print "    [[ -x \"$__fi_candidate\" ]] && __FI_CLI=\"$__fi_candidate\""
+        print "  done"
+        print "fi"
+        print "__FI_SEG=\"\""
+        print "[[ -n \"$__FI_CLI\" ]] && __FI_SEG=$(\"$__FI_CLI\" status --format=segment 2>/dev/null || true)"
         print "[[ -n \"$__FI_SEG\" ]] && LINE1=\"$LINE1$__FI_SEG\""
         print endm
       }
@@ -1000,9 +1011,20 @@ cmd_install_statusline_append() {
   cat >>"$FI_STATUSLINE_FILE" <<EOF
 $FI_STATUSLINE_START_MARKER
 # Appended by \`found-issues install-statusline\`. Remove this entire block
-# to disable. The \`|| true\` guards against \`set -e\` killing the
-# statusline when the found-issues CLI isn't on PATH.
-__FI_SEG=\$(found-issues status --format=segment 2>/dev/null || true)
+# to disable. Robust against PATH variability — statusline runs in a raw
+# shell exec context where the plugin's auto-PATH may not apply. Tries
+# \`found-issues\` on PATH first; falls back to globbing the plugin cache
+# for the latest installed binary.
+__FI_CLI=""
+if command -v found-issues >/dev/null 2>&1; then
+  __FI_CLI=found-issues
+else
+  for __fi_candidate in "\$HOME"/.claude/plugins/cache/*/found-issues/*/bin/found-issues; do
+    [[ -x "\$__fi_candidate" ]] && __FI_CLI="\$__fi_candidate"
+  done
+fi
+__FI_SEG=""
+[[ -n "\$__FI_CLI" ]] && __FI_SEG=\$("\$__FI_CLI" status --format=segment 2>/dev/null || true)
 if [[ -n "\$__FI_SEG" ]]; then echo "\$__FI_SEG"; fi
 $FI_STATUSLINE_END_MARKER
 EOF

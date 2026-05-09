@@ -56,6 +56,33 @@ SL
   ! grep -Fq 'echo "$__FI_SEG"' "$HOME/.claude/statusline.sh"
 }
 
+@test "install-statusline: emits PATH-robust fallback (glob + command -v)" {
+  # Both standalone and inline forms must include the fallback that globs
+  # ~/.claude/plugins/cache/*/found-issues/*/bin/found-issues when the CLI
+  # isn't on PATH (statusline runs in a stripped exec context).
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+echo "test"
+SL
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  grep -Fq 'command -v found-issues' "$HOME/.claude/statusline.sh"
+  grep -Fq '.claude/plugins/cache/*/found-issues/*/bin/found-issues' "$HOME/.claude/statusline.sh"
+
+  # Same check for inline form
+  rm "$HOME/.claude/statusline.sh"
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+LINE1="repo"
+LINE1="$LINE1 | branch"
+echo "$LINE1"
+SL
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  grep -Fq 'command -v found-issues' "$HOME/.claude/statusline.sh"
+  grep -Fq '.claude/plugins/cache/*/found-issues/*/bin/found-issues' "$HOME/.claude/statusline.sh"
+}
+
 @test "install-statusline: idempotent (second run no-ops)" {
   cat > "$HOME/.claude/statusline.sh" <<'SL'
 #!/usr/bin/env bash
