@@ -118,12 +118,15 @@ All namespaced under `/found-issues:` (Claude Code plugin convention):
 | `/found-issues:annotate-commit [<sha>]` | Link an entry to a commit (defaults to HEAD) |
 | `/found-issues:promote` | Carry branch-only entries into main before branch deletion |
 | `/found-issues:status` | Print current counts |
+| `/found-issues:archive` | Move old `[fixed]` entries to `docs/found-issues-archive.md` (count threshold 50 OR days threshold 30, whichever first) |
 | `/found-issues:setup` | Optional first-run orientation |
 | `/found-issues:uninstall` | Clean up plugin-private state before `/plugin uninstall` |
 
-**Want shorter typing?** Add `~/.claude/commands/fi.md` with the content
-`Run /found-issues:$ARGUMENTS`. Then `/fi log src/foo.py:42 — bug` works
-as a shortcut for `/found-issues:log src/foo.py:42 — bug`.
+**Want shorter typing?** `/found-issues:setup` offers an optional `/fi`
+shortcut — pick it during setup and `/fi log src/foo.py:42 — bug` works
+as a shortcut for `/found-issues:log src/foo.py:42 — bug`. Installed via
+the deterministic `found-issues install-fi-alias` CLI subcommand;
+removable via `found-issues uninstall-fi-alias`.
 
 ## Format
 
@@ -158,10 +161,10 @@ Details + edge cases: [`docs/modes.md`](docs/modes.md).
 
 ## Status & roadmap
 
-**v0.1.0 — initial release.**
+**v1.0.0 — first stable public release.**
 
-- 122 tests passing in CI on Linux + macOS
-- 7 hooks + 6 slash commands + a CLI binary, all wired through the
+- 165 tests passing in CI on Linux + macOS
+- 7 hooks + 9 slash commands + a CLI binary, all wired through the
   Claude Code plugin spec
 - Auto-detected modes; no per-repo configuration
 - Optional per-repo git pre-commit hook for format validation outside
