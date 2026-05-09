@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="0.1.13"
+readonly FI_VERSION="0.1.14"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -919,6 +919,15 @@ readonly FI_STATUSLINE_FILE="$HOME/.claude/statusline.sh"
 readonly FI_STATUSLINE_START_MARKER="# === found-issues plugin segment ==="
 readonly FI_STATUSLINE_END_MARKER="# === end found-issues plugin segment ==="
 
+# Capture the mode of a file as octal (e.g. "755"). Cross-platform: BSD stat
+# uses -f '%Lp', GNU stat uses -c '%a'. Falls back to 755 if neither works,
+# which is correct for executable scripts (the common case for statusline).
+fi_capture_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null \
+    || stat -c '%a' "$1" 2>/dev/null \
+    || echo 755
+}
+
 cmd_install_statusline() {
   if [[ ! -f "$FI_STATUSLINE_FILE" ]]; then
     fi_err "install-statusline: $FI_STATUSLINE_FILE does not exist"
@@ -965,7 +974,8 @@ cmd_install_statusline_inline() {
     return
   fi
 
-  local tmp
+  local original_mode tmp
+  original_mode=$(fi_capture_mode "$FI_STATUSLINE_FILE")
   tmp="$(mktemp -t found-issues-statusline.XXXXXX)"
   awk -v insert_after="$last_line1" \
       -v start="$FI_STATUSLINE_START_MARKER" \
@@ -998,6 +1008,10 @@ cmd_install_statusline_inline() {
   ' "$FI_STATUSLINE_FILE" >"$tmp"
 
   mv "$tmp" "$FI_STATUSLINE_FILE"
+  # Restore original mode — mktemp creates files at 0600, so without this
+  # the statusline loses its execute bit and Claude Code silently can't run it.
+  chmod "$original_mode" "$FI_STATUSLINE_FILE" 2>/dev/null \
+    || chmod +x "$FI_STATUSLINE_FILE"
   printf 'install-statusline: inserted inline LINE1 segment in %s (after line %d)\n' \
     "$FI_STATUSLINE_FILE" "$last_line1"
   printf 'Restart your Claude Code session to see the segment render.\n'
@@ -1054,7 +1068,8 @@ cmd_uninstall_statusline() {
     return 0
   fi
 
-  local tmp
+  local original_mode tmp
+  original_mode=$(fi_capture_mode "$FI_STATUSLINE_FILE")
   tmp="$(mktemp -t found-issues-statusline.XXXXXX)"
   # Delete every line from the start marker through the end marker, inclusive.
   # No blank-line tracking needed because install no longer inserts one.
@@ -1065,6 +1080,9 @@ cmd_uninstall_statusline() {
   ' "$FI_STATUSLINE_FILE" > "$tmp"
 
   mv "$tmp" "$FI_STATUSLINE_FILE"
+  # Restore original mode — see comment in cmd_install_statusline_inline.
+  chmod "$original_mode" "$FI_STATUSLINE_FILE" 2>/dev/null \
+    || chmod +x "$FI_STATUSLINE_FILE"
   printf 'uninstall-statusline: removed found-issues segment from %s\n' "$FI_STATUSLINE_FILE"
 }
 

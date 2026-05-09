@@ -12,6 +12,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.14] — 2026-05-09
+
+### Fixed
+
+- **`install-statusline` and `uninstall-statusline` now preserve executable permission** on `~/.claude/statusline.sh`. Both commands edit via `awk > tmp; mv tmp file`, but `mktemp` creates files at mode 0600 (no execute bit). Without preservation, after running install-statusline the statusline file lost +x → Claude Code couldn't execute it → **statusline silently disappeared entirely** (not just the segment — the whole multi-line statusline). User caught this during a fresh-install e2e test.
+- Both commands now `stat` the original mode before editing (cross-platform: BSD `-f '%Lp'` vs GNU `-c '%a'`) and `chmod` it back after. Falls back to `chmod +x` if stat fails.
+
+### Added
+
+- 2 new bats tests asserting executable permission survives both install and uninstall.
+
 ## [0.1.13] — 2026-05-09
 
 ### Fixed
@@ -228,7 +239,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.14
 [0.1.13]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.13
 [0.1.12]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.12
 [0.1.11]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.11
