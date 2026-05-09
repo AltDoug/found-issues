@@ -14,30 +14,41 @@ let's continue."* found-issues makes it stop, log the observation, and
 surface it later. Automatically. Across sessions. **Without the user
 lifting a finger.**
 
-## Install
+## Installation
+
+Run these in Claude Code, in order:
 
 ```
 /plugin marketplace add AltDoug/found-issues
 /plugin install found-issues
-/reload-plugins
+```
+
+Then **start a new Claude Code session** so the plugin loads (existing
+sessions only pick it up after a fresh start; `/reload-plugins` works
+in the *current* session if you'd rather not restart).
+
+In the new session, run:
+
+```
 /found-issues:setup
 ```
 
-The first two install the plugin. `/reload-plugins` activates it.
-`/found-issues:setup` walks you through orientation in ~30 seconds and
-offers optional polish (statusline integration, shorter `/fi` alias,
-per-repo git pre-commit hook).
+This walks you through orientation in ~30 seconds and offers optional
+polish (statusline integration, shorter `/fi` alias, per-repo git
+pre-commit hook). Setup is **optional** — the plugin is fully active
+without it — but running it once gets the polish wired up and removes
+the guesswork. You can always re-run it later.
 
-The setup command is **optional** — the plugin is fully active without
-it — but running it once gets the polish wired up and removes the
-guesswork. You can always re-run it later.
-
-The plugin handles:
+The plugin handles automatically:
 
 - Auto-loading the agent rules into context every session
 - Registering all 7 lifecycle hooks
 - Adding the `found-issues` CLI to your PATH
 - Working in any repo (auto-detects mode: local / git / github-direct / github-pr)
+
+To uninstall later: `/found-issues:uninstall` cleans up plugin-private
+state (statusline segment, onboarding marker, mode cache, `/fi` alias),
+then `/plugin uninstall found-issues` removes the plugin itself.
 
 ## What it does
 
@@ -106,6 +117,7 @@ All namespaced under `/found-issues:` (Claude Code plugin convention):
 | `/found-issues:promote` | Carry branch-only entries into main before branch deletion |
 | `/found-issues:status` | Print current counts |
 | `/found-issues:setup` | Optional first-run orientation |
+| `/found-issues:uninstall` | Clean up plugin-private state before `/plugin uninstall` |
 
 **Want shorter typing?** Add `~/.claude/commands/fi.md` with the content
 `Run /found-issues:$ARGUMENTS`. Then `/fi log src/foo.py:42 — bug` works
