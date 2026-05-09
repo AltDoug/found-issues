@@ -11,6 +11,18 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Demo GIF embedded in README
 - Submission to official Claude Code marketplace
 
+## [1.0.2] — 2026-05-09
+
+### Fixed
+
+- **`install-statusline` segment now actually renders the count.** v1.0.1 (and every version before it) generated a segment block that called `found-issues status` from the statusline subprocess's cwd — which is **never the workspace dir**. As a result, the statusline counter silently rendered as empty for every user with a multi-line statusline that uses `git -C "$DIR"` rather than `cd` (i.e. the common pattern). The bug was discovered during a public-release dogfood run when the count didn't appear despite the segment block being correctly installed.
+- v1.0.2 segment now extracts `workspace.current_dir` from the conventional `$input` JSON variable (the standard Claude Code statusline convention), and `cd`s into that directory before invoking `found-issues status`. Falls back to no-cd behavior if `$input` isn't defined or `jq` isn't available — same as v1.0.1, no regression.
+- Both inline and standalone (append) forms updated. To pick up the fix, existing users must run `found-issues uninstall-statusline` then `found-issues install-statusline` (the marker-based idempotency means a fresh install would otherwise no-op).
+
+### Added
+
+- **2 new bats tests** in `tests/cli-statusline.bats`: (1) a structural test asserting the generated segment block contains the cwd handling (greps for `jq -r`, `.workspace.current_dir`, `cd "$__FI_DIR"`); (2) a true end-to-end test that pipes Claude-Code-style JSON input (`{"workspace":{"current_dir":"..."}}`) into the generated statusline.sh and asserts the count renders. The e2e test would have caught this bug before public release. 167 tests total (was 165).
+
 ## [1.0.1] — 2026-05-09
 
 ### Added
@@ -315,6 +327,7 @@ These are exercised in dogfood usage rather than CI.
      publicly tagged release on GitHub. The CHANGELOG retains v0.1.x entries
      for transparency about how the plugin was built. -->
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/AltDoug/found-issues/releases/tag/v1.0.2
 [1.0.1]: https://github.com/AltDoug/found-issues/releases/tag/v1.0.1
 [1.0.0]: https://github.com/AltDoug/found-issues/releases/tag/v1.0.0
