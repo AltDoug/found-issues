@@ -8,9 +8,35 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Planned
 
-- Demo GIF embedded in README before public flip
-- Public release (flip repo from private to public)
+- Demo GIF embedded in README
 - Submission to official Claude Code marketplace
+
+## [1.0.0] — 2026-05-09
+
+**First stable public release.**
+
+`found-issues` is now publicly available. The plugin spent v0.1.0–v0.1.16 in
+private development being dogfooded across the author's own work; v1.0.0 is
+the public-debut tag. No functional changes since v0.1.16 — same code,
+same behavior, same 165-test suite. Just public-OSS hygiene + repo settings.
+
+### Changed
+
+- README "Status & roadmap" updated from stale `v0.1.0 / 122 tests passing` to current `v1.0.0 / 165 tests passing`.
+- README slash-commands table now includes `/found-issues:archive` (was shipping since v0.1.8 but undocumented).
+- CHANGELOG: added missing reference links for `[0.1.15]` and `[0.1.16]`; updated `[Unreleased]` compare link to `v1.0.0...HEAD`.
+- Aggregator (`AltDoug/claude-plugins`): added a one-line note explaining the manifest-name (`altdoug-plugins`) vs repo-name (`claude-plugins`) asymmetry that confused at least one user during install/uninstall.
+
+### Added
+
+- `SECURITY.md` at repo root — vuln-reporting process surfaced as a GitHub Security tab.
+- Aggregator now ships `CONTRIBUTING.md` explaining that plugin code lives in plugin repos; PRs against the aggregator just bump `marketplace.json`.
+- GitHub repo metadata: topics (`claude-code`, `claude-code-plugin`, `ai-agents`, `issue-tracker`, `markdown`, `developer-tools`) for discoverability.
+- Branch protection on `main`: PR-required + passing CI checks before merge.
+
+### Fixed
+
+- Removed first-name reference (`"like Diogo's"`) from the v0.1.11 CHANGELOG entry — privacy cleanup before public flip.
 
 ## [0.1.16] — 2026-05-09
 
@@ -78,7 +104,7 @@ User feedback during e2e uninstall+reinstall test: *"shouldnt that all be part o
 
 ### Fixed
 
-- **`install-statusline` now inserts the segment inline on LINE1 when a LINE1 assembly pattern is detected** in `~/.claude/statusline.sh` (multi-line statuslines like Diogo's). Previously always appended at end-of-file, which made the segment render as an awkward standalone 4th line instead of inline next to repo/branch. Falls back to standalone-append for simple printf-style statuslines.
+- **`install-statusline` now inserts the segment inline on LINE1 when a LINE1 assembly pattern is detected** in `~/.claude/statusline.sh` (multi-line statuslines that build LINE1 across multiple assignments). Previously always appended at end-of-file, which made the segment render as an awkward standalone 4th line instead of inline next to repo/branch. Falls back to standalone-append for simple printf-style statuslines.
 - **`commands/setup.md` "already integrated?" check uses the actual marker grep** (`# === found-issues plugin segment ===`), not a generic "found-issues" string match. Previous check produced false positives when the statusline file had any cleanup comments or other references containing the word "found-issues".
 
 ### Added
@@ -273,19 +299,9 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.14...HEAD
-[0.1.14]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.14
-[0.1.13]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.13
-[0.1.12]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.12
-[0.1.11]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.11
-[0.1.10]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.10
-[0.1.9]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.9
-[0.1.8]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.8
-[0.1.7]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.7
-[0.1.6]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.6
-[0.1.5]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.5
-[0.1.4]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.4
-[0.1.3]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.3
-[0.1.2]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.2
-[0.1.1]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.1
-[0.1.0]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.0
+<!-- v0.1.x versions were private-development releases. v1.0.0 is the first
+     publicly tagged release on GitHub. The CHANGELOG retains v0.1.x entries
+     for transparency about how the plugin was built. -->
+
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/AltDoug/found-issues/releases/tag/v1.0.0
