@@ -11,6 +11,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Demo GIF embedded in README
 - Submission to official Claude Code marketplace
 
+## [1.0.1] — 2026-05-09
+
+### Fixed
+
+- **`/found-issues:setup` picker now labels the statusline option as `(Recommended)`** and lists it first. Without the recommended marker, users habitually tab through the multi-select picker and skip the highest-signal integration. `commands/setup.md` previously described the install mechanics for each option but didn't specify the picker structure — the LLM was generating it ad-hoc with no recommendation cue. Now setup.md explicitly: (1) requires a single multi-select picker, (2) requires `(Recommended)` suffix on the statusline option, (3) requires statusline listed first, (4) requires omitting already-installed options from the picker, (5) requires skipping the picker entirely when both are installed.
+
 ## [1.0.0] — 2026-05-09
 
 **First stable public release.**
@@ -303,5 +309,6 @@ These are exercised in dogfood usage rather than CI.
      publicly tagged release on GitHub. The CHANGELOG retains v0.1.x entries
      for transparency about how the plugin was built. -->
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/AltDoug/found-issues/releases/tag/v1.0.1
 [1.0.0]: https://github.com/AltDoug/found-issues/releases/tag/v1.0.0

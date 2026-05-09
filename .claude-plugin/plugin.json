@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "found-issues",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Markdown-based issue tracker for AI agents. Claude logs out-of-scope issues it spots while working; entries auto-flip to fixed on PR merge or commit-fix.",
   "author": {
     "name": "AltDoug",
