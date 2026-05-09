@@ -20,7 +20,7 @@ teardown() {
   [[ "$output" == *"does not exist"* ]]
 }
 
-@test "install-statusline: appends marker block to existing statusline" {
+@test "install-statusline: appends standalone segment when no LINE1 pattern" {
   cat > "$HOME/.claude/statusline.sh" <<'SL'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -29,10 +29,31 @@ echo "repo | branch"
 SL
   fi_run install-statusline
   [ "$status" -eq 0 ]
-  [[ "$output" == *"appended found-issues segment"* ]]
+  [[ "$output" == *"appended standalone segment"* ]]
   grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
   grep -Fq "# === end found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
   grep -Fq "|| true" "$HOME/.claude/statusline.sh"
+  # Standalone form echoes the segment
+  grep -Fq 'echo "$__FI_SEG"' "$HOME/.claude/statusline.sh"
+}
+
+@test "install-statusline: inserts inline when LINE1 assembly detected" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+set -euo pipefail
+input=$(cat)
+LINE1="repo"
+LINE1="$LINE1 | branch"
+echo "$LINE1"
+SL
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"inserted inline LINE1 segment"* ]]
+  grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
+  # Inline form updates LINE1
+  grep -Fq 'LINE1="$LINE1$__FI_SEG"' "$HOME/.claude/statusline.sh"
+  # Standalone echo should NOT be present in inline mode
+  ! grep -Fq 'echo "$__FI_SEG"' "$HOME/.claude/statusline.sh"
 }
 
 @test "install-statusline: idempotent (second run no-ops)" {

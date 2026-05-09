@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="0.1.10"
+readonly FI_VERSION="0.1.11"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -936,27 +936,78 @@ cmd_install_statusline() {
     return 0
   fi
 
-  # Ensure the existing file ends with a newline before we append, so the
-  # marker starts cleanly at the beginning of a new line.
+  # Detect a LINE1-assembly pattern. Most multi-line statuslines build a
+  # LINE1 variable then printf/echo it. If that pattern exists, we insert
+  # inline — the segment appears next to repo/branch on the same line. If
+  # not, we fall back to append (segment becomes its own standalone line).
+  local line1_assignments
+  line1_assignments=$(grep -cE '^[[:space:]]*LINE1[[:space:]]*=|LINE1="\$LINE1' "$FI_STATUSLINE_FILE" 2>/dev/null || true)
+  [[ "$line1_assignments" =~ ^[0-9]+$ ]] || line1_assignments=0
+
+  if (( line1_assignments >= 2 )); then
+    cmd_install_statusline_inline
+  else
+    cmd_install_statusline_append
+  fi
+}
+
+# Insert the segment block right after the LAST LINE1= assignment, so the
+# segment is appended to LINE1 inline (next to repo/branch), not echoed as
+# its own line at the end.
+cmd_install_statusline_inline() {
+  local last_line1
+  last_line1=$(grep -nE '^[[:space:]]*LINE1[[:space:]]*=|LINE1="\$LINE1' "$FI_STATUSLINE_FILE" \
+    | tail -1 | cut -d: -f1)
+
+  if [[ -z "$last_line1" || ! "$last_line1" =~ ^[0-9]+$ ]]; then
+    # Couldn't pinpoint — fall back to append
+    cmd_install_statusline_append
+    return
+  fi
+
+  local tmp
+  tmp="$(mktemp -t found-issues-statusline.XXXXXX)"
+  awk -v insert_after="$last_line1" \
+      -v start="$FI_STATUSLINE_START_MARKER" \
+      -v endm="$FI_STATUSLINE_END_MARKER" '
+    {
+      print
+      if (NR == insert_after) {
+        print start
+        print "# Inline-appended to LINE1 by `found-issues install-statusline`."
+        print "# The `|| true` guards against `set -e` killing the statusline when the"
+        print "# found-issues CLI isn'"'"'t on PATH. Remove this entire block to disable."
+        print "__FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)"
+        print "[[ -n \"$__FI_SEG\" ]] && LINE1=\"$LINE1$__FI_SEG\""
+        print endm
+      }
+    }
+  ' "$FI_STATUSLINE_FILE" >"$tmp"
+
+  mv "$tmp" "$FI_STATUSLINE_FILE"
+  printf 'install-statusline: inserted inline LINE1 segment in %s (after line %d)\n' \
+    "$FI_STATUSLINE_FILE" "$last_line1"
+  printf 'Restart your Claude Code session to see the segment render.\n'
+}
+
+# Append the block at end-of-file. Segment renders as its own standalone line.
+# Used when no LINE1 pattern is detected (simple printf-based statuslines).
+cmd_install_statusline_append() {
   if [[ -n "$(tail -c 1 "$FI_STATUSLINE_FILE")" ]]; then
     printf '\n' >>"$FI_STATUSLINE_FILE"
   fi
 
   cat >>"$FI_STATUSLINE_FILE" <<EOF
 $FI_STATUSLINE_START_MARKER
-# Added by \`found-issues install-statusline\`. Remove this entire block to
-# disable. The \`|| true\` is critical: it prevents \`set -e\` (common in
-# statusline scripts) from killing the script when the found-issues CLI
-# isn't on PATH (plugin uninstalled, raw-shell exec context, etc).
-# Use if/fi (not && chains) so the block's last command always exits 0
-# even when the segment is empty — otherwise the host script's final
-# exit code becomes 1 and Claude Code may discard its output.
+# Appended by \`found-issues install-statusline\`. Remove this entire block
+# to disable. The \`|| true\` guards against \`set -e\` killing the
+# statusline when the found-issues CLI isn't on PATH.
 __FI_SEG=\$(found-issues status --format=segment 2>/dev/null || true)
 if [[ -n "\$__FI_SEG" ]]; then echo "\$__FI_SEG"; fi
 $FI_STATUSLINE_END_MARKER
 EOF
 
-  printf 'install-statusline: appended found-issues segment to %s\n' "$FI_STATUSLINE_FILE"
+  printf 'install-statusline: appended standalone segment to %s\n' "$FI_STATUSLINE_FILE"
   printf 'Restart your Claude Code session to see the segment render.\n'
 }
 

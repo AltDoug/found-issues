@@ -12,6 +12,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.11] — 2026-05-09
+
+### Fixed
+
+- **`install-statusline` now inserts the segment inline on LINE1 when a LINE1 assembly pattern is detected** in `~/.claude/statusline.sh` (multi-line statuslines like Diogo's). Previously always appended at end-of-file, which made the segment render as an awkward standalone 4th line instead of inline next to repo/branch. Falls back to standalone-append for simple printf-style statuslines.
+- **`commands/setup.md` "already integrated?" check uses the actual marker grep** (`# === found-issues plugin segment ===`), not a generic "found-issues" string match. Previous check produced false positives when the statusline file had any cleanup comments or other references containing the word "found-issues".
+
+### Added
+
+- New bats test confirming inline insertion when LINE1 pattern detected, distinct from the existing standalone-append test.
+
 ## [0.1.10] — 2026-05-09
 
 ### Added
@@ -200,7 +211,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.11
 [0.1.10]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.10
 [0.1.9]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.9
 [0.1.8]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.8
