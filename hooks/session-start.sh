@@ -12,6 +12,32 @@
 
 set -euo pipefail
 
+# First-run onboarding hint — prepends a single italicized tip to the user's
+# next response, then never fires again. This replaces the silent removal in
+# v0.1.5 (users couldn't discover /found-issues:setup) and the verbose
+# directive in v0.1.4 (hijacked first response as a paragraph block).
+#
+# Trade-off: still goes via "directive to Claude" because SessionStart stdout
+# is context, not user UI. The directive is now a single italic line — visible
+# enough to discover the setup command, light enough to not derail what the
+# user actually asked.
+ONBOARD_DIR="$HOME/.claude/found-issues"
+ONBOARD_MARKER="$ONBOARD_DIR/.onboarded"
+if [[ ! -f "$ONBOARD_MARKER" ]]; then
+  mkdir -p "$ONBOARD_DIR"
+  cat <<'EOF'
+[found-issues setup hint — fires only on first session ever, never again]
+
+Prepend this single italicized line to the very top of your next reply, then continue with whatever the user asked:
+
+> _found-issues plugin is now active. Run `/found-issues:setup` for orientation + optional integrations (statusline counter, `/fi` alias, pre-commit hook)._
+
+Do not paraphrase or expand. One line, then the user's actual task.
+
+EOF
+  touch "$ONBOARD_MARKER"
+fi
+
 # Locate the CLI binary
 FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
 if ! command -v "$FI_BIN" >/dev/null 2>&1; then

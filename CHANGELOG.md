@@ -12,6 +12,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.10] — 2026-05-09
+
+### Added
+
+- **Light first-run onboarding hint.** SessionStart hook now prepends a single italicized line to the user's first response after install: *"found-issues plugin is now active. Run `/found-issues:setup` for orientation + optional integrations."* Then never fires again (marker at `~/.claude/found-issues/.onboarded`). This closes the discoverability gap from v0.1.5: manual installers via `/plugin install` UI never read the README, so they had no signal that `/found-issues:setup` existed. The v0.1.4 verbose-directive approach was rejected as too "sloppy" (full block hijacked first response). v0.1.10 is the middle ground — visible enough to discover, light enough to not derail.
+
 ## [0.1.9] — 2026-05-09
 
 ### Changed
@@ -194,7 +200,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.10
 [0.1.9]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.9
 [0.1.8]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.8
 [0.1.7]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.7
