@@ -71,3 +71,48 @@ teardown() {
   fi_run sync
   grep -qE '\(fixed: [0-9]{4}-[0-9]{2}-[0-9]{2}\)' docs/found-issues.md
 }
+
+@test "sync: auto-archives old fixed entries by default" {
+  local old
+  old="$(date -v-45d +%Y-%m-%d 2>/dev/null || date -d '45 days ago' +%Y-%m-%d)"
+  mkdir -p docs
+  cat > docs/found-issues.md <<EOF
+# found-issues
+
+- [fixed] $old src/foo.py:1 — old bug (PR: org/repo#1) (fixed: $old)
+- [open] 2026-05-09 src/bar.py:1 — new bug
+EOF
+
+  fi_run sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"moved 1 entries"* ]]
+  [ -f docs/found-issues-archive.md ]
+  grep -Fq "$old" docs/found-issues-archive.md
+  ! grep -Fq "$old" docs/found-issues.md
+}
+
+@test "sync: respects FOUND_ISSUES_AUTO_ARCHIVE=off" {
+  local old
+  old="$(date -v-45d +%Y-%m-%d 2>/dev/null || date -d '45 days ago' +%Y-%m-%d)"
+  mkdir -p docs
+  cat > docs/found-issues.md <<EOF
+# found-issues
+
+- [fixed] $old src/foo.py:1 — old bug (PR: org/repo#1) (fixed: $old)
+- [open] 2026-05-09 src/bar.py:1 — new bug
+EOF
+
+  FOUND_ISSUES_AUTO_ARCHIVE=off fi_run sync
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"moved"* ]]
+  [ ! -f docs/found-issues-archive.md ]
+  grep -Fq "$old" docs/found-issues.md
+}
+
+@test "sync: silent when no archive needed (no spurious output)" {
+  fi_run log "src/missing.py:1 — bug"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"moved"* ]]
+  [[ "$output" != *"Hint"* ]]
+}

@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="0.1.8"
+readonly FI_VERSION="0.1.9"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -663,34 +663,24 @@ cmd_sync() {
   fi
   cmd_status plain
 
-  # Archive hint: surface when fixed entries exceed thresholds
-  local fixed_total
-  fixed_total=$(grep -cE '^- \[fixed\]' "$file" 2>/dev/null || true)
-  [[ "$fixed_total" =~ ^[0-9]+$ ]] || fixed_total=0
-  if (( fixed_total > 50 )); then
-    printf '\nHint: %d fixed entries in this file. Run /found-issues:archive to move old ones to docs/found-issues-archive.md.\n' \
-      "$fixed_total"
+  # Auto-archive: enforced by default. Users who want pure manual control set
+  # FOUND_ISSUES_AUTO_ARCHIVE=off in their shell rc. Without enforcement, users
+  # forget /found-issues:archive exists and files balloon to thousands of entries.
+  if [[ "${FOUND_ISSUES_AUTO_ARCHIVE:-on}" != "off" ]]; then
+    local archive_output
+    archive_output="$(cmd_archive 2>&1 || true)"
+    # Surface output only when entries actually moved (not on no-op runs)
+    if [[ "$archive_output" == *"moved"*"entries"* ]]; then
+      printf '\n%s\n' "$archive_output"
+    fi
   else
-    # Also hint if any fixed entry is older than 30 days
-    local cutoff
-    cutoff="$(date -v-30d +%Y-%m-%d 2>/dev/null \
-      || date -d "30 days ago" +%Y-%m-%d 2>/dev/null \
-      || true)"
-    if [[ -n "$cutoff" ]]; then
-      local stale_fixed
-      stale_fixed=$(awk -v cutoff="$cutoff" '
-        /^- \[fixed\]/ {
-          if (match($0, /\(fixed: [0-9]{4}-[0-9]{2}-[0-9]{2}\)/)) {
-            d = substr($0, RSTART+8, 10)
-            if (d < cutoff) c++
-          }
-        }
-        END { print c+0 }
-      ' "$file")
-      if (( stale_fixed > 0 )); then
-        printf '\nHint: %d fixed entries are >30 days old. Run /found-issues:archive to clean up.\n' \
-          "$stale_fixed"
-      fi
+    # Opted out — surface the hint instead so they know thresholds are exceeded
+    local fixed_total
+    fixed_total=$(grep -cE '^- \[fixed\]' "$file" 2>/dev/null || true)
+    [[ "$fixed_total" =~ ^[0-9]+$ ]] || fixed_total=0
+    if (( fixed_total > 50 )); then
+      printf '\nHint: %d fixed entries. Run /found-issues:archive to clean up (auto-archive is off).\n' \
+        "$fixed_total"
     fi
   fi
 }
