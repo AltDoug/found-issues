@@ -88,19 +88,27 @@ hook handles this. Skip mentioning if it's not yet implemented.)
 ## Optional 3 — Short alias
 
 Plugin commands are namespaced as `/found-issues:log`, `/found-issues:sync`,
-etc. Users who want shorter typing can create a personal alias by adding
-this file to `~/.claude/commands/fi.md`:
+etc. Users who want shorter typing can install a personal alias.
 
-```markdown
----
-description: Shorthand for /found-issues commands
----
+**Use the deterministic CLI subcommand — do NOT write the file yourself.**
+The plugin ships `found-issues install-fi-alias` for this. It writes
+`~/.claude/commands/fi.md` with the literal `$ARGUMENTS` placeholder
+intact, refuses to overwrite a pre-existing user-authored `/fi` command,
+and is fully reversible via `found-issues uninstall-fi-alias`.
 
-Run /found-issues:$ARGUMENTS
-```
+Flow:
 
-Then `/fi log src/foo.py:42 — bug` works as a shortcut for
-`/found-issues:log src/foo.py:42 — bug`.
+1. Check if the user already has a `/fi` command:
+   ```bash
+   ls ~/.claude/commands/fi.md 2>/dev/null
+   ```
+2. If absent, ask: *"Want me to install the `/fi` shortcut so `/fi log
+   ...` expands to `/found-issues:log ...`?"*
+3. On yes, run `found-issues install-fi-alias`. The CLI is idempotent
+   (running twice no-ops) and won't trample a user's own `/fi.md`.
+
+To uninstall later: `found-issues uninstall-fi-alias` removes the file
+only if it's ours.
 
 ## Reporting
 

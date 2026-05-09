@@ -12,6 +12,23 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.16] — 2026-05-09
+
+### Fixed
+
+- **`/fi` alias now installs deterministically via `found-issues install-fi-alias`.** v0.1.15 setup told the LLM to handcraft `~/.claude/commands/fi.md` from a markdown code block in `commands/setup.md`. On a real install the agent dropped `$ARGUMENTS` — `/fi log src/foo.py:42` would expand to `Run /found-issues:` with the subcommand and arguments lost. Same failure class statusline had pre-v0.1.11 (LLM editing files by hand). v0.1.16 ships dedicated CLI subcommands `install-fi-alias` / `uninstall-fi-alias` so the LLM just calls them — no more handcrafted content.
+
+### Added
+
+- **New CLI subcommands**: `install-fi-alias` (creates `~/.claude/commands/fi.md` with literal `$ARGUMENTS` baked in, idempotent, refuses to overwrite a user-authored `/fi` command) and `uninstall-fi-alias` (removes only if it's ours; preserves user-authored `/fi`).
+- **README**: setup.png screenshot in the Installation section showing the optional-integrations picker.
+- 10 new bats tests in `tests/cli-fi-alias.bats` covering install, idempotency, no-clobber, parent-dir creation, uninstall, user-authored preservation, no-op, round-trip — and explicitly: *the file contains literal `$ARGUMENTS`* (regression test for the v0.1.15 bug).
+
+### Changed
+
+- `commands/setup.md` Optional 3 now calls `found-issues install-fi-alias` instead of handing the LLM a markdown code block.
+- `cmd_uninstall` now delegates `/fi` removal to `cmd_uninstall_fi_alias` so the "is this ours?" heuristic lives in one place — install and uninstall can't drift apart.
+
 ## [0.1.15] — 2026-05-09
 
 ### Added
