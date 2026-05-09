@@ -46,7 +46,7 @@ teardown() {
   [[ "$output" == *'"total_open":4'* ]]
 }
 
-@test "status: plain format uses '·' separator" {
+@test "status: plain format uses middle-dot separator" {
   fi_seed_sample docs/found-issues.md
   fi_run status --format=plain
   [[ "$output" == *" · "* ]]

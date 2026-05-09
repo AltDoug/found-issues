@@ -159,11 +159,25 @@ default.
 
 Details + edge cases: [`docs/modes.md`](docs/modes.md).
 
+## Platform support
+
+Tested in CI on:
+
+| OS | Shell | Status |
+|---|---|---|
+| Linux (Ubuntu) | bash | ✅ Supported |
+| macOS | bash | ✅ Supported |
+| Windows | Git Bash | ✅ Supported |
+
+**Windows note**: the plugin's CLI and hooks are bash-based (`#!/usr/bin/env bash`), so they need a bash interpreter to run. On Windows, that's provided by [Git for Windows](https://gitforwindows.org/) (Git Bash) — a near-universal install for any Windows dev box. CI runs the full test suite on `windows-latest` under Git Bash and passes. WSL works too.
+
+If you're on a Windows install without Git Bash or WSL, install Git for Windows first.
+
 ## Status & roadmap
 
-**v1.0.0 — first stable public release.**
+**v1.0.1 — Windows support added.**
 
-- 165 tests passing in CI on Linux + macOS
+- 165 tests passing in CI on **Linux + macOS + Windows** (Git Bash)
 - 7 hooks + 9 slash commands + a CLI binary, all wired through the
   Claude Code plugin spec
 - Auto-detected modes; no per-repo configuration

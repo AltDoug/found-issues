@@ -13,9 +13,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.1] — 2026-05-09
 
+### Added
+
+- **Windows support, verified by CI.** Added `windows-latest` to the bats matrix in `.github/workflows/test.yml` — runs under Git Bash. 165/165 tests pass. README now claims Linux + macOS + Windows in the new "Platform support" section. The plugin remains bash-based (`#!/usr/bin/env bash` shebang on every script); on Windows users need Git for Windows installed (Git Bash provides bash + GNU coreutils — near-universal install on Windows dev boxes). WSL also works.
+
 ### Fixed
 
 - **`/found-issues:setup` picker now labels the statusline option as `(Recommended)`** and lists it first. Without the recommended marker, users habitually tab through the multi-select picker and skip the highest-signal integration. `commands/setup.md` previously described the install mechanics for each option but didn't specify the picker structure — the LLM was generating it ad-hoc with no recommendation cue. Now setup.md explicitly: (1) requires a single multi-select picker, (2) requires `(Recommended)` suffix on the statusline option, (3) requires statusline listed first, (4) requires omitting already-installed options from the picker, (5) requires skipping the picker entirely when both are installed.
+- **Renamed `tests/cli-status.bats:49` test** from `"status: plain format uses '·' separator"` to `"status: plain format uses middle-dot separator"`. The Unicode middle dot in the test *name* (not the body) tripped bats' test-name parser on Git Bash for Windows. The body still asserts the `·` character in output — that's the actual contract being tested.
 
 ## [1.0.0] — 2026-05-09
 
