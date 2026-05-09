@@ -39,6 +39,8 @@ pre-commit hook). Setup is **optional** — the plugin is fully active
 without it — but running it once gets the polish wired up and removes
 the guesswork. You can always re-run it later.
 
+![setup picker showing optional integrations](setup.png)
+
 The plugin handles automatically:
 
 - Auto-loading the agent rules into context every session
