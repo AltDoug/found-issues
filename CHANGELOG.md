@@ -16,6 +16,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **Windows support, verified by CI.** Added `windows-latest` to the bats matrix in `.github/workflows/test.yml` — runs under Git Bash. 165/165 tests pass. README now claims Linux + macOS + Windows in the new "Platform support" section. The plugin remains bash-based (`#!/usr/bin/env bash` shebang on every script); on Windows users need Git for Windows installed (Git Bash provides bash + GNU coreutils — near-universal install on Windows dev boxes). WSL also works.
+- **README "How to use it day-to-day" section** surfacing the two usage patterns that weren't documented but are the actual day-to-day value: (1) plain-English queries work because `docs/found-issues.md` is auto-loaded into Claude's context every session — no slash command needed for *"what's open?"* / *"show me the critical ones"*; (2) the log can be treated as a work queue — ask an agent to triage and fix the easy ones in batch, the auto-annotate hooks + auto-flip-on-merge close the loop. Without this section, new readers saw a passive logger and missed the active-queue workflow.
 
 ### Fixed
 
