@@ -39,15 +39,24 @@ and adds a clearly-bracketed block that's trivially removable.
 Flow:
 
 1. Check if the user has a statusline: `ls ~/.claude/statusline.sh`
-2. If yes, ask: *"Want me to add the found-issues counter segment to
-   your statusline? It appends a small marker-bracketed block — fully
-   reversible with `found-issues uninstall-statusline`."*
-3. On yes, run `found-issues install-statusline`. The command:
-   - Detects an existing install via marker (idempotent — re-running is safe)
-   - Appends a single segment block at the end of the file
-   - Adds **one** new line to the rendered statusline (the counter)
-   - Doesn't modify any existing logic
-4. Tell the user to restart their session to see the segment render.
+2. **Check if the segment is already installed.** Use the marker grep
+   (NOT a generic "found-issues" string match — comments and other
+   references can produce false positives):
+   ```bash
+   grep -Fq "# === found-issues plugin segment ===" ~/.claude/statusline.sh && echo INSTALLED || echo NOT_INSTALLED
+   ```
+3. If NOT installed, ask: *"Want me to add the found-issues counter
+   segment to your statusline? It inserts a small marker-bracketed
+   block — fully reversible with `found-issues uninstall-statusline`."*
+4. On yes, run `found-issues install-statusline`. The command auto-detects
+   whether the user's statusline has a LINE1 assembly pattern:
+   - **LINE1 pattern detected** (multi-line statuslines): inserts the
+     segment inline so it appears next to repo/branch on the same line
+   - **No LINE1 pattern** (simple printf statuslines): appends the
+     segment as a standalone new line
+   - Either way: idempotent (marker prevents double-install), reversible
+     (`uninstall-statusline`), guarded against `set -e`
+5. Tell the user to restart their session to see the segment render.
 
 If `~/.claude/statusline.sh` doesn't exist, the user uses the default
 Claude Code statusline. Tell them: *"You'll see the count via the
