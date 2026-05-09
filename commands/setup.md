@@ -38,14 +38,32 @@ ls "$HOME/.claude/statusline.sh" 2>/dev/null
 ```
 
 If it exists, ask the user: *"I can add a found-issues counter segment to
-your statusline. Want me to wire it up? It's a single line append."* If they
-say yes, append this to the file (don't overwrite, append):
+your statusline. Want me to wire it up?"* If they say yes:
+
+1. Read the statusline file first (`Read ~/.claude/statusline.sh`).
+2. Find where the output lines are assembled (look for `LINE1=`, `printf`,
+   or `echo` calls that build the statusline output).
+3. Insert these **two lines** into the LINE1 assembly section, right after
+   the last segment that builds LINE1 (before peers, before LINE2):
 
 ```bash
-echo '' >> "$HOME/.claude/statusline.sh"
-echo '# found-issues counter (added by /found-issues:setup)' >> "$HOME/.claude/statusline.sh"
-echo 'echo -n "$(found-issues status --format=segment 2>/dev/null)"' >> "$HOME/.claude/statusline.sh"
+# found-issues counter (added by /found-issues:setup)
+FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+[[ -n "$FI_SEG" ]] && LINE1="$LINE1 ${DIM}|${RESET} $FI_SEG"
 ```
+
+**CRITICAL: the `|| true` is mandatory.** Many statusline scripts use
+`set -e` or `set -euo pipefail`. Without `|| true`, the `found-issues`
+command-not-found exit code kills the entire statusline script (the
+statusline runs as a raw shell exec, not inside Claude Code, so the
+plugin's CLI may not be on PATH). The `|| true` makes the segment
+silently absent when the CLI isn't available, instead of breaking
+everything.
+
+If the statusline doesn't use a `LINE1`-style variable assembly pattern
+(e.g., it uses direct `printf` output), adapt the insertion to match the
+file's existing structure — but ALWAYS use `|| true` on the command
+substitution.
 
 If the user already has a found-issues counter (search for `found-issues`
 in the statusline file), tell them: *"You already have a counter. The
