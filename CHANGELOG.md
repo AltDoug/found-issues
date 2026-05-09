@@ -12,6 +12,23 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.8] — 2026-05-09
+
+### Added
+
+- **`/found-issues:archive` command + `found-issues archive` CLI subcommand** — moves old `[fixed]` entries to `docs/found-issues-archive.md`. Triggers when EITHER threshold met:
+  - Days: `(fixed: YYYY-MM-DD)` older than 30 days (default, `--days=N` to override)
+  - Count: total `[fixed]` entries exceed 50 (default, `--count=N` to override) — oldest move first
+- `--dry-run` flag previews what would move without modifying files
+- Archive file is append-only — the plugin never modifies it after writing
+- Open + deferred entries are never touched
+- Sync now prints a one-line hint when archive thresholds are exceeded, so users discover the command organically
+- 9 new bats tests covering all archive paths
+
+### Why
+
+Real-world entry rate during active development is ~25/day per repo, not "50–200/year" as initially scoped. At that pace, files grow fast and the active file becomes harder to scan. Archive keeps the active file lean while preserving full closure history in a separate append-only file. Single-source-of-truth model preserved (one active + one archive, both readable, no synchronization across multiple status-split files).
+
 ## [0.1.7] — 2026-05-09
 
 ### Added
@@ -166,7 +183,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.8
 [0.1.7]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.7
 [0.1.6]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.6
 [0.1.5]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.5
