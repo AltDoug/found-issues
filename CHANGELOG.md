@@ -12,6 +12,16 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.12] — 2026-05-09
+
+### Fixed
+
+- **Statusline integration is now robust to PATH variability.** Both inline and standalone insertion forms now try `found-issues` on PATH first, then fall back to globbing `~/.claude/plugins/cache/*/found-issues/*/bin/found-issues` for the latest installed binary. The statusline runs in a raw shell exec context where the plugin's auto-PATH may not apply (verified empirically — `command -v found-issues` fails in stripped-env subprocess but the cache glob succeeds). Without this fallback, users had a wired-but-silent statusline segment.
+
+### Added
+
+- New bats test asserting both insertion forms emit the `command -v` + cache-glob fallback pattern.
+
 ## [0.1.11] — 2026-05-09
 
 ### Fixed
@@ -211,7 +221,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.12
 [0.1.11]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.11
 [0.1.10]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.10
 [0.1.9]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.9
