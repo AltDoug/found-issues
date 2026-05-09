@@ -12,6 +12,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.13] — 2026-05-09
+
+### Fixed
+
+- **Statusline fallback uses `sort -V` for semver-correct version selection.** v0.1.12's `for` loop iterated glob results and assigned the alphabetically-last match — which picks `0.1.9` over `0.1.10`/`0.1.11` because byte-wise sort puts `9` after `1`. Affects users who have updated through versions and have multiple cached. Now uses `ls -d ... | sort -V | tail -1`.
+- **`|| true` on the cache-glob pipeline.** With `set -o pipefail` (common in statusline scripts), `ls -d` returning non-zero on no glob matches propagates through the pipe and triggers `set -e` exit. The fallback would silently kill the entire statusline whenever the plugin wasn't cached. Adding `|| true` after the pipeline makes it safe.
+
 ## [0.1.12] — 2026-05-09
 
 ### Fixed
@@ -221,7 +228,8 @@ sprint.
 
 These are exercised in dogfood usage rather than CI.
 
-[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/AltDoug/found-issues/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.13
 [0.1.12]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.12
 [0.1.11]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.11
 [0.1.10]: https://github.com/AltDoug/found-issues/releases/tag/v0.1.10
