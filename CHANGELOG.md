@@ -12,6 +12,23 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public release (flip repo from private to public)
 - Submission to official Claude Code marketplace
 
+## [0.1.15] — 2026-05-09
+
+### Added
+
+- **`found-issues uninstall` cleanup command** and `/found-issues:uninstall` slash wrapper. Claude Code's `/plugin uninstall` removes the plugin itself but leaves plugin-private state behind under `~/.claude/` and `~/.cache/` (no pre/post-uninstall lifecycle hooks in the spec — see anthropics/claude-code#11240). The new command wipes only what we installed, in one go:
+  - Statusline segment block in `~/.claude/statusline.sh` (preserves rest of file + executable bit, reuses `uninstall-statusline`)
+  - Onboarding marker dir `~/.claude/found-issues/`
+  - Mode-detection cache `~/.cache/found-issues/`
+  - `/fi` alias at `~/.claude/commands/fi.md` *only if* it contains `Run /found-issues:` (won't touch a user's own `/fi` command)
+  - Per-repo `docs/found-issues.md` and `docs/found-issues-archive.md` are intentionally preserved — that's user project data
+- Prints `/plugin uninstall found-issues` and `/plugin marketplace remove altdoug-plugins` as next-steps (those can only run from inside Claude Code).
+- 8 new bats tests in `tests/cli-uninstall.bats` covering no-op, each cleanup type individually, user's-own-`fi.md` preservation, statusline-block removal preserving rest of file + executable bit, next-steps reminder, and all-4-at-once.
+
+### Why
+
+User feedback during e2e uninstall+reinstall test: *"shouldnt that all be part of the uninstall? why is there left over"* — manual `rm -rf` cleanup is unacceptable UX. Plugin-side leftovers are our problem to solve.
+
 ## [0.1.14] — 2026-05-09
 
 ### Fixed

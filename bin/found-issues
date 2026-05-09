@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="0.1.14"
+readonly FI_VERSION="0.1.15"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -112,6 +112,7 @@ COMMANDS
                                         (defaults: count=50 OR days=30, whichever first)
   install-statusline                    Append the counter segment to ~/.claude/statusline.sh
   uninstall-statusline                  Remove the counter segment block
+  uninstall                             Wipe plugin-private state (run before /plugin uninstall)
 
   --version                             Print version
   --help                                Print this help
@@ -767,6 +768,72 @@ cmd_promote() {
     "$current_branch"
 }
 
+# === Subcommand: uninstall ===
+#
+# Wipes plugin-private state that Claude Code's `/plugin uninstall` doesn't
+# clean: the onboarding marker, the mode-detection cache, the statusline
+# integration block, and the optional `/fi` shorthand alias from setup.
+#
+# Does NOT touch: per-repo `docs/found-issues.md` files (user data),
+# Claude Code's plugin cache (Claude Code manages those — `/plugin uninstall`),
+# or the marketplace clone (separate via `/plugin marketplace remove`).
+#
+# Order matters: run this BEFORE `/plugin uninstall found-issues` so the
+# plugin's CLI is still on PATH while the cleanup runs.
+
+cmd_uninstall() {
+  local removed_count=0
+
+  # 1. Statusline integration (only if installed)
+  if [[ -f "$FI_STATUSLINE_FILE" ]] && grep -Fq "$FI_STATUSLINE_START_MARKER" "$FI_STATUSLINE_FILE"; then
+    cmd_uninstall_statusline >/dev/null
+    printf '✓ removed statusline segment block from %s\n' "$FI_STATUSLINE_FILE"
+    removed_count=$((removed_count + 1))
+  fi
+
+  # 2. Onboarding marker dir
+  if [[ -d "$HOME/.claude/found-issues" ]]; then
+    rm -rf "$HOME/.claude/found-issues"
+    printf '✓ removed onboarding state at ~/.claude/found-issues/\n'
+    removed_count=$((removed_count + 1))
+  fi
+
+  # 3. Mode detection cache
+  if [[ -d "$HOME/.cache/found-issues" ]]; then
+    rm -rf "$HOME/.cache/found-issues"
+    printf '✓ removed mode-detection cache at ~/.cache/found-issues/\n'
+    removed_count=$((removed_count + 1))
+  fi
+
+  # 4. /fi alias (created optionally by /found-issues:setup)
+  if [[ -f "$HOME/.claude/commands/fi.md" ]]; then
+    # Only remove if it's our alias (don't trample a user's own /fi command)
+    if grep -Fq "Run /found-issues:" "$HOME/.claude/commands/fi.md" 2>/dev/null; then
+      rm -f "$HOME/.claude/commands/fi.md"
+      printf '✓ removed /fi alias at ~/.claude/commands/fi.md\n'
+      removed_count=$((removed_count + 1))
+    fi
+  fi
+
+  if (( removed_count == 0 )); then
+    printf 'uninstall: nothing to clean (plugin-private state already empty)\n'
+  fi
+
+  cat <<'EOF'
+
+Plugin-private state is now clean. Per-repo `docs/found-issues.md` and
+`docs/found-issues-archive.md` files are intentionally preserved — they're
+your project data.
+
+Next steps to fully remove the plugin:
+
+  /plugin uninstall found-issues
+  /plugin marketplace remove altdoug-plugins   (if installed via aggregator)
+
+The above can only be run from inside Claude Code (slash commands).
+EOF
+}
+
 # === Subcommand: archive ===
 #
 # Move old [fixed] entries from docs/found-issues.md to docs/found-issues-archive.md
@@ -1116,6 +1183,7 @@ main() {
     promote)          cmd_promote "$@" ;;
     install-statusline)   cmd_install_statusline "$@" ;;
     uninstall-statusline) cmd_uninstall_statusline "$@" ;;
+    uninstall)            cmd_uninstall "$@" ;;
     archive)              cmd_archive "$@" ;;
     -v|--version)     cmd_version ;;
     -h|--help|help)   cmd_help ;;
