@@ -56,10 +56,11 @@ SL
   ! grep -Fq 'echo "$__FI_SEG"' "$HOME/.claude/statusline.sh"
 }
 
-@test "install-statusline: emits PATH-robust fallback (glob + command -v)" {
+@test "install-statusline: emits PATH-robust fallback with sort -V (semver-correct)" {
   # Both standalone and inline forms must include the fallback that globs
   # ~/.claude/plugins/cache/*/found-issues/*/bin/found-issues when the CLI
-  # isn't on PATH (statusline runs in a stripped exec context).
+  # isn't on PATH. Must use sort -V — byte-wise glob order picks 0.1.9 as
+  # latest when 0.1.10/0.1.11 are present (regression bug from v0.1.12).
   cat > "$HOME/.claude/statusline.sh" <<'SL'
 #!/usr/bin/env bash
 echo "test"
@@ -68,6 +69,7 @@ SL
   [ "$status" -eq 0 ]
   grep -Fq 'command -v found-issues' "$HOME/.claude/statusline.sh"
   grep -Fq '.claude/plugins/cache/*/found-issues/*/bin/found-issues' "$HOME/.claude/statusline.sh"
+  grep -Fq 'sort -V' "$HOME/.claude/statusline.sh"
 
   # Same check for inline form
   rm "$HOME/.claude/statusline.sh"
@@ -81,6 +83,7 @@ SL
   [ "$status" -eq 0 ]
   grep -Fq 'command -v found-issues' "$HOME/.claude/statusline.sh"
   grep -Fq '.claude/plugins/cache/*/found-issues/*/bin/found-issues' "$HOME/.claude/statusline.sh"
+  grep -Fq 'sort -V' "$HOME/.claude/statusline.sh"
 }
 
 @test "install-statusline: idempotent (second run no-ops)" {

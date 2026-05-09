@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="0.1.12"
+readonly FI_VERSION="0.1.13"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -983,9 +983,11 @@ cmd_install_statusline_inline() {
         print "if command -v found-issues >/dev/null 2>&1; then"
         print "  __FI_CLI=found-issues"
         print "else"
-        print "  for __fi_candidate in \"$HOME\"/.claude/plugins/cache/*/found-issues/*/bin/found-issues; do"
-        print "    [[ -x \"$__fi_candidate\" ]] && __FI_CLI=\"$__fi_candidate\""
-        print "  done"
+        print "  # sort -V handles semver correctly (0.1.10 > 0.1.9, unlike byte-wise glob order)"
+        print "  # `|| true` is critical: with `set -o pipefail` (common in statuslines), ls"
+        print "  # returns non-zero when glob has no matches and that propagates through the pipe"
+        print "  __FI_CLI=$(ls -d \"$HOME\"/.claude/plugins/cache/*/found-issues/*/bin/found-issues 2>/dev/null | sort -V | tail -1 || true)"
+        print "  [[ -x \"$__FI_CLI\" ]] || __FI_CLI=\"\""
         print "fi"
         print "__FI_SEG=\"\""
         print "[[ -n \"$__FI_CLI\" ]] && __FI_SEG=$(\"$__FI_CLI\" status --format=segment 2>/dev/null || true)"
@@ -1019,9 +1021,11 @@ __FI_CLI=""
 if command -v found-issues >/dev/null 2>&1; then
   __FI_CLI=found-issues
 else
-  for __fi_candidate in "\$HOME"/.claude/plugins/cache/*/found-issues/*/bin/found-issues; do
-    [[ -x "\$__fi_candidate" ]] && __FI_CLI="\$__fi_candidate"
-  done
+  # sort -V handles semver correctly (0.1.10 > 0.1.9, unlike byte-wise glob order).
+  # \`|| true\` is critical: with \`set -o pipefail\` (common in statuslines), ls
+  # returns non-zero when glob has no matches and that propagates through the pipe.
+  __FI_CLI=\$(ls -d "\$HOME"/.claude/plugins/cache/*/found-issues/*/bin/found-issues 2>/dev/null | sort -V | tail -1 || true)
+  [[ -x "\$__FI_CLI" ]] || __FI_CLI=""
 fi
 __FI_SEG=""
 [[ -n "\$__FI_CLI" ]] && __FI_SEG=\$("\$__FI_CLI" status --format=segment 2>/dev/null || true)
