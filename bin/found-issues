@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.0.3"
+readonly FI_VERSION="1.0.4"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -113,9 +113,11 @@ COMMANDS
   archive [--dry-run] [--days=N] [--count=N]
                                         Move old [fixed] entries to docs/found-issues-archive.md
                                         (defaults: count=50 OR days=30, whichever first)
-  install-statusline [--migrate]        Append the counter segment to ~/.claude/statusline.sh.
-                                        Self-healing: auto-rewrites broken v1.0.0/1.0.1 marker blocks;
-                                        --migrate also rewrites pre-v0.1.7 handwritten snippets.
+  install-statusline [--no-migrate]     Append the counter segment to ~/.claude/statusline.sh.
+                                        Self-healing: auto-rewrites broken v1.0.0/1.0.1 marker blocks
+                                        AND auto-migrates pre-v0.1.7 handwritten snippets (with a
+                                        timestamped backup). Pass --no-migrate to refuse touching
+                                        legacy lines (v1.0.3 strict behavior).
   uninstall-statusline                  Remove the counter segment block
   doctor-statusline                     Diagnose the current statusline integration (no changes)
   install-fi-alias                      Create the /fi shortcut at ~/.claude/commands/fi.md
@@ -1031,6 +1033,25 @@ fi_capture_mode() {
     || echo 755
 }
 
+# Save a timestamped backup of the statusline file before destructive edits
+# (legacy-snippet stripping). Echoes the backup path on stdout. Used by
+# install-statusline's auto-migrate path so users can recover by hand if the
+# strip heuristic ever mis-matches a custom variant.
+#
+# Why backup before strip: v1.0.4 flipped --migrate from opt-in to default.
+# The strip heuristic is precise (only matches the 3-line handwritten template
+# pattern) but auto-acting on user files warrants a recovery path. The backup
+# is single-shot per migration (timestamped suffix) — won't accumulate across
+# repeated installs because the second install hits installed-fixed and no-ops.
+fi_save_statusline_backup() {
+  local src="$1"
+  local ts backup
+  ts="$(date +%Y%m%d-%H%M%S 2>/dev/null || echo backup)"
+  backup="${src}.fi-bak-${ts}"
+  cp "$src" "$backup" 2>/dev/null || return 1
+  printf '%s' "$backup"
+}
+
 # Classify the current state of the user's statusline integration.
 # Echoes one of: none, installed-fixed, installed-broken, legacy-handwritten,
 # legacy-and-installed, or no-file.
@@ -1164,15 +1185,25 @@ fi_strip_legacy_handwritten() {
 }
 
 cmd_install_statusline() {
-  # Argument parsing. --migrate is required to surgically rewrite legacy
-  # handwritten snippets (we can't auto-migrate those silently because the
-  # heuristic could mismatch user-edited variants). Marker-bracketed broken
-  # blocks (v1.0.0/1.0.1) auto-migrate without a flag because the markers
-  # give us deterministic block boundaries.
-  local migrate=0
+  # Argument parsing. As of v1.0.4 the default is to auto-migrate legacy
+  # handwritten snippets (the 3-line pre-v0.1.7 setup.md template). v1.0.3
+  # required `--migrate` for safety, but in practice that opt-in barrier
+  # caused the AI-driven setup flow to bail silently and the user to see
+  # an empty counter — the symptom v1.0.3 was supposed to fix. The strip
+  # heuristic is precise and a timestamped backup is saved before the strip,
+  # so reversal is one `mv` away if the user's snippet is custom enough to
+  # mismatch.
+  #
+  # Use `--no-migrate` to opt back into the v1.0.3 strict behavior (refuse
+  # to touch legacy lines, print the manual migration command).
+  #
+  # `--migrate` / `--force` are kept as backwards-compat no-ops — invoking
+  # them remains valid and behaves identically to the new default.
+  local migrate=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --migrate|--force) migrate=1; shift ;;
+      --no-migrate) migrate=0; shift ;;
       *) shift ;;
     esac
   done
@@ -1209,23 +1240,41 @@ cmd_install_statusline() {
         fi_err "Lines matching the handwritten setup.md template were found OUTSIDE our marker block."
         fi_err "These call \`found-issues status\` from the wrong cwd → empty segment (silent breakage)."
         fi_err ""
-        fi_err "To migrate (removes the legacy lines and inserts the canonical marker-bracketed block):"
-        fi_err "  found-issues install-statusline --migrate"
+        fi_err "Auto-migration was explicitly disabled via --no-migrate. To migrate, drop the flag:"
+        fi_err "  found-issues install-statusline"
         fi_err ""
         fi_err "Or inspect first:"
         fi_err "  found-issues doctor-statusline"
         return 1
       fi
+      local fi_backup_path=""
+      fi_backup_path="$(fi_save_statusline_backup "$FI_STATUSLINE_FILE" || true)"
+      fi_err "install-statusline: detected pre-v0.1.7 handwritten snippet — auto-migrating."
+      fi_err "  Removing the 3-line snippet (\`# found-issues plugin segment\` comment, the"
+      fi_err "  \`FI_SEG=\$(found-issues status --format=segment ...)\` line, and the"
+      fi_err "  \`\$FI_SEG\`-using LINE1 follow-up) and inserting the canonical marker-bracketed"
+      fi_err "  block with cwd handling."
+      [[ -n "$fi_backup_path" ]] && fi_err "  Backup of pre-migration file: $fi_backup_path"
+      fi_err "  Opt out with: found-issues install-statusline --no-migrate"
       printf 'install-statusline: migrating pre-v0.1.7 handwritten snippet in %s\n' "$FI_STATUSLINE_FILE"
       fi_strip_legacy_handwritten "$FI_STATUSLINE_FILE"
       ;;
     legacy-and-installed)
       if (( migrate == 0 )); then
         fi_err "install-statusline: $FI_STATUSLINE_FILE has BOTH a marker block AND a stray legacy line."
-        fi_err "This would render the counter twice. Migrate with:"
-        fi_err "  found-issues install-statusline --migrate"
+        fi_err "This would render the counter twice."
+        fi_err ""
+        fi_err "Auto-migration was explicitly disabled via --no-migrate. To migrate, drop the flag:"
+        fi_err "  found-issues install-statusline"
         return 1
       fi
+      local fi_backup_path=""
+      fi_backup_path="$(fi_save_statusline_backup "$FI_STATUSLINE_FILE" || true)"
+      fi_err "install-statusline: detected stray legacy snippet alongside marker block — auto-migrating."
+      fi_err "  Removing the legacy 3-line handwritten snippet AND the existing (likely broken)"
+      fi_err "  marker-bracketed block, then re-inserting the canonical block."
+      [[ -n "$fi_backup_path" ]] && fi_err "  Backup of pre-migration file: $fi_backup_path"
+      fi_err "  Opt out with: found-issues install-statusline --no-migrate"
       printf 'install-statusline: removing stray legacy snippet AND broken/duplicate marker block in %s\n' "$FI_STATUSLINE_FILE"
       cmd_uninstall_statusline >/dev/null
       fi_strip_legacy_handwritten "$FI_STATUSLINE_FILE"
@@ -1286,12 +1335,12 @@ cmd_doctor_statusline() {
     legacy-handwritten)
       printf 'BROKEN — pre-v0.1.7 handwritten snippet found (no markers, no cwd handling).\n'
       printf 'Symptom: counter renders empty regardless of which repo you'\''re in.\n'
-      printf 'Fix: found-issues install-statusline --migrate   (removes legacy lines, inserts canonical block)\n'
+      printf 'Fix: found-issues install-statusline   (auto-migrates as of v1.0.4: strips legacy lines, inserts canonical block, saves a timestamped backup)\n'
       ;;
     legacy-and-installed)
       printf 'CONFLICTED — both a marker block AND a stray legacy line are present.\n'
       printf 'Symptom: counter may render twice or render empty depending on order.\n'
-      printf 'Fix: found-issues install-statusline --migrate   (cleans up both, reinstalls canonical)\n'
+      printf 'Fix: found-issues install-statusline   (auto-migrates as of v1.0.4: cleans up both, reinstalls canonical, saves a timestamped backup)\n'
       ;;
     none)
       printf 'NOT INSTALLED — no found-issues integration in this statusline.\n'

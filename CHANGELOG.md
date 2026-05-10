@@ -11,6 +11,30 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Demo GIF embedded in README
 - Submission to official Claude Code marketplace
 
+## [1.0.4] — 2026-05-10
+
+### Fixed (legacy-snippet auto-migration is now the default — completes the v1.0.3 self-heal for AI-driven setup)
+
+- **`install-statusline` auto-migrates legacy snippets without `--migrate`.** v1.0.3 added detection + migration for pre-v0.1.7 handwritten snippets but gated it behind an explicit `--migrate` flag for safety. In practice this caused the silent-breakage symptom v1.0.3 was meant to fix: the AI-driven `/found-issues:setup` flow runs the picker without first running `doctor-statusline` (it's a prose-level pre-step), so a user with a legacy snippet picks "statusline segment", the picker invokes bare `install-statusline`, and the CLI bails with `return 1`. Claude doesn't always surface the bail. User uninstalls + reinstalls + re-runs setup — same outcome every cycle, because the legacy lines never get touched.
+- **The fix:**
+  - `install-statusline` (no flags) now auto-migrates `legacy-handwritten` and `legacy-and-installed` states the same way it already auto-rewrote `installed-broken` blocks. Symmetric with `cmd_uninstall`, which has always auto-stripped legacy snippets without `--migrate`.
+  - **Backup safety net**: before stripping legacy lines, the CLI saves a timestamped backup at `~/.claude/statusline.sh.fi-bak-<YYYYMMDD-HHMMSS>`. If the strip heuristic ever mismatches a custom variant, recovery is one `mv` away.
+  - **Loud stderr notice**: the CLI now prints a multi-line explanation of what was removed and points at the backup path before the migration runs, so users see exactly what changed.
+  - **Opt-out preserved**: pass `--no-migrate` to restore v1.0.3 strict behavior (refuse to touch legacy lines, print manual recovery command). `--migrate` / `--force` stay as backwards-compatible no-ops.
+  - **Doctor + SessionStart updated**: both surfaces now recommend plain `found-issues install-statusline` (no flag) as the fix for legacy state, since it's the single canonical entry point.
+  - **`commands/setup.md` updated**: the "doctor pass before the picker" prose is now informational rather than required-for-correctness. Picker invokes bare `install-statusline`; AI doesn't need to branch by state or remember to pass `--migrate`.
+- **Why flip the default**: the v1.0.3 reasoning was that the strip heuristic could mismatch user-edited variants. In practice, the heuristic only matches the specific 3-line operative pattern (`# ... found-issues ...` comment + `FI_SEG=$(found-issues status --format=segment ...)` line + `$FI_SEG`-using LINE1 follow-up); custom variants that diverged from the template wouldn't match. The cost of false-positive strip is low (one `mv` from the backup); the cost of preserving the opt-in barrier is silent breakage every time AI-driven setup misses the doctor-pass — exactly the failure mode this release fixes.
+
+### Added
+
+- **`fi_save_statusline_backup` helper** — copies `~/.claude/statusline.sh` to a timestamped sibling before destructive edits. Single-shot per migration; doesn't accumulate across repeated installs because subsequent runs hit `installed-fixed` and no-op.
+- **2 new bats tests** in `tests/cli-statusline.bats`: `--no-migrate refuses legacy-handwritten` and `--no-migrate refuses legacy-and-installed` assert the strict opt-out still works. The pre-existing default-path tests for both legacy states are renamed and tightened: they now also assert the timestamped backup file exists and contains the pre-migration content. **182 tests total** (was 180).
+
+### How existing users pick up the fix
+
+- **Pre-v0.1.7 handwritten installs** (the cohort blocked by v1.0.3): `found-issues install-statusline` — no flag, just works. A timestamped backup is saved automatically.
+- **Auto-discovery**: SessionStart nudge (still once per day) now points at the same plain command.
+
 ## [1.0.3] — 2026-05-10
 
 ### Fixed (silent-broken-statusline self-heal — completes the v1.0.2 fix for ALL pre-existing users)
