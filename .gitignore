@@ -5,18 +5,36 @@
 Icon?
 ._*
 
+# Windows
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
 # Editor / IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+*.bak
 .netrwhist
+
+# Merge conflict residue
+*.orig
+*.rej
 
 # Logs / temp
 *.log
 *.tmp
 .cache/
+
+# Secrets — prevent accidental commits of env files. We don't use them now,
+# but ignoring upfront eliminates a class of leaks if any contributor adds
+# a script or test that does. Whitelist .env.example so a documented
+# template can be checked in.
+.env
+.env.*
+!.env.example
 
 # Build artifacts (none yet, placeholder)
 dist/
