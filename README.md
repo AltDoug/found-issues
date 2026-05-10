@@ -48,9 +48,28 @@ The plugin handles automatically:
 - Adding the `found-issues` CLI to your PATH
 - Working in any repo (auto-detects mode: local / git / github-direct / github-pr)
 
-To uninstall later: `/found-issues:uninstall` cleans up plugin-private
-state (statusline segment, onboarding marker, mode cache, `/fi` alias),
-then `/plugin uninstall found-issues` removes the plugin itself.
+### Uninstalling
+
+> **Order matters.** Run our cleanup *before* the platform uninstall, or
+> plugin-private state will be orphaned in `~/.claude/`.
+
+```
+/found-issues:uninstall                            # 1. plugin's own cleanup
+/plugin uninstall found-issues                     # 2. platform uninstall
+/plugin marketplace remove altdoug-plugins         # 3. (only if you also want to remove the marketplace)
+```
+
+Why the order: `/plugin uninstall` (Claude Code's built-in command) only
+removes the plugin code itself — it does **not** invoke our `uninstall` skill.
+If you run it first, the statusline segment, onboarding marker, mode cache,
+and `/fi` alias all stay behind in `~/.claude/`. They're invisible until you
+reinstall later, at which point they cause confusing state mismatches (silent
+broken statusline counter, orphaned alias, etc.).
+
+`/found-issues:uninstall` runs `found-issues uninstall` which removes only
+files our installer ever touched (manifest-tracked, conservative). Per-repo
+`docs/found-issues.md` files are intentionally preserved — they're your
+project data.
 
 ## What it does
 

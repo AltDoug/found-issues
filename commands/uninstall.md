@@ -8,6 +8,21 @@ The user wants to uninstall `found-issues`. Claude Code's `/plugin uninstall`
 removes the plugin itself, but plugin-private state under `~/.claude/` and
 `~/.cache/` is not touched by the platform — that's our problem to clean up.
 
+**Order matters — surface this to the user before running anything.** The
+canonical sequence is:
+
+1. `/found-issues:uninstall` (this command — runs `found-issues uninstall`)
+2. `/plugin uninstall found-issues` (Claude Code platform command)
+3. `/plugin marketplace remove altdoug-plugins` (only if also removing the marketplace)
+
+If the user already ran `/plugin uninstall found-issues` first (the common
+mistake), our CLI may not be on PATH anymore. Tell them to either:
+- Reinstall the plugin temporarily (`/plugin install found-issues`), then
+  re-run this skill in the right order; or
+- Manually `rm -rf ~/.claude/found-issues ~/.cache/found-issues` and edit
+  `~/.claude/statusline.sh` to remove the marker-bracketed block (between
+  `# === found-issues plugin segment ===` and `# === end ...`).
+
 Run the deterministic cleanup command:
 
 ```bash
