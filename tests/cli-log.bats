@@ -124,3 +124,17 @@ EOF
   # Existing reason annotation preserved
   grep -F "(reason: scoped out)" docs/found-issues.md
 }
+
+@test "log: touch below threshold prints brief stderr 'Nx of M for promotion'" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  # Touch 1 of 3
+  fi_run log "src/foo.py:42 — null check missing"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1x of 3"* ]] || [[ "$output" == *"1 of 3"* ]]
+  [[ "$output" == *"src/foo.py:42"* ]]
+}

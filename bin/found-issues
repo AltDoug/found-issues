@@ -151,19 +151,52 @@ EOF
 cmd_version() { printf 'found-issues version %s\n' "$FI_VERSION"; }
 
 # Handle a `log` invocation that matched a [deferred] entry's dedup key.
-# Appends today's date to the (touched: ...) annotation. Subsequent tasks
-# extend this with threshold checks and auto-promotion logic.
+# Appends today's date to the (touched: ...) annotation, then checks
+# count vs threshold and prints brief feedback (or nudge/auto-promote).
 fi_handle_deferred_touch() {
   local file="$1"
   local matched_entry="$2"
   local today
   today="$(fi_today)"
 
-  # Append today's date to the matched entry's (touched: ...) annotation.
+  # Append today's date FIRST so the count reflects this touch.
   fi_append_touch "$file" "$matched_entry" "$today"
 
-  # Reload the entry to compute new touch count + threshold (next tasks).
-  printf 'Touched deferred entry: %s\n' "$matched_entry" >&2
+  # Re-read the updated entry to compute current count + threshold.
+  # The entry's path may have changed (annotation appended), so match by
+  # the original entry's dedup-stable prefix.
+  local updated_entry=""
+  local prefix="${matched_entry%% (touched:*}"
+  prefix="${prefix%% (defer-cycle:*}"  # be defensive about ordering
+  while IFS= read -r line; do
+    if [[ "$line" == "$prefix"* ]]; then
+      updated_entry="$line"
+      break
+    fi
+  done < <(fi_entries "$file" deferred 2>/dev/null || true)
+
+  if [[ -z "$updated_entry" ]]; then
+    # Should not happen if append succeeded; fail soft.
+    printf 'Touched deferred entry: %s\n' "$matched_entry" >&2
+    return 0
+  fi
+
+  local cycle count threshold
+  cycle="$(fi_extract_defer_cycle "$updated_entry")"
+  count="$(fi_current_cycle_touch_count "$updated_entry")"
+  threshold="$(fi_compute_threshold "$cycle")"
+
+  # Compute a hint for the user (path:line if available)
+  local hint
+  hint="${matched_entry#*\] }"
+  hint="${hint#* }"  # strip date
+  hint="${hint%% — *}"
+
+  if (( count < threshold )); then
+    printf 'Touched deferred entry (%dx of %d for promotion): %s\n' "$count" "$threshold" "$hint" >&2
+  fi
+
+  # >= threshold branches added in next tasks
   return 0
 }
 
