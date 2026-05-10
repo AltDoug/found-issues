@@ -67,3 +67,31 @@ teardown() {
   [[ "$output" == *"AltDoug/found-issues#42"* ]] || [[ "$output" == *"(PR:"* ]]
   [[ "$output" == *"sync"* ]] || [[ "$output" == *"merge"* ]]
 }
+
+@test "defer: re-defer increments defer-cycle and appends ';' to touched" {
+  # Simulate: an entry that was previously deferred + touched + promoted, now [open]
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-05-10 src/foo.py:42 — null check (touched: 2026-05-21, 2026-05-28, 2026-06-04)
+EOF
+  fi_run defer "src/foo.py:42" --reason "rescoped, parking for v2"
+  [ "$status" -eq 0 ]
+  grep -F "[deferred]" docs/found-issues.md
+  grep -F "(defer-cycle: 2)" docs/found-issues.md
+  grep -F "(touched: 2026-05-21, 2026-05-28, 2026-06-04; )" docs/found-issues.md
+  grep -F "(reason: rescoped, parking for v2)" docs/found-issues.md
+}
+
+@test "defer: re-defer with new --reason replaces old reason annotation" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-05-10 src/foo.py:42 — null check (reason: original reason) (touched: 2026-05-21, 2026-05-28, 2026-06-04) (defer-cycle: 2)
+EOF
+  fi_run defer "src/foo.py:42" --reason "new reason"
+  [ "$status" -eq 0 ]
+  grep -F "(reason: new reason)" docs/found-issues.md
+  ! grep -F "(reason: original reason)" docs/found-issues.md
+  grep -F "(defer-cycle: 3)" docs/found-issues.md
+}
