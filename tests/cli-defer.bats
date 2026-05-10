@@ -20,3 +20,10 @@ teardown() {
   grep -F "[deferred]" docs/found-issues.md
   ! grep -F "[open]" docs/found-issues.md
 }
+
+@test "defer: --reason captures (reason: ...) annotation" {
+  fi_run log "src/foo.py:42 — null check missing"
+  fi_run defer "src/foo.py:42" --reason "tracked in JIRA-1234"
+  [ "$status" -eq 0 ]
+  grep -F "(reason: tracked in JIRA-1234)" docs/found-issues.md
+}
