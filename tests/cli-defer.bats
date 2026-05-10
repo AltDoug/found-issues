@@ -46,3 +46,13 @@ teardown() {
   [[ "$output" == *"src/foo.py:88"* ]]
   [[ "$output" == *"more specific"* ]]
 }
+
+@test "defer: already-deferred exits 3 with re-defer guidance" {
+  fi_run log "src/foo.py:42 — null check"
+  fi_run defer "src/foo.py:42"
+  [ "$status" -eq 0 ]
+  fi_run defer "src/foo.py:42"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"already [deferred]"* ]]
+  [[ "$output" == *"promote"* ]]
+}
