@@ -150,6 +150,23 @@ EOF
 
 cmd_version() { printf 'found-issues version %s\n' "$FI_VERSION"; }
 
+# Handle a `log` invocation that matched a [deferred] entry's dedup key.
+# Appends today's date to the (touched: ...) annotation. Subsequent tasks
+# extend this with threshold checks and auto-promotion logic.
+fi_handle_deferred_touch() {
+  local file="$1"
+  local matched_entry="$2"
+  local today
+  today="$(fi_today)"
+
+  # Append today's date to the matched entry's (touched: ...) annotation.
+  fi_append_touch "$file" "$matched_entry" "$today"
+
+  # Reload the entry to compute new touch count + threshold (next tasks).
+  printf 'Touched deferred entry: %s\n' "$matched_entry" >&2
+  return 0
+}
+
 # === Subcommand: log ===
 #
 # Usage: found-issues log [--critical] <location> — <symptom>

@@ -93,3 +93,34 @@ teardown() {
   fi_run log "src/foo.py:43 — bug B"
   [[ "$output" == *"2 issues"* ]]
 }
+
+@test "log: matching [deferred] entry appends today's date to (touched: ...)" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing
+EOF
+  fi_run log "src/foo.py:42 — null check missing"
+  [ "$status" -eq 0 ]
+  # Today's date appears as a touched annotation
+  today="$(date +%Y-%m-%d)"
+  grep -F "(touched: $today)" docs/found-issues.md
+  # No new [open] entry created
+  ! grep -F "[open]" docs/found-issues.md
+  # Single [deferred] entry remains
+  [ "$(grep -c '^- \[deferred\]' docs/found-issues.md)" -eq 1 ]
+}
+
+@test "log: matching [deferred] without prior touched: creates the annotation" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing (reason: scoped out)
+EOF
+  fi_run log "src/foo.py:42 — null check missing"
+  [ "$status" -eq 0 ]
+  today="$(date +%Y-%m-%d)"
+  grep -F "(touched: $today)" docs/found-issues.md
+  # Existing reason annotation preserved
+  grep -F "(reason: scoped out)" docs/found-issues.md
+}
