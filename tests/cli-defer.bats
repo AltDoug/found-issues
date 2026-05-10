@@ -56,3 +56,14 @@ teardown() {
   [[ "$output" == *"already [deferred]"* ]]
   [[ "$output" == *"promote"* ]]
 }
+
+@test "defer: blocks in-PR entry with exit 4 and recovery message" {
+  fi_run log "src/foo.py:42 — null check"
+  # Manually add a PR annotation to simulate annotate-pr having run
+  sed -i.bak 's/null check/null check (PR: AltDoug\/found-issues#42)/' docs/found-issues.md
+  fi_run defer "src/foo.py:42"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"active PR annotation"* ]]
+  [[ "$output" == *"AltDoug/found-issues#42"* ]] || [[ "$output" == *"(PR:"* ]]
+  [[ "$output" == *"sync"* ]] || [[ "$output" == *"merge"* ]]
+}
