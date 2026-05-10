@@ -29,6 +29,14 @@ jobs:
       - id: filter
         uses: dorny/paths-filter@v3
         with:
+          # `every`: a file matches `code` only when it satisfies ALL patterns
+          # in the list — i.e. `**` AND NOT any of the `!` excludes. The
+          # default `some` quantifier matches if ANY pattern matches; with
+          # `**` always-matching, the negatives never kick in and the filter
+          # is effectively a no-op (PR #45 smoke-tested this and the matrix
+          # ran for a CHANGELOG-only change). `every` makes the negatives
+          # actually subtractive.
+          predicate-quantifier: every
           # Negative globs: `code` is true unless EVERY changed file is cosmetic.
           # `commands/*.md` is intentionally NOT excluded — slash command
           # markdown is functional (frontmatter + instructions consumed by
