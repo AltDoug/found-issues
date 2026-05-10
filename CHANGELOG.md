@@ -6,17 +6,42 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed (release-channel consolidation, no plugin code change)
+### Planned
+
+- Demo GIF embedded in README
+- Submission to official Claude Code marketplace
+
+## [1.0.3] — 2026-05-10
+
+### Fixed (silent-broken-statusline self-heal — completes the v1.0.2 fix for ALL pre-existing users)
+
+- **`install-statusline` is now self-healing.** v1.0.2 fixed the cwd bug for *new* installs but left two cohorts of real users with silently-broken statusline counters: (1) public users who installed via v1.0.0/1.0.1 — they have a marker-bracketed segment that lacks `cd "$__FI_DIR"` handling; (2) early-adopter / dogfood users from pre-v0.1.7 — they have a 3-line handwritten snippet (no markers) embedded in their `~/.claude/statusline.sh` per the old setup.md template. Both cohorts see no counter even though install reported success.
+- **The fix:**
+  - `install-statusline` now classifies the existing state of `~/.claude/statusline.sh` (`none` / `installed-fixed` / `installed-broken` / `legacy-handwritten` / `legacy-and-installed`).
+  - **`installed-broken` (v1.0.0/1.0.1 marker block missing cwd handling)**: auto-rewrites in place — no flag needed, because the markers give us deterministic block boundaries. Users just re-run `found-issues install-statusline` and it self-heals.
+  - **`legacy-handwritten` (pre-v0.1.7 handwritten snippet)**: requires explicit `--migrate` flag. The CLI surgically removes the 3-line handwritten block (signature: a comment line containing `found-issues`, the `FI_SEG=$(found-issues status --format=segment ...)` invocation, and the LINE1 assembly follow-up) and inserts the canonical marker-bracketed block. Migration is opt-in because the heuristic could mismatch user-edited variants.
+  - **`legacy-and-installed`**: cleans up both with `--migrate`.
+- **New subcommand `doctor-statusline`**: dry-run diagnosis of the current state. Reports which of the 5 states the user's statusline is in and the recommended fix command. No file modifications.
+- **SessionStart hook self-heal nudge**: detects broken/legacy statusline state at session start. If found, emits a one-time-per-day directive to Claude pointing at `found-issues doctor-statusline` and the migration command. Cost of breakage (silent broken counter) is high; cost of a one-line nudge is low.
+- **`status` subcommand now accepts `--cwd PATH`** and falls back to `$CLAUDE_PROJECT_DIR` when no flag is passed. Defensive correctness for any caller that knows the workspace dir explicitly (hooks, scripts, future statusline integrations).
+
+### Added
+
+- **12 new bats tests** in `tests/cli-statusline.bats` covering: `--cwd` flag, `CLAUDE_PROJECT_DIR` fallback, all 5 classifier states via `doctor-statusline`, `--migrate` rewrites for `legacy-handwritten` / `installed-broken` / `legacy-and-installed`, idempotency after migration, and a true e2e test that proves a pre-migration broken statusline renders empty AND post-migration renders the count. 179 tests total (was 167).
+
+### Changed (release-channel consolidation from prior Unreleased section, no plugin code change)
 
 - **Removed standalone marketplace at `AltDoug/found-issues`.** Deleted `.claude-plugin/marketplace.json` from this repo. The single canonical install path is now the aggregator at `AltDoug/claude-plugins`. Why: dual install paths created confusion (e.g. `/plugin marketplace add AltDoug/found-issues` would register under marketplace name `found-issues` while the aggregator registers as `altdoug-plugins`, leading to mismatches in `/plugin marketplace remove` commands). One marketplace, one install path, one canonical name.
 - **README + AGENTS.md install instructions** now use `/plugin marketplace add AltDoug/claude-plugins`.
 - **CI `json validation` step** no longer validates the removed marketplace.json.
 - **Migration for users who installed via the standalone path**: `/plugin marketplace remove found-issues` then `/plugin marketplace add AltDoug/claude-plugins`. The plugin itself doesn't need reinstalling — same code, just a different marketplace registration.
 
-### Planned
+### How existing users pick up the fix
 
-- Demo GIF embedded in README
-- Submission to official Claude Code marketplace
+- **v1.0.0/1.0.1 marker-bracketed installs**: `found-issues install-statusline` (no flag — auto-detects + auto-rewrites).
+- **Pre-v0.1.7 handwritten installs**: `found-issues install-statusline --migrate` (explicit opt-in for surgical line removal).
+- **Not sure**: `found-issues doctor-statusline` first to inspect, then run the recommended command it prints.
+- **Auto-discovery**: SessionStart will nudge once per day until fixed.
 
 ## [1.0.2] — 2026-05-09
 

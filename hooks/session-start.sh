@@ -38,6 +38,73 @@ EOF
   touch "$ONBOARD_MARKER"
 fi
 
+# Broken-statusline self-heal nudge — fires at most once per day per machine.
+# Detects pre-v0.1.7 handwritten snippets and v1.0.0/1.0.1 marker-bracketed
+# segments that lack cwd handling (both render the counter empty silently).
+# Emits a one-line directive to Claude pointing at the migration command.
+#
+# Why only once per day: the cost of breakage is high (silent broken counter
+# for real users), the cost of a one-line nudge is low. Re-checking each
+# session also means: if the user ignores it once, they get reminded daily
+# until they fix it OR uninstall.
+mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
+STATUSLINE_NUDGE_MARKER="$ONBOARD_DIR/.statusline-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
+if [[ ! -f "$STATUSLINE_NUDGE_MARKER" ]] && [[ -f "$HOME/.claude/statusline.sh" ]]; then
+  # Inline classifier (matches fi_statusline_state in the CLI). Kept in sync
+  # by tests/cli-statusline.bats:"session-start hook detects broken state".
+  STATUSLINE_FILE="$HOME/.claude/statusline.sh"
+  STATUSLINE_START_MARKER="# === found-issues plugin segment ==="
+  STATUSLINE_END_MARKER="# === end found-issues plugin segment ==="
+  has_marker=0; marker_block_fixed=0; has_legacy=0
+  if grep -Fq "$STATUSLINE_START_MARKER" "$STATUSLINE_FILE" 2>/dev/null; then
+    has_marker=1
+    if awk -v start="$STATUSLINE_START_MARKER" -v endm="$STATUSLINE_END_MARKER" '
+        $0 == start { in_block = 1; next }
+        $0 == endm { in_block = 0; next }
+        in_block { print }
+      ' "$STATUSLINE_FILE" 2>/dev/null | grep -Fq '__FI_DIR'; then
+      marker_block_fixed=1
+    fi
+  fi
+  if awk -v start="$STATUSLINE_START_MARKER" -v endm="$STATUSLINE_END_MARKER" '
+      $0 == start { in_block = 1; next }
+      $0 == endm { in_block = 0; next }
+      !in_block && /found-issues[[:space:]]+status[[:space:]]+--format[=[:space:]]+segment/ { found = 1 }
+      END { exit (found ? 0 : 1) }
+    ' "$STATUSLINE_FILE" 2>/dev/null; then
+    has_legacy=1
+  fi
+
+  # Broken if: marker present without cwd handling, OR handwritten legacy line outside markers.
+  if (( (has_marker == 1 && marker_block_fixed == 0) || has_legacy == 1 )); then
+    if [[ "$has_legacy" -eq 1 && "$has_marker" -eq 0 ]]; then
+      fix_cmd='found-issues install-statusline --migrate'
+      kind='pre-v0.1.7 handwritten snippet'
+    elif [[ "$has_legacy" -eq 1 && "$has_marker" -eq 1 ]]; then
+      fix_cmd='found-issues install-statusline --migrate'
+      kind='conflicting handwritten + marker block'
+    else
+      fix_cmd='found-issues install-statusline'
+      kind='v1.0.0/1.0.1 marker block missing cwd handling'
+    fi
+    cat <<EOF
+[found-issues self-heal nudge — fires at most once per day until fixed]
+
+Detected a broken statusline integration in ~/.claude/statusline.sh
+($kind). The counter is rendering empty silently. Run \`found-issues doctor-statusline\`
+to inspect, then \`$fix_cmd\` to fix.
+
+Prepend this single italicized line to the very top of your next reply, then continue with whatever the user asked:
+
+> _found-issues counter is silently broken in your statusline. Fix: \`$fix_cmd\` (or \`found-issues doctor-statusline\` to inspect first)._
+
+Do not paraphrase. One line, then the user's actual task.
+
+EOF
+    touch "$STATUSLINE_NUDGE_MARKER" 2>/dev/null || true
+  fi
+fi
+
 # Locate the CLI binary
 FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
 if ! command -v "$FI_BIN" >/dev/null 2>&1; then

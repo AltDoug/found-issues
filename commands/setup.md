@@ -47,9 +47,28 @@ shows actionable items:
 - `~/.claude/statusline.sh` contains `# === found-issues plugin segment ===` → omit option 1
 - `~/.claude/commands/fi.md` contains `Run /found-issues:$ARGUMENTS` → omit option 2
 
-If **both** are already installed, do not show the picker at all. Tell the
-user "all polish items already done" and skip to the reporting step. This
-is what users see when re-running setup after an upgrade.
+**Doctor pass before the picker (v1.0.3+):** before showing the picker,
+always run `found-issues doctor-statusline`. If the output contains
+`State: legacy-handwritten`, `State: installed-broken`, or
+`State: legacy-and-installed`, the user has a *broken* integration that
+silently renders an empty counter — they think it works but it doesn't.
+**Surface this prominently** before the picker:
+
+> _Heads up: your statusline integration is in a broken state
+> (`<state from doctor>`). The counter is currently rendering as empty.
+> Want me to fix it now? It's a single command, fully reversible:_
+> `<recommended command from doctor output>`
+
+On confirm, run the doctor's recommended command (either
+`found-issues install-statusline` for `installed-broken`, or
+`found-issues install-statusline --migrate` for the legacy variants).
+Don't show the picker's statusline option afterwards — the doctor pass
+already handled it.
+
+If **both** are already installed (and statusline is `installed-fixed`),
+do not show the picker at all. Tell the user "all polish items already
+done" and skip to the reporting step. This is what users see when
+re-running setup after an upgrade.
 
 The detailed install mechanics for each option are below — those describe
 the CLI subcommand to invoke once the user picks.
@@ -99,6 +118,14 @@ prints the count once per session.
 
 To uninstall later: `found-issues uninstall-statusline` removes the
 block cleanly without touching the rest of the file.
+
+**Self-heal for legacy installs (v1.0.3+):** if a user is upgrading from
+v1.0.0/v1.0.1 (marker block missing cwd handling) or from the pre-v0.1.7
+dogfood era (handwritten 3-line snippet, no markers), `install-statusline`
+auto-detects and offers migration. Marker-bracketed broken blocks rewrite
+in place automatically; legacy handwritten snippets require explicit
+`--migrate` flag for safety. Run `found-issues doctor-statusline` first to
+inspect without modifying anything.
 
 ## Optional 2 — Per-repo pre-commit hook
 
