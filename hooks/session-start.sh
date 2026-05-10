@@ -77,14 +77,14 @@ if [[ ! -f "$STATUSLINE_NUDGE_MARKER" ]] && [[ -f "$HOME/.claude/statusline.sh" 
 
   # Broken if: marker present without cwd handling, OR handwritten legacy line outside markers.
   if (( (has_marker == 1 && marker_block_fixed == 0) || has_legacy == 1 )); then
+    # All three broken states resolve via plain `install-statusline` as of
+    # v1.0.4 — auto-migrate is the default for legacy snippets too.
+    fix_cmd='found-issues install-statusline'
     if [[ "$has_legacy" -eq 1 && "$has_marker" -eq 0 ]]; then
-      fix_cmd='found-issues install-statusline --migrate'
       kind='pre-v0.1.7 handwritten snippet'
     elif [[ "$has_legacy" -eq 1 && "$has_marker" -eq 1 ]]; then
-      fix_cmd='found-issues install-statusline --migrate'
       kind='conflicting handwritten + marker block'
     else
-      fix_cmd='found-issues install-statusline'
       kind='v1.0.0/1.0.1 marker block missing cwd handling'
     fi
     cat <<EOF

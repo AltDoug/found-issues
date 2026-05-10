@@ -371,7 +371,9 @@ SL
   [ "$status" -eq 0 ]
   [[ "$output" == *"State: legacy-handwritten"* ]]
   [[ "$output" == *"BROKEN"* ]]
-  [[ "$output" == *"--migrate"* ]]
+  # v1.0.4: doctor's recommended fix is plain `install-statusline` (auto-migrates).
+  [[ "$output" == *"install-statusline"* ]]
+  [[ "$output" != *"--migrate"* ]]
 }
 
 @test "doctor-statusline: detects v1.0.0/1.0.1 marker block missing cwd handling (installed-broken)" {
@@ -397,7 +399,10 @@ SL
   [[ "$output" == *"BROKEN"* ]]
 }
 
-@test "install-statusline: refuses to migrate legacy-handwritten without --migrate flag" {
+@test "install-statusline: auto-migrates legacy-handwritten by default (v1.0.4)" {
+  # v1.0.3 required `--migrate` for safety, but the AI-driven setup flow
+  # bailed silently in practice. v1.0.4 flips the default — auto-migrate
+  # with a timestamped backup. See CHANGELOG 1.0.4.
   cat > "$HOME/.claude/statusline.sh" <<'SL'
 #!/usr/bin/env bash
 input=$(cat)
@@ -408,10 +413,37 @@ FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
 echo "$LINE1"
 SL
   fi_run install-statusline
+  [ "$status" -eq 0 ]
+  # Migration happened — legacy lines stripped, canonical block added.
+  ! grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh"
+  grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
+  grep -Fq 'cd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
+  # Backup file was saved next to the statusline (pattern: statusline.sh.fi-bak-<ts>).
+  ls "$HOME/.claude/statusline.sh".fi-bak-* >/dev/null 2>&1
+  # Backup contains the original (pre-migration) legacy snippet.
+  local backup
+  backup=$(ls "$HOME/.claude/statusline.sh".fi-bak-* | head -1)
+  grep -Fq 'FI_SEG=$(found-issues status' "$backup"
+}
+
+@test "install-statusline --no-migrate: refuses to touch legacy-handwritten (v1.0.3 strict opt-out)" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+input=$(cat)
+LINE1="repo"
+# found-issues plugin segment
+FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+[[ -n "$FI_SEG" ]] && LINE1="$LINE1 | $FI_SEG"
+echo "$LINE1"
+SL
+  fi_run install-statusline --no-migrate
   [ "$status" -ne 0 ]
-  [[ "$output" == *"--migrate"* ]]
-  # Original file unchanged (no markers added)
+  [[ "$output" == *"--no-migrate"* ]]
+  # Original file unchanged (no markers added, no migration)
   ! grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
+  grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh"
+  # No backup file should exist (we bailed before touching anything)
+  ! ls "$HOME/.claude/statusline.sh".fi-bak-* >/dev/null 2>&1
 }
 
 @test "install-statusline --migrate: surgically removes handwritten lines and inserts canonical block" {
@@ -468,7 +500,7 @@ SL
   [ "$count" -eq 1 ]
 }
 
-@test "install-statusline --migrate: handles legacy-and-installed (both legacy AND markers)" {
+@test "install-statusline: auto-migrates legacy-and-installed (both legacy AND markers, v1.0.4)" {
   cat > "$HOME/.claude/statusline.sh" <<'SL'
 #!/usr/bin/env bash
 LINE1="repo"
@@ -483,13 +515,9 @@ __FI_SEG=$("$__FI_CLI" status --format=segment 2>/dev/null || true)
 # === end found-issues plugin segment ===
 echo "$LINE1"
 SL
-  # Without --migrate, refuses
-  fi_run install-statusline
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"--migrate"* ]]
 
-  # With --migrate, cleans up both
-  fi_run install-statusline --migrate
+  # Default behavior (no flag): cleans up both, saves backup.
+  fi_run install-statusline
   [ "$status" -eq 0 ]
   ! grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh"
   # Exactly one marker block remains
@@ -498,6 +526,29 @@ SL
   [ "$count" -eq 1 ]
   # And it has cwd handling
   grep -Fq 'cd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
+  # Backup saved
+  ls "$HOME/.claude/statusline.sh".fi-bak-* >/dev/null 2>&1
+}
+
+@test "install-statusline --no-migrate: refuses legacy-and-installed (v1.0.3 strict opt-out)" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+LINE1="repo"
+# Old handwritten block
+FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+[[ -n "$FI_SEG" ]] && LINE1="$LINE1 | $FI_SEG"
+# === found-issues plugin segment ===
+__FI_CLI=found-issues
+__FI_SEG=$("$__FI_CLI" status --format=segment 2>/dev/null || true)
+[[ -n "$__FI_SEG" ]] && LINE1="$LINE1$__FI_SEG"
+# === end found-issues plugin segment ===
+echo "$LINE1"
+SL
+  fi_run install-statusline --no-migrate
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--no-migrate"* ]]
+  # Legacy snippet still present, not stripped
+  grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh"
 }
 
 @test "install-statusline: idempotent after migration (second --migrate call no-ops)" {

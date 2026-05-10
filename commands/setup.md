@@ -47,23 +47,27 @@ shows actionable items:
 - `~/.claude/statusline.sh` contains `# === found-issues plugin segment ===` → omit option 1
 - `~/.claude/commands/fi.md` contains `Run /found-issues:$ARGUMENTS` → omit option 2
 
-**Doctor pass before the picker (v1.0.3+):** before showing the picker,
-always run `found-issues doctor-statusline`. If the output contains
-`State: legacy-handwritten`, `State: installed-broken`, or
-`State: legacy-and-installed`, the user has a *broken* integration that
-silently renders an empty counter — they think it works but it doesn't.
-**Surface this prominently** before the picker:
+**Doctor pass before the picker (informational, v1.0.4+):** running
+`found-issues doctor-statusline` before the picker is no longer required
+for correctness — `install-statusline` self-heals every broken state on
+its own (auto-migrates legacy snippets with a timestamped backup as of
+v1.0.4). It's still useful for *transparency*: if the user has a broken
+state, surface it so they know what's about to be fixed. Recommended:
+
+```bash
+found-issues doctor-statusline
+```
+
+If the output contains `BROKEN` or `CONFLICTED`, mention it briefly
+before the picker:
 
 > _Heads up: your statusline integration is in a broken state
-> (`<state from doctor>`). The counter is currently rendering as empty.
-> Want me to fix it now? It's a single command, fully reversible:_
-> `<recommended command from doctor output>`
+> (`<state from doctor>`). Picking the statusline option below will
+> fix it (a timestamped backup is saved automatically)._
 
-On confirm, run the doctor's recommended command (either
-`found-issues install-statusline` for `installed-broken`, or
-`found-issues install-statusline --migrate` for the legacy variants).
-Don't show the picker's statusline option afterwards — the doctor pass
-already handled it.
+Then continue with the picker as normal — `install-statusline` (no flags)
+handles every broken state. No conditional flag-passing or branching by
+state required from you.
 
 If **both** are already installed (and statusline is `installed-fixed`),
 do not show the picker at all. Tell the user "all polish items already
@@ -119,13 +123,16 @@ prints the count once per session.
 To uninstall later: `found-issues uninstall-statusline` removes the
 block cleanly without touching the rest of the file.
 
-**Self-heal for legacy installs (v1.0.3+):** if a user is upgrading from
-v1.0.0/v1.0.1 (marker block missing cwd handling) or from the pre-v0.1.7
-dogfood era (handwritten 3-line snippet, no markers), `install-statusline`
-auto-detects and offers migration. Marker-bracketed broken blocks rewrite
-in place automatically; legacy handwritten snippets require explicit
-`--migrate` flag for safety. Run `found-issues doctor-statusline` first to
-inspect without modifying anything.
+**Self-heal for legacy installs (v1.0.4+):** `install-statusline` is now
+fully self-healing for every broken state. Upgrading from v1.0.0/v1.0.1
+(marker block missing cwd handling) or pre-v0.1.7 dogfood era
+(handwritten 3-line snippet, no markers) — both cases auto-migrate on a
+plain `install-statusline` call. Legacy snippets are stripped surgically
+and a timestamped backup of the pre-migration file is saved at
+`~/.claude/statusline.sh.fi-bak-<ts>` for one-`mv` recovery if needed.
+Pass `--no-migrate` to opt back into v1.0.3 strict behavior (refuse to
+touch legacy lines). Run `found-issues doctor-statusline` first if you
+want to inspect without modifying anything.
 
 ## Optional 2 — Per-repo pre-commit hook
 
