@@ -239,3 +239,14 @@ fi_count_stale() {
 
   printf '%d' "$count"
 }
+
+# Extract the value of the (touched: ...) annotation from an entry line.
+# Echoes the raw value (comma-separated dates, possibly with ';' cycle
+# separators). Echoes empty string if the annotation is absent.
+fi_extract_touched_segment() {
+  local line="$1"
+  local re_touched='\(touched: ([^)]+)\)'
+  if [[ "$line" =~ $re_touched ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}

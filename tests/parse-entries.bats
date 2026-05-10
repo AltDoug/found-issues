@@ -175,3 +175,20 @@ teardown() {
   result="$(fi_count_critical docs/found-issues.md)"
   [ "$result" = "1" ]
 }
+
+# === fi_extract_touched_segment ===
+
+@test "fi_extract_touched_segment: returns empty when annotation absent" {
+  result="$(fi_extract_touched_segment "- [deferred] 2026-05-10 src/foo.py:42 — bug")"
+  [ -z "$result" ]
+}
+
+@test "fi_extract_touched_segment: extracts single date" {
+  result="$(fi_extract_touched_segment "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21)")"
+  [ "$result" = "2026-05-21" ]
+}
+
+@test "fi_extract_touched_segment: extracts multiple dates with cycle separator" {
+  result="$(fi_extract_touched_segment "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; 2026-07-15)")"
+  [ "$result" = "2026-05-21, 2026-05-28; 2026-07-15" ]
+}
