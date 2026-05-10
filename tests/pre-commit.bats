@@ -63,3 +63,27 @@ teardown() {
   run "$HOOK"
   [ "$status" -eq 1 ]
 }
+
+@test "pre-commit: accepts (touched: ...) defer-flow annotation" {
+  mkdir -p docs
+  echo "- [deferred] 2026-05-08 src/foo.py:42 — not now (touched: 2026-05-21, 2026-05-28)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit: accepts (touched: ...) with (defer-cycle: N) annotation" {
+  mkdir -p docs
+  echo "- [deferred] 2026-05-08 src/foo.py:42 — not now (touched: 2026-05-21; 2026-05-28) (defer-cycle: 2)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit: accepts (reason: ...) defer-flow annotation" {
+  mkdir -p docs
+  echo "- [deferred] 2026-05-08 src/foo.py:42 — not now (reason: tracked in JIRA-1234)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
