@@ -6,8 +6,54 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-progress runs when a new commit lands on the same PR / branch.
+# Saves CI minutes (especially on Windows, ~7 min) and stops stale results
+# from clobbering fresh ones when fix-up commits arrive in quick succession.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Detect whether this PR/push touches anything that affects test outcomes.
+  # Cosmetic-only changes (README, CHANGELOG, screenshots, LICENSE, .gitignore,
+  # docs/, hero.tape) skip the matrix — the `ci` aggregator below treats
+  # `skipped` as `success` so branch protection is satisfied without burning
+  # ~7 min on a PNG swap.
+  changes:
+    name: detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # Negative globs: `code` is true unless EVERY changed file is cosmetic.
+          # `commands/*.md` is intentionally NOT excluded — slash command
+          # markdown is functional (frontmatter + instructions consumed by
+          # Claude Code), so changes deserve full CI even though no bats test
+          # asserts on them. `.github/workflows/**` is also intentionally
+          # included so workflow edits run their own new test suite.
+          filters: |
+            code:
+              - '**'
+              - '!README.md'
+              - '!CHANGELOG.md'
+              - '!CONTRIBUTING.md'
+              - '!SECURITY.md'
+              - '!AGENTS.md'
+              - '!LICENSE'
+              - '!**/*.png'
+              - '!**/*.jpg'
+              - '!**/*.gif'
+              - '!hero.tape'
+              - '!.gitignore'
+              - '!docs/**'
+
   bats:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: bats (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -56,6 +102,8 @@ jobs:
         run: bats tests/
 
   shellcheck:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: shellcheck
     runs-on: ubuntu-latest
     steps:
@@ -69,6 +117,8 @@ jobs:
         continue-on-error: true  # Advisory; don't block PR on shellcheck warnings
 
   json-lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: json validation
     runs-on: ubuntu-latest
     steps:
@@ -81,6 +131,8 @@ jobs:
           done
 
   test-name-lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: test name ASCII guard
     runs-on: ubuntu-latest
     steps:
@@ -90,9 +142,9 @@ jobs:
         # UTF-8 sequences in test NAMES (the body is fine — only the name is
         # parsed by bats's test discovery). When it hits one, it silently
         # drops the test and emits a confusing "expected N got N-1" failure
-        # ~6 minutes into the Windows runner. We hit this twice in the
-        # v1.0.1 → v1.0.2 cycle (em-dash, middle-dot). Catching it here in
-        # ~1s on a Linux runner saves the round-trip.
+        # ~6 minutes into the Windows runner. We hit this three times across
+        # v1.0.1, v1.0.2, v1.0.3 (em-dash, middle-dot, em-dash again).
+        # Catching it here in ~5s on a Linux runner saves the round-trip.
         #
         # Using perl rather than grep because grep's byte-range bracket
         # expressions don't reliably match high bytes across GNU/BSD/locale
@@ -109,4 +161,45 @@ jobs:
             echo "Fix: rename the test to ASCII. The body can still assert against any character — only the @test name matters."
             exit 1
           fi
-          echo "All @test names are ASCII. ✓"
+          echo "All @test names are ASCII."
+
+  # Aggregator job — the SINGLE required status check in branch protection.
+  # Why aggregator: if we made `bats`/`shellcheck`/etc. each individually
+  # required, the path-filter skip would leave them in `Expected` state
+  # forever and block merging cosmetic-only PRs. With one aggregator that
+  # reports `success` when its dependencies are `success` OR `skipped`,
+  # cosmetic PRs go green in seconds and code PRs still block on real
+  # failures.
+  ci:
+    name: ci
+    needs: [bats, shellcheck, json-lint, test-name-lint]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required jobs succeeded or were skipped
+        run: |
+          set -euo pipefail
+          # Each `needs.<job>.result` is one of: success, failure, cancelled, skipped.
+          # success / skipped → OK (skipped means path filter excluded this PR).
+          # failure / cancelled → fail the aggregator → block the merge.
+          declare -A results=(
+            [bats]='${{ needs.bats.result }}'
+            [shellcheck]='${{ needs.shellcheck.result }}'
+            [json-lint]='${{ needs.json-lint.result }}'
+            [test-name-lint]='${{ needs.test-name-lint.result }}'
+          )
+          fail=0
+          for job in "${!results[@]}"; do
+            r="${results[$job]}"
+            case "$r" in
+              success|skipped) printf '  %-16s %s\n' "$job:" "$r" ;;
+              *)               printf '  %-16s %s (BLOCKING)\n' "$job:" "$r"; fail=1 ;;
+            esac
+          done
+          if (( fail == 1 )); then
+            echo
+            echo "ci: at least one required job failed or was cancelled — blocking merge."
+            exit 1
+          fi
+          echo
+          echo "ci: all required jobs succeeded or were skipped (cosmetic-only PR)."
