@@ -327,3 +327,42 @@ EOF
   ! grep "src/bar.py" test.md | grep -q "touched:"
   ! grep "src/baz.py" test.md | grep -q "touched:"
 }
+
+@test "fi_increment_defer_cycle: adds (defer-cycle: 2) and ';' to touched on first re-defer" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28)
+EOF
+  fi_increment_defer_cycle test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28)"
+  grep -F "(defer-cycle: 2)" test.md
+  grep -F "(touched: 2026-05-21, 2026-05-28; )" test.md
+}
+
+@test "fi_increment_defer_cycle: bumps existing cycle (2 -> 3)" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; 2026-07-15) (defer-cycle: 2)
+EOF
+  fi_increment_defer_cycle test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; 2026-07-15) (defer-cycle: 2)"
+  grep -F "(defer-cycle: 3)" test.md
+  grep -F "(touched: 2026-05-21, 2026-05-28; 2026-07-15; )" test.md
+  ! grep -F "(defer-cycle: 2)" test.md
+}
+
+@test "fi_increment_defer_cycle: no ';' appended when no touched annotation" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug
+EOF
+  fi_increment_defer_cycle test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug"
+  grep -F "(defer-cycle: 2)" test.md
+  ! grep "touched:" test.md
+}
+
+@test "fi_increment_defer_cycle: no ';' appended when current segment is empty" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21; ) (defer-cycle: 2)
+EOF
+  fi_increment_defer_cycle test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21; ) (defer-cycle: 2)"
+  grep -F "(defer-cycle: 3)" test.md
+  # No double ';;' — annotation stays "; "
+  grep -F "(touched: 2026-05-21; )" test.md
+  ! grep -F ";;" test.md
+}

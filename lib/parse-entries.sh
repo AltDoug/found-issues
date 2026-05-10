@@ -401,3 +401,72 @@ fi_current_cycle_touch_count() {
     | grep -c . || true)"
   printf '%s' "${count:-0}"
 }
+
+# Mutate file: increment the (defer-cycle: N) annotation on a target entry.
+# If absent, sets to 2 (since absent means cycle 1 implicitly).
+# Also appends ';' separator to (touched: ...) IF that annotation exists
+# AND its current segment has content. Skips ';' append when there's
+# nothing to separate (preventing ';;' artifacts).
+#
+# Returns:
+#   0  — success
+#   1  — file does not exist
+#   2  — target entry not found in file
+fi_increment_defer_cycle() {
+  local file="$1"
+  local target_entry="$2"
+
+  if [[ ! -f "$file" ]]; then
+    return 1
+  fi
+
+  local tmp
+  tmp="$(mktemp -t fi-defercycle.XXXXXX)"
+
+  local found=0
+  while IFS= read -r line; do
+    if [[ "$line" == "$target_entry" ]] && (( found == 0 )); then
+      found=1
+      local new_line="$line"
+
+      # Bump (or add) defer-cycle annotation.
+      if [[ "$new_line" =~ \(defer-cycle:\ ([0-9]+)\) ]]; then
+        local current_cycle="${BASH_REMATCH[1]}"
+        local next_cycle=$((current_cycle + 1))
+        # Use sed for safety (bash 3.2 glob with parens is unreliable).
+        new_line="$(printf '%s' "$new_line" | sed "s/(defer-cycle: ${current_cycle})/(defer-cycle: ${next_cycle})/")"
+      else
+        new_line="${new_line} (defer-cycle: 2)"
+      fi
+
+      # Append ';' to touched annotation if it has content in current segment.
+      if [[ "$new_line" =~ \(touched:\ ([^\)]*)\) ]]; then
+        local existing="${BASH_REMATCH[1]}"
+        # Determine current cycle segment (after last ';').
+        local current="${existing##*;}"
+        # Trim leading whitespace from current segment.
+        current="${current#"${current%%[![:space:]]*}"}"
+        if [[ -n "$current" ]]; then
+          local new_touched="${existing}; "
+          # Escape characters that are special in sed's BRE search pattern.
+          local esc_existing esc_new_touched
+          esc_existing="$(printf '%s' "$existing" | sed 's/[[\.*^$()+?{|]/\\&/g')"
+          esc_new_touched="$(printf '%s' "$new_touched" | sed 's/[&/\\]/\\&/g')"
+          new_line="$(printf '%s' "$new_line" | sed "s/(touched: ${esc_existing})/(touched: ${esc_new_touched})/")"
+        fi
+        # If current segment is empty (already ends in '; '), do nothing.
+      fi
+
+      printf '%s\n' "$new_line" >> "$tmp"
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$file"
+
+  if (( found == 0 )); then
+    rm -f "$tmp"
+    return 2
+  fi
+
+  mv "$tmp" "$file"
+}
