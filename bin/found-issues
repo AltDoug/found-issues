@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.0.2"
+readonly FI_VERSION="1.0.3"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -103,15 +103,21 @@ COMMANDS
   log <location> — <symptom>            Append an [open] entry
                                         (Use /fi log inside Claude Code)
   sync                                  Annotation-driven flip + tombstone close
-  status [--format=segment|plain|json]  Print counts (for statusline integration)
+  status [--format=segment|plain|json] [--cwd PATH]
+                                        Print counts (for statusline integration).
+                                        --cwd overrides where to look for the issues file
+                                        (defaults to \$CLAUDE_PROJECT_DIR or \$PWD).
   annotate-pr <N>                       Annotate matching [open] entries with PR
   annotate-commit [<sha>]               Annotate matching [open] entries with commit
   promote                               List entries that need promotion to main
   archive [--dry-run] [--days=N] [--count=N]
                                         Move old [fixed] entries to docs/found-issues-archive.md
                                         (defaults: count=50 OR days=30, whichever first)
-  install-statusline                    Append the counter segment to ~/.claude/statusline.sh
+  install-statusline [--migrate]        Append the counter segment to ~/.claude/statusline.sh.
+                                        Self-healing: auto-rewrites broken v1.0.0/1.0.1 marker blocks;
+                                        --migrate also rewrites pre-v0.1.7 handwritten snippets.
   uninstall-statusline                  Remove the counter segment block
+  doctor-statusline                     Diagnose the current statusline integration (no changes)
   install-fi-alias                      Create the /fi shortcut at ~/.claude/commands/fi.md
   uninstall-fi-alias                    Remove the /fi shortcut (only if it's ours)
   uninstall                             Wipe plugin-private state (run before /plugin uninstall)
@@ -273,8 +279,21 @@ cmd_log() {
 
 cmd_status() {
   local format="${1:-segment}"
+  local cwd="${2:-}"
+
+  # Resolve search root for the issues file. Priority:
+  #   1. --cwd PATH (explicit flag, deterministic — caller knows the workspace)
+  #   2. $CLAUDE_PROJECT_DIR (set by Claude Code in hook contexts)
+  #   3. $PWD (current behavior — walk up from wherever we were invoked)
+  # This matters because Claude Code's statusline subprocess does NOT inherit
+  # the workspace as cwd; it inherits whatever spawned the harness ($HOME on
+  # macOS). Without an explicit cwd, the file walk finds nothing → empty
+  # segment → silent breakage. See v1.0.2 install-statusline cwd fix and the
+  # v1.0.3 self-heal migration that pairs with this flag.
+  local search_root="${cwd:-${CLAUDE_PROJECT_DIR:-$PWD}}"
+
   local file
-  file="$(fi_find_issues_file)" || true
+  file="$(fi_find_issues_file "$search_root")" || true
 
   local critical=0 issues=0 in_pr=0 stale=0 total_open=0
   if [[ -n "$file" && -f "$file" ]]; then
@@ -786,10 +805,26 @@ cmd_promote() {
 cmd_uninstall() {
   local removed_count=0
 
-  # 1. Statusline integration (only if installed)
+  # 1a. Statusline integration — marker-bracketed block (v1.0.0+ installs)
   if [[ -f "$FI_STATUSLINE_FILE" ]] && grep -Fq "$FI_STATUSLINE_START_MARKER" "$FI_STATUSLINE_FILE"; then
     cmd_uninstall_statusline >/dev/null
     printf '✓ removed statusline segment block from %s\n' "$FI_STATUSLINE_FILE"
+    removed_count=$((removed_count + 1))
+  fi
+
+  # 1b. Statusline integration — pre-v0.1.7 handwritten snippet (no markers).
+  # Without this, dogfood-era users running `uninstall` would still have the
+  # broken handwritten lines left in their statusline.sh. Use the same
+  # surgical-strip helper that `install-statusline --migrate` uses.
+  if [[ -f "$FI_STATUSLINE_FILE" ]] && awk -v start="$FI_STATUSLINE_START_MARKER" \
+                                          -v endm="$FI_STATUSLINE_END_MARKER" '
+      $0 == start { in_block = 1; next }
+      $0 == endm { in_block = 0; next }
+      !in_block && /found-issues[[:space:]]+status[[:space:]]+--format[=[:space:]]+segment/ { found = 1 }
+      END { exit (found ? 0 : 1) }
+    ' "$FI_STATUSLINE_FILE" 2>/dev/null; then
+    fi_strip_legacy_handwritten "$FI_STATUSLINE_FILE"
+    printf '✓ removed pre-v0.1.7 handwritten snippet from %s\n' "$FI_STATUSLINE_FILE"
     removed_count=$((removed_count + 1))
   fi
 
@@ -996,7 +1031,152 @@ fi_capture_mode() {
     || echo 755
 }
 
+# Classify the current state of the user's statusline integration.
+# Echoes one of: none, installed-fixed, installed-broken, legacy-handwritten,
+# legacy-and-installed, or no-file.
+#
+# Why this matters: silent breakage. Users with v1.0.0/1.0.1 have a
+# marker-bracketed segment that doesn't `cd` into the workspace → empty
+# output. Pre-v0.1.7 dogfood users have a 3-line handwritten snippet (no
+# markers at all) with the same cwd bug. Both groups installed in good
+# faith and see nothing on their statusline. The classifier lets
+# install-statusline / doctor-statusline / SessionStart all act on the
+# same precise diagnosis.
+#
+# Heuristics:
+#   no-file              — $FI_STATUSLINE_FILE does not exist
+#   installed-fixed      — marker block present AND contains `__FI_DIR` + `cd "$__FI_DIR"`
+#   installed-broken     — marker block present, missing the cwd handling (v1.0.0/1.0.1)
+#   legacy-handwritten   — no markers, but a line matches the handwritten
+#                          `FI_SEG=$(found-issues status --format=segment ...)`
+#                          pattern from pre-v0.1.7 setup.md
+#   legacy-and-installed — both markers AND a stray legacy line outside markers
+#                          (would render the count twice — needs cleanup)
+#   none                 — no found-issues integration at all (fresh install path)
+fi_statusline_state() {
+  local file="$FI_STATUSLINE_FILE"
+  if [[ ! -f "$file" ]]; then
+    printf 'no-file'
+    return 0
+  fi
+
+  local has_marker=0 marker_block_fixed=0 has_legacy=0
+  if grep -Fq "$FI_STATUSLINE_START_MARKER" "$file" 2>/dev/null; then
+    has_marker=1
+    # Inspect block contents — `__FI_DIR` only appears in v1.0.2+ snippets.
+    if awk -v start="$FI_STATUSLINE_START_MARKER" \
+           -v endm="$FI_STATUSLINE_END_MARKER" '
+        $0 == start { in_block = 1; next }
+        $0 == endm { in_block = 0; next }
+        in_block { print }
+      ' "$file" | grep -Fq '__FI_DIR'; then
+      marker_block_fixed=1
+    fi
+  fi
+
+  # Detect handwritten legacy lines OUTSIDE any marker block. The pre-v0.1.7
+  # setup.md instructed Claude to write a 3-line snippet roughly:
+  #   # found-issues plugin segment ...
+  #   FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+  #   [[ -n "$FI_SEG" ]] && LINE1="$LINE1 ... $FI_SEG"
+  # The signature line is the `found-issues status --format=segment` invocation
+  # NOT bracketed by our markers and NOT prefixed by `__FI_CLI` (which would
+  # indicate it's the v1.0.0+ marker form, not handwritten).
+  if awk -v start="$FI_STATUSLINE_START_MARKER" \
+         -v endm="$FI_STATUSLINE_END_MARKER" '
+      $0 == start { in_block = 1; next }
+      $0 == endm { in_block = 0; next }
+      !in_block && /found-issues[[:space:]]+status[[:space:]]+--format[=[:space:]]+segment/ { found = 1 }
+      END { exit (found ? 0 : 1) }
+    ' "$file"; then
+    has_legacy=1
+  fi
+
+  if (( has_marker == 1 && marker_block_fixed == 1 && has_legacy == 0 )); then
+    printf 'installed-fixed'
+  elif (( has_marker == 1 && marker_block_fixed == 1 && has_legacy == 1 )); then
+    printf 'legacy-and-installed'
+  elif (( has_marker == 1 && marker_block_fixed == 0 && has_legacy == 0 )); then
+    printf 'installed-broken'
+  elif (( has_marker == 1 && marker_block_fixed == 0 && has_legacy == 1 )); then
+    printf 'legacy-and-installed'
+  elif (( has_marker == 0 && has_legacy == 1 )); then
+    printf 'legacy-handwritten'
+  else
+    printf 'none'
+  fi
+}
+
+# Surgically remove handwritten legacy snippet lines from $FI_STATUSLINE_FILE.
+# Identifies a "legacy block" as:
+#   - A line containing `found-issues status --format=segment` (or `--format segment`)
+#     that is NOT inside our marker block.
+#   - PLUS the immediately preceding line if it's a `# ... found-issues ...` comment.
+#   - PLUS the immediately following line if it references `$FI_SEG`/`$__FI_SEG`
+#     (the LINE1 assembly or echo follow-up).
+# Conservative: only deletes contiguous lines matching this signature. Won't
+# touch unrelated content. Outside-marker constraint prevents accidental
+# damage to installed-fixed/installed-broken blocks (those go through the
+# uninstall+install path instead).
+fi_strip_legacy_handwritten() {
+  local file="$1"
+  local tmp original_mode
+  original_mode=$(fi_capture_mode "$file")
+  tmp="$(mktemp -t found-issues-statusline.XXXXXX)"
+
+  awk -v start="$FI_STATUSLINE_START_MARKER" \
+      -v endm="$FI_STATUSLINE_END_MARKER" '
+    BEGIN { buf_n = 0; in_block = 0 }
+    {
+      if ($0 == start) { in_block = 1 }
+      if (!in_block && $0 ~ /found-issues[[:space:]]+status[[:space:]]+--format[=[:space:]]+segment/) {
+        # This line is the legacy invocation — drop it. Also drop the
+        # immediately preceding buffered line if it is a found-issues comment.
+        if (buf_n > 0 && buf[buf_n] ~ /^[[:space:]]*#.*found-issues/) {
+          buf_n--
+        }
+        # Set a flag so the NEXT line is also skipped if it references FI_SEG.
+        skip_next = 1
+        next
+      }
+      if (skip_next == 1) {
+        skip_next = 0
+        if ($0 ~ /\$FI_SEG|\$__FI_SEG/) {
+          # Drop the LINE1-assembly / echo follow-up.
+          next
+        }
+        # Otherwise fall through and emit normally.
+      }
+      # Flush the previous buffered line, then buffer the current.
+      if (buf_n > 0) { print buf[1] }
+      buf[1] = $0
+      buf_n = 1
+      if ($0 == endm) { in_block = 0 }
+    }
+    END {
+      if (buf_n > 0) { print buf[1] }
+    }
+  ' "$file" >"$tmp"
+
+  mv "$tmp" "$file"
+  chmod "$original_mode" "$file" 2>/dev/null \
+    || chmod +x "$file"
+}
+
 cmd_install_statusline() {
+  # Argument parsing. --migrate is required to surgically rewrite legacy
+  # handwritten snippets (we can't auto-migrate those silently because the
+  # heuristic could mismatch user-edited variants). Marker-bracketed broken
+  # blocks (v1.0.0/1.0.1) auto-migrate without a flag because the markers
+  # give us deterministic block boundaries.
+  local migrate=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --migrate|--force) migrate=1; shift ;;
+      *) shift ;;
+    esac
+  done
+
   if [[ ! -f "$FI_STATUSLINE_FILE" ]]; then
     fi_err "install-statusline: $FI_STATUSLINE_FILE does not exist"
     fi_err ""
@@ -1007,11 +1187,61 @@ cmd_install_statusline() {
     return 1
   fi
 
-  if grep -Fq "$FI_STATUSLINE_START_MARKER" "$FI_STATUSLINE_FILE"; then
-    printf 'install-statusline: already installed in %s\n' "$FI_STATUSLINE_FILE"
-    printf '(remove the existing block first or run uninstall-statusline)\n'
-    return 0
-  fi
+  local state
+  state="$(fi_statusline_state)"
+
+  case "$state" in
+    installed-fixed)
+      printf 'install-statusline: already installed (and current) in %s\n' "$FI_STATUSLINE_FILE"
+      return 0
+      ;;
+    installed-broken)
+      # v1.0.0/1.0.1 marker-bracketed segment without cwd handling — silent
+      # breakage for every public user pre-v1.0.2. Auto-migrate: the markers
+      # give us safe block boundaries, and the rewrite is a strict upgrade.
+      printf 'install-statusline: detected v1.0.0/1.0.1 marker-bracketed segment without cwd handling — rewriting in place.\n'
+      cmd_uninstall_statusline >/dev/null
+      ;;
+    legacy-handwritten)
+      if (( migrate == 0 )); then
+        fi_err "install-statusline: detected pre-v0.1.7 handwritten snippet in $FI_STATUSLINE_FILE"
+        fi_err ""
+        fi_err "Lines matching the handwritten setup.md template were found OUTSIDE our marker block."
+        fi_err "These call \`found-issues status\` from the wrong cwd → empty segment (silent breakage)."
+        fi_err ""
+        fi_err "To migrate (removes the legacy lines and inserts the canonical marker-bracketed block):"
+        fi_err "  found-issues install-statusline --migrate"
+        fi_err ""
+        fi_err "Or inspect first:"
+        fi_err "  found-issues doctor-statusline"
+        return 1
+      fi
+      printf 'install-statusline: migrating pre-v0.1.7 handwritten snippet in %s\n' "$FI_STATUSLINE_FILE"
+      fi_strip_legacy_handwritten "$FI_STATUSLINE_FILE"
+      ;;
+    legacy-and-installed)
+      if (( migrate == 0 )); then
+        fi_err "install-statusline: $FI_STATUSLINE_FILE has BOTH a marker block AND a stray legacy line."
+        fi_err "This would render the counter twice. Migrate with:"
+        fi_err "  found-issues install-statusline --migrate"
+        return 1
+      fi
+      printf 'install-statusline: removing stray legacy snippet AND broken/duplicate marker block in %s\n' "$FI_STATUSLINE_FILE"
+      cmd_uninstall_statusline >/dev/null
+      fi_strip_legacy_handwritten "$FI_STATUSLINE_FILE"
+      ;;
+    none)
+      : # fall through to install
+      ;;
+    no-file)
+      fi_err "install-statusline: $FI_STATUSLINE_FILE does not exist"
+      return 1
+      ;;
+    *)
+      fi_err "install-statusline: unexpected state: $state"
+      return 1
+      ;;
+  esac
 
   # Detect a LINE1-assembly pattern. Most multi-line statuslines build a
   # LINE1 variable then printf/echo it. If that pattern exists, we insert
@@ -1026,6 +1256,51 @@ cmd_install_statusline() {
   else
     cmd_install_statusline_append
   fi
+}
+
+# Diagnostic dry-run: print the current state of the statusline integration
+# and the recommended action. No file modifications.
+cmd_doctor_statusline() {
+  if [[ ! -f "$FI_STATUSLINE_FILE" ]]; then
+    printf 'doctor-statusline: %s does not exist.\n' "$FI_STATUSLINE_FILE"
+    printf 'Status: NO STATUSLINE — Claude Code uses the default statusline.\n'
+    printf 'Action: create %s, then run `found-issues install-statusline`.\n' "$FI_STATUSLINE_FILE"
+    return 0
+  fi
+
+  local state
+  state="$(fi_statusline_state)"
+  printf 'doctor-statusline: %s\n' "$FI_STATUSLINE_FILE"
+  printf 'State: %s\n\n' "$state"
+
+  case "$state" in
+    installed-fixed)
+      printf 'OK — statusline integration is current (cwd handling present).\n'
+      printf 'No action needed.\n'
+      ;;
+    installed-broken)
+      printf 'BROKEN — marker-bracketed segment is missing cwd handling (v1.0.0/1.0.1 bug).\n'
+      printf 'Symptom: counter renders empty even though the block is installed.\n'
+      printf 'Fix: found-issues install-statusline   (auto-rewrites the broken block)\n'
+      ;;
+    legacy-handwritten)
+      printf 'BROKEN — pre-v0.1.7 handwritten snippet found (no markers, no cwd handling).\n'
+      printf 'Symptom: counter renders empty regardless of which repo you'\''re in.\n'
+      printf 'Fix: found-issues install-statusline --migrate   (removes legacy lines, inserts canonical block)\n'
+      ;;
+    legacy-and-installed)
+      printf 'CONFLICTED — both a marker block AND a stray legacy line are present.\n'
+      printf 'Symptom: counter may render twice or render empty depending on order.\n'
+      printf 'Fix: found-issues install-statusline --migrate   (cleans up both, reinstalls canonical)\n'
+      ;;
+    none)
+      printf 'NOT INSTALLED — no found-issues integration in this statusline.\n'
+      printf 'Install: found-issues install-statusline\n'
+      ;;
+    no-file)
+      printf 'NO STATUSLINE FILE.\n'
+      ;;
+  esac
 }
 
 # Insert the segment block right after the LAST LINE1= assignment, so the
@@ -1264,21 +1539,24 @@ main() {
     log)              cmd_log "$@" ;;
     sync)             cmd_sync "$@" ;;
     status)
-      local format="segment"
+      local format="segment" cwd=""
       while [[ $# -gt 0 ]]; do
         case "$1" in
           --format=*) format="${1#--format=}"; shift ;;
           --format)   format="${2:-segment}"; shift 2 ;;
+          --cwd=*)    cwd="${1#--cwd=}"; shift ;;
+          --cwd)      cwd="${2:-}"; shift 2 ;;
           *)          shift ;;
         esac
       done
-      cmd_status "$format"
+      cmd_status "$format" "$cwd"
       ;;
     annotate-pr)      cmd_annotate_pr "$@" ;;
     annotate-commit)  cmd_annotate_commit "$@" ;;
     promote)          cmd_promote "$@" ;;
     install-statusline)   cmd_install_statusline "$@" ;;
     uninstall-statusline) cmd_uninstall_statusline "$@" ;;
+    doctor-statusline)    cmd_doctor_statusline "$@" ;;
     install-fi-alias)     cmd_install_fi_alias "$@" ;;
     uninstall-fi-alias)   cmd_uninstall_fi_alias "$@" ;;
     uninstall)            cmd_uninstall "$@" ;;

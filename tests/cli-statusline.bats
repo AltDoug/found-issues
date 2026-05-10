@@ -288,3 +288,283 @@ SL
   [ "$status" -eq 0 ]
   [[ -x "$HOME/.claude/statusline.sh" ]]
 }
+
+# === v1.0.3: --cwd flag, classifier, self-heal install, doctor-statusline ===
+
+@test "status: --cwd PATH locates issues file in arbitrary directory" {
+  # Set up fake project elsewhere
+  local proj="$TMP/elsewhere"
+  mkdir -p "$proj/docs"
+  local today; today=$(date +%Y-%m-%d)
+  cat > "$proj/docs/found-issues.md" <<EOF
+# found-issues
+- [open] $today src/foo.py:1 — bug
+EOF
+
+  # CWD is $TMP (no found-issues there). Without --cwd, status is empty.
+  cd "$TMP"
+  fi_run status --format=plain
+  [ "$status" -eq 0 ]
+  [[ -z "$output" ]]
+
+  # With --cwd, locates the issues file and reports counts.
+  fi_run status --format=plain --cwd "$proj"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 issue"* ]]
+}
+
+@test "status: CLAUDE_PROJECT_DIR env var fallback when no --cwd" {
+  local proj="$TMP/with-claude-dir"
+  mkdir -p "$proj/docs"
+  local today; today=$(date +%Y-%m-%d)
+  cat > "$proj/docs/found-issues.md" <<EOF
+# found-issues
+- [open] $today src/foo.py:1 — bug
+EOF
+
+  cd "$TMP"
+  CLAUDE_PROJECT_DIR="$proj" fi_run status --format=plain
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 issue"* ]]
+}
+
+@test "doctor-statusline: reports NOT INSTALLED when statusline lacks integration" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+echo "no fi here"
+SL
+  fi_run doctor-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NOT INSTALLED"* ]]
+  [[ "$output" == *"State: none"* ]]
+}
+
+@test "doctor-statusline: reports OK after fresh install" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+LINE1="repo"
+LINE1="$LINE1 | branch"
+echo "$LINE1"
+SL
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  fi_run doctor-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK"* ]]
+  [[ "$output" == *"State: installed-fixed"* ]]
+}
+
+@test "doctor-statusline: detects pre-v0.1.7 handwritten snippet (legacy-handwritten)" {
+  # The exact 3-line snippet from pre-v0.1.7 setup.md — and what every
+  # dogfood-era user has in their statusline.sh today.
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+input=$(cat)
+LINE1="repo"
+LINE1="$LINE1 | branch"
+# found-issues plugin segment (|| true guards against set -e when CLI isn't on PATH)
+FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+[[ -n "$FI_SEG" ]] && LINE1="$LINE1 | $FI_SEG"
+echo "$LINE1"
+SL
+  fi_run doctor-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"State: legacy-handwritten"* ]]
+  [[ "$output" == *"BROKEN"* ]]
+  [[ "$output" == *"--migrate"* ]]
+}
+
+@test "doctor-statusline: detects v1.0.0/1.0.1 marker block missing cwd handling (installed-broken)" {
+  # Synthesize the broken marker-bracketed block that v1.0.0/1.0.1 installed.
+  # Critically: contains the markers but NOT __FI_DIR.
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+LINE1="repo"
+# === found-issues plugin segment ===
+__FI_CLI=""
+if command -v found-issues >/dev/null 2>&1; then
+  __FI_CLI=found-issues
+fi
+__FI_SEG=""
+[[ -n "$__FI_CLI" ]] && __FI_SEG=$("$__FI_CLI" status --format=segment 2>/dev/null || true)
+[[ -n "$__FI_SEG" ]] && LINE1="$LINE1$__FI_SEG"
+# === end found-issues plugin segment ===
+echo "$LINE1"
+SL
+  fi_run doctor-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"State: installed-broken"* ]]
+  [[ "$output" == *"BROKEN"* ]]
+}
+
+@test "install-statusline: refuses to migrate legacy-handwritten without --migrate flag" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+input=$(cat)
+LINE1="repo"
+# found-issues plugin segment
+FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+[[ -n "$FI_SEG" ]] && LINE1="$LINE1 | $FI_SEG"
+echo "$LINE1"
+SL
+  fi_run install-statusline
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--migrate"* ]]
+  # Original file unchanged (no markers added)
+  ! grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
+}
+
+@test "install-statusline --migrate: surgically removes handwritten lines and inserts canonical block" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+input=$(cat)
+LINE1="repo"
+LINE1="$LINE1 | branch"
+# found-issues plugin segment (|| true guards against set -e when CLI isn't on PATH)
+FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+[[ -n "$FI_SEG" ]] && LINE1="$LINE1 | $FI_SEG"
+echo "$LINE1"
+SL
+  fi_run install-statusline --migrate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"migrating pre-v0.1.7 handwritten"* ]]
+  # Legacy lines gone
+  ! grep -Fq 'FI_SEG=$(found-issues status --format=segment' "$HOME/.claude/statusline.sh"
+  ! grep -Fq '$FI_SEG' "$HOME/.claude/statusline.sh"
+  # Canonical block present, with cwd handling
+  grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
+  grep -Fq 'cd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
+  # Surrounding code preserved
+  grep -Fq 'LINE1="repo"' "$HOME/.claude/statusline.sh"
+  grep -Fq 'echo "$LINE1"' "$HOME/.claude/statusline.sh"
+}
+
+@test "install-statusline: auto-rewrites installed-broken (v1.0.0/1.0.1) without --migrate flag" {
+  # No --migrate needed: marker boundaries make the rewrite safe.
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+LINE1="repo"
+LINE1="$LINE1 | branch"
+# === found-issues plugin segment ===
+__FI_CLI=""
+if command -v found-issues >/dev/null 2>&1; then
+  __FI_CLI=found-issues
+fi
+__FI_SEG=""
+[[ -n "$__FI_CLI" ]] && __FI_SEG=$("$__FI_CLI" status --format=segment 2>/dev/null || true)
+[[ -n "$__FI_SEG" ]] && LINE1="$LINE1$__FI_SEG"
+# === end found-issues plugin segment ===
+echo "$LINE1"
+SL
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"detected v1.0.0/1.0.1"* ]] || [[ "$output" == *"rewriting in place"* ]]
+  # Now contains cwd handling
+  grep -Fq '__FI_DIR' "$HOME/.claude/statusline.sh"
+  grep -Fq 'cd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
+  # Single marker block (no duplicates)
+  local count
+  count=$(grep -cF "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh")
+  [ "$count" -eq 1 ]
+}
+
+@test "install-statusline --migrate: handles legacy-and-installed (both legacy AND markers)" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+LINE1="repo"
+LINE1="$LINE1 | branch"
+# Old handwritten block
+FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+[[ -n "$FI_SEG" ]] && LINE1="$LINE1 | $FI_SEG"
+# === found-issues plugin segment ===
+__FI_CLI=found-issues
+__FI_SEG=$("$__FI_CLI" status --format=segment 2>/dev/null || true)
+[[ -n "$__FI_SEG" ]] && LINE1="$LINE1$__FI_SEG"
+# === end found-issues plugin segment ===
+echo "$LINE1"
+SL
+  # Without --migrate, refuses
+  fi_run install-statusline
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--migrate"* ]]
+
+  # With --migrate, cleans up both
+  fi_run install-statusline --migrate
+  [ "$status" -eq 0 ]
+  ! grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh"
+  # Exactly one marker block remains
+  local count
+  count=$(grep -cF "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh")
+  [ "$count" -eq 1 ]
+  # And it has cwd handling
+  grep -Fq 'cd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
+}
+
+@test "install-statusline: idempotent after migration (second --migrate call no-ops)" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+input=$(cat)
+LINE1="repo"
+LINE1="$LINE1 | branch"
+# found-issues plugin segment
+FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+[[ -n "$FI_SEG" ]] && LINE1="$LINE1 | $FI_SEG"
+echo "$LINE1"
+SL
+  fi_run install-statusline --migrate
+  [ "$status" -eq 0 ]
+  local first_hash
+  first_hash=$(shasum "$HOME/.claude/statusline.sh" | awk '{print $1}')
+
+  # Second run: state is now installed-fixed → no-op
+  fi_run install-statusline --migrate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already installed"* ]]
+  local second_hash
+  second_hash=$(shasum "$HOME/.claude/statusline.sh" | awk '{print $1}')
+  [ "$first_hash" = "$second_hash" ]
+}
+
+@test "install-statusline --migrate: e2e counter renders after legacy snippet rewritten" {
+  command -v jq >/dev/null 2>&1 || skip "jq not available"
+
+  local today; today=$(date +%Y-%m-%d)
+  local project="$TMP/proj"
+  mkdir -p "$project/docs"
+  cat > "$project/docs/found-issues.md" <<EOF
+# found-issues
+- [open] $today src/a.py:1 — bug
+- [open] $today src/b.py:1 — bug
+EOF
+
+  # Statusline starts with the legacy handwritten snippet (broken).
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+set -euo pipefail
+input=$(cat)
+LINE1="repo"
+LINE1="$LINE1 | branch"
+# found-issues plugin segment (|| true guards against set -e when CLI isn't on PATH)
+FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+[[ -n "$FI_SEG" ]] && LINE1="$LINE1 | $FI_SEG"
+echo "$LINE1"
+SL
+
+  # Pre-migration: counter is empty (this is the bug).
+  local fi_bin_dir
+  fi_bin_dir=$(dirname "$FI_BIN")
+  local pre
+  pre=$(echo "{\"workspace\":{\"current_dir\":\"$project\"}}" | \
+        env PATH="$fi_bin_dir:$PATH" bash "$HOME/.claude/statusline.sh")
+  [[ "$pre" != *"2 issues"* ]]
+
+  # Migrate.
+  fi_run install-statusline --migrate
+  [ "$status" -eq 0 ]
+
+  # Post-migration: counter renders.
+  local post
+  post=$(echo "{\"workspace\":{\"current_dir\":\"$project\"}}" | \
+         env PATH="$fi_bin_dir:$PATH" bash "$HOME/.claude/statusline.sh")
+  [[ "$post" == *"2 issues"* ]]
+}
