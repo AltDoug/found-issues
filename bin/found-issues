@@ -113,6 +113,12 @@ COMMANDS
   archive [--dry-run] [--days=N] [--count=N]
                                         Move old [fixed] entries to docs/found-issues-archive.md
                                         (defaults: count=50 OR days=30, whichever first)
+  defer <match> [--reason "..."]        Flip [open] → [deferred]. On re-defer
+                                        (entry has prior touch history),
+                                        increments defer-cycle and appends ';'
+                                        to touched annotation.
+  promote-deferred <match>              Flip [deferred] → [open], preserving all
+                                        annotations as evidence of recurrence.
   install-statusline [--no-migrate]     Append the counter segment to ~/.claude/statusline.sh.
                                         Self-healing: auto-rewrites broken v1.0.0/1.0.1 marker blocks
                                         AND auto-migrates pre-v0.1.7 handwritten snippets (with a
