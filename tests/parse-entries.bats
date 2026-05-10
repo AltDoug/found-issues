@@ -175,3 +175,194 @@ teardown() {
   result="$(fi_count_critical docs/found-issues.md)"
   [ "$result" = "1" ]
 }
+
+# === fi_extract_touched_segment ===
+
+@test "fi_extract_touched_segment: returns empty when annotation absent" {
+  result="$(fi_extract_touched_segment "- [deferred] 2026-05-10 src/foo.py:42 — bug")"
+  [ -z "$result" ]
+}
+
+@test "fi_extract_touched_segment: extracts single date" {
+  result="$(fi_extract_touched_segment "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21)")"
+  [ "$result" = "2026-05-21" ]
+}
+
+@test "fi_extract_touched_segment: extracts multiple dates with cycle separator" {
+  result="$(fi_extract_touched_segment "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; 2026-07-15)")"
+  [ "$result" = "2026-05-21, 2026-05-28; 2026-07-15" ]
+}
+
+# === fi_current_cycle_touch_count ===
+
+@test "fi_current_cycle_touch_count: returns 0 when annotation absent" {
+  result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug")"
+  [ "$result" -eq 0 ]
+}
+
+@test "fi_current_cycle_touch_count: counts dates in cycle 1 (no separator)" {
+  result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28, 2026-06-04)")"
+  [ "$result" -eq 3 ]
+}
+
+@test "fi_current_cycle_touch_count: counts only current cycle (after last ';')" {
+  result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28, 2026-06-04; 2026-07-15, 2026-07-22)")"
+  [ "$result" -eq 2 ]
+}
+
+@test "fi_current_cycle_touch_count: returns 0 when current segment is empty (just appended ';')" {
+  result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; )")"
+  [ "$result" -eq 0 ]
+}
+
+@test "fi_current_cycle_touch_count: ignores malformed (non-date) tokens" {
+  result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, garbage, 2026-05-28)")"
+  [ "$result" -eq 2 ]
+}
+
+# === fi_extract_defer_cycle ===
+
+@test "fi_extract_defer_cycle: returns 1 when annotation absent" {
+  result="$(fi_extract_defer_cycle "- [deferred] 2026-05-10 src/foo.py:42 — bug")"
+  [ "$result" -eq 1 ]
+}
+
+@test "fi_extract_defer_cycle: extracts numeric cycle" {
+  result="$(fi_extract_defer_cycle "- [deferred] 2026-05-10 src/foo.py:42 — bug (defer-cycle: 3)")"
+  [ "$result" -eq 3 ]
+}
+
+@test "fi_extract_defer_cycle: defaults to 1 on non-numeric value (defensive)" {
+  result="$(fi_extract_defer_cycle "- [deferred] 2026-05-10 src/foo.py:42 — bug (defer-cycle: garbage)")"
+  [ "$result" -eq 1 ]
+}
+
+# === fi_extract_reason ===
+
+@test "fi_extract_reason: returns empty when annotation absent" {
+  result="$(fi_extract_reason "- [deferred] 2026-05-10 src/foo.py:42 — bug")"
+  [ -z "$result" ]
+}
+
+@test "fi_extract_reason: extracts reason text" {
+  result="$(fi_extract_reason "- [deferred] 2026-05-10 src/foo.py:42 — bug (reason: tracked in JIRA-1234)")"
+  [ "$result" = "tracked in JIRA-1234" ]
+}
+
+# === fi_compute_threshold ===
+
+@test "fi_compute_threshold: cycle 1 default (3)" {
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  result="$(fi_compute_threshold 1)"
+  [ "$result" -eq 3 ]
+}
+
+@test "fi_compute_threshold: cycle 2 default (6)" {
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  result="$(fi_compute_threshold 2)"
+  [ "$result" -eq 6 ]
+}
+
+@test "fi_compute_threshold: cycle 4 default (24)" {
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  result="$(fi_compute_threshold 4)"
+  [ "$result" -eq 24 ]
+}
+
+@test "fi_compute_threshold: respects custom base" {
+  FOUND_ISSUES_DEFER_TOUCH_THRESHOLD=5 \
+  FOUND_ISSUES_DEFER_ESCALATION_FACTOR=2 \
+    result="$(fi_compute_threshold 2)"
+  [ "$result" -eq 10 ]
+}
+
+@test "fi_compute_threshold: respects custom factor" {
+  FOUND_ISSUES_DEFER_TOUCH_THRESHOLD=3 \
+  FOUND_ISSUES_DEFER_ESCALATION_FACTOR=3 \
+    result="$(fi_compute_threshold 3)"
+  [ "$result" -eq 27 ]
+}
+
+@test "fi_compute_threshold: invalid base falls back to default with warning" {
+  FOUND_ISSUES_DEFER_TOUCH_THRESHOLD=garbage \
+    result="$(fi_compute_threshold 1 2>&1)"
+  [[ "$result" == *"3"* ]]
+  [[ "$result" == *"warning"* ]] || [[ "$result" == *"FOUND_ISSUES_DEFER_TOUCH_THRESHOLD"* ]]
+}
+
+# === fi_append_touch ===
+
+@test "fi_append_touch: creates annotation when absent" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug
+EOF
+  fi_append_touch test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug" "2026-05-21"
+  grep -F "(touched: 2026-05-21)" test.md
+}
+
+@test "fi_append_touch: appends to existing single-cycle annotation" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21)
+EOF
+  fi_append_touch test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21)" "2026-05-28"
+  grep -F "(touched: 2026-05-21, 2026-05-28)" test.md
+}
+
+@test "fi_append_touch: appends after last ';' (cycle 2)" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; ) (defer-cycle: 2)
+EOF
+  fi_append_touch test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; ) (defer-cycle: 2)" "2026-07-15"
+  grep -F "(touched: 2026-05-21, 2026-05-28; 2026-07-15)" test.md
+}
+
+@test "fi_append_touch: leaves other entries untouched" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug
+- [open] 2026-05-11 src/bar.py:99 — other bug
+- [deferred] 2026-05-12 src/baz.py:1 — third bug
+EOF
+  fi_append_touch test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug" "2026-05-21"
+  grep -F "(touched: 2026-05-21)" test.md
+  ! grep "src/bar.py" test.md | grep -q "touched:"
+  ! grep "src/baz.py" test.md | grep -q "touched:"
+}
+
+@test "fi_increment_defer_cycle: adds (defer-cycle: 2) and ';' to touched on first re-defer" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28)
+EOF
+  fi_increment_defer_cycle test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28)"
+  grep -F "(defer-cycle: 2)" test.md
+  grep -F "(touched: 2026-05-21, 2026-05-28; )" test.md
+}
+
+@test "fi_increment_defer_cycle: bumps existing cycle (2 -> 3)" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; 2026-07-15) (defer-cycle: 2)
+EOF
+  fi_increment_defer_cycle test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; 2026-07-15) (defer-cycle: 2)"
+  grep -F "(defer-cycle: 3)" test.md
+  grep -F "(touched: 2026-05-21, 2026-05-28; 2026-07-15; )" test.md
+  ! grep -F "(defer-cycle: 2)" test.md
+}
+
+@test "fi_increment_defer_cycle: no ';' appended when no touched annotation" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug
+EOF
+  fi_increment_defer_cycle test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug"
+  grep -F "(defer-cycle: 2)" test.md
+  ! grep "touched:" test.md
+}
+
+@test "fi_increment_defer_cycle: no ';' appended when current segment is empty" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21; ) (defer-cycle: 2)
+EOF
+  fi_increment_defer_cycle test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21; ) (defer-cycle: 2)"
+  grep -F "(defer-cycle: 3)" test.md
+  # No double ';;' — annotation stays "; "
+  grep -F "(touched: 2026-05-21; )" test.md
+  ! grep -F ";;" test.md
+}

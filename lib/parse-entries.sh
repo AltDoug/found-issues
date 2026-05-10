@@ -239,3 +239,234 @@ fi_count_stale() {
 
   printf '%d' "$count"
 }
+
+# Extract the value of the (touched: ...) annotation from an entry line.
+# Echoes the raw value (comma-separated dates, possibly with ';' cycle
+# separators). Echoes empty string if the annotation is absent.
+fi_extract_touched_segment() {
+  local line="$1"
+  local re_touched='\(touched: ([^)]+)\)'
+  if [[ "$line" =~ $re_touched ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
+# Extract the integer value of the (defer-cycle: N) annotation.
+# Defaults to 1 (implicit cycle 1) if the annotation is absent or
+# non-numeric.
+fi_extract_defer_cycle() {
+  local line="$1"
+  local re_cycle='\(defer-cycle: ([0-9]+)\)'
+  if [[ "$line" =~ $re_cycle ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  else
+    printf '1'
+  fi
+}
+
+# Extract the value of the (reason: ...) annotation.
+# Echoes empty string if absent.
+fi_extract_reason() {
+  local line="$1"
+  local re_reason='\(reason: ([^)]+)\)'
+  if [[ "$line" =~ $re_reason ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
+# Compute touch threshold for a given defer-cycle.
+# Formula: BASE * FACTOR^(cycle-1), defaulting to 3 * 2^(N-1).
+# Env vars FOUND_ISSUES_DEFER_TOUCH_THRESHOLD (base) and
+# FOUND_ISSUES_DEFER_ESCALATION_FACTOR (factor) override defaults.
+# Invalid values (non-numeric, <= 0) warn to stderr and fall back.
+fi_compute_threshold() {
+  local cycle="${1:-1}"
+  local base="${FOUND_ISSUES_DEFER_TOUCH_THRESHOLD:-3}"
+  local factor="${FOUND_ISSUES_DEFER_ESCALATION_FACTOR:-2}"
+
+  if ! [[ "$base" =~ ^[0-9]+$ ]] || (( base <= 0 )); then
+    printf 'warning: invalid FOUND_ISSUES_DEFER_TOUCH_THRESHOLD=%s (must be positive integer); using default 3\n' "$base" >&2
+    base=3
+  fi
+  if ! [[ "$factor" =~ ^[0-9]+$ ]] || (( factor <= 0 )); then
+    printf 'warning: invalid FOUND_ISSUES_DEFER_ESCALATION_FACTOR=%s (must be positive integer); using default 2\n' "$factor" >&2
+    factor=2
+  fi
+  if ! [[ "$cycle" =~ ^[0-9]+$ ]] || (( cycle <= 0 )); then
+    cycle=1
+  fi
+
+  # Compute base * factor^(cycle-1) using awk (bash has no power operator).
+  awk -v b="$base" -v f="$factor" -v c="$cycle" 'BEGIN { printf "%d", b * (f ^ (c - 1)) }'
+}
+
+# Mutate file: append date to the matching entry's (touched: ...) annotation.
+# Atomic via temp+mv. Matches entry by exact line equality.
+#
+# Append rules:
+#   - No (touched: ...) annotation: insert " (touched: <date>)" at end of line.
+#   - Has (touched: ...) and current segment is empty (annotation ends with ';' or '; '):
+#     append "<date>" right before the closing ')'.
+#   - Has (touched: ...) with content in current segment:
+#     append ", <date>" right before the closing ')'.
+#
+# Returns:
+#   0  — success
+#   1  — file does not exist
+#   2  — target entry not found in file
+fi_append_touch() {
+  local file="$1"
+  local target_entry="$2"
+  local date="$3"
+
+  if [[ ! -f "$file" ]]; then
+    return 1
+  fi
+
+  local tmp
+  tmp="$(mktemp -t fi-touch.XXXXXX)"
+
+  local found=0
+  local re_touched='\(touched: ([^)]+)\)'
+
+  while IFS= read -r line; do
+    if [[ "$line" == "$target_entry" ]] && (( found == 0 )); then
+      found=1
+      local new_line
+      if [[ "$line" =~ $re_touched ]]; then
+        local existing="${BASH_REMATCH[1]}"
+        # Determine current cycle segment (after last ';').
+        local current="${existing##*;}"
+        # Trim leading whitespace from current segment.
+        current="${current#"${current%%[![:space:]]*}"}"
+        local new_value
+        if [[ -z "$current" ]]; then
+          # Current segment is empty — normalize to '; <date>'.
+          # Strip any trailing whitespace from the part before ';',
+          # then append ' <date>'.
+          local before_semi="${existing%%;*}"
+          # Trim trailing whitespace from before_semi.
+          before_semi="${before_semi%"${before_semi##*[![:space:]]}"}"
+          new_value="${before_semi}; ${date}"
+        else
+          # Current segment has content — append ', <date>'.
+          new_value="${existing}, ${date}"
+        fi
+        # Replace the annotation using sed (safe against special chars in bash glob).
+        # Escape characters that are special in sed's BRE/ERE and replacement strings.
+        local esc_existing esc_new_value
+        esc_existing="$(printf '%s' "$existing" | sed 's/[[\.*^$()+?{|]/\\&/g')"
+        esc_new_value="$(printf '%s' "$new_value" | sed 's/[&/\\]/\\&/g')"
+        new_line="$(printf '%s' "$line" \
+          | sed "s/(touched: ${esc_existing})/(touched: ${esc_new_value})/")"
+      else
+        # No existing annotation: append at end of line.
+        new_line="${line} (touched: ${date})"
+      fi
+      printf '%s\n' "$new_line" >> "$tmp"
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$file"
+
+  if (( found == 0 )); then
+    rm -f "$tmp"
+    return 2
+  fi
+
+  mv "$tmp" "$file"
+}
+
+# Count the number of well-formed YYYY-MM-DD dates in the CURRENT cycle's
+# segment of the (touched: ...) annotation. The current segment is the
+# substring after the last ';' separator (or the entire annotation if no
+# ';' is present). Echoes 0 if the annotation is absent or the current
+# segment contains no well-formed dates.
+fi_current_cycle_touch_count() {
+  local line="$1"
+  local segment
+  segment="$(fi_extract_touched_segment "$line")"
+  if [[ -z "$segment" ]]; then
+    printf '0'
+    return
+  fi
+
+  # Take everything after the last ';' (if no ';', this is the full segment).
+  local current="${segment##*;}"
+
+  # Count well-formed dates (defensive: ignore garbage tokens).
+  local count
+  count="$(printf '%s' "$current" \
+    | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' \
+    | grep -c . || true)"
+  printf '%s' "${count:-0}"
+}
+
+# Mutate file: increment the (defer-cycle: N) annotation on a target entry.
+# If absent, sets to 2 (since absent means cycle 1 implicitly).
+# Also appends ';' separator to (touched: ...) IF that annotation exists
+# AND its current segment has content. Skips ';' append when there's
+# nothing to separate (preventing ';;' artifacts).
+#
+# Returns:
+#   0  — success
+#   1  — file does not exist
+#   2  — target entry not found in file
+fi_increment_defer_cycle() {
+  local file="$1"
+  local target_entry="$2"
+
+  if [[ ! -f "$file" ]]; then
+    return 1
+  fi
+
+  local tmp
+  tmp="$(mktemp -t fi-defercycle.XXXXXX)"
+
+  local found=0
+  while IFS= read -r line; do
+    if [[ "$line" == "$target_entry" ]] && (( found == 0 )); then
+      found=1
+      local new_line="$line"
+
+      # Bump (or add) defer-cycle annotation.
+      if [[ "$new_line" =~ \(defer-cycle:\ ([0-9]+)\) ]]; then
+        local current_cycle="${BASH_REMATCH[1]}"
+        local next_cycle=$((current_cycle + 1))
+        # Use sed for safety (bash 3.2 glob with parens is unreliable).
+        new_line="$(printf '%s' "$new_line" | sed "s/(defer-cycle: ${current_cycle})/(defer-cycle: ${next_cycle})/")"
+      else
+        new_line="${new_line} (defer-cycle: 2)"
+      fi
+
+      # Append ';' to touched annotation if it has content in current segment.
+      if [[ "$new_line" =~ \(touched:\ ([^\)]*)\) ]]; then
+        local existing="${BASH_REMATCH[1]}"
+        # Determine current cycle segment (after last ';').
+        local current="${existing##*;}"
+        # Trim leading whitespace from current segment.
+        current="${current#"${current%%[![:space:]]*}"}"
+        if [[ -n "$current" ]]; then
+          local new_touched="${existing}; "
+          # Escape characters that are special in sed's BRE search pattern.
+          local esc_existing esc_new_touched
+          esc_existing="$(printf '%s' "$existing" | sed 's/[[\.*^$()+?{|]/\\&/g')"
+          esc_new_touched="$(printf '%s' "$new_touched" | sed 's/[&/\\]/\\&/g')"
+          new_line="$(printf '%s' "$new_line" | sed "s/(touched: ${esc_existing})/(touched: ${esc_new_touched})/")"
+        fi
+        # If current segment is empty (already ends in '; '), do nothing.
+      fi
+
+      printf '%s\n' "$new_line" >> "$tmp"
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$file"
+
+  if (( found == 0 )); then
+    rm -f "$tmp"
+    return 2
+  fi
+
+  mv "$tmp" "$file"
+}
