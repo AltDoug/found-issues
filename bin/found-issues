@@ -207,7 +207,11 @@ fi_handle_deferred_touch() {
     printf 'Consider: found-issues promote-deferred --match %s\n' "$hint" >&2
   fi
 
-  # >= threshold + critical branch added in next task
+  if (( count >= threshold )) && (( is_critical == 1 )); then
+    fi_promote_entry_to_open "$file" "$updated_entry"
+    printf 'Touched [!] critical deferred entry — auto-promoted to [open] (%dx in cycle %d): %s\n' "$count" "$cycle" "$hint" >&2
+  fi
+
   return 0
 }
 
@@ -532,6 +536,32 @@ cmd_defer() {
   fi
 }
 
+# Flip a single matched [deferred] entry to [open] in $file.
+# Returns 0 on success. Used by both cmd_promote_deferred (matches by user
+# input) and fi_handle_deferred_touch (matches by exact entry).
+fi_promote_entry_to_open() {
+  local file="$1"
+  local target="$2"
+  local tmp
+  tmp="$(mktemp -t fi-promote.XXXXXX)"
+  local found=0
+  while IFS= read -r line; do
+    if [[ "$line" == "$target" ]] && (( found == 0 )); then
+      found=1
+      local new_line="${line/- \[deferred\]/- [open]}"
+      printf '%s\n' "$new_line" >> "$tmp"
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$file"
+  if (( found == 0 )); then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$file"
+  return 0
+}
+
 # === Subcommand: promote-deferred ===
 #
 # Flips [deferred] → [open] for the entry matching <match>.
@@ -617,21 +647,10 @@ cmd_promote_deferred() {
 
   local target="${matches[0]}"
 
-  # Flip status: replace "- [deferred]" with "- [open]" on this exact line.
-  # All other content (annotations) preserved.
-  local tmp
-  tmp="$(mktemp -t fi-promote.XXXXXX)"
-  local found=0
-  while IFS= read -r line; do
-    if [[ "$line" == "$target" ]] && (( found == 0 )); then
-      found=1
-      local new_line="${line/- \[deferred\]/- [open]}"
-      printf '%s\n' "$new_line" >> "$tmp"
-    else
-      printf '%s\n' "$line" >> "$tmp"
-    fi
-  done < "$file"
-  mv "$tmp" "$file"
+  if ! fi_promote_entry_to_open "$file" "$target"; then
+    fi_err "promote-deferred: internal error mutating file"
+    return 5
+  fi
 
   printf 'Promoted [deferred] → [open]: %s\n' "$target"
   if [[ "$target" == *"(touched:"* ]]; then

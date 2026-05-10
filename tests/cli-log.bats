@@ -155,3 +155,19 @@ EOF
   grep -F "[deferred]" docs/found-issues.md
   ! grep -F "[open]" docs/found-issues.md
 }
+
+@test "log: touch >= threshold (critical [!]) auto-promotes inline" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] [!] 2026-05-10 src/foo.py:42 — auth bypass (touched: 2026-05-21, 2026-05-28)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  fi_run log "src/foo.py:42 — auth bypass"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"auto-promoted"* ]]
+  [[ "$output" == *"3x"* ]]
+  # Entry now [open] [!]
+  grep -F "[open] [!]" docs/found-issues.md
+  ! grep -F "[deferred]" docs/found-issues.md
+}
