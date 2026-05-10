@@ -138,3 +138,20 @@ EOF
   [[ "$output" == *"1x of 3"* ]] || [[ "$output" == *"1 of 3"* ]]
   [[ "$output" == *"src/foo.py:42"* ]]
 }
+
+@test "log: touch == threshold (non-critical) prints nudge with promote-deferred command" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing (touched: 2026-05-21, 2026-05-28)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  # 3rd touch hits threshold
+  fi_run log "src/foo.py:42 — null check missing"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"now 3x"* ]] || [[ "$output" == *"3x, threshold 3"* ]]
+  [[ "$output" == *"promote-deferred"* ]]
+  # Entry should still be [deferred] (non-critical doesn't auto-promote)
+  grep -F "[deferred]" docs/found-issues.md
+  ! grep -F "[open]" docs/found-issues.md
+}

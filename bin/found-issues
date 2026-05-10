@@ -196,7 +196,18 @@ fi_handle_deferred_touch() {
     printf 'Touched deferred entry (%dx of %d for promotion): %s\n' "$count" "$threshold" "$hint" >&2
   fi
 
-  # >= threshold branches added in next tasks
+  # Determine criticality
+  local is_critical=0
+  if [[ "$updated_entry" == *"[!]"* ]]; then
+    is_critical=1
+  fi
+
+  if (( count >= threshold )) && (( is_critical == 0 )); then
+    printf 'Touched deferred entry (now %dx, threshold %d): %s\n' "$count" "$threshold" "$hint" >&2
+    printf 'Consider: found-issues promote-deferred --match %s\n' "$hint" >&2
+  fi
+
+  # >= threshold + critical branch added in next task
   return 0
 }
 
