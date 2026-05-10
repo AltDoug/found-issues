@@ -423,6 +423,113 @@ cmd_defer() {
   fi
 }
 
+# === Subcommand: promote-deferred ===
+#
+# Flips [deferred] → [open] for the entry matching <match>.
+# All annotations preserved byte-identical (touch history + defer-cycle +
+# reason serve as evidence of recurrence and historical context).
+#
+# Exits:
+#   0 success
+#   1 no matching [deferred] entry
+#   2 ambiguous (multiple matches)
+#   3 entry is [open], not [deferred] (helpful message)
+cmd_promote_deferred() {
+  local match=""
+
+  # Argument parsing — accept positional or --match
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --match)
+        match="${2:-}"
+        shift 2 || break
+        ;;
+      *)
+        if [[ -z "$match" ]]; then
+          match="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$match" ]]; then
+    fi_err "promote-deferred: missing <match> argument"
+    fi_err "Usage: found-issues promote-deferred <match>   OR   --match <match>"
+    return 2
+  fi
+
+  local file
+  file="$(fi_resolve_issues_file)"
+
+  # Find matching [deferred] entries
+  local matches=()
+  while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    local lower_entry lower_match
+    lower_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
+    lower_match="$(printf '%s' "$match" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$lower_entry" == *"$lower_match"* ]]; then
+      matches+=("$entry")
+    fi
+  done < <(fi_entries "$file" deferred 2>/dev/null || true)
+
+  if (( ${#matches[@]} == 0 )); then
+    # Check whether the match hits an [open] entry — different error.
+    local open_matches=()
+    while IFS= read -r entry; do
+      [[ -z "$entry" ]] && continue
+      local lower_entry lower_match
+      lower_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
+      lower_match="$(printf '%s' "$match" | tr '[:upper:]' '[:lower:]')"
+      if [[ "$lower_entry" == *"$lower_match"* ]]; then
+        open_matches+=("$entry")
+      fi
+    done < <(fi_entries "$file" open 2>/dev/null || true)
+
+    if (( ${#open_matches[@]} > 0 )); then
+      fi_err "promote-deferred: not [deferred] — match \"$match\" hits an [open] entry already."
+      return 3
+    fi
+
+    fi_err "promote-deferred: no [deferred] entries match \"$match\""
+    return 1
+  fi
+
+  if (( ${#matches[@]} > 1 )); then
+    fi_err "promote-deferred: ambiguous match — ${#matches[@]} [deferred] entries match \"$match\":"
+    local m
+    for m in "${matches[@]}"; do
+      fi_err "  $m"
+    done
+    fi_err "Use a more specific match."
+    return 2
+  fi
+
+  local target="${matches[0]}"
+
+  # Flip status: replace "- [deferred]" with "- [open]" on this exact line.
+  # All other content (annotations) preserved.
+  local tmp
+  tmp="$(mktemp -t fi-promote.XXXXXX)"
+  local found=0
+  while IFS= read -r line; do
+    if [[ "$line" == "$target" ]] && (( found == 0 )); then
+      found=1
+      local new_line="${line/- \[deferred\]/- [open]}"
+      printf '%s\n' "$new_line" >> "$tmp"
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$file"
+  mv "$tmp" "$file"
+
+  printf 'Promoted [deferred] → [open]: %s\n' "$target"
+  if [[ "$target" == *"(touched:"* ]]; then
+    printf 'Touch history preserved as evidence of recurrence.\n'
+  fi
+}
+
 # === Subcommand: status ===
 
 cmd_status() {
@@ -1749,6 +1856,7 @@ main() {
     annotate-pr)      cmd_annotate_pr "$@" ;;
     annotate-commit)  cmd_annotate_commit "$@" ;;
     defer)            cmd_defer "$@" ;;
+    promote-deferred)     cmd_promote_deferred "$@" ;;
     promote)          cmd_promote "$@" ;;
     install-statusline)   cmd_install_statusline "$@" ;;
     uninstall-statusline) cmd_uninstall_statusline "$@" ;;
