@@ -150,6 +150,71 @@ EOF
 
 cmd_version() { printf 'found-issues version %s\n' "$FI_VERSION"; }
 
+# Handle a `log` invocation that matched a [deferred] entry's dedup key.
+# Appends today's date to the (touched: ...) annotation, then checks
+# count vs threshold and prints brief feedback (or nudge/auto-promote).
+fi_handle_deferred_touch() {
+  local file="$1"
+  local matched_entry="$2"
+  local today
+  today="$(fi_today)"
+
+  # Append today's date FIRST so the count reflects this touch.
+  fi_append_touch "$file" "$matched_entry" "$today"
+
+  # Re-read the updated entry to compute current count + threshold.
+  # The entry's path may have changed (annotation appended), so match by
+  # the original entry's dedup-stable prefix.
+  local updated_entry=""
+  local prefix="${matched_entry%% (touched:*}"
+  prefix="${prefix%% (defer-cycle:*}"  # be defensive about ordering
+  while IFS= read -r line; do
+    if [[ "$line" == "$prefix"* ]]; then
+      updated_entry="$line"
+      break
+    fi
+  done < <(fi_entries "$file" deferred 2>/dev/null || true)
+
+  if [[ -z "$updated_entry" ]]; then
+    # Should not happen if append succeeded; fail soft.
+    printf 'Touched deferred entry: %s\n' "$matched_entry" >&2
+    return 0
+  fi
+
+  local cycle count threshold
+  cycle="$(fi_extract_defer_cycle "$updated_entry")"
+  count="$(fi_current_cycle_touch_count "$updated_entry")"
+  threshold="$(fi_compute_threshold "$cycle")"
+
+  # Compute a hint for the user (path:line if available)
+  local hint
+  hint="${matched_entry#*\] }"
+  hint="${hint#* }"  # strip date
+  hint="${hint%% — *}"
+
+  if (( count < threshold )); then
+    printf 'Touched deferred entry (%dx of %d for promotion): %s\n' "$count" "$threshold" "$hint" >&2
+  fi
+
+  # Determine criticality
+  local is_critical=0
+  if [[ "$updated_entry" == *"[!]"* ]]; then
+    is_critical=1
+  fi
+
+  if (( count >= threshold )) && (( is_critical == 0 )); then
+    printf 'Touched deferred entry (now %dx, threshold %d): %s\n' "$count" "$threshold" "$hint" >&2
+    printf 'Consider: found-issues promote-deferred --match %s\n' "$hint" >&2
+  fi
+
+  if (( count >= threshold )) && (( is_critical == 1 )); then
+    fi_promote_entry_to_open "$file" "$updated_entry"
+    printf 'Touched [!] critical deferred entry — auto-promoted to [open] (%dx in cycle %d): %s\n' "$count" "$cycle" "$hint" >&2
+  fi
+
+  return 0
+}
+
 # === Subcommand: log ===
 #
 # Usage: found-issues log [--critical] <location> — <symptom>
@@ -230,15 +295,21 @@ cmd_log() {
     new_key="$(fi_dedup_key_abstract "$symptom")"
   fi
 
+  # Dedup against [open] AND [deferred] entries.
+  # - [open] match: existing behavior — print "Skipped — already logged" and return.
+  # - [deferred] match: new behavior — append touch annotation, possibly nudge or
+  #   auto-promote (handled by fi_handle_deferred_touch).
+  local matched_status=""  # "open" or "deferred", or empty if no match
+  local matched_entry=""
+  local entry e_data e_path e_line e_symptom existing_key
+
+  # Scan [open] first (preserve existing precedence)
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue
-    # Compute key for existing entry
-    local e_data e_path e_line e_symptom existing_key
     e_data="$(fi_parse_entry "$entry")" || continue
     e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
     e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
     e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
-
     if [[ -n "$e_line" ]]; then
       existing_key="$(fi_dedup_key "$e_path" "$e_line" "$e_symptom")"
     elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
@@ -246,13 +317,49 @@ cmd_log() {
     else
       existing_key="$(fi_dedup_key_abstract "$e_symptom")"
     fi
-
     if [[ "$existing_key" == "$new_key" ]]; then
-      printf 'Skipped — already logged: %s\n' "$entry"
-      cmd_status plain
-      return 0
+      matched_status="open"
+      matched_entry="$entry"
+      break
     fi
   done < <(fi_entries "$file" open 2>/dev/null || true)
+
+  # If no [open] match, scan [deferred]
+  if [[ -z "$matched_status" ]]; then
+    while IFS= read -r entry; do
+      [[ -z "$entry" ]] && continue
+      e_data="$(fi_parse_entry "$entry")" || continue
+      e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+      e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+      e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
+      if [[ -n "$e_line" ]]; then
+        existing_key="$(fi_dedup_key "$e_path" "$e_line" "$e_symptom")"
+      elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
+        existing_key="$(fi_dedup_key "$e_path" "" "$e_symptom")"
+      else
+        existing_key="$(fi_dedup_key_abstract "$e_symptom")"
+      fi
+      if [[ "$existing_key" == "$new_key" ]]; then
+        matched_status="deferred"
+        matched_entry="$entry"
+        break
+      fi
+    done < <(fi_entries "$file" deferred 2>/dev/null || true)
+  fi
+
+  # Branch on match
+  if [[ "$matched_status" == "open" ]]; then
+    printf 'Skipped — already logged: %s\n' "$matched_entry"
+    cmd_status plain
+    return 0
+  fi
+
+  if [[ "$matched_status" == "deferred" ]]; then
+    fi_handle_deferred_touch "$file" "$matched_entry"
+    return $?
+  fi
+
+  # No match — fall through to existing "build new entry" code.
 
   # Build new entry
   local crit_flag=""
@@ -429,6 +536,32 @@ cmd_defer() {
   fi
 }
 
+# Flip a single matched [deferred] entry to [open] in $file.
+# Returns 0 on success. Used by both cmd_promote_deferred (matches by user
+# input) and fi_handle_deferred_touch (matches by exact entry).
+fi_promote_entry_to_open() {
+  local file="$1"
+  local target="$2"
+  local tmp
+  tmp="$(mktemp -t fi-promote.XXXXXX)"
+  local found=0
+  while IFS= read -r line; do
+    if [[ "$line" == "$target" ]] && (( found == 0 )); then
+      found=1
+      local new_line="${line/- \[deferred\]/- [open]}"
+      printf '%s\n' "$new_line" >> "$tmp"
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$file"
+  if (( found == 0 )); then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$file"
+  return 0
+}
+
 # === Subcommand: promote-deferred ===
 #
 # Flips [deferred] → [open] for the entry matching <match>.
@@ -514,21 +647,10 @@ cmd_promote_deferred() {
 
   local target="${matches[0]}"
 
-  # Flip status: replace "- [deferred]" with "- [open]" on this exact line.
-  # All other content (annotations) preserved.
-  local tmp
-  tmp="$(mktemp -t fi-promote.XXXXXX)"
-  local found=0
-  while IFS= read -r line; do
-    if [[ "$line" == "$target" ]] && (( found == 0 )); then
-      found=1
-      local new_line="${line/- \[deferred\]/- [open]}"
-      printf '%s\n' "$new_line" >> "$tmp"
-    else
-      printf '%s\n' "$line" >> "$tmp"
-    fi
-  done < "$file"
-  mv "$tmp" "$file"
+  if ! fi_promote_entry_to_open "$file" "$target"; then
+    fi_err "promote-deferred: internal error mutating file"
+    return 5
+  fi
 
   printf 'Promoted [deferred] → [open]: %s\n' "$target"
   if [[ "$target" == *"(touched:"* ]]; then
