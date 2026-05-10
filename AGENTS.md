@@ -9,7 +9,7 @@ This is a Claude Code plugin. Install via the plugin marketplace,
 then run setup as the final step:
 
 ```
-/plugin marketplace add AltDoug/found-issues
+/plugin marketplace add AltDoug/claude-plugins
 /plugin install found-issues
 /reload-plugins
 /found-issues:setup

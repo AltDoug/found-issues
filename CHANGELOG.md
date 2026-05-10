@@ -6,6 +6,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (release-channel consolidation, no plugin code change)
+
+- **Removed standalone marketplace at `AltDoug/found-issues`.** Deleted `.claude-plugin/marketplace.json` from this repo. The single canonical install path is now the aggregator at `AltDoug/claude-plugins`. Why: dual install paths created confusion (e.g. `/plugin marketplace add AltDoug/found-issues` would register under marketplace name `found-issues` while the aggregator registers as `altdoug-plugins`, leading to mismatches in `/plugin marketplace remove` commands). One marketplace, one install path, one canonical name.
+- **README + AGENTS.md install instructions** now use `/plugin marketplace add AltDoug/claude-plugins`.
+- **CI `json validation` step** no longer validates the removed marketplace.json.
+- **Migration for users who installed via the standalone path**: `/plugin marketplace remove found-issues` then `/plugin marketplace add AltDoug/claude-plugins`. The plugin itself doesn't need reinstalling — same code, just a different marketplace registration.
+
 ### Planned
 
 - Demo GIF embedded in README
