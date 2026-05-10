@@ -525,7 +525,7 @@ SL
   [ "$first_hash" = "$second_hash" ]
 }
 
-@test "install-statusline --migrate: e2e — counter renders after legacy snippet rewritten" {
+@test "install-statusline --migrate: e2e counter renders after legacy snippet rewritten" {
   command -v jq >/dev/null 2>&1 || skip "jq not available"
 
   local today; today=$(date +%Y-%m-%d)
