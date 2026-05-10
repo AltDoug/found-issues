@@ -83,3 +83,21 @@ HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/hooks/format-enforcer.s
   [ "$status" -eq 0 ]
   unset FOUND_ISSUES_FORMAT_ENFORCER
 }
+
+@test "format-enforcer: accepts (touched: ...) defer-flow annotation" {
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [deferred] 2026-05-08 src/foo.py:42 — not now (touched: 2026-05-21, 2026-05-28)"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "format-enforcer: accepts (touched: ...) with (defer-cycle: N) annotation" {
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [deferred] 2026-05-08 src/foo.py:42 — not now (touched: 2026-05-21; 2026-05-28) (defer-cycle: 2)"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "format-enforcer: accepts (reason: ...) defer-flow annotation" {
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [deferred] 2026-05-08 src/foo.py:42 — not now (reason: tracked in JIRA-1234)"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
