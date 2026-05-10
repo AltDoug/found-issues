@@ -92,11 +92,10 @@ The dedup loop (currently scanning only `[open]` entries via `fi_entries "$file"
 2. Append today's date to `(touched: ...)` annotation — create the annotation if absent, append after last `;` if present.
 3. Determine defer-cycle (default 1 if no `(defer-cycle: N)` annotation).
 4. Compute threshold for this cycle.
-5. Branch on count + criticality:
+5. Branch on count + criticality (always use `>=` not `==` so env-var threshold changes mid-cycle still trigger correctly):
    - count < threshold: brief stderr line "Touched deferred entry (Nx of M for promotion): <hint>".
-   - count == threshold AND entry is `[!]` critical: auto-promote inline; print "Touched [!] critical deferred entry — auto-promoted to [open] (Nx in cycle N)".
-   - count == threshold AND not critical: print stderr nudge with `promote-deferred --match <hint>` suggestion.
-   - count > threshold: same nudge as `==` case (each subsequent touch re-fires the nudge until promotion).
+   - count >= threshold AND entry is `[!]` critical: auto-promote inline (once; after promotion entry is `[open]` and subsequent touches hit the existing `[open]` dedup-skip path); print "Touched [!] critical deferred entry — auto-promoted to [open] (Nx in cycle N)".
+   - count >= threshold AND not critical: print stderr nudge with `promote-deferred --match <hint>` suggestion. Re-fires every touch until operator promotes (cheap signal; the operator can act or keep deferring — touches keep accumulating until the next defer-cycle escalates the threshold).
 6. **No new `[open]` entry is created.** The touch is the response.
 
 ### New lib helpers (extend `lib/parse-entries.sh`)
@@ -107,8 +106,8 @@ fi_current_cycle_touch_count <entry>   → echoes count of dates after last ';' 
 fi_extract_defer_cycle <entry>         → echoes integer (1 if absent or non-numeric)
 fi_extract_reason <entry>              → echoes the (reason: ...) value (or empty)
 fi_compute_threshold <cycle>           → echoes BASE * FACTOR^(cycle-1); env vars override BASE/FACTOR
-fi_append_touch <file> <entry> <date>  → mutates file (atomic temp+mv); appends date to entry's (touched: ...)
-fi_increment_defer_cycle <file> <entry> → mutates file; bumps defer-cycle annotation; appends ';' to touched
+fi_append_touch <file> <entry> <date>  → mutates file (atomic temp+mv); appends date to entry's (touched: ...) annotation (creates the annotation if absent; appends after the last ';' in the current cycle's segment if present)
+fi_increment_defer_cycle <file> <entry> → mutates file; bumps defer-cycle annotation. If a (touched: ...) annotation exists with content in the current cycle's segment, appends ';' as cycle separator. If touched annotation is absent or current segment is empty (e.g., re-defer with zero touches in prior cycle), no separator is appended (nothing to separate).
 ```
 
 ### New skills (markdown wrappers)
