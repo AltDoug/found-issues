@@ -300,6 +300,83 @@ fi_compute_threshold() {
   awk -v b="$base" -v f="$factor" -v c="$cycle" 'BEGIN { printf "%d", b * (f ^ (c - 1)) }'
 }
 
+# Mutate file: append date to the matching entry's (touched: ...) annotation.
+# Atomic via temp+mv. Matches entry by exact line equality.
+#
+# Append rules:
+#   - No (touched: ...) annotation: insert " (touched: <date>)" at end of line.
+#   - Has (touched: ...) and current segment is empty (annotation ends with ';' or '; '):
+#     append "<date>" right before the closing ')'.
+#   - Has (touched: ...) with content in current segment:
+#     append ", <date>" right before the closing ')'.
+#
+# Returns:
+#   0  — success
+#   1  — file does not exist
+#   2  — target entry not found in file
+fi_append_touch() {
+  local file="$1"
+  local target_entry="$2"
+  local date="$3"
+
+  if [[ ! -f "$file" ]]; then
+    return 1
+  fi
+
+  local tmp
+  tmp="$(mktemp -t fi-touch.XXXXXX)"
+
+  local found=0
+  local re_touched='\(touched: ([^)]+)\)'
+
+  while IFS= read -r line; do
+    if [[ "$line" == "$target_entry" ]] && (( found == 0 )); then
+      found=1
+      local new_line
+      if [[ "$line" =~ $re_touched ]]; then
+        local existing="${BASH_REMATCH[1]}"
+        # Determine current cycle segment (after last ';').
+        local current="${existing##*;}"
+        # Trim leading whitespace from current segment.
+        current="${current#"${current%%[![:space:]]*}"}"
+        local new_value
+        if [[ -z "$current" ]]; then
+          # Current segment is empty — normalize to '; <date>'.
+          # Strip any trailing whitespace from the part before ';',
+          # then append ' <date>'.
+          local before_semi="${existing%%;*}"
+          # Trim trailing whitespace from before_semi.
+          before_semi="${before_semi%"${before_semi##*[![:space:]]}"}"
+          new_value="${before_semi}; ${date}"
+        else
+          # Current segment has content — append ', <date>'.
+          new_value="${existing}, ${date}"
+        fi
+        # Replace the annotation using sed (safe against special chars in bash glob).
+        # Escape characters that are special in sed's BRE/ERE and replacement strings.
+        local esc_existing esc_new_value
+        esc_existing="$(printf '%s' "$existing" | sed 's/[[\.*^$()+?{|]/\\&/g')"
+        esc_new_value="$(printf '%s' "$new_value" | sed 's/[&/\\]/\\&/g')"
+        new_line="$(printf '%s' "$line" \
+          | sed "s/(touched: ${esc_existing})/(touched: ${esc_new_value})/")"
+      else
+        # No existing annotation: append at end of line.
+        new_line="${line} (touched: ${date})"
+      fi
+      printf '%s\n' "$new_line" >> "$tmp"
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$file"
+
+  if (( found == 0 )); then
+    rm -f "$tmp"
+    return 2
+  fi
+
+  mv "$tmp" "$file"
+}
+
 # Count the number of well-formed YYYY-MM-DD dates in the CURRENT cycle's
 # segment of the (touched: ...) annotation. The current segment is the
 # substring after the last ';' separator (or the entire annotation if no

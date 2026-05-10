@@ -289,3 +289,41 @@ teardown() {
   [[ "$result" == *"3"* ]]
   [[ "$result" == *"warning"* ]] || [[ "$result" == *"FOUND_ISSUES_DEFER_TOUCH_THRESHOLD"* ]]
 }
+
+# === fi_append_touch ===
+
+@test "fi_append_touch: creates annotation when absent" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug
+EOF
+  fi_append_touch test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug" "2026-05-21"
+  grep -F "(touched: 2026-05-21)" test.md
+}
+
+@test "fi_append_touch: appends to existing single-cycle annotation" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21)
+EOF
+  fi_append_touch test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21)" "2026-05-28"
+  grep -F "(touched: 2026-05-21, 2026-05-28)" test.md
+}
+
+@test "fi_append_touch: appends after last ';' (cycle 2)" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; ) (defer-cycle: 2)
+EOF
+  fi_append_touch test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; ) (defer-cycle: 2)" "2026-07-15"
+  grep -F "(touched: 2026-05-21, 2026-05-28; 2026-07-15)" test.md
+}
+
+@test "fi_append_touch: leaves other entries untouched" {
+  cat > test.md <<'EOF'
+- [deferred] 2026-05-10 src/foo.py:42 — bug
+- [open] 2026-05-11 src/bar.py:99 — other bug
+- [deferred] 2026-05-12 src/baz.py:1 — third bug
+EOF
+  fi_append_touch test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug" "2026-05-21"
+  grep -F "(touched: 2026-05-21)" test.md
+  ! grep "src/bar.py" test.md | grep -q "touched:"
+  ! grep "src/baz.py" test.md | grep -q "touched:"
+}
