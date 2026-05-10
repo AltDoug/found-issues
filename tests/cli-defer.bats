@@ -27,3 +27,22 @@ teardown() {
   [ "$status" -eq 0 ]
   grep -F "(reason: tracked in JIRA-1234)" docs/found-issues.md
 }
+
+@test "defer: no match exits 1 with clear error" {
+  fi_run log "src/foo.py:42 — null check"
+  fi_run defer "nonexistent"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no [open] entries match"* ]]
+  [[ "$output" == *"nonexistent"* ]]
+}
+
+@test "defer: ambiguous match exits 2 with listing" {
+  fi_run log "src/foo.py:42 — null check"
+  fi_run log "src/foo.py:88 — leak"
+  fi_run defer "foo.py"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"ambiguous match"* ]]
+  [[ "$output" == *"src/foo.py:42"* ]]
+  [[ "$output" == *"src/foo.py:88"* ]]
+  [[ "$output" == *"more specific"* ]]
+}
