@@ -19,7 +19,7 @@ lifting a finger.**
 Run these in Claude Code, in order:
 
 ```
-/plugin marketplace add AltDoug/found-issues
+/plugin marketplace add AltDoug/claude-plugins
 /plugin install found-issues
 ```
 
