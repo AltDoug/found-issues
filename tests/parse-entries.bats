@@ -192,3 +192,30 @@ teardown() {
   result="$(fi_extract_touched_segment "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; 2026-07-15)")"
   [ "$result" = "2026-05-21, 2026-05-28; 2026-07-15" ]
 }
+
+# === fi_current_cycle_touch_count ===
+
+@test "fi_current_cycle_touch_count: returns 0 when annotation absent" {
+  result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug")"
+  [ "$result" -eq 0 ]
+}
+
+@test "fi_current_cycle_touch_count: counts dates in cycle 1 (no separator)" {
+  result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28, 2026-06-04)")"
+  [ "$result" -eq 3 ]
+}
+
+@test "fi_current_cycle_touch_count: counts only current cycle (after last ';')" {
+  result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28, 2026-06-04; 2026-07-15, 2026-07-22)")"
+  [ "$result" -eq 2 ]
+}
+
+@test "fi_current_cycle_touch_count: returns 0 when current segment is empty (just appended ';')" {
+  result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, 2026-05-28; )")"
+  [ "$result" -eq 0 ]
+}
+
+@test "fi_current_cycle_touch_count: ignores malformed (non-date) tokens" {
+  result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, garbage, 2026-05-28)")"
+  [ "$result" -eq 2 ]
+}

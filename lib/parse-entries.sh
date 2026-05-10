@@ -250,3 +250,28 @@ fi_extract_touched_segment() {
     printf '%s' "${BASH_REMATCH[1]}"
   fi
 }
+
+# Count the number of well-formed YYYY-MM-DD dates in the CURRENT cycle's
+# segment of the (touched: ...) annotation. The current segment is the
+# substring after the last ';' separator (or the entire annotation if no
+# ';' is present). Echoes 0 if the annotation is absent or the current
+# segment contains no well-formed dates.
+fi_current_cycle_touch_count() {
+  local line="$1"
+  local segment
+  segment="$(fi_extract_touched_segment "$line")"
+  if [[ -z "$segment" ]]; then
+    printf '0'
+    return
+  fi
+
+  # Take everything after the last ';' (if no ';', this is the full segment).
+  local current="${segment##*;}"
+
+  # Count well-formed dates (defensive: ignore garbage tokens).
+  local count
+  count="$(printf '%s' "$current" \
+    | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' \
+    | grep -c . || true)"
+  printf '%s' "${count:-0}"
+}
