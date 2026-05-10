@@ -230,15 +230,21 @@ cmd_log() {
     new_key="$(fi_dedup_key_abstract "$symptom")"
   fi
 
+  # Dedup against [open] AND [deferred] entries.
+  # - [open] match: existing behavior — print "Skipped — already logged" and return.
+  # - [deferred] match: new behavior — append touch annotation, possibly nudge or
+  #   auto-promote (handled by fi_handle_deferred_touch).
+  local matched_status=""  # "open" or "deferred", or empty if no match
+  local matched_entry=""
+  local entry e_data e_path e_line e_symptom existing_key
+
+  # Scan [open] first (preserve existing precedence)
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue
-    # Compute key for existing entry
-    local e_data e_path e_line e_symptom existing_key
     e_data="$(fi_parse_entry "$entry")" || continue
     e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
     e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
     e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
-
     if [[ -n "$e_line" ]]; then
       existing_key="$(fi_dedup_key "$e_path" "$e_line" "$e_symptom")"
     elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
@@ -246,13 +252,49 @@ cmd_log() {
     else
       existing_key="$(fi_dedup_key_abstract "$e_symptom")"
     fi
-
     if [[ "$existing_key" == "$new_key" ]]; then
-      printf 'Skipped — already logged: %s\n' "$entry"
-      cmd_status plain
-      return 0
+      matched_status="open"
+      matched_entry="$entry"
+      break
     fi
   done < <(fi_entries "$file" open 2>/dev/null || true)
+
+  # If no [open] match, scan [deferred]
+  if [[ -z "$matched_status" ]]; then
+    while IFS= read -r entry; do
+      [[ -z "$entry" ]] && continue
+      e_data="$(fi_parse_entry "$entry")" || continue
+      e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+      e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+      e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
+      if [[ -n "$e_line" ]]; then
+        existing_key="$(fi_dedup_key "$e_path" "$e_line" "$e_symptom")"
+      elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
+        existing_key="$(fi_dedup_key "$e_path" "" "$e_symptom")"
+      else
+        existing_key="$(fi_dedup_key_abstract "$e_symptom")"
+      fi
+      if [[ "$existing_key" == "$new_key" ]]; then
+        matched_status="deferred"
+        matched_entry="$entry"
+        break
+      fi
+    done < <(fi_entries "$file" deferred 2>/dev/null || true)
+  fi
+
+  # Branch on match
+  if [[ "$matched_status" == "open" ]]; then
+    printf 'Skipped — already logged: %s\n' "$matched_entry"
+    cmd_status plain
+    return 0
+  fi
+
+  if [[ "$matched_status" == "deferred" ]]; then
+    fi_handle_deferred_touch "$file" "$matched_entry"
+    return $?
+  fi
+
+  # No match — fall through to existing "build new entry" code.
 
   # Build new entry
   local crit_flag=""
