@@ -805,10 +805,26 @@ cmd_promote() {
 cmd_uninstall() {
   local removed_count=0
 
-  # 1. Statusline integration (only if installed)
+  # 1a. Statusline integration — marker-bracketed block (v1.0.0+ installs)
   if [[ -f "$FI_STATUSLINE_FILE" ]] && grep -Fq "$FI_STATUSLINE_START_MARKER" "$FI_STATUSLINE_FILE"; then
     cmd_uninstall_statusline >/dev/null
     printf '✓ removed statusline segment block from %s\n' "$FI_STATUSLINE_FILE"
+    removed_count=$((removed_count + 1))
+  fi
+
+  # 1b. Statusline integration — pre-v0.1.7 handwritten snippet (no markers).
+  # Without this, dogfood-era users running `uninstall` would still have the
+  # broken handwritten lines left in their statusline.sh. Use the same
+  # surgical-strip helper that `install-statusline --migrate` uses.
+  if [[ -f "$FI_STATUSLINE_FILE" ]] && awk -v start="$FI_STATUSLINE_START_MARKER" \
+                                          -v endm="$FI_STATUSLINE_END_MARKER" '
+      $0 == start { in_block = 1; next }
+      $0 == endm { in_block = 0; next }
+      !in_block && /found-issues[[:space:]]+status[[:space:]]+--format[=[:space:]]+segment/ { found = 1 }
+      END { exit (found ? 0 : 1) }
+    ' "$FI_STATUSLINE_FILE" 2>/dev/null; then
+    fi_strip_legacy_handwritten "$FI_STATUSLINE_FILE"
+    printf '✓ removed pre-v0.1.7 handwritten snippet from %s\n' "$FI_STATUSLINE_FILE"
     removed_count=$((removed_count + 1))
   fi
 

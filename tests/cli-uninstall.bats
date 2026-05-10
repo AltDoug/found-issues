@@ -101,6 +101,34 @@ SL
   [[ "$output" == *"/plugin marketplace remove"* ]]
 }
 
+@test "uninstall: also strips pre-v0.1.7 handwritten snippet (no markers)" {
+  # Dogfood-era users have this 3-line snippet but no markers. The pre-v1.0.3
+  # uninstall would silently leave these lines behind. The v1.0.3 uninstall
+  # path uses the same surgical strip helper as install-statusline --migrate.
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+input=$(cat)
+LINE1="repo"
+LINE1="$LINE1 | branch"
+# found-issues plugin segment (|| true guards against set -e when CLI isn't on PATH)
+FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+[[ -n "$FI_SEG" ]] && LINE1="$LINE1 | $FI_SEG"
+echo "$LINE1"
+SL
+  chmod 755 "$HOME/.claude/statusline.sh"
+
+  fi_run uninstall
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pre-v0.1.7 handwritten snippet"* ]]
+  ! grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh"
+  ! grep -Fq '$FI_SEG' "$HOME/.claude/statusline.sh"
+  # Surrounding code preserved
+  grep -Fq 'LINE1="repo"' "$HOME/.claude/statusline.sh"
+  grep -Fq 'echo "$LINE1"' "$HOME/.claude/statusline.sh"
+  # Executable preserved
+  [[ -x "$HOME/.claude/statusline.sh" ]]
+}
+
 @test "uninstall: cleans all 4 leftover types in one go" {
   mkdir -p "$HOME/.claude/found-issues" && touch "$HOME/.claude/found-issues/.onboarded"
   mkdir -p "$HOME/.cache/found-issues" && echo "x" > "$HOME/.cache/found-issues/mode_a_b"

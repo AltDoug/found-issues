@@ -24,10 +24,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **New subcommand `doctor-statusline`**: dry-run diagnosis of the current state. Reports which of the 5 states the user's statusline is in and the recommended fix command. No file modifications.
 - **SessionStart hook self-heal nudge**: detects broken/legacy statusline state at session start. If found, emits a one-time-per-day directive to Claude pointing at `found-issues doctor-statusline` and the migration command. Cost of breakage (silent broken counter) is high; cost of a one-line nudge is low.
 - **`status` subcommand now accepts `--cwd PATH`** and falls back to `$CLAUDE_PROJECT_DIR` when no flag is passed. Defensive correctness for any caller that knows the workspace dir explicitly (hooks, scripts, future statusline integrations).
+- **`found-issues uninstall` now also strips pre-v0.1.7 handwritten snippets** (in addition to the marker-bracketed block). Previously, dogfood-era users who ran the uninstall flow would still have the broken handwritten lines left behind in `~/.claude/statusline.sh`. Reuses the same `fi_strip_legacy_handwritten` helper that powers `install-statusline --migrate`.
 
 ### Added
 
-- **12 new bats tests** in `tests/cli-statusline.bats` covering: `--cwd` flag, `CLAUDE_PROJECT_DIR` fallback, all 5 classifier states via `doctor-statusline`, `--migrate` rewrites for `legacy-handwritten` / `installed-broken` / `legacy-and-installed`, idempotency after migration, and a true e2e test that proves a pre-migration broken statusline renders empty AND post-migration renders the count. 179 tests total (was 167).
+- **13 new bats tests** covering: `--cwd` flag, `CLAUDE_PROJECT_DIR` fallback, all 5 classifier states via `doctor-statusline`, `--migrate` rewrites for `legacy-handwritten` / `installed-broken` / `legacy-and-installed`, idempotency after migration, true e2e proving pre-migration broken renders empty AND post-migration renders the count, and the new `uninstall` legacy-snippet cleanup. 180 tests total (was 167).
 
 ### Changed (release-channel consolidation from prior Unreleased section, no plugin code change)
 
