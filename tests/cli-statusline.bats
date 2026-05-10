@@ -173,16 +173,18 @@ SL
   [[ "$output" == *"inserted inline"* ]]
 
   # Pipe Claude-Code-style JSON input where workspace.current_dir is the project.
-  # Use a clean PATH to ensure the segment falls back to the cache glob —
-  # but our cache glob looks under $HOME, so we need the test to find found-issues.
-  # Easiest: make sure found-issues is on PATH for the subshell.
+  # Inherit the test's PATH (instead of restricting to /usr/bin:/bin) — on Git
+  # Bash for Windows jq lives at the chocolatey/winget path, NOT /usr/bin, and
+  # without jq the segment falls back to no-cd behavior and renders empty.
+  # Prepend the found-issues bin dir so the CLI resolves without needing the
+  # cache-glob fallback.
   local fi_bin_dir
   fi_bin_dir=$(dirname "$FI_BIN")
 
   local rendered
   rendered=$(echo "{\"workspace\":{\"current_dir\":\"$project\"}}" | \
-             env PATH="$fi_bin_dir:/usr/bin:/bin" bash "$HOME/.claude/statusline.sh")
-  # Should contain the count "3 issues" (or similar) — proves segment ran from $project
+             env PATH="$fi_bin_dir:$PATH" bash "$HOME/.claude/statusline.sh")
+  # Should contain the count "3 issues" — proves segment ran from $project.
   [[ "$rendered" == *"3 issues"* ]]
 }
 
