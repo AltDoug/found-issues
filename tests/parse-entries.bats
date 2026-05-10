@@ -219,3 +219,73 @@ teardown() {
   result="$(fi_current_cycle_touch_count "- [deferred] 2026-05-10 src/foo.py:42 — bug (touched: 2026-05-21, garbage, 2026-05-28)")"
   [ "$result" -eq 2 ]
 }
+
+# === fi_extract_defer_cycle ===
+
+@test "fi_extract_defer_cycle: returns 1 when annotation absent" {
+  result="$(fi_extract_defer_cycle "- [deferred] 2026-05-10 src/foo.py:42 — bug")"
+  [ "$result" -eq 1 ]
+}
+
+@test "fi_extract_defer_cycle: extracts numeric cycle" {
+  result="$(fi_extract_defer_cycle "- [deferred] 2026-05-10 src/foo.py:42 — bug (defer-cycle: 3)")"
+  [ "$result" -eq 3 ]
+}
+
+@test "fi_extract_defer_cycle: defaults to 1 on non-numeric value (defensive)" {
+  result="$(fi_extract_defer_cycle "- [deferred] 2026-05-10 src/foo.py:42 — bug (defer-cycle: garbage)")"
+  [ "$result" -eq 1 ]
+}
+
+# === fi_extract_reason ===
+
+@test "fi_extract_reason: returns empty when annotation absent" {
+  result="$(fi_extract_reason "- [deferred] 2026-05-10 src/foo.py:42 — bug")"
+  [ -z "$result" ]
+}
+
+@test "fi_extract_reason: extracts reason text" {
+  result="$(fi_extract_reason "- [deferred] 2026-05-10 src/foo.py:42 — bug (reason: tracked in JIRA-1234)")"
+  [ "$result" = "tracked in JIRA-1234" ]
+}
+
+# === fi_compute_threshold ===
+
+@test "fi_compute_threshold: cycle 1 default (3)" {
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  result="$(fi_compute_threshold 1)"
+  [ "$result" -eq 3 ]
+}
+
+@test "fi_compute_threshold: cycle 2 default (6)" {
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  result="$(fi_compute_threshold 2)"
+  [ "$result" -eq 6 ]
+}
+
+@test "fi_compute_threshold: cycle 4 default (24)" {
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  result="$(fi_compute_threshold 4)"
+  [ "$result" -eq 24 ]
+}
+
+@test "fi_compute_threshold: respects custom base" {
+  FOUND_ISSUES_DEFER_TOUCH_THRESHOLD=5 \
+  FOUND_ISSUES_DEFER_ESCALATION_FACTOR=2 \
+    result="$(fi_compute_threshold 2)"
+  [ "$result" -eq 10 ]
+}
+
+@test "fi_compute_threshold: respects custom factor" {
+  FOUND_ISSUES_DEFER_TOUCH_THRESHOLD=3 \
+  FOUND_ISSUES_DEFER_ESCALATION_FACTOR=3 \
+    result="$(fi_compute_threshold 3)"
+  [ "$result" -eq 27 ]
+}
+
+@test "fi_compute_threshold: invalid base falls back to default with warning" {
+  FOUND_ISSUES_DEFER_TOUCH_THRESHOLD=garbage \
+    result="$(fi_compute_threshold 1 2>&1)"
+  [[ "$result" == *"3"* ]]
+  [[ "$result" == *"warning"* ]] || [[ "$result" == *"FOUND_ISSUES_DEFER_TOUCH_THRESHOLD"* ]]
+}

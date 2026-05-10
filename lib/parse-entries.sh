@@ -251,6 +251,55 @@ fi_extract_touched_segment() {
   fi
 }
 
+# Extract the integer value of the (defer-cycle: N) annotation.
+# Defaults to 1 (implicit cycle 1) if the annotation is absent or
+# non-numeric.
+fi_extract_defer_cycle() {
+  local line="$1"
+  local re_cycle='\(defer-cycle: ([0-9]+)\)'
+  if [[ "$line" =~ $re_cycle ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  else
+    printf '1'
+  fi
+}
+
+# Extract the value of the (reason: ...) annotation.
+# Echoes empty string if absent.
+fi_extract_reason() {
+  local line="$1"
+  local re_reason='\(reason: ([^)]+)\)'
+  if [[ "$line" =~ $re_reason ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
+# Compute touch threshold for a given defer-cycle.
+# Formula: BASE * FACTOR^(cycle-1), defaulting to 3 * 2^(N-1).
+# Env vars FOUND_ISSUES_DEFER_TOUCH_THRESHOLD (base) and
+# FOUND_ISSUES_DEFER_ESCALATION_FACTOR (factor) override defaults.
+# Invalid values (non-numeric, <= 0) warn to stderr and fall back.
+fi_compute_threshold() {
+  local cycle="${1:-1}"
+  local base="${FOUND_ISSUES_DEFER_TOUCH_THRESHOLD:-3}"
+  local factor="${FOUND_ISSUES_DEFER_ESCALATION_FACTOR:-2}"
+
+  if ! [[ "$base" =~ ^[0-9]+$ ]] || (( base <= 0 )); then
+    printf 'warning: invalid FOUND_ISSUES_DEFER_TOUCH_THRESHOLD=%s (must be positive integer); using default 3\n' "$base" >&2
+    base=3
+  fi
+  if ! [[ "$factor" =~ ^[0-9]+$ ]] || (( factor <= 0 )); then
+    printf 'warning: invalid FOUND_ISSUES_DEFER_ESCALATION_FACTOR=%s (must be positive integer); using default 2\n' "$factor" >&2
+    factor=2
+  fi
+  if ! [[ "$cycle" =~ ^[0-9]+$ ]] || (( cycle <= 0 )); then
+    cycle=1
+  fi
+
+  # Compute base * factor^(cycle-1) using awk (bash has no power operator).
+  awk -v b="$base" -v f="$factor" -v c="$cycle" 'BEGIN { printf "%d", b * (f ^ (c - 1)) }'
+}
+
 # Count the number of well-formed YYYY-MM-DD dates in the CURRENT cycle's
 # segment of the (touched: ...) annotation. The current segment is the
 # substring after the last ';' separator (or the entire annotation if no
