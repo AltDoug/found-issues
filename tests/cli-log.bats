@@ -187,7 +187,7 @@ EOF
   [[ "$output" == *"promote-deferred"* ]]
 }
 
-@test "log: cycle 3 threshold = 12 — escalation across multiple cycles" {
+@test "log: cycle 3 threshold = 12 - escalation across multiple cycles" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
 # found-issues
@@ -249,7 +249,7 @@ EOF
   [ "$(grep -c '^- \[open\]' docs/found-issues.md)" -eq 2 ]
 }
 
-@test "log: full lifecycle — log, defer, 3x touch, nudge, promote, re-defer, 6x touch, second nudge" {
+@test "log: full lifecycle - log, defer, 3x touch, nudge, promote, re-defer, 6x touch, second nudge" {
   unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
 
   # Step 1: log
