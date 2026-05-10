@@ -248,3 +248,49 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(grep -c '^- \[open\]' docs/found-issues.md)" -eq 2 ]
 }
+
+@test "log: full lifecycle — log, defer, 3x touch, nudge, promote, re-defer, 6x touch, second nudge" {
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+
+  # Step 1: log
+  fi_run log "src/auth.py:88 — leaks session token"
+  [ "$status" -eq 0 ]
+
+  # Step 2: defer
+  fi_run defer "src/auth.py:88" --reason "tracked in JIRA"
+  [ "$status" -eq 0 ]
+  grep -F "[deferred]" docs/found-issues.md
+  grep -F "(reason: tracked in JIRA)" docs/found-issues.md
+
+  # Step 3: 3 touches → nudge fires on 3rd
+  fi_run log "src/auth.py:88 — leaks session token"
+  [[ "$output" == *"1x of 3"* ]]
+  fi_run log "src/auth.py:88 — leaks session token"
+  [[ "$output" == *"2x of 3"* ]]
+  fi_run log "src/auth.py:88 — leaks session token"
+  [[ "$output" == *"now 3x"* ]] || [[ "$output" == *"3x, threshold 3"* ]]
+  [[ "$output" == *"promote-deferred"* ]]
+  # Still [deferred] (non-critical)
+  grep -F "[deferred]" docs/found-issues.md
+
+  # Step 4: promote
+  fi_run promote-deferred "src/auth.py:88"
+  [ "$status" -eq 0 ]
+  grep -F "[open]" docs/found-issues.md
+
+  # Step 5: re-defer (cycle 2)
+  fi_run defer "src/auth.py:88" --reason "rescoped"
+  [ "$status" -eq 0 ]
+  grep -F "(defer-cycle: 2)" docs/found-issues.md
+  grep -F "(reason: rescoped)" docs/found-issues.md
+
+  # Step 6: 6 touches in cycle 2 → second nudge at 6th
+  fi_run log "src/auth.py:88 — leaks session token"
+  [[ "$output" == *"1x of 6"* ]]
+  fi_run log "src/auth.py:88 — leaks session token"
+  fi_run log "src/auth.py:88 — leaks session token"
+  fi_run log "src/auth.py:88 — leaks session token"
+  fi_run log "src/auth.py:88 — leaks session token"
+  fi_run log "src/auth.py:88 — leaks session token"
+  [[ "$output" == *"now 6x"* ]] || [[ "$output" == *"6x, threshold 6"* ]]
+}

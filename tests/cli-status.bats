@@ -70,3 +70,47 @@ teardown() {
   fi_run status --format=garbage
   [ "$status" -ne 0 ]
 }
+
+@test "status: [deferred] entries do not count toward 'issues'" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-05-10 src/foo.py:42 — null check
+- [deferred] 2026-05-10 src/bar.py:99 — kicked down road
+EOF
+  fi_run status --format=json
+  [ "$status" -eq 0 ]
+  # total_open should be 1 (only the [open] entry)
+  echo "$output" | grep -F '"total_open":1'
+}
+
+@test "status: promoted entry counts in [open] (transition correctness)" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check (touched: 2026-05-21, 2026-05-28, 2026-06-04)
+EOF
+  # Pre-promote: 0 in 'issues'
+  fi_run status --format=json
+  echo "$output" | grep -F '"total_open":0'
+  # Promote
+  fi_run promote-deferred "src/foo.py:42"
+  # Post-promote: 1 in 'issues'
+  fi_run status --format=json
+  echo "$output" | grep -F '"total_open":1'
+}
+
+@test "status: critical [!] post-auto-promote bumps 'critical' (not generic 'issues')" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] [!] 2026-05-10 src/foo.py:42 — auth bypass (touched: 2026-05-21, 2026-05-28)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  # 3rd touch auto-promotes critical
+  fi_run log "src/foo.py:42 — auth bypass"
+  [ "$status" -eq 0 ]
+  fi_run status --format=json
+  # critical: 1, issues: 0 (critical excluded from 'issues' subtraction)
+  echo "$output" | grep -F '"critical":1'
+}
