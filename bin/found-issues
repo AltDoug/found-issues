@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.0.1"
+readonly FI_VERSION="1.0.2"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1067,8 +1067,21 @@ cmd_install_statusline_inline() {
         print "  __FI_CLI=$(ls -d \"$HOME\"/.claude/plugins/cache/*/found-issues/*/bin/found-issues 2>/dev/null | sort -V | tail -1 || true)"
         print "  [[ -x \"$__FI_CLI\" ]] || __FI_CLI=\"\""
         print "fi"
+        print "# Extract workspace dir from the conventional `$input` variable. The"
+        print "# statusline subprocess'"'"'s cwd is NOT the workspace dir, so without this"
+        print "# `found-issues status` runs from $HOME and finds nothing."
+        print "__FI_DIR=\"\""
+        print "if [[ -n \"${input:-}\" ]] && command -v jq >/dev/null 2>&1; then"
+        print "  __FI_DIR=$(echo \"$input\" | jq -r '"'"'.workspace.current_dir // \"\"'"'"' 2>/dev/null || true)"
+        print "fi"
         print "__FI_SEG=\"\""
-        print "[[ -n \"$__FI_CLI\" ]] && __FI_SEG=$(\"$__FI_CLI\" status --format=segment 2>/dev/null || true)"
+        print "if [[ -n \"$__FI_CLI\" ]]; then"
+        print "  if [[ -n \"$__FI_DIR\" ]]; then"
+        print "    __FI_SEG=$( cd \"$__FI_DIR\" 2>/dev/null && \"$__FI_CLI\" status --format=segment 2>/dev/null || true )"
+        print "  else"
+        print "    __FI_SEG=$(\"$__FI_CLI\" status --format=segment 2>/dev/null || true)"
+        print "  fi"
+        print "fi"
         print "[[ -n \"$__FI_SEG\" ]] && LINE1=\"$LINE1$__FI_SEG\""
         print endm
       }
@@ -1109,8 +1122,21 @@ else
   __FI_CLI=\$(ls -d "\$HOME"/.claude/plugins/cache/*/found-issues/*/bin/found-issues 2>/dev/null | sort -V | tail -1 || true)
   [[ -x "\$__FI_CLI" ]] || __FI_CLI=""
 fi
+# Extract workspace dir from the conventional \`\$input\` variable. The
+# statusline subprocess's cwd is NOT the workspace dir, so without this
+# \`found-issues status\` runs from \$HOME and finds nothing.
+__FI_DIR=""
+if [[ -n "\${input:-}" ]] && command -v jq >/dev/null 2>&1; then
+  __FI_DIR=\$(echo "\$input" | jq -r '.workspace.current_dir // ""' 2>/dev/null || true)
+fi
 __FI_SEG=""
-[[ -n "\$__FI_CLI" ]] && __FI_SEG=\$("\$__FI_CLI" status --format=segment 2>/dev/null || true)
+if [[ -n "\$__FI_CLI" ]]; then
+  if [[ -n "\$__FI_DIR" ]]; then
+    __FI_SEG=\$( cd "\$__FI_DIR" 2>/dev/null && "\$__FI_CLI" status --format=segment 2>/dev/null || true )
+  else
+    __FI_SEG=\$("\$__FI_CLI" status --format=segment 2>/dev/null || true)
+  fi
+fi
 if [[ -n "\$__FI_SEG" ]]; then echo "\$__FI_SEG"; fi
 $FI_STATUSLINE_END_MARKER
 EOF

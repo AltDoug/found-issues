@@ -104,6 +104,90 @@ SL
   [ "$first_size" -eq "$second_size" ]
 }
 
+@test "install-statusline: generated segment block contains cwd handling (the v1.0.1 bug)" {
+  # Both standalone and inline forms must extract workspace dir from $input
+  # and cd before invoking the CLI. Without this, the statusline subprocess
+  # runs `found-issues status` from $HOME and never finds docs/found-issues.md.
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+echo "test"
+SL
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  # Standalone form: must include $input parsing and cd
+  grep -Fq 'jq -r' "$HOME/.claude/statusline.sh"
+  grep -Fq '.workspace.current_dir' "$HOME/.claude/statusline.sh"
+  grep -Fq 'cd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
+
+  # Same for inline form
+  rm "$HOME/.claude/statusline.sh"
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+input=$(cat)
+LINE1="repo"
+LINE1="$LINE1 | branch"
+echo "$LINE1"
+SL
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  grep -Fq 'jq -r' "$HOME/.claude/statusline.sh"
+  grep -Fq '.workspace.current_dir' "$HOME/.claude/statusline.sh"
+  grep -Fq 'cd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
+}
+
+@test "install-statusline: e2e segment renders count when given workspace JSON (regression)" {
+  # The actual scenario: a multi-line statusline that uses `git -C "$DIR"`
+  # rather than cd, runs from $HOME, gets JSON input including workspace.current_dir.
+  # Before v1.0.2 this returned empty because `found-issues status` was called
+  # from $HOME and never found docs/found-issues.md. v1.0.2 should cd first.
+
+  # Skip if jq isn't available — segment falls back to no-cd behavior, can't test.
+  command -v jq >/dev/null 2>&1 || skip "jq not available"
+
+  # Set up a fake project with known issues. Use TODAY so no "stale" bucket
+  # confuses the assertion, and no [!] so all 3 land in the plain "issues"
+  # bucket (critical entries would split into a separate "1 critical" segment).
+  local today
+  today=$(date +%Y-%m-%d)
+  local project="$TMP/proj"
+  mkdir -p "$project/docs"
+  cat > "$project/docs/found-issues.md" <<EOF
+# found-issues
+
+- [open] $today src/foo.py:42 — null check missing (suggested: add guard)
+- [open] $today src/auth.ts:88 — leaks token (suggested: redact)
+- [open] $today src/queue.py:12 — race on flush
+EOF
+
+  # Statusline that builds LINE1 with branch info (triggers inline insertion)
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+set -euo pipefail
+input=$(cat)
+LINE1="repo"
+LINE1="$LINE1 | branch"
+echo "$LINE1"
+SL
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"inserted inline"* ]]
+
+  # Pipe Claude-Code-style JSON input where workspace.current_dir is the project.
+  # Inherit the test's PATH (instead of restricting to /usr/bin:/bin) — on Git
+  # Bash for Windows jq lives at the chocolatey/winget path, NOT /usr/bin, and
+  # without jq the segment falls back to no-cd behavior and renders empty.
+  # Prepend the found-issues bin dir so the CLI resolves without needing the
+  # cache-glob fallback.
+  local fi_bin_dir
+  fi_bin_dir=$(dirname "$FI_BIN")
+
+  local rendered
+  rendered=$(echo "{\"workspace\":{\"current_dir\":\"$project\"}}" | \
+             env PATH="$fi_bin_dir:$PATH" bash "$HOME/.claude/statusline.sh")
+  # Should contain the count "3 issues" — proves segment ran from $project.
+  [[ "$rendered" == *"3 issues"* ]]
+}
+
 @test "install-statusline: appended block doesn't break a set -e statusline" {
   cat > "$HOME/.claude/statusline.sh" <<'SL'
 #!/usr/bin/env bash
