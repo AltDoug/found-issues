@@ -75,7 +75,38 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate plugin manifests
         run: |
-          for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
+          for f in .claude-plugin/plugin.json hooks/hooks.json; do
             echo "Validating $f..."
             jq empty "$f"
           done
+
+  test-name-lint:
+    name: test name ASCII guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject non-ASCII characters in @test names
+        # Why this exists: bats on Git Bash for Windows can't parse multi-byte
+        # UTF-8 sequences in test NAMES (the body is fine — only the name is
+        # parsed by bats's test discovery). When it hits one, it silently
+        # drops the test and emits a confusing "expected N got N-1" failure
+        # ~6 minutes into the Windows runner. We hit this twice in the
+        # v1.0.1 → v1.0.2 cycle (em-dash, middle-dot). Catching it here in
+        # ~1s on a Linux runner saves the round-trip.
+        #
+        # Using perl rather than grep because grep's byte-range bracket
+        # expressions don't reliably match high bytes across GNU/BSD/locale
+        # variations. Perl's \x00-\x7f negation works everywhere.
+        run: |
+          set -euo pipefail
+          matches=$(perl -ne 'print "$ARGV:$.: $_" if /^\@test "[^"]*[^\x00-\x7f]/' tests/*.bats 2>/dev/null || true)
+          if [[ -n "$matches" ]]; then
+            echo "ERROR: bats test names must be ASCII-only (Git Bash on Windows can't parse non-ASCII names)."
+            echo ""
+            echo "Found in:"
+            echo "$matches"
+            echo ""
+            echo "Fix: rename the test to ASCII. The body can still assert against any character — only the @test name matters."
+            exit 1
+          fi
+          echo "All @test names are ASCII. ✓"
