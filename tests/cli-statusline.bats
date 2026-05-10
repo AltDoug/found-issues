@@ -135,7 +135,7 @@ SL
   grep -Fq 'cd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
 }
 
-@test "install-statusline: e2e — segment renders count when given workspace JSON (regression)" {
+@test "install-statusline: e2e segment renders count when given workspace JSON (regression)" {
   # The actual scenario: a multi-line statusline that uses `git -C "$DIR"`
   # rather than cd, runs from $HOME, gets JSON input including workspace.current_dir.
   # Before v1.0.2 this returned empty because `found-issues status` was called
