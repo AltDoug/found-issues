@@ -48,6 +48,23 @@ The plugin handles automatically:
 - Adding the `found-issues` CLI to your PATH
 - Working in any repo (auto-detects mode: local / git / github-direct / github-pr)
 
+### Staying up to date
+
+Claude Code keeps third-party marketplaces (this one included) on **manual
+update** by default. **Recommended:** flip auto-update on once, then future
+versions land silently at session start. Run `/plugin`, open the
+**Marketplaces** tab, pick `altdoug-plugins`, and choose **Enable
+auto-update**. After an update lands, Claude Code prompts you to run
+`/reload-plugins` (or restart the session) to pick up the new code.
+
+Prefer to update on your own schedule? Skip the toggle and pull manually
+whenever you want:
+
+```
+/plugin marketplace update altdoug-plugins
+/plugin update found-issues
+```
+
 ### Uninstalling
 
 > **Order matters.** Run our cleanup *before* the platform uninstall, or
