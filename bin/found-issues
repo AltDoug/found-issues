@@ -694,8 +694,23 @@ cmd_status() {
         "$critical" "$issues" "$in_pr" "$stale" "$total_open"
       ;;
     plain)
+      # Label policy (2026-05-10 UX audit, surfaces 2.1 + 9.1):
+      # The "issues" bucket is the residual: total_open minus in_pr minus
+      # critical. When it's the ONLY counter on display (no critical / no
+      # in_pr / no stale), "issue/issues" reads naturally. When other
+      # counters are present, "other" disambiguates the residual so users
+      # don't try to mentally add "2 critical + 5 issues = 7 open" (which
+      # double-counts because critical is excluded from the residual).
+      local has_other_counter=0
+      [[ "$critical" -gt 0 ]] && has_other_counter=1
+      [[ "$in_pr" -gt 0 ]] && has_other_counter=1
+      [[ "$stale" -gt 0 ]] && has_other_counter=1
       local issues_word
-      issues_word="$([[ "$issues" -eq 1 ]] && echo "issue" || echo "issues")"
+      if (( has_other_counter == 1 )); then
+        issues_word="other"
+      else
+        issues_word="$([[ "$issues" -eq 1 ]] && echo "issue" || echo "issues")"
+      fi
       local parts=()
       [[ "$critical" -gt 0 ]] && parts+=("$critical critical")
       [[ "$issues" -gt 0 ]] && parts+=("$issues $issues_word")
@@ -715,9 +730,18 @@ cmd_status() {
       fi
       ;;
     segment)
-      # ANSI-colored, with leading separator (for inline statusline injection)
+      # ANSI-colored, with leading separator (for inline statusline injection).
+      # Same label policy as the plain branch — see comment above.
+      local has_other_counter=0
+      [[ "$critical" -gt 0 ]] && has_other_counter=1
+      [[ "$in_pr" -gt 0 ]] && has_other_counter=1
+      [[ "$stale" -gt 0 ]] && has_other_counter=1
       local issues_word
-      issues_word="$([[ "$issues" -eq 1 ]] && echo "issue" || echo "issues")"
+      if (( has_other_counter == 1 )); then
+        issues_word="other"
+      else
+        issues_word="$([[ "$issues" -eq 1 ]] && echo "issue" || echo "issues")"
+      fi
       local parts=()
       [[ "$critical" -gt 0 ]] && parts+=($'\033[1;31m'"$critical critical"$'\033[0m')
       [[ "$issues" -gt 0 ]] && parts+=($'\033[31m'"$issues $issues_word"$'\033[0m')
