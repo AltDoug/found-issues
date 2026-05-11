@@ -3,8 +3,8 @@
 ## What does it actually do?
 
 When Claude (or any AI agent) notices a bug, error, or warning while
-working on something else, it usually shrugs: *"pre-existing, not our
-problem, let's continue."* found-issues makes it stop, log the
+working on something else, it usually shrugs: *"pre-existing, not the
+code we touched, let's move on."* found-issues makes it stop, log the
 observation to `docs/found-issues.md`, and surface it later. Entries
 flip to `[fixed]` automatically when a PR or commit addresses them.
 

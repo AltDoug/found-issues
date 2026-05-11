@@ -9,10 +9,10 @@
 ![demo](hero.png)
 
 When Claude notices a bug, error, or warning while working on something
-else, it usually shrugs and moves on — *"pre-existing, not our code,
-let's continue."* found-issues makes it stop, log the observation, and
-surface it later. Automatically. Across sessions. **Without the user
-lifting a finger.**
+else, it usually shrugs and moves on — *"pre-existing, not the code we
+touched, let's continue."* found-issues makes it stop, log the
+observation, and surface it later. Automatically. Across sessions.
+**Without the user lifting a finger.**
 
 ## Installation
 
@@ -175,8 +175,9 @@ stale, so the segment counts always add up cleanly.)
 Most AI coding agents have a **proactive blindspot**: they notice
 defects in code they're reading, judge those defects as out-of-scope,
 and silently move on. Sometimes they say "I noticed X but it's
-pre-existing, not our problem." Then the bug stays in the codebase
-forever — invisible to the user who'd never have spotted it themselves.
+pre-existing, not the code we touched, let's move on." Then the bug
+stays in the codebase forever — invisible to the user who'd never have
+spotted it themselves.
 
 found-issues changes the contract. The agent maintains a tiny markdown
 file as it works. Issues never disappear into the void. Eventually they
