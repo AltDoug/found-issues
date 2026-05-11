@@ -203,8 +203,17 @@ fi_handle_deferred_touch() {
     is_critical=1
   fi
 
+  # Stderr nudge: fires on count >= threshold (both at-threshold and overshoot).
+  # Overshoot wording surfaces how many touches the user has accumulated past
+  # the threshold — useful when they've been ignoring the nudge and want to
+  # gauge whether the entry warrants promotion now.
   if (( count >= threshold )) && (( is_critical == 0 )); then
-    printf 'Touched deferred entry (now %dx, threshold %d): %s\n' "$count" "$threshold" "$hint" >&2
+    if (( count == threshold )); then
+      printf 'Touched deferred entry (now %dx, threshold %d): %s\n' "$count" "$threshold" "$hint" >&2
+    else
+      printf 'Touched deferred entry (now %dx, %d past threshold of %d): %s\n' \
+        "$count" "$((count - threshold))" "$threshold" "$hint" >&2
+    fi
     printf 'Consider: found-issues promote-deferred --match %s\n' "$hint" >&2
   fi
 
@@ -216,13 +225,16 @@ fi_handle_deferred_touch() {
   # Stdout summary — emitted for every deferred-touch case so wrappers that
   # swallow stderr still surface the event. The stderr lines above remain
   # the canonical user-facing detail; stdout is a single parseable line.
-  # See 2026-05-10 UX audit, surface 3.3.
+  # See 2026-05-10 UX audit, surfaces 3.3 + 4.2.
   if (( count >= threshold )) && (( is_critical == 1 )); then
     printf 'Touched [deferred] (auto-promoted to [open]): %s (cycle %d, %dx of %d)\n' \
       "$hint" "$cycle" "$count" "$threshold"
-  elif (( count >= threshold )); then
+  elif (( count == threshold )); then
     printf 'Touched [deferred] (at threshold): %s (cycle %d, %dx of %d) — consider promote-deferred\n' \
       "$hint" "$cycle" "$count" "$threshold"
+  elif (( count > threshold )); then
+    printf 'Touched [deferred] (past threshold by %d): %s (cycle %d, %dx of %d) — consider promote-deferred\n' \
+      "$((count - threshold))" "$hint" "$cycle" "$count" "$threshold"
   else
     printf 'Touched [deferred]: %s (cycle %d, %dx of %d)\n' \
       "$hint" "$cycle" "$count" "$threshold"
