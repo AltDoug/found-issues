@@ -150,9 +150,11 @@ The auto-loaded rules teach Claude to annotate entries it fixes (via
 merge, the entries flip to `[fixed]` automatically.
 
 **Use the count as soft pressure.** When the statusline reads
-`12 issues · 3 critical`, it's a constant reminder that there's known
+`3 critical · 12 other`, it's a constant reminder that there's known
 work waiting. The critical flag (`[!]`) bubbles drop-everything items
-to the top.
+to the top. (The residual bucket labels as "issue/issues" when it's the
+only counter on display and "other" when alongside critical / in PR /
+stale, so the segment counts always add up cleanly.)
 
 ## Why this exists
 
