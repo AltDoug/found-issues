@@ -272,6 +272,7 @@ Open an issue if you have a use case for any of these.
 - [`docs/architecture.md`](docs/architecture.md) — how the pieces fit together
 - [`docs/format-spec.md`](docs/format-spec.md) — canonical entry format
 - [`docs/modes.md`](docs/modes.md) — workflow modes and detection
+- [`docs/configuration.md`](docs/configuration.md) — every env-var opt-out and tunable
 - [`docs/faq.md`](docs/faq.md) — common questions
 - [`AGENTS.md`](AGENTS.md) — instructions for AI agents installing this
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to propose changes
