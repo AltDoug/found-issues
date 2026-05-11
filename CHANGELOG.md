@@ -11,6 +11,36 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Demo GIF embedded in README
 - Submission to official Claude Code marketplace
 
+## [1.0.6] — 2026-05-11
+
+### Audit-driven fixes (5 PRs, all from the 2026-05-10 UX audit)
+
+The 2026-05-10 end-to-end UX audit ([`docs/superpowers/audits/2026-05-10-ux-audit.md`](docs/superpowers/audits/2026-05-10-ux-audit.md)) walked the 10 surfaces a new user touches in their first 30 minutes and surfaced one P0 + three P1s + a triage of P2/nice-to-have items. v1.0.6 ships the P0 and all three P1s; the P2/nice-to-have items are batched for v1.1+.
+
+### Fixed (P0 — surface 8.1)
+
+- **`hooks/pre-branch-delete.sh` matches by dedup key, not full-line equality** (PR #59). The hook was comparing branch `[open]` entries to main's content via `grep -Fxq`. After a feature branch's entry was annotated with `(PR: ...)` and merged, main's sync flipped it to `[fixed]` and appended `(fixed: YYYY-MM-DD)` — the branch's verbatim `[open]` line no longer matched the new `[fixed]` line, so the hook **hard-blocked deletion of a fully-merged feature branch**. Now compares by dedup key (path:line:symptom) across all statuses on main; promoted entries are correctly recognized regardless of status flip or appended annotations. Hit during the 2026-05-10 `fix/install-statusline-cwd` cleanup. 3 new bats regression tests.
+
+### Fixed (P1 — surfaces 1.1 + 6.1)
+
+- **AGENTS.md install + uninstall sections synced with README** (PR #60). AGENTS.md (the AI-facing source of truth) had drifted from README (the human-facing source of truth) on both install (4-command flow with `/reload-plugins` vs. 2-command + restart) and — more critically — uninstall (claimed `/plugin uninstall` deletes plugin-private state; it does NOT, leaving `~/.claude/found-issues`, the statusline marker block, the mode cache, and the `/fi` alias as orphans). An AI assistant helping a user uninstall would have followed AGENTS.md and created exactly the orphan state PR #50 was meant to mitigate. New `tests/docs-consistency.bats` (6 cases) fails CI on future drift between the two documents.
+
+### Fixed (P1 — surface 3.3)
+
+- **`fi_handle_deferred_touch` emits stdout summary in addition to stderr** (PR #61). Pre-v1.0.6 the deferred-touch path printed only to stderr — wrappers (sidecar tools, CI smoke tests, non-Claude-Code adapters) that swallow stderr saw zero feedback for an action-required event (the nudge, threshold flag, auto-promote). Now emits a single parseable stdout summary line per call (three shapes: below threshold, at threshold "consider promote-deferred", auto-promoted), followed by `cmd_status plain` for symmetry with the open-match and new-entry log paths. Existing stderr output unchanged. 3 new bats cases asserting stdout-only.
+
+### Fixed (P1 — surfaces 2.1 + 9.1)
+
+- **Statusline residual bucket relabels to "other" in mixed counters** (PR #62). The label `2 critical · 5 issues · 1 in PR` was unintuitive: critical is excluded from the residual `issues` count (`issues = total_open - in_pr - critical`), but users naturally tried to add them. Now relabels the residual to `other` whenever critical / in PR / stale is also showing: `2 critical · 5 other · 1 in PR`. The solo plain case (only the residual on display) keeps the natural "1 issue" / "N issues" wording — no regression for the common first-time experience. JSON wire format intentionally unchanged (`"issues": N`) for backwards compat with any external tooling. 5 new bats cases.
+
+### Audit deliverable
+
+- [`docs/superpowers/audits/2026-05-10-ux-audit.md`](docs/superpowers/audits/2026-05-10-ux-audit.md) (PR #58) — 373-line audit walking 10 surfaces with walked-through experience / friction observed / prioritized fixes. Canonical reference for what's coming in v1.1+.
+
+### Tests
+
+- 244 → 261 (+17 across the 4 fix PRs).
+
 ## [1.0.5] — 2026-05-10
 
 ### Added (defer recurrence flow — full lifecycle for [deferred] status)
