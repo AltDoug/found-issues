@@ -161,6 +161,8 @@ fi_handle_deferred_touch() {
   today="$(fi_today)"
 
   # Append today's date FIRST so the count reflects this touch.
+  # Even when muted, we still record the touch for history — the mute
+  # only suppresses the nudge / auto-promote, not the audit trail.
   fi_append_touch "$file" "$matched_entry" "$today"
 
   # Re-read the updated entry to compute current count + threshold.
@@ -192,6 +194,20 @@ fi_handle_deferred_touch() {
   hint="${matched_entry#*\] }"
   hint="${hint#* }"  # strip date
   hint="${hint%% — *}"
+
+  # Mute-until short-circuit. If the entry has an active (mute-until: ...)
+  # annotation and today is before that date, suppress nudge + auto-promote
+  # entirely. Touch is still recorded above. See 2026-05-10 UX audit
+  # surface 4.4.
+  if fi_is_muted "$updated_entry" "$today"; then
+    local mute_date
+    mute_date="$(fi_extract_mute_until "$updated_entry")"
+    printf 'Touched deferred entry (muted until %s): %s\n' "$mute_date" "$hint" >&2
+    printf 'Touched [deferred] (muted until %s): %s (cycle %d, %dx of %d)\n' \
+      "$mute_date" "$hint" "$cycle" "$count" "$threshold"
+    cmd_status plain
+    return 0
+  fi
 
   if (( count < threshold )); then
     printf 'Touched deferred entry (%dx of %d for promotion): %s\n' "$count" "$threshold" "$hint" >&2
@@ -440,6 +456,7 @@ cmd_log() {
 cmd_defer() {
   local match="${1:-}"
   local reason=""
+  local mute_until=""
 
   # Argument parsing
   shift || true
@@ -447,6 +464,10 @@ cmd_defer() {
     case "$1" in
       --reason)
         reason="${2:-}"
+        shift 2 || break
+        ;;
+      --mute-until)
+        mute_until="${2:-}"
         shift 2 || break
         ;;
       *)
@@ -457,8 +478,27 @@ cmd_defer() {
 
   if [[ -z "$match" ]]; then
     fi_err "defer: missing <match> argument"
-    fi_err "Usage: found-issues defer <match> [--reason \"<text>\"]"
+    fi_err "Usage: found-issues defer <match> [--reason \"<text>\"] [--mute-until YYYY-MM-DD]"
     return 2
+  fi
+
+  # Validate --mute-until format if provided. Lexical YYYY-MM-DD is required;
+  # we don't run semantic validation (Feb 30 etc.) because cross-platform
+  # `date` parsing is gnarly. Bad dates degrade to "annotation present, never
+  # matches today's date" which fails open (nudge resumes) — safe.
+  if [[ -n "$mute_until" ]]; then
+    if ! [[ "$mute_until" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+      fi_err "defer: --mute-until value must be YYYY-MM-DD, got: $mute_until"
+      return 2
+    fi
+    # Warn (not error) on a date in the past — the user may have a stale
+    # value and probably wants to know, but the entry is still validly
+    # deferred (just with a no-op mute).
+    local today
+    today="$(fi_today)"
+    if [[ "$mute_until" < "$today" ]] || [[ "$mute_until" == "$today" ]]; then
+      fi_err "defer: warning — --mute-until $mute_until is not in the future (today: $today). The mute will be a no-op; nudges resume on the next touch."
+    fi
   fi
 
   local file
@@ -529,6 +569,7 @@ cmd_defer() {
   fi
 
   # First: flip [open] → [deferred] and replace any existing (reason: ...)
+  # and (mute-until: ...) annotations.
   local tmp
   tmp="$(mktemp -t fi-defer.XXXXXX)"
   local found=0
@@ -537,11 +578,16 @@ cmd_defer() {
     if [[ "$line" == "$target" ]] && (( found == 0 )); then
       found=1
       local new_line="${line/- \[open\]/- [deferred]}"
-      # Strip any existing (reason: ...) annotation
+      # Strip any existing (reason: ...) and (mute-until: ...) annotations.
       new_line="$(printf '%s' "$new_line" | sed -E 's/ \(reason: [^)]+\)//g')"
-      # Append new (reason: ...) if --reason was provided
+      new_line="$(printf '%s' "$new_line" | sed -E 's/ \(mute-until: [0-9]{4}-[0-9]{2}-[0-9]{2}\)//g')"
+      # Append new (reason: ...) if --reason was provided.
       if [[ -n "$reason" ]]; then
         new_line="${new_line} (reason: ${reason})"
+      fi
+      # Append new (mute-until: ...) if --mute-until was provided.
+      if [[ -n "$mute_until" ]]; then
+        new_line="${new_line} (mute-until: ${mute_until})"
       fi
       flipped_entry="$new_line"
       printf '%s\n' "$new_line" >> "$tmp"
@@ -571,6 +617,11 @@ cmd_defer() {
 # Flip a single matched [deferred] entry to [open] in $file.
 # Returns 0 on success. Used by both cmd_promote_deferred (matches by user
 # input) and fi_handle_deferred_touch (matches by exact entry).
+#
+# Strips (mute-until: ...) on flip — the annotation is a defer-state
+# concept; an [open] entry has no nudge to suppress. touch history,
+# defer-cycle, and reason annotations are preserved as evidence per
+# the defer-recurrence-flow design.
 fi_promote_entry_to_open() {
   local file="$1"
   local target="$2"
@@ -581,6 +632,7 @@ fi_promote_entry_to_open() {
     if [[ "$line" == "$target" ]] && (( found == 0 )); then
       found=1
       local new_line="${line/- \[deferred\]/- [open]}"
+      new_line="$(printf '%s' "$new_line" | sed -E 's/ \(mute-until: [0-9]{4}-[0-9]{2}-[0-9]{2}\)//g')"
       printf '%s\n' "$new_line" >> "$tmp"
     else
       printf '%s\n' "$line" >> "$tmp"

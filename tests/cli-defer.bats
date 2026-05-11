@@ -95,3 +95,52 @@ EOF
   ! grep -F "(reason: original reason)" docs/found-issues.md
   grep -F "(defer-cycle: 3)" docs/found-issues.md
 }
+
+# === 2026-05-10 UX audit surface 4.4 — --mute-until flag ===
+
+@test "defer: --mute-until adds (mute-until: ...) annotation" {
+  fi_run log "src/foo.py:42 — null check missing"
+  fi_run defer "src/foo.py:42" --mute-until "2099-12-31"
+  [ "$status" -eq 0 ]
+  grep -F "(mute-until: 2099-12-31)" docs/found-issues.md
+  grep -F "[deferred]" docs/found-issues.md
+}
+
+@test "defer: --mute-until and --reason combine on one line" {
+  fi_run log "src/foo.py:42 — null check"
+  fi_run defer "src/foo.py:42" --reason "blocked on JIRA-42" --mute-until "2099-12-31"
+  [ "$status" -eq 0 ]
+  grep -F "(reason: blocked on JIRA-42)" docs/found-issues.md
+  grep -F "(mute-until: 2099-12-31)" docs/found-issues.md
+}
+
+@test "defer: --mute-until validates YYYY-MM-DD format and rejects garbage" {
+  fi_run log "src/foo.py:42 — null check"
+  fi_run defer "src/foo.py:42" --mute-until "next-thursday"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"YYYY-MM-DD"* ]]
+  # Entry should NOT have been deferred (we exited before the file mutation)
+  grep -F "[open]" docs/found-issues.md
+  ! grep -F "[deferred]" docs/found-issues.md
+}
+
+@test "defer: --mute-until in the past prints a warning but still defers" {
+  fi_run log "src/foo.py:42 — null check"
+  fi_run defer "src/foo.py:42" --mute-until "2020-01-01"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"not in the future"* ]] || [[ "$output" == *"warning"* ]]
+  grep -F "[deferred]" docs/found-issues.md
+  grep -F "(mute-until: 2020-01-01)" docs/found-issues.md
+}
+
+@test "defer: re-defer replaces existing (mute-until: ...) annotation" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-05-10 src/foo.py:42 — null check (mute-until: 2099-01-01) (touched: 2026-05-21, 2026-05-28, 2026-06-04)
+EOF
+  fi_run defer "src/foo.py:42" --mute-until "2099-12-31"
+  [ "$status" -eq 0 ]
+  grep -F "(mute-until: 2099-12-31)" docs/found-issues.md
+  ! grep -F "(mute-until: 2099-01-01)" docs/found-issues.md
+}
