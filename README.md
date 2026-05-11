@@ -48,6 +48,23 @@ The plugin handles automatically:
 - Adding the `found-issues` CLI to your PATH
 - Working in any repo (auto-detects mode: local / git / github-direct / github-pr)
 
+### Staying up to date
+
+Claude Code keeps third-party marketplaces (this one included) on **manual
+update** by default. **Recommended:** flip auto-update on once, then future
+versions land silently at session start. Run `/plugin`, open the
+**Marketplaces** tab, pick `altdoug-plugins`, and choose **Enable
+auto-update**. After an update lands, Claude Code prompts you to run
+`/reload-plugins` (or restart the session) to pick up the new code.
+
+Prefer to update on your own schedule? Skip the toggle and pull manually
+whenever you want:
+
+```
+/plugin marketplace update altdoug-plugins
+/plugin update found-issues
+```
+
 ### Uninstalling
 
 > **Order matters.** Run our cleanup *before* the platform uninstall, or
@@ -59,17 +76,14 @@ The plugin handles automatically:
 /plugin marketplace remove altdoug-plugins         # 3. (only if you also want to remove the marketplace)
 ```
 
-Why the order: `/plugin uninstall` (Claude Code's built-in command) only
-removes the plugin code itself — it does **not** invoke our `uninstall` skill.
-If you run it first, the statusline segment, onboarding marker, mode cache,
-and `/fi` alias all stay behind in `~/.claude/`. They're invisible until you
-reinstall later, at which point they cause confusing state mismatches (silent
-broken statusline counter, orphaned alias, etc.).
+<details>
+<summary>Why the order matters</summary>
 
-`/found-issues:uninstall` runs `found-issues uninstall` which removes only
-files our installer ever touched (manifest-tracked, conservative). Per-repo
-`docs/found-issues.md` files are intentionally preserved — they're your
-project data.
+`/plugin uninstall` (Claude Code's built-in command) only removes the plugin code itself — it does **not** invoke our `uninstall` skill. If you run it first, the statusline segment, onboarding marker, mode cache, and `/fi` alias all stay behind in `~/.claude/`. They're invisible until you reinstall later, at which point they cause confusing state mismatches (silent broken statusline counter, orphaned alias, etc.).
+
+`/found-issues:uninstall` runs `found-issues uninstall` which removes only files our installer ever touched (manifest-tracked, conservative). Per-repo `docs/found-issues.md` files are intentionally preserved — they're your project data.
+
+</details>
 
 ## What it does
 
@@ -194,6 +208,7 @@ All namespaced under `/found-issues:` (Claude Code plugin convention):
 | `/found-issues:status` | Print current counts |
 | `/found-issues:archive` | Move old `[fixed]` entries to `docs/found-issues-archive.md` (count threshold 50 OR days threshold 30, whichever first) |
 | `/found-issues:setup` | Optional first-run orientation |
+| `/found-issues:doctor` | General health check — CLI, statusline, gh, mode, hook opt-outs, issues file |
 | `/found-issues:uninstall` | Clean up plugin-private state before `/plugin uninstall` |
 
 **Want shorter typing?** `/found-issues:setup` offers an optional `/fi`
@@ -204,34 +219,17 @@ removable via `found-issues uninstall-fi-alias`.
 
 ## Format
 
+Entries are markdown checklist lines:
+
 ```
-- [STATUS] [!] YYYY-MM-DD path:line — symptom (suggested: fix) (PR: org/repo#N) (fixed: YYYY-MM-DD)
+- [STATUS] [!] YYYY-MM-DD path:line — symptom (annotations…)
 ```
 
-- **Statuses**: `open` / `deferred` / `fixed`
-- **`[!]`** optional critical flag (drop-everything priority)
-- **` — `** is U+2014 em-dash with spaces, *not* a hyphen
-- **Annotations** are optional but enable auto-flipping; `(PR: ...)` and
-  `(commit: ...)` can coexist on one entry
-
-Full grammar, regex patterns, and invalid examples: [`docs/format-spec.md`](docs/format-spec.md).
+Statuses are `open` / `deferred` / `fixed`. `[!]` is the optional critical flag. Annotations like `(PR: org/repo#N)` and `(commit: <sha>)` are optional but enable auto-flipping. Full grammar, regex, and edge cases: [`docs/format-spec.md`](docs/format-spec.md).
 
 ## Workflow modes
 
-found-issues auto-detects which mode each repo is in:
-
-| Mode | Detected when | Closure mechanism |
-|---|---|---|
-| `local` | No `.git/` directory | Manual + tombstone |
-| `git` | Git repo, no GitHub remote | `(commit: <sha>)` + tombstone |
-| `github-direct` | GitHub remote, no recent merged PRs | `(commit: <sha>)` + tombstone |
-| `github-pr` | GitHub remote with recent merged PRs | `(PR: org/repo#N)` + commit + tombstone |
-
-Mixed workflow (sometimes PR, sometimes direct push) is fully
-supported — both annotation forms always work; mode just sets the
-default.
-
-Details + edge cases: [`docs/modes.md`](docs/modes.md).
+Auto-detects 4 modes per repo: `local`, `git`, `github-direct`, `github-pr`. Mixed workflow (sometimes PR, sometimes direct push) is fully supported — mode just sets the default closure mechanism. Detection logic, mode table, and edge cases: [`docs/modes.md`](docs/modes.md).
 
 ## Platform support
 
@@ -247,25 +245,11 @@ Tested in CI on:
 
 If you're on a Windows install without Git Bash or WSL, install Git for Windows first.
 
-## Status & roadmap
+## Status
 
-**v1.0.1 — Windows support added.**
+**v1.1.0** — 297 tests passing in CI on Linux + macOS + Windows (Git Bash). 7 hooks, 9 slash commands, 1 CLI binary, all wired through the Claude Code plugin spec.
 
-- 165 tests passing in CI on **Linux + macOS + Windows** (Git Bash)
-- 7 hooks + 9 slash commands + a CLI binary, all wired through the
-  Claude Code plugin spec
-- Auto-detected modes; no per-repo configuration
-- Optional per-repo git pre-commit hook for format validation outside
-  Claude Code
-
-Roadmap things being considered (not committed):
-
-- Universal layer that works with Codex / Cursor / Aider
-- AI-assisted dedup for semantic-similar entries
-- Configurable stale threshold per repo
-- Web dashboard / browser extension for non-terminal users
-
-Open an issue if you have a use case for any of these.
+Have a use case the plugin doesn't cover? [Open an issue](https://github.com/AltDoug/found-issues/issues/new).
 
 ## Docs
 
@@ -273,6 +257,7 @@ Open an issue if you have a use case for any of these.
 - [`docs/format-spec.md`](docs/format-spec.md) — canonical entry format
 - [`docs/modes.md`](docs/modes.md) — workflow modes and detection
 - [`docs/configuration.md`](docs/configuration.md) — every env-var opt-out and tunable
+- [`docs/versioning.md`](docs/versioning.md) — SemVer rules + when to bump which segment
 - [`docs/faq.md`](docs/faq.md) — common questions
 - [`AGENTS.md`](AGENTS.md) — instructions for AI agents installing this
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to propose changes

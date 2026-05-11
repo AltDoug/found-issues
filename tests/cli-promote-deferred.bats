@@ -76,3 +76,22 @@ EOF
   grep -F "(defer-cycle: 2)" docs/found-issues.md
   grep -F "(touched: 2026-05-21, 2026-05-28; 2026-07-15)" docs/found-issues.md
 }
+
+@test "promote-deferred: strips (mute-until: ...) on flip to [open]" {
+  # 2026-05-10 UX audit surface 4.4 design. mute-until is a defer-state
+  # concept; an [open] entry has no nudge to suppress. Stripping it on
+  # promote keeps the active file readable. touch/cycle/reason stay.
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check (reason: blocked) (touched: 2026-05-21) (mute-until: 2099-12-31)
+EOF
+  fi_run promote-deferred "src/foo.py:42"
+  [ "$status" -eq 0 ]
+  grep -F "[open]" docs/found-issues.md
+  # mute-until is gone
+  ! grep -F "(mute-until:" docs/found-issues.md
+  # other annotations stay
+  grep -F "(reason: blocked)" docs/found-issues.md
+  grep -F "(touched: 2026-05-21)" docs/found-issues.md
+}
