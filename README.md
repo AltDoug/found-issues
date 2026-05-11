@@ -194,6 +194,7 @@ All namespaced under `/found-issues:` (Claude Code plugin convention):
 | `/found-issues:status` | Print current counts |
 | `/found-issues:archive` | Move old `[fixed]` entries to `docs/found-issues-archive.md` (count threshold 50 OR days threshold 30, whichever first) |
 | `/found-issues:setup` | Optional first-run orientation |
+| `/found-issues:doctor` | General health check — CLI, statusline, gh, mode, hook opt-outs, issues file |
 | `/found-issues:uninstall` | Clean up plugin-private state before `/plugin uninstall` |
 
 **Want shorter typing?** `/found-issues:setup` offers an optional `/fi`

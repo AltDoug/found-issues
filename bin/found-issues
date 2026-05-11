@@ -125,6 +125,7 @@ COMMANDS
                                         timestamped backup). Pass --no-migrate to refuse touching
                                         legacy lines (v1.0.3 strict behavior).
   uninstall-statusline                  Remove the counter segment block
+  doctor                                General health check (CLI, statusline, gh, mode, hooks, issues file)
   doctor-statusline                     Diagnose the current statusline integration (no changes)
   install-fi-alias                      Create the /fi shortcut at ~/.claude/commands/fi.md
   uninstall-fi-alias                    Remove the /fi shortcut (only if it's ours)
@@ -1788,6 +1789,196 @@ cmd_doctor_statusline() {
   esac
 }
 
+# === Subcommand: doctor ===
+#
+# General-purpose health diagnostic — aggregates statusline state, gh auth,
+# mode detection, hook opt-outs, and issues-file state into a single
+# printable report. Read-only (no file modifications). Always exits 0.
+#
+# Composes existing subdiagnostics rather than duplicating logic — calls
+# fi_statusline_state, fi_detect_mode, fi_find_issues_file, fi_count*.
+# Added 2026-05-10 UX audit (surfaces 5.2 + 6.2 fast-follow).
+cmd_doctor() {
+  local section_pass="✓"
+  local section_warn="!"
+  local section_fail="✗"
+
+  # Resolve a portable "section" prefix without unicode — older terminals
+  # render "✓" as a tofu box. Fall back to ASCII when LC_ALL doesn't claim UTF-8.
+  if ! locale 2>/dev/null | grep -qi 'utf-8\|utf8'; then
+    section_pass="OK"
+    section_warn="!!"
+    section_fail="FAIL"
+  fi
+
+  printf 'found-issues doctor — v%s\n\n' "$FI_VERSION"
+
+  # --- Plugin runtime ---
+  printf '== Plugin runtime ==\n'
+  printf '%s CLI: %s\n' "$section_pass" "${FI_BIN_DIR}/found-issues"
+  printf '%s lib dir: %s\n' "$section_pass" "$FI_LIB_DIR"
+  if [[ -d "$HOME/.claude/found-issues" ]]; then
+    if [[ -f "$HOME/.claude/found-issues/.onboarded" ]]; then
+      printf '%s Onboarding marker present (setup ran at least once).\n' "$section_pass"
+    else
+      printf '%s Onboarding marker dir exists but `.onboarded` is missing — first-run SessionStart hint may fire again.\n' "$section_warn"
+    fi
+  else
+    printf '%s No onboarding marker — first-run SessionStart hint will fire on next session start.\n' "$section_warn"
+  fi
+  printf '\n'
+
+  # --- Statusline ---
+  printf '== Statusline ==\n'
+  if [[ -f "$FI_STATUSLINE_FILE" ]]; then
+    local statusline_state
+    statusline_state="$(fi_statusline_state)"
+    case "$statusline_state" in
+      installed-fixed)
+        printf '%s State: installed-fixed (canonical block, cwd handling present).\n' "$section_pass"
+        ;;
+      installed-broken|legacy-handwritten|legacy-and-installed)
+        printf '%s State: %s — counter renders empty silently.\n' "$section_fail" "$statusline_state"
+        printf '   Fix: found-issues install-statusline   (auto-migrates with timestamped backup)\n'
+        ;;
+      none)
+        printf '%s State: none — statusline.sh exists but no found-issues segment.\n' "$section_warn"
+        printf '   Install: found-issues install-statusline\n'
+        ;;
+      no-file)
+        printf '%s State: no-file (unreachable — guarded above).\n' "$section_warn"
+        ;;
+    esac
+  else
+    printf '%s No %s — Claude Code uses the default statusline.\n' "$section_warn" "$FI_STATUSLINE_FILE"
+    printf '   To enable the counter segment, create the file and run `found-issues install-statusline`.\n'
+  fi
+  printf '\n'
+
+  # --- gh CLI auth (only relevant in github-* modes) ---
+  printf '== gh CLI ==\n'
+  if command -v gh >/dev/null 2>&1; then
+    if gh auth status >/dev/null 2>&1; then
+      local gh_user
+      gh_user="$(gh api user --jq '.login' 2>/dev/null || echo unknown)"
+      printf '%s gh authenticated as %s.\n' "$section_pass" "$gh_user"
+    else
+      printf '%s gh installed but not authenticated. `gh auth login` to enable PR-related features.\n' "$section_warn"
+    fi
+  else
+    printf '%s gh CLI not on PATH. PR-related features (annotate-pr, sync against PR merges) are disabled.\n' "$section_warn"
+  fi
+  printf '\n'
+
+  # --- Mode detection + cache ---
+  printf '== Mode detection ==\n'
+  local mode
+  mode="$(fi_detect_mode)"
+  printf '%s Detected mode: %s\n' "$section_pass" "$mode"
+  if [[ -n "${FOUND_ISSUES_MODE:-}" ]]; then
+    printf '   (env override active: FOUND_ISSUES_MODE=%s)\n' "$FOUND_ISSUES_MODE"
+  fi
+  if [[ -d "$HOME/.cache/found-issues" ]]; then
+    local cache_count
+    cache_count="$(find "$HOME/.cache/found-issues" -type f -name 'mode_*' 2>/dev/null | wc -l | tr -d ' ')"
+    printf '%s Mode cache: %s/.cache/found-issues/ (%s cached repos)\n' "$section_pass" "$HOME" "$cache_count"
+  else
+    printf '%s Mode cache directory not present yet — will be created on first GitHub-mode detection.\n' "$section_warn"
+  fi
+  printf '\n'
+
+  # --- Hook opt-outs ---
+  printf '== Hook opt-outs ==\n'
+  local any_off=0
+  local v
+  for v in FOUND_ISSUES_STOP_REMINDER FOUND_ISSUES_PROMOTE_GUARD FOUND_ISSUES_FORMAT_ENFORCER FOUND_ISSUES_PRE_COMMIT FOUND_ISSUES_AUTO_ARCHIVE; do
+    local val="${!v:-}"
+    if [[ "$val" == "off" ]]; then
+      printf '%s %s=off  (hook disabled)\n' "$section_warn" "$v"
+      any_off=1
+    fi
+  done
+  if (( any_off == 0 )); then
+    printf '%s All hooks default-active. See docs/configuration.md for the opt-out list.\n' "$section_pass"
+  fi
+  printf '\n'
+
+  # --- Defer-flow tunables (only print if non-default) ---
+  if [[ -n "${FOUND_ISSUES_DEFER_TOUCH_THRESHOLD:-}" ]] || [[ -n "${FOUND_ISSUES_DEFER_ESCALATION_FACTOR:-}" ]] || [[ -n "${FOUND_ISSUES_STALE_DAYS:-}" ]]; then
+    printf '== Tunables (non-default) ==\n'
+    [[ -n "${FOUND_ISSUES_DEFER_TOUCH_THRESHOLD:-}" ]] && printf '   FOUND_ISSUES_DEFER_TOUCH_THRESHOLD=%s (default 3)\n' "$FOUND_ISSUES_DEFER_TOUCH_THRESHOLD"
+    [[ -n "${FOUND_ISSUES_DEFER_ESCALATION_FACTOR:-}" ]] && printf '   FOUND_ISSUES_DEFER_ESCALATION_FACTOR=%s (default 2)\n' "$FOUND_ISSUES_DEFER_ESCALATION_FACTOR"
+    [[ -n "${FOUND_ISSUES_STALE_DAYS:-}" ]] && printf '   FOUND_ISSUES_STALE_DAYS=%s (default 30)\n' "$FOUND_ISSUES_STALE_DAYS"
+    printf '\n'
+  fi
+
+  # --- Issues file ---
+  printf '== Issues file ==\n'
+  local issues_file
+  issues_file="$(fi_find_issues_file 2>/dev/null || true)"
+  if [[ -n "$issues_file" && -f "$issues_file" ]]; then
+    local total_open critical in_pr stale deferred fixed
+    total_open="$(fi_count "$issues_file" open)"
+    critical="$(fi_count_critical "$issues_file")"
+    in_pr="$(fi_count_in_pr "$issues_file")"
+    stale="$(fi_count_stale "$issues_file" "${FOUND_ISSUES_STALE_DAYS:-30}")"
+    deferred="$(fi_count "$issues_file" deferred)"
+    fixed="$(fi_count "$issues_file" fixed)"
+    printf '%s Path: %s\n' "$section_pass" "$issues_file"
+    printf '   open: %s (critical: %s, in PR: %s, stale: %s)\n' "$total_open" "$critical" "$in_pr" "$stale"
+    printf '   deferred: %s\n' "$deferred"
+    printf '   fixed: %s\n' "$fixed"
+
+    # Suspicious entry checks. grep -c can return non-zero when no match,
+    # so wrap each command substitution with `|| true` (set -e+pipefail at
+    # the top of this script would otherwise exit on no-match) and strip
+    # whitespace via tr.
+    local susp_count=0
+    local bad_open
+    bad_open="$(grep -cE '^- \[open\].*\(fixed:' "$issues_file" 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ -z "$bad_open" || ! "$bad_open" =~ ^[0-9]+$ ]] && bad_open=0
+    if (( bad_open > 0 )); then
+      printf '%s %s [open] entries with stray (fixed: ...) annotation — sync didn'\''t flip them yet, or annotation is malformed.\n' "$section_warn" "$bad_open"
+      susp_count=$((susp_count + bad_open))
+    fi
+
+    local bad_fixed with_anno
+    bad_fixed="$(grep -cE '^- \[fixed\]' "$issues_file" 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ -z "$bad_fixed" || ! "$bad_fixed" =~ ^[0-9]+$ ]] && bad_fixed=0
+    with_anno="$(grep -cE '^- \[fixed\].*\(fixed: [0-9]{4}-[0-9]{2}-[0-9]{2}\)' "$issues_file" 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ -z "$with_anno" || ! "$with_anno" =~ ^[0-9]+$ ]] && with_anno=0
+    if (( bad_fixed > with_anno )); then
+      local missing=$((bad_fixed - with_anno))
+      printf '%s %s [fixed] entries without (fixed: YYYY-MM-DD) annotation — closure date unknown.\n' "$section_warn" "$missing"
+      susp_count=$((susp_count + missing))
+    fi
+
+    if (( susp_count == 0 )); then
+      printf '%s No suspicious entries detected.\n' "$section_pass"
+    fi
+  else
+    printf '%s No issues file found in this directory or any ancestor.\n' "$section_warn"
+    printf '   First `found-issues log` will create %s\n' "docs/found-issues.md (or .found-issues.md in local mode)"
+  fi
+  printf '\n'
+
+  # --- Recommended next actions ---
+  printf '== Recommended next ==\n'
+  case "$(fi_statusline_state 2>/dev/null)" in
+    installed-broken|legacy-handwritten|legacy-and-installed)
+      printf '   - Run `found-issues install-statusline` to fix the broken counter.\n'
+      ;;
+  esac
+  if [[ -n "$issues_file" && -f "$issues_file" ]]; then
+    if [[ "$(fi_count "$issues_file" open)" -gt 0 ]]; then
+      printf '   - Run `/found-issues:sync` to reconcile open entries against PR/commit history.\n'
+    fi
+  fi
+  printf '   - See docs/configuration.md for env-var opt-outs and tunables.\n'
+
+  return 0
+}
+
 # Insert the segment block right after the LAST LINE1= assignment, so the
 # segment is appended to LINE1 inline (next to repo/branch), not echoed as
 # its own line at the end.
@@ -2044,6 +2235,7 @@ main() {
     install-statusline)   cmd_install_statusline "$@" ;;
     uninstall-statusline) cmd_uninstall_statusline "$@" ;;
     doctor-statusline)    cmd_doctor_statusline "$@" ;;
+    doctor)               cmd_doctor "$@" ;;
     install-fi-alias)     cmd_install_fi_alias "$@" ;;
     uninstall-fi-alias)   cmd_uninstall_fi_alias "$@" ;;
     uninstall)            cmd_uninstall "$@" ;;
