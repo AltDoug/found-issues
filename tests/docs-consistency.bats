@@ -33,7 +33,7 @@ fi_first_line() {
   grep -Fq "/found-issues:uninstall" "$AGENTS"
 }
 
-@test "docs-consistency: README's uninstall order — /found-issues:uninstall before /plugin uninstall found-issues" {
+@test "docs-consistency: README's uninstall order has /found-issues:uninstall before /plugin uninstall found-issues" {
   local our_line their_line
   our_line="$(fi_first_line "$README" '/found-issues:uninstall')"
   their_line="$(fi_first_line "$README" '/plugin uninstall found-issues')"
@@ -42,7 +42,7 @@ fi_first_line() {
   (( our_line < their_line ))
 }
 
-@test "docs-consistency: AGENTS.md's uninstall order — /found-issues:uninstall before /plugin uninstall found-issues" {
+@test "docs-consistency: AGENTS.md's uninstall order has /found-issues:uninstall before /plugin uninstall found-issues" {
   local our_line their_line
   our_line="$(fi_first_line "$AGENTS" '/found-issues:uninstall')"
   their_line="$(fi_first_line "$AGENTS" '/plugin uninstall found-issues')"
