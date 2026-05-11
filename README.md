@@ -250,9 +250,9 @@ If you're on a Windows install without Git Bash or WSL, install Git for Windows 
 
 ## Status & roadmap
 
-**v1.0.6 — UX audit fixes** (P0 + 3 P1s from the 2026-05-10 end-to-end audit).
+**v1.1.0 — UX audit fast-follows + SemVer recalibration** (4 P2 items from the 2026-05-10 end-to-end audit + a new CI guard that enforces SemVer rules going forward).
 
-- 261 tests passing in CI on **Linux + macOS + Windows** (Git Bash)
+- 297 tests passing in CI on **Linux + macOS + Windows** (Git Bash)
 - 7 hooks + 9 slash commands + a CLI binary, all wired through the
   Claude Code plugin spec
 - Auto-detected modes; no per-repo configuration
@@ -273,6 +273,7 @@ Open an issue if you have a use case for any of these.
 - [`docs/architecture.md`](docs/architecture.md) — how the pieces fit together
 - [`docs/format-spec.md`](docs/format-spec.md) — canonical entry format
 - [`docs/modes.md`](docs/modes.md) — workflow modes and detection
+- [`docs/versioning.md`](docs/versioning.md) — SemVer rules + when to bump which segment
 - [`docs/faq.md`](docs/faq.md) — common questions
 - [`AGENTS.md`](AGENTS.md) — instructions for AI agents installing this
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to propose changes
