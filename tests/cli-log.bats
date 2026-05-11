@@ -243,6 +243,52 @@ EOF
   [[ "$stdout_only" == *"3x of 3"* ]]
 }
 
+@test "log: deferred-touch overshoot stderr uses 'N past threshold of M' wording" {
+  # 2026-05-10 UX audit surface 4.2. The nudge has always fired on count
+  # >= threshold (the audit misread `>=` as `==`), but pre-v1.0.7 the
+  # stderr wording was identical at-threshold and past-threshold. v1.0.7
+  # splits the wording so users can gauge how far past the threshold
+  # they've drifted.
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing (touched: 2026-05-21, 2026-05-22, 2026-05-23)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  # Entry has 3 touches already; this log makes it 4 (overshoot by 1).
+  fi_run log "src/foo.py:42 — null check missing"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"now 4x"* ]]
+  [[ "$output" == *"1 past threshold of 3"* ]]
+  [[ "$output" == *"promote-deferred"* ]]
+}
+
+@test "log: deferred-touch overshoot stdout uses 'past threshold by N' label" {
+  # Sibling of the previous test — checks the stdout summary line.
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing (touched: 2026-05-21, 2026-05-22, 2026-05-23)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  stdout_only="$("$FI_BIN" log "src/foo.py:42 — null check missing" 2>/dev/null)"
+  [[ "$stdout_only" == *"past threshold by 1"* ]]
+  [[ "$stdout_only" == *"consider promote-deferred"* ]]
+}
+
+@test "log: deferred-touch at exact threshold keeps 'at threshold' wording (regression)" {
+  # Regression: count == threshold must NOT use the overshoot wording.
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing (touched: 2026-05-21, 2026-05-28)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  stdout_only="$("$FI_BIN" log "src/foo.py:42 — null check missing" 2>/dev/null)"
+  [[ "$stdout_only" == *"at threshold"* ]]
+  [[ "$stdout_only" != *"past threshold"* ]]
+}
+
 @test "log: same-day double touch appends date twice" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
