@@ -80,8 +80,9 @@ the CLI subcommand to invoke once the user picks.
 ## Optional 1 — Statusline integration
 
 The plugin offers a counter segment for the user's Claude Code statusline
-showing `N critical · N issues · N in PR · N stale` (each shown only when
-> 0).
+showing `N critical · N other · N in PR · N stale` (each shown only when
+> 0; the residual bucket is labeled "issue/issues" when it's the only
+counter on display, and "other" when alongside any of the other three).
 
 **Use the deterministic CLI subcommand — do NOT edit the file yourself.**
 The plugin ships `found-issues install-statusline` for this. It's
