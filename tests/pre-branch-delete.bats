@@ -91,3 +91,75 @@ teardown() {
   # Skip on default branch (we don't enforce promote-before-delete-of-main)
   [ "$status" -eq 0 ]
 }
+
+@test "pre-branch-delete: allows delete when branch [open] was promoted as [fixed]+annotations on main (dedup-key match)" {
+  # Regression for the 2026-05-10 surprise: a feature branch's [open] entry
+  # gets annotated (PR:..) and merged into main; sync flips it to [fixed]
+  # with (fixed:..) appended. The branch's verbatim [open] line is no
+  # longer on main, but the dedup key is. Pre-v1.0.6 line-equality blocked
+  # the delete; dedup-key matching should allow it.
+  git commit -q --allow-empty -m "init"
+
+  git checkout -q -b feat/work
+  fi_run log "src/foo.py:42 — null check missing"
+  git add -A; git commit -q -m "log entry"
+
+  git checkout -q main
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+
+Test fixture.
+
+- [fixed] 2026-05-08 src/foo.py:42 — null check missing (PR: org/repo#5) (fixed: 2026-05-10)
+EOF
+  git add -A; git commit -q -m "sync flip"
+
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/work"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-branch-delete: allows delete when branch [open] was promoted as [deferred] on main (dedup-key match)" {
+  # Sibling of the [fixed] case: same dedup-key matching, but main has the
+  # entry in [deferred] state (e.g. promoted then deferred). Branch's
+  # [open] should still be considered promoted.
+  git commit -q --allow-empty -m "init"
+
+  git checkout -q -b feat/work
+  fi_run log "src/bar.py:99 — race on shutdown"
+  git add -A; git commit -q -m "log entry"
+
+  git checkout -q main
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+
+Test fixture.
+
+- [deferred] 2026-05-08 src/bar.py:99 — race on shutdown (reason: blocked on legal)
+EOF
+  git add -A; git commit -q -m "promote-then-defer"
+
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/work"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-branch-delete: still blocks when branch [open] has no dedup-key match on main" {
+  # Confirms the new matching doesn't over-allow: a branch entry whose
+  # dedup key is truly absent from main is still flagged as unpromoted.
+  fi_run log "src/main_only.py:1 — main entry"
+  git add -A; git commit -q -m "init"
+
+  git checkout -q -b feat/work
+  fi_run log "src/branch_only.py:1 — branch-only entry"
+  git add -A; git commit -q -m "branch entry"
+
+  git checkout -q main
+
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/work"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"branch_only.py"* ]]
+}
