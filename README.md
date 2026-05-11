@@ -249,9 +249,9 @@ If you're on a Windows install without Git Bash or WSL, install Git for Windows 
 
 ## Status & roadmap
 
-**v1.0.1 — Windows support added.**
+**v1.0.6 — UX audit fixes** (P0 + 3 P1s from the 2026-05-10 end-to-end audit).
 
-- 165 tests passing in CI on **Linux + macOS + Windows** (Git Bash)
+- 261 tests passing in CI on **Linux + macOS + Windows** (Git Bash)
 - 7 hooks + 9 slash commands + a CLI binary, all wired through the
   Claude Code plugin spec
 - Auto-detected modes; no per-repo configuration
