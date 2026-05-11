@@ -200,6 +200,49 @@ EOF
   [[ "$output" == *"now 12x"* ]] || [[ "$output" == *"12x, threshold 12"* ]]
 }
 
+@test "log: deferred-touch nudge surfaces on stdout (not just stderr)" {
+  # Regression for the 2026-05-10 UX audit (surface 3.3). Pre-v1.0.6,
+  # fi_handle_deferred_touch printed only to stderr — wrappers that swallow
+  # stderr saw zero feedback. Now stdout carries a single parseable summary.
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  stdout_only="$("$FI_BIN" log "src/foo.py:42 — null check missing" 2>/dev/null)"
+  [[ "$stdout_only" == *"Touched [deferred]"* ]]
+  [[ "$stdout_only" == *"src/foo.py:42"* ]]
+  [[ "$stdout_only" == *"cycle 1"* ]]
+  [[ "$stdout_only" == *"1x of 3"* ]]
+}
+
+@test "log: deferred-touch at-threshold stdout flags 'consider promote-deferred'" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing (touched: 2026-05-21, 2026-05-28)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  stdout_only="$("$FI_BIN" log "src/foo.py:42 — null check missing" 2>/dev/null)"
+  [[ "$stdout_only" == *"at threshold"* ]]
+  [[ "$stdout_only" == *"consider promote-deferred"* ]]
+  [[ "$stdout_only" == *"3x of 3"* ]]
+}
+
+@test "log: deferred-touch auto-promote stdout reports the flip" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] [!] 2026-05-10 src/foo.py:42 — auth bypass (touched: 2026-05-21, 2026-05-28)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  stdout_only="$("$FI_BIN" log "src/foo.py:42 — auth bypass" 2>/dev/null)"
+  [[ "$stdout_only" == *"auto-promoted to [open]"* ]]
+  [[ "$stdout_only" == *"src/foo.py:42"* ]]
+  [[ "$stdout_only" == *"3x of 3"* ]]
+}
+
 @test "log: same-day double touch appends date twice" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
