@@ -1,6 +1,6 @@
 ---
-description: Defer a [open] found-issue to [deferred] — suppresses it from the statusline counter and adds optional reason. Re-defers (after promotion) automatically increment the defer-cycle and escalate the touch threshold for the next nudge.
-argument-hint: <match> [--reason "<text>"]
+description: Defer a [open] found-issue to [deferred] — suppresses it from the statusline counter, optionally adds reason or mute-until window. Re-defers (after promotion) automatically increment the defer-cycle and escalate the touch threshold for the next nudge.
+argument-hint: <match> [--reason "<text>"] [--mute-until YYYY-MM-DD]
 allowed-tools: Bash(found-issues:*)
 ---
 
@@ -9,7 +9,7 @@ The user wants to defer a `[open]` found-issue. Deferring means: keep the entry 
 ## Invocation
 
 ```bash
-found-issues defer <match> [--reason "<text>"]
+found-issues defer <match> [--reason "<text>"] [--mute-until YYYY-MM-DD]
 ```
 
 `<match>` is a substring matched case-insensitively against the entry's path or symptom. If the match is ambiguous (matches multiple `[open]` entries), the CLI lists all matches and exits 2 — surface them to the user and ask for a more specific match.
@@ -35,3 +35,20 @@ If you defer an entry that was previously `[deferred]` → promoted → now `[op
 ## Optional `--reason "<text>"`
 
 Captures a short human note explaining WHY this entry is being deferred. Stored as `(reason: ...)` on the entry. Replaces any existing `(reason: ...)` from a prior cycle. Helpful for future re-review.
+
+## Optional `--mute-until YYYY-MM-DD`
+
+Suppresses the recurrence nudge (the "now Nx, threshold M" stderr message and the "consider promote-deferred" stdout flag) until the given date. Useful when an entry is genuinely blocked for a known period (legal review, third-party fix, post-Q3 launch window, etc.) and you don't want touch-driven nudges to interrupt during that window.
+
+- Format **must** be ISO `YYYY-MM-DD` (e.g. `2026-08-01`). Garbage is rejected with exit 2.
+- Past dates are accepted but warn — the mute is immediately a no-op, nudges resume on the next touch.
+- Stored as `(mute-until: YYYY-MM-DD)` on the entry; replaces any existing mute-until from a prior cycle.
+- Touches **are still recorded** during the mute (history preservation); only the nudge/auto-promote logic is short-circuited.
+- The mute is stripped automatically on `promote-deferred` — an `[open]` entry doesn't have a nudge to suppress, so the annotation is no longer meaningful.
+- Critical entries (`[!]`) **are** muted too. Auto-promote is suppressed during the mute. Re-promote manually if intent changes mid-mute.
+
+Example:
+
+```bash
+found-issues defer src/auth.py:88 --reason "blocked on legal review (JIRA-1234)" --mute-until 2026-08-01
+```

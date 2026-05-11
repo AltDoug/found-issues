@@ -274,6 +274,35 @@ fi_extract_reason() {
   fi
 }
 
+# Extract the value of the (mute-until: YYYY-MM-DD) annotation.
+# Echoes empty string if absent.
+fi_extract_mute_until() {
+  local line="$1"
+  local re_mute='\(mute-until: ([0-9]{4}-[0-9]{2}-[0-9]{2})\)'
+  if [[ "$line" =~ $re_mute ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
+# Returns 0 if the entry has an active mute-until (today < mute date),
+# 1 otherwise (no annotation, or annotation present but the date has
+# passed). Cross-platform: ISO YYYY-MM-DD sorts lexically so plain string
+# comparison works without `date` arithmetic.
+#
+# Args:
+#   $1 — entry line
+#   $2 — today's date as YYYY-MM-DD (caller supplies; cheaper than re-running
+#        `date` per call)
+fi_is_muted() {
+  local line="$1"
+  local today="$2"
+  local mute_date
+  mute_date="$(fi_extract_mute_until "$line")"
+  [[ -z "$mute_date" ]] && return 1
+  [[ "$today" < "$mute_date" ]] && return 0
+  return 1
+}
+
 # Compute touch threshold for a given defer-cycle.
 # Formula: BASE * FACTOR^(cycle-1), defaulting to 3 * 2^(N-1).
 # Env vars FOUND_ISSUES_DEFER_TOUCH_THRESHOLD (base) and

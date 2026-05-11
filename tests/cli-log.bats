@@ -289,6 +289,65 @@ EOF
   [[ "$stdout_only" != *"past threshold"* ]]
 }
 
+@test "log: deferred-touch on a muted entry suppresses nudge but records touch" {
+  # 2026-05-10 UX audit surface 4.4. Entry has an active --mute-until in
+  # the future. Touch must still be recorded (history preservation), but
+  # the nudge / auto-promote logic is short-circuited.
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing (touched: 2026-05-21, 2026-05-22) (mute-until: 2099-12-31)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  fi_run log "src/foo.py:42 — null check missing"
+  [ "$status" -eq 0 ]
+  # Mute message present
+  [[ "$output" == *"muted until 2099-12-31"* ]]
+  # Nudge messaging absent
+  [[ "$output" != *"promote-deferred"* ]]
+  [[ "$output" != *"at threshold"* ]]
+  [[ "$output" != *"past threshold"* ]]
+  # Touch IS recorded (history preserved)
+  today="$(date +%Y-%m-%d)"
+  grep -F "$today" docs/found-issues.md
+  # Entry still [deferred] (no auto-promote during mute)
+  grep -F "[deferred]" docs/found-issues.md
+}
+
+@test "log: deferred-touch on an expired-mute entry resumes normal nudge" {
+  # Mute-until in the past = expired. Normal logic applies.
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] 2026-05-10 src/foo.py:42 — null check missing (touched: 2026-05-21, 2026-05-28) (mute-until: 2020-01-01)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  # 3rd touch hits threshold; expired mute should NOT suppress the nudge
+  fi_run log "src/foo.py:42 — null check missing"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"muted until"* ]]
+  [[ "$output" == *"promote-deferred"* ]]
+}
+
+@test "log: deferred-touch critical [!] during mute does NOT auto-promote" {
+  # Audit 4.4 design intent: mute applies even to critical entries. If
+  # the user explicitly muted a critical entry, that's their call. Auto-
+  # promote is suppressed for the duration of the mute.
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [deferred] [!] 2026-05-10 src/foo.py:42 — auth bypass (touched: 2026-05-21, 2026-05-28) (mute-until: 2099-12-31)
+EOF
+  unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
+  fi_run log "src/foo.py:42 — auth bypass"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"muted until"* ]]
+  [[ "$output" != *"auto-promoted"* ]]
+  # Entry must still be [deferred] [!]
+  grep -F "[deferred] [!]" docs/found-issues.md
+  ! grep -F "[open] [!]" docs/found-issues.md
+}
+
 @test "log: same-day double touch appends date twice" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
