@@ -2,9 +2,17 @@
 # pre-branch-delete.sh — PreToolUse hook on Bash
 #
 # Hard-blocks branch deletions if the branch has [open] found-issues entries
-# that aren't on the default branch. Reason: deleting a branch with
-# unpromoted entries silently loses them — the whole point of /found-issues:promote
-# is to prevent that.
+# whose dedup key (path:line:symptom) does not appear in the default branch's
+# version of the file. Reason: deleting a branch with unpromoted entries
+# silently loses them — the whole point of /found-issues:promote is to
+# prevent that.
+#
+# Matching: dedup key, not full-line equality. An entry that was merged via
+# PR and then flipped from [open] to [fixed] on main (with annotations
+# appended) is still considered "promoted" — its dedup key is on main even
+# though the verbatim line is not. v1.0.5 and earlier used grep -Fxq full-
+# line matching and false-positive-blocked deletion of merged-via-PR
+# feature branches.
 #
 # Patterns matched:
 #   git branch -d <name>
@@ -83,6 +91,45 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
 rel_path="docs/found-issues.md"
 [[ ! -f "$repo_root/$rel_path" ]] && rel_path=".found-issues.md"
 
+# Source dedup-key helpers. Both libs are needed: parse-entries.sh for
+# fi_parse_entry, canonicalize.sh for fi_dedup_key{,_abstract}.
+if [[ -n "${FOUND_ISSUES_LIB_DIR:-}" ]]; then
+  lib_dir="$FOUND_ISSUES_LIB_DIR"
+elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  lib_dir="$CLAUDE_PLUGIN_ROOT/lib"
+else
+  cli_dir="$(dirname "$(readlink -f "${FOUND_ISSUES_BIN:-found-issues}" 2>/dev/null || command -v "${FOUND_ISSUES_BIN:-found-issues}" 2>/dev/null || echo "")")"
+  lib_dir="$cli_dir/../lib"
+fi
+if [[ -f "$lib_dir/parse-entries.sh" && -f "$lib_dir/canonicalize.sh" ]]; then
+  # shellcheck source=../lib/parse-entries.sh
+  source "$lib_dir/parse-entries.sh"
+  # shellcheck source=../lib/canonicalize.sh
+  source "$lib_dir/canonicalize.sh"
+else
+  # Lib missing — can't compute dedup keys safely. Fail open (allow delete)
+  # rather than fall back to line-equality, which was the bug we're fixing.
+  exit 0
+fi
+
+# Compute the dedup key for a single entry line. Mirrors cmd_log's branching
+# (path:line, path-only, or abstract). Echoes empty on parse failure.
+fi_dedup_key_for_line() {
+  local line="$1"
+  local data path line_num symptom
+  data="$(fi_parse_entry "$line" 2>/dev/null)" || return 1
+  path="$(printf '%s' "$data" | grep '^path=' | head -1 | cut -d= -f2-)"
+  line_num="$(printf '%s' "$data" | grep '^line=' | head -1 | cut -d= -f2-)"
+  symptom="$(printf '%s' "$data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
+  if [[ -n "$line_num" ]]; then
+    fi_dedup_key "$path" "$line_num" "$symptom"
+  elif [[ "$path" == */* || "$path" == *.* ]]; then
+    fi_dedup_key "$path" "" "$symptom"
+  else
+    fi_dedup_key_abstract "$symptom"
+  fi
+}
+
 # Check each branch for unpromoted [open] entries
 problems=()
 for branch in "${branches[@]}"; do
@@ -102,12 +149,29 @@ for branch in "${branches[@]}"; do
     || git show "$default_branch:$rel_path" 2>/dev/null \
     || true)"
 
-  # Find [open] entries on branch not on main
+  # Build a newline-delimited set of dedup keys from main's entries across
+  # ALL statuses (open / deferred / fixed). The key insight: a branch entry
+  # that was promoted is findable in main regardless of whether main has
+  # since flipped its status or appended (PR:..)/(fixed:..) annotations.
+  main_keyset=""
+  if [[ -n "$main_content" ]]; then
+    while IFS= read -r m_line; do
+      if [[ "$m_line" =~ ^-[[:space:]]+\[(open|deferred|fixed)\] ]]; then
+        m_key="$(fi_dedup_key_for_line "$m_line" 2>/dev/null || true)"
+        [[ -n "$m_key" ]] && main_keyset+="${m_key}"$'\n'
+      fi
+    done <<< "$main_content"
+  fi
+
+  # Find branch [open] entries whose dedup key is not in main's keyset.
   branch_unpromoted=""
   while IFS= read -r line; do
     if [[ "$line" =~ ^-[[:space:]]+\[open\] ]]; then
-      if [[ -z "$main_content" ]] \
-         || ! printf '%s' "$main_content" | grep -Fxq -- "$line"; then
+      b_key="$(fi_dedup_key_for_line "$line" 2>/dev/null || true)"
+      if [[ -z "$b_key" ]]; then
+        # Parse failed — treat as unpromoted (safer than silently allowing).
+        branch_unpromoted+="$line"$'\n'
+      elif ! printf '%s' "$main_keyset" | grep -Fxq -- "$b_key"; then
         branch_unpromoted+="$line"$'\n'
       fi
     fi
