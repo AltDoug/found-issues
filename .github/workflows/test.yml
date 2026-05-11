@@ -117,7 +117,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run shellcheck on hooks and CLI
-        uses: ludeeus/action-shellcheck@master
+        # SHA-pinned (master @ 2024-06-20). Latest tag is 2.0.0 from Jan 2023,
+        # ~18 months stale vs master, so master is the de-facto current ref —
+        # but `@master` is a live supply-chain risk (anyone with write to the
+        # action's master branch runs in our CI). Pinning to a SHA freezes
+        # what we run; Dependabot will propose SHA bumps on its weekly cadence.
+        uses: ludeeus/action-shellcheck@00b27aa7cb85167568cb48a3838b75f4265f2bca
         with:
           severity: warning
           scandir: '.'

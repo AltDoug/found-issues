@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Only ecosystem in this repo. No package.json / requirements.txt / Gemfile —
+  # the plugin is pure bash. We do, however, depend on third-party GitHub
+  # Actions, which is the standard supply-chain attack surface for CI.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
