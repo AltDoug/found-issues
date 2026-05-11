@@ -115,7 +115,7 @@ EOF
   echo "$output" | grep -F '"critical":1'
 }
 
-@test "status: plain — solo residual uses 'issue/issues' (no other counters)" {
+@test "status: plain solo residual uses 'issue/issues' (no other counters)" {
   # 2026-05-10 UX audit, surfaces 2.1 / 9.1. The solo plain case keeps
   # natural language: "1 issue" / "3 issues" — no rename when nothing else
   # is on display.
@@ -130,7 +130,7 @@ EOF
   [[ "$output" != *"other"* ]]
 }
 
-@test "status: plain — residual relabels to 'other' when critical is also showing" {
+@test "status: plain residual relabels to 'other' when critical is also showing" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
 # found-issues
@@ -147,7 +147,7 @@ EOF
   [[ "$output" != *"issues"* ]]
 }
 
-@test "status: plain — residual relabels to 'other' when in-PR is also showing" {
+@test "status: plain residual relabels to 'other' when in-PR is also showing" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
 # found-issues
@@ -160,7 +160,7 @@ EOF
   [[ "$output" == *"1 in PR"* ]]
 }
 
-@test "status: segment — same label policy as plain (other when mixed)" {
+@test "status: segment uses same label policy as plain (other when mixed)" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
 # found-issues
