@@ -6,84 +6,13 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-![demo](hero.png)
+![demo](hero.gif)
 
 When Claude notices a bug, error, or warning while working on something
 else, it usually shrugs and moves on — *"pre-existing, not the code we
 touched, let's continue."* found-issues makes it stop, log the
 observation, and surface it later. Automatically. Across sessions.
 **Without the user lifting a finger.**
-
-## Installation
-
-Run these in Claude Code, in order:
-
-```
-/plugin marketplace add AltDoug/claude-plugins
-/plugin install found-issues
-```
-
-Then **start a new Claude Code session** so the plugin loads (existing
-sessions only pick it up after a fresh start; `/reload-plugins` works
-in the *current* session if you'd rather not restart).
-
-In the new session, run:
-
-```
-/found-issues:setup
-```
-
-This walks you through orientation in ~30 seconds and offers optional
-polish (statusline integration, shorter `/fi` alias, per-repo git
-pre-commit hook). Setup is **optional** — the plugin is fully active
-without it — but running it once gets the polish wired up and removes
-the guesswork. You can always re-run it later.
-
-![setup picker showing optional integrations](setup.png)
-
-The plugin handles automatically:
-
-- Auto-loading the agent rules into context every session
-- Registering all 7 lifecycle hooks
-- Adding the `found-issues` CLI to your PATH
-- Working in any repo (auto-detects mode: local / git / github-direct / github-pr)
-
-### Staying up to date
-
-Claude Code keeps third-party marketplaces (this one included) on **manual
-update** by default. **Recommended:** flip auto-update on once, then future
-versions land silently at session start. Run `/plugin`, open the
-**Marketplaces** tab, pick `altdoug-plugins`, and choose **Enable
-auto-update**. After an update lands, Claude Code prompts you to run
-`/reload-plugins` (or restart the session) to pick up the new code.
-
-Prefer to update on your own schedule? Skip the toggle and pull manually
-whenever you want:
-
-```
-/plugin marketplace update altdoug-plugins
-/plugin update found-issues
-```
-
-### Uninstalling
-
-> **Order matters.** Run our cleanup *before* the platform uninstall, or
-> plugin-private state will be orphaned in `~/.claude/`.
-
-```
-/found-issues:uninstall                            # 1. plugin's own cleanup
-/plugin uninstall found-issues                     # 2. platform uninstall
-/plugin marketplace remove altdoug-plugins         # 3. (only if you also want to remove the marketplace)
-```
-
-<details>
-<summary>Why the order matters</summary>
-
-`/plugin uninstall` (Claude Code's built-in command) only removes the plugin code itself — it does **not** invoke our `uninstall` skill. If you run it first, the statusline segment, onboarding marker, mode cache, and `/fi` alias all stay behind in `~/.claude/`. They're invisible until you reinstall later, at which point they cause confusing state mismatches (silent broken statusline counter, orphaned alias, etc.).
-
-`/found-issues:uninstall` runs `found-issues uninstall` which removes only files our installer ever touched (manifest-tracked, conservative). Per-repo `docs/found-issues.md` files are intentionally preserved — they're your project data.
-
-</details>
 
 ## What it does
 
@@ -115,85 +44,75 @@ one wired up:
 The file stays accurate. `[fixed]` history accumulates as a record.
 Nothing requires manual bookkeeping.
 
-### Deferring recurring issues
-
-Sometimes a logged issue is real but not addressable now (out-of-scope, blocked, low priority). The plugin treats `[deferred]` as a first-class lifecycle state: tracked in the file, suppressed from the statusline counter, and flagged when it recurs.
-
-```bash
-# Defer with optional reason
-/found-issues:defer src/auth.py:88 --reason "tracked in JIRA-1234"
-
-# Promote back to [open] when ready to address
-/found-issues:promote-deferred src/auth.py:88
-```
-
-**Recurrence detection.** When you `log` an issue that matches an existing `[deferred]` entry's dedup key, the plugin appends today's date to a `(touched: ...)` annotation on the deferred entry — no new `[open]` entry is created. After 3 touches (cycle 1 default), it nudges:
-
-```
-Touched deferred entry (now 3x, threshold 3): src/auth.py:88
-Consider: found-issues promote-deferred --match auth.py
-```
-
-**Critical entries auto-promote.** Entries logged with `--critical` (the `[!]` flag) flip back to `[open]` automatically on the Nth touch — no manual step.
-
-**Loop prevention.** If you promote and re-defer the same entry, the threshold for the next nudge doubles (cycle 1: 3 touches → cycle 2: 6 → cycle 3: 12 → ...). The history is preserved as evidence, but the bar to bug you about it again rises geometrically. Configurable via `FOUND_ISSUES_DEFER_TOUCH_THRESHOLD` (base, default 3) and `FOUND_ISSUES_DEFER_ESCALATION_FACTOR` (factor, default 2).
-
-## How to use it day-to-day
-
-Once installed, the plugin runs on its own — Claude logs as it works,
-the statusline shows the count, entries auto-flip on PR/commit. But
-the value compounds when you treat the log as a queue:
-
-**Ask Claude what's open.** The file is auto-loaded into context every
-session, so plain-English queries work:
-
-> *"What's open in found-issues?"*
-> *"Show me the critical ones."*
-> *"What's the oldest unfixed entry?"*
-
-No special command needed — Claude already has `docs/found-issues.md`
-in context.
-
-**Have an agent triage the easy ones.** When the queue gets long:
-
-> *"Read docs/found-issues.md, pick three entries you can fix in under
-> 10 minutes, and do them. Open a PR for each."*
-
-The auto-loaded rules teach Claude to annotate entries it fixes (via
-`/found-issues:annotate-pr` and the post-pr-create hook). When the PRs
-merge, the entries flip to `[fixed]` automatically.
-
-**Use the count as soft pressure.** When the statusline reads
-`3 critical · 12 other`, it's a constant reminder that there's known
-work waiting. The critical flag (`[!]`) bubbles drop-everything items
-to the top. (The residual bucket labels as "issue/issues" when it's the
-only counter on display and "other" when alongside critical / in PR /
-stale, so the segment counts always add up cleanly.)
-
 ## Why this exists
 
 Most AI coding agents have a **proactive blindspot**: they notice
 defects in code they're reading, judge those defects as out-of-scope,
-and silently move on. Sometimes they say "I noticed X but it's
-pre-existing, not the code we touched, let's move on." Then the bug
-stays in the codebase forever — invisible to the user who'd never have
-spotted it themselves.
+and silently move on. Then the bug stays in the codebase forever —
+invisible to the user who'd never have spotted it themselves.
 
 found-issues changes the contract. The agent maintains a tiny markdown
 file as it works. Issues never disappear into the void. Eventually they
 either get fixed (and auto-closed) or stay visible until they do.
 
-## How is this different from…?
+## Install
 
-| | found-issues | GitHub Issues / Linear / Jira | Backlog.md / claude-mem |
-|---|---|---|---|
-| Tracks | Defects the AI noticed but didn't fix | Anything (features, bugs, tasks) | Generic markdown tasks / session memory |
-| Created by | The AI agent (proactively) | Humans | Either |
-| Storage | Plain markdown in your repo | Cloud DB | Markdown |
-| Closure | Auto via PR/commit/tombstone | Manual | Manual |
-| AI verification of unannotated entries | Yes | No | No |
+Run these in Claude Code:
 
-You can run all of these together — they don't overlap functionally.
+```
+/plugin marketplace add AltDoug/claude-plugins
+/plugin install found-issues
+```
+
+Then **start a new Claude Code session** so the plugin loads. That's it
+— the plugin is fully active.
+
+Optional one-time polish (statusline counter, `/fi` shortcut, per-repo
+git pre-commit hook):
+
+```
+/found-issues:setup
+```
+
+<details>
+<summary>Updates and uninstall</summary>
+
+**Auto-update (recommended).** Run `/plugin`, open the **Marketplaces**
+tab, pick `altdoug-plugins`, choose **Enable auto-update**. New versions
+land silently at session start.
+
+**Manual update:**
+
+```
+/plugin marketplace update altdoug-plugins
+/plugin update found-issues
+```
+
+**Uninstall — order matters.** Run our cleanup *before* the platform
+uninstall, or plugin-private state (statusline segment, `/fi` alias,
+mode cache) will be orphaned in `~/.claude/`:
+
+```
+/found-issues:uninstall                            # 1. plugin's own cleanup
+/plugin uninstall found-issues                     # 2. platform uninstall
+/plugin marketplace remove altdoug-plugins         # 3. (only to remove the marketplace too)
+```
+
+Per-repo `docs/found-issues.md` files are intentionally preserved —
+they're your project data.
+
+</details>
+
+## Quick start
+
+After install, just work normally. To see the system in action:
+
+> *"What's open in found-issues?"*
+
+The file is auto-loaded into context every session, so plain-English
+queries work — no special command needed. Try also: *"Show me the
+critical ones"* or *"Read docs/found-issues.md, pick three entries you
+can fix in under 10 minutes, and do them."*
 
 ## Slash commands
 
@@ -205,18 +124,33 @@ All namespaced under `/found-issues:` (Claude Code plugin convention):
 | `/found-issues:sync` | Reconcile with PR/commit history + AI-verify unannotated entries |
 | `/found-issues:annotate-pr <N>` | Link an entry to a PR (auto-prompted by hooks) |
 | `/found-issues:annotate-commit [<sha>]` | Link an entry to a commit (defaults to HEAD) |
+| `/found-issues:defer <path:line> [--reason <text>]` | Mark an entry as deferred (suppress from counter) |
+| `/found-issues:promote-deferred <path:line>` | Promote a `[deferred]` entry back to `[open]` |
 | `/found-issues:promote` | Carry branch-only entries into main before branch deletion |
 | `/found-issues:status` | Print current counts |
-| `/found-issues:archive` | Move old `[fixed]` entries to `docs/found-issues-archive.md` (count threshold 50 OR days threshold 30, whichever first) |
+| `/found-issues:archive` | Move old `[fixed]` entries to `docs/found-issues-archive.md` (50-entry / 30-day thresholds) |
 | `/found-issues:setup` | Optional first-run orientation |
 | `/found-issues:doctor` | General health check — CLI, statusline, gh, mode, hook opt-outs, issues file |
 | `/found-issues:uninstall` | Clean up plugin-private state before `/plugin uninstall` |
 
-**Want shorter typing?** `/found-issues:setup` offers an optional `/fi`
-shortcut — pick it during setup and `/fi log src/foo.py:42 — bug` works
-as a shortcut for `/found-issues:log src/foo.py:42 — bug`. Installed via
-the deterministic `found-issues install-fi-alias` CLI subcommand;
-removable via `found-issues uninstall-fi-alias`.
+`/found-issues:setup` offers an optional `/fi` shortcut so `/fi log
+src/foo.py:42 — bug` works as a shortcut for the full namespaced form.
+
+## Use the count as soft pressure
+
+When the statusline reads `3 critical · 12 other`, it's a constant
+reminder there's known work waiting. The critical flag (`[!]`) bubbles
+drop-everything items to the top.
+
+## Deferring recurring issues
+
+`[deferred]` is a first-class state — tracked in the file, suppressed
+from the statusline counter, and flagged when it recurs. Touch a
+deferred entry enough times and the plugin nudges you to promote it
+back to `[open]`. Critical entries auto-promote. Re-defer escalates the
+nudge threshold geometrically (loop prevention).
+
+Full lifecycle, formulas, and tunables: [`docs/deferring.md`](docs/deferring.md).
 
 ## Format
 
@@ -234,17 +168,16 @@ Auto-detects 4 modes per repo: `local`, `git`, `github-direct`, `github-pr`. Mix
 
 ## Platform support
 
-Tested in CI on:
-
 | OS | Shell | Status |
 |---|---|---|
 | Linux (Ubuntu) | bash | ✅ Supported |
 | macOS | bash | ✅ Supported |
 | Windows | Git Bash | ✅ Supported |
 
-**Windows note**: the plugin's CLI and hooks are bash-based (`#!/usr/bin/env bash`), so they need a bash interpreter to run. On Windows, that's provided by [Git for Windows](https://gitforwindows.org/) (Git Bash) — a near-universal install for any Windows dev box. CI runs the full test suite on `windows-latest` under Git Bash and passes. WSL works too.
-
-If you're on a Windows install without Git Bash or WSL, install Git for Windows first.
+The CLI and hooks are bash-based, so on Windows you need a bash
+interpreter — that's what [Git for Windows](https://gitforwindows.org/)
+(Git Bash) provides. WSL works too. CI runs the full test suite on all
+three platforms.
 
 ## Status
 
@@ -257,9 +190,10 @@ Have a use case the plugin doesn't cover? [Open an issue](https://github.com/Alt
 - [`docs/architecture.md`](docs/architecture.md) — how the pieces fit together
 - [`docs/format-spec.md`](docs/format-spec.md) — canonical entry format
 - [`docs/modes.md`](docs/modes.md) — workflow modes and detection
+- [`docs/deferring.md`](docs/deferring.md) — defer lifecycle, recurrence detection, loop prevention
 - [`docs/configuration.md`](docs/configuration.md) — every env-var opt-out and tunable
 - [`docs/versioning.md`](docs/versioning.md) — SemVer rules + when to bump which segment
-- [`docs/faq.md`](docs/faq.md) — common questions
+- [`docs/faq.md`](docs/faq.md) — common questions, including "how is this different from Linear / Jira / Backlog.md / claude-mem?"
 - [`AGENTS.md`](AGENTS.md) — instructions for AI agents installing this
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to propose changes
 - [`CHANGELOG.md`](CHANGELOG.md) — version history
