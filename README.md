@@ -256,6 +256,7 @@ Have a use case the plugin doesn't cover? [Open an issue](https://github.com/Alt
 - [`docs/architecture.md`](docs/architecture.md) — how the pieces fit together
 - [`docs/format-spec.md`](docs/format-spec.md) — canonical entry format
 - [`docs/modes.md`](docs/modes.md) — workflow modes and detection
+- [`docs/configuration.md`](docs/configuration.md) — every env-var opt-out and tunable
 - [`docs/versioning.md`](docs/versioning.md) — SemVer rules + when to bump which segment
 - [`docs/faq.md`](docs/faq.md) — common questions
 - [`AGENTS.md`](AGENTS.md) — instructions for AI agents installing this
