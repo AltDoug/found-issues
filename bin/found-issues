@@ -212,6 +212,25 @@ fi_handle_deferred_touch() {
     printf 'Touched [!] critical deferred entry — auto-promoted to [open] (%dx in cycle %d): %s\n' "$count" "$cycle" "$hint" >&2
   fi
 
+  # Stdout summary — emitted for every deferred-touch case so wrappers that
+  # swallow stderr still surface the event. The stderr lines above remain
+  # the canonical user-facing detail; stdout is a single parseable line.
+  # See 2026-05-10 UX audit, surface 3.3.
+  if (( count >= threshold )) && (( is_critical == 1 )); then
+    printf 'Touched [deferred] (auto-promoted to [open]): %s (cycle %d, %dx of %d)\n' \
+      "$hint" "$cycle" "$count" "$threshold"
+  elif (( count >= threshold )); then
+    printf 'Touched [deferred] (at threshold): %s (cycle %d, %dx of %d) — consider promote-deferred\n' \
+      "$hint" "$cycle" "$count" "$threshold"
+  else
+    printf 'Touched [deferred]: %s (cycle %d, %dx of %d)\n' \
+      "$hint" "$cycle" "$count" "$threshold"
+  fi
+
+  # Echo updated counter state so callers always see a tail line consistent
+  # with the open-match and new-entry log paths.
+  cmd_status plain
+
   return 0
 }
 
