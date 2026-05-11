@@ -76,17 +76,14 @@ whenever you want:
 /plugin marketplace remove altdoug-plugins         # 3. (only if you also want to remove the marketplace)
 ```
 
-Why the order: `/plugin uninstall` (Claude Code's built-in command) only
-removes the plugin code itself — it does **not** invoke our `uninstall` skill.
-If you run it first, the statusline segment, onboarding marker, mode cache,
-and `/fi` alias all stay behind in `~/.claude/`. They're invisible until you
-reinstall later, at which point they cause confusing state mismatches (silent
-broken statusline counter, orphaned alias, etc.).
+<details>
+<summary>Why the order matters</summary>
 
-`/found-issues:uninstall` runs `found-issues uninstall` which removes only
-files our installer ever touched (manifest-tracked, conservative). Per-repo
-`docs/found-issues.md` files are intentionally preserved — they're your
-project data.
+`/plugin uninstall` (Claude Code's built-in command) only removes the plugin code itself — it does **not** invoke our `uninstall` skill. If you run it first, the statusline segment, onboarding marker, mode cache, and `/fi` alias all stay behind in `~/.claude/`. They're invisible until you reinstall later, at which point they cause confusing state mismatches (silent broken statusline counter, orphaned alias, etc.).
+
+`/found-issues:uninstall` runs `found-issues uninstall` which removes only files our installer ever touched (manifest-tracked, conservative). Per-repo `docs/found-issues.md` files are intentionally preserved — they're your project data.
+
+</details>
 
 ## What it does
 
@@ -222,34 +219,17 @@ removable via `found-issues uninstall-fi-alias`.
 
 ## Format
 
+Entries are markdown checklist lines:
+
 ```
-- [STATUS] [!] YYYY-MM-DD path:line — symptom (suggested: fix) (PR: org/repo#N) (fixed: YYYY-MM-DD)
+- [STATUS] [!] YYYY-MM-DD path:line — symptom (annotations…)
 ```
 
-- **Statuses**: `open` / `deferred` / `fixed`
-- **`[!]`** optional critical flag (drop-everything priority)
-- **` — `** is U+2014 em-dash with spaces, *not* a hyphen
-- **Annotations** are optional but enable auto-flipping; `(PR: ...)` and
-  `(commit: ...)` can coexist on one entry
-
-Full grammar, regex patterns, and invalid examples: [`docs/format-spec.md`](docs/format-spec.md).
+Statuses are `open` / `deferred` / `fixed`. `[!]` is the optional critical flag. Annotations like `(PR: org/repo#N)` and `(commit: <sha>)` are optional but enable auto-flipping. Full grammar, regex, and edge cases: [`docs/format-spec.md`](docs/format-spec.md).
 
 ## Workflow modes
 
-found-issues auto-detects which mode each repo is in:
-
-| Mode | Detected when | Closure mechanism |
-|---|---|---|
-| `local` | No `.git/` directory | Manual + tombstone |
-| `git` | Git repo, no GitHub remote | `(commit: <sha>)` + tombstone |
-| `github-direct` | GitHub remote, no recent merged PRs | `(commit: <sha>)` + tombstone |
-| `github-pr` | GitHub remote with recent merged PRs | `(PR: org/repo#N)` + commit + tombstone |
-
-Mixed workflow (sometimes PR, sometimes direct push) is fully
-supported — both annotation forms always work; mode just sets the
-default.
-
-Details + edge cases: [`docs/modes.md`](docs/modes.md).
+Auto-detects 4 modes per repo: `local`, `git`, `github-direct`, `github-pr`. Mixed workflow (sometimes PR, sometimes direct push) is fully supported — mode just sets the default closure mechanism. Detection logic, mode table, and edge cases: [`docs/modes.md`](docs/modes.md).
 
 ## Platform support
 
@@ -265,25 +245,11 @@ Tested in CI on:
 
 If you're on a Windows install without Git Bash or WSL, install Git for Windows first.
 
-## Status & roadmap
+## Status
 
-**v1.1.0 — UX audit fast-follows + SemVer recalibration** (4 P2 items from the 2026-05-10 end-to-end audit + a new CI guard that enforces SemVer rules going forward).
+**v1.1.0** — 297 tests passing in CI on Linux + macOS + Windows (Git Bash). 7 hooks, 9 slash commands, 1 CLI binary, all wired through the Claude Code plugin spec.
 
-- 297 tests passing in CI on **Linux + macOS + Windows** (Git Bash)
-- 7 hooks + 9 slash commands + a CLI binary, all wired through the
-  Claude Code plugin spec
-- Auto-detected modes; no per-repo configuration
-- Optional per-repo git pre-commit hook for format validation outside
-  Claude Code
-
-Roadmap things being considered (not committed):
-
-- Universal layer that works with Codex / Cursor / Aider
-- AI-assisted dedup for semantic-similar entries
-- Configurable stale threshold per repo
-- Web dashboard / browser extension for non-terminal users
-
-Open an issue if you have a use case for any of these.
+Have a use case the plugin doesn't cover? [Open an issue](https://github.com/AltDoug/found-issues/issues/new).
 
 ## Docs
 
