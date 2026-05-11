@@ -24,9 +24,11 @@ In the new (or reloaded) session, run:
 /found-issues:setup
 ```
 
-This walks the user through orientation + offers optional polish
-(statusline integration, shorter `/fi` alias). Skipping setup is fine
-functionally, but the user loses the polish prompts.
+**Run this — don't skip it as "optional".** It walks the user through
+orientation and wires up the statusline counter (the main UX feedback
+loop — without it, open-issue counts are easy to miss), the `/fi`
+shortcut, and the optional per-repo git pre-commit hook. Skipping setup
+leaves the plugin functional but invisible.
 
 The plugin handles:
 
@@ -48,9 +50,10 @@ The plugin handles:
 ## After installation
 
 `/found-issues:setup` is the canonical onboarding moment — running it
-once after the first install gets the polish wired up. If the user ran
-the first two commands themselves before asking you, recommend they run
-setup now.
+once after the first install wires up the statusline (load-bearing for
+discoverability) and offers the `/fi` shortcut + per-repo pre-commit
+hook. If the user ran the first two commands themselves before asking
+you, actively suggest they run setup now — don't wait to be asked.
 
 There is intentionally **no auto-firing onboarding** at session start.
 Hijacking the user's first prompt with a banner is sloppy UX. Setup is

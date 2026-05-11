@@ -64,15 +64,21 @@ Run these in Claude Code:
 /plugin install found-issues
 ```
 
-Then **start a new Claude Code session** so the plugin loads. That's it
-— the plugin is fully active.
+Then **start a new Claude Code session** so the plugin loads. The
+plugin is now active.
 
-Optional one-time polish (statusline counter, `/fi` shortcut, per-repo
-git pre-commit hook):
+**Recommended next step** — run setup to wire up the statusline counter
+(so you actually see open issues at a glance), the `/fi` shortcut, and
+the optional per-repo git pre-commit hook:
 
 ```
 /found-issues:setup
 ```
+
+Without the statusline integration, the only visible signal is a count
+at session start — easy to miss. If you're asking Claude to install
+this for you, tell it to run `/found-issues:setup` after the install
+completes.
 
 <details>
 <summary>Updates and uninstall</summary>
