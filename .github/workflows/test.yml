@@ -138,6 +138,23 @@ jobs:
             jq empty "$f"
           done
 
+  version-check:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: version check (SemVer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify FI_VERSION + CHANGELOG consistency
+        # See docs/versioning.md for the rules + decision tree.
+        # The script enforces:
+        #   1. FI_VERSION in bin/found-issues matches the top CHANGELOG version.
+        #   2. PATCH bumps (X.Y.Z+1) must NOT contain '### Added' — additive
+        #      changes require a MINOR bump per SemVer 2.0.0.
+        # Catches the v1.0.5 mistake retroactively-impossible (immutable tag)
+        # but prevents recurrence going forward.
+        run: bash scripts/check-version.sh
+
   test-name-lint:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -180,7 +197,7 @@ jobs:
   # failures.
   ci:
     name: ci
-    needs: [bats, shellcheck, json-lint, test-name-lint]
+    needs: [bats, shellcheck, json-lint, test-name-lint, version-check]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -195,6 +212,7 @@ jobs:
             [shellcheck]='${{ needs.shellcheck.result }}'
             [json-lint]='${{ needs.json-lint.result }}'
             [test-name-lint]='${{ needs.test-name-lint.result }}'
+            [version-check]='${{ needs.version-check.result }}'
           )
           fail=0
           for job in "${!results[@]}"; do

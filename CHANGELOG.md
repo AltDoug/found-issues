@@ -11,6 +11,63 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Demo GIF embedded in README
 - Submission to official Claude Code marketplace
 
+## [1.1.0] — 2026-05-11
+
+### SemVer recalibration
+
+This release is **v1.1.0 instead of v1.0.7** as a SemVer correction. Two of the four fast-follow items below add new functionality (`defer --mute-until` flag and the new `doctor` subcommand) — under strict [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html) that's a MINOR bump (`1.0.x → 1.1.0`), not PATCH (`1.0.6 → 1.0.7`).
+
+Historical note: v1.0.5 should have been v1.1.0 too — it added new subcommands (`defer`, `promote-deferred`), a new lifecycle state (`[deferred]`), and new flags. The mis-numbering was caught in v1.0.7 planning but the v1.0.5 tag is permanent. Going forward, **the new `scripts/check-version.sh` CI guard** (added in this release) blocks any PR that adds an `### Added` section under a PATCH-only bump.
+
+See [`docs/versioning.md`](docs/versioning.md) for the rules + decision tree.
+
+### Audit-driven fast-follows (4 PRs, all from the 2026-05-10 UX audit's "worth a v1.0.6 if time permits" list)
+
+v1.0.6 shipped the P0 + 3 P1s. v1.1.0 picks up the four "fast-follow" items that the audit flagged as worth shipping but not blocking. Same audit doc, same priority ladder — these were P2-ish polish that the audit explicitly recommended as next-up.
+
+### Added (surfaces 8.2 / 8.6 / 9.2 + cross-cutting #3)
+
+- **`docs/configuration.md`** (PR #64) — canonical env-var reference. Lists every plugin-readable env var (5 hook opt-outs, 3 defer-flow tunables, stale-days, mode override, 4 internal/testing knobs) with defaults, scope, and concrete examples. README's Docs section links to it. Closes the audit's cross-cutting observation #3 ("env-var opt-outs exist but are scattered").
+
+### Added (surface 4.4)
+
+- **`defer --mute-until YYYY-MM-DD`** (PR #66) — new flag on `found-issues defer` that suppresses the recurrence nudge until a target date. Useful when an entry is genuinely blocked for a known period (legal review, third-party fix, post-launch window). Touches still record during the mute (history preservation); only the nudge / auto-promote logic is short-circuited. Critical `[!]` entries are muted too — if the user explicitly muted a critical entry, that's their call. `promote-deferred` strips the annotation on flip to `[open]` since it's a defer-state concept. Strict ISO format; past dates warn but defer succeeds.
+- 2 new lib helpers in `lib/parse-entries.sh`: `fi_extract_mute_until`, `fi_is_muted` (lexical ISO comparison — no `date` arithmetic).
+
+### Changed (surface 4.2)
+
+- **Defer overshoot wording** (PR #65) — `fi_handle_deferred_touch` now distinguishes at-threshold from past-threshold cases. Pre-v1.0.7 the wording was identical; users couldn't see at a glance how far past threshold an entry had drifted.
+  - At threshold (count == M): `(now Nx, threshold M)` / stdout `(at threshold)` — unchanged.
+  - Past threshold (count > M): `(now Nx, K past threshold of M)` / stdout `(past threshold by K)` — new.
+  - Below threshold: unchanged.
+  - Audit's claim that "nudge doesn't fire on overshoot" was incorrect (the existing `>=` check already fired); this PR is the remaining wording-precision improvement.
+
+### Added (surfaces 5.2 + 6.2)
+
+- **`found-issues doctor`** (PR #67) — general-purpose health diagnostic. Aggregates 7 sections into one screen of output:
+  1. Plugin runtime (CLI path, lib dir, onboarding marker)
+  2. Statusline state (delegates to `fi_statusline_state` — same 5-state classifier as `doctor-statusline`)
+  3. gh CLI auth state
+  4. Mode detection + cache state + `FOUND_ISSUES_MODE` override surfacing
+  5. Hook opt-outs (which of the 5 env vars are `=off`)
+  6. Tunables (non-default) — only shown when any of `FOUND_ISSUES_DEFER_TOUCH_THRESHOLD` / `FOUND_ISSUES_DEFER_ESCALATION_FACTOR` / `FOUND_ISSUES_STALE_DAYS` is set
+  7. Issues file (path, per-status counts, suspicious-entry flags — `[open]` with stray `(fixed: ...)`, `[fixed]` without closure-date annotation)
+- Ends with a "Recommended next" list of concrete fix commands.
+- Read-only; always exits 0. Locale-aware glyph fallback (UTF-8 → ✓/!/✗, ASCII → OK/!!/FAIL).
+- Wrapped as `/found-issues:doctor`. README slash-commands table updated.
+
+### Added (versioning discipline)
+
+- **`docs/versioning.md`** — canonical SemVer rules with concrete examples drawn from this project's release history. Decision tree for "is this PATCH or MINOR or MAJOR?"
+- **`scripts/check-version.sh`** — CI guard that enforces two invariants:
+  1. `FI_VERSION` in `bin/found-issues` matches the top-most `[X.Y.Z]` section header in `CHANGELOG.md`.
+  2. If the latest version's bump from the previous is PATCH-only (X.Y unchanged, Z incremented), the latest section must NOT contain `### Added` — additive changes require a MINOR bump.
+- Wired into `.github/workflows/test.yml` as a new lint step (runs alongside `shellcheck` / `json validation` / `test name ASCII guard`). Bats tests at `tests/check-version.bats` cover the positive + negative paths.
+
+### Tests
+
+- 261 → 297 (+36 across PRs #65/#66/#67 fast-follows + version-check infra).
+
 ## [1.0.6] — 2026-05-11
 
 ### Audit-driven fixes (5 PRs, all from the 2026-05-10 UX audit)
