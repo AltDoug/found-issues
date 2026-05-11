@@ -1,9 +1,9 @@
 # Defer Recurrence Flow — Design
 
 **Date:** 2026-05-10
-**Status:** Approved (brainstorming complete; awaiting implementation plan)
+**Status:** Implemented in v1.0.5 (PRs #51, #52, #53, #54 — all merged)
 **Author:** Claude Opus 4.7 (1M context) + Diogo Silva Sena (AltDoug)
-**Related:** Brainstorming session 2026-05-10; found-issues v1.0.4
+**Related:** Brainstorming session 2026-05-10; found-issues v1.0.4 → v1.0.5; implementation plan at [`docs/superpowers/plans/2026-05-10-defer-recurrence-flow.md`](../plans/2026-05-10-defer-recurrence-flow.md)
 
 ## Problem statement
 
