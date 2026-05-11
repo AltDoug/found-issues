@@ -11,6 +11,30 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Demo GIF embedded in README
 - Submission to official Claude Code marketplace
 
+## [1.0.5] — 2026-05-10
+
+### Added (defer recurrence flow — full lifecycle for [deferred] status)
+
+- **`found-issues defer <match> [--reason "..."]` subcommand**: flips [open] → [deferred] for an entry matching `<match>`. On re-defer (entry has prior touch history from a previous defer→promote cycle), automatically increments a `(defer-cycle: N)` annotation and appends `;` to the `(touched: ...)` annotation to mark the new cycle boundary. Optional `--reason` captures a short note explaining why the entry is being deferred. Exit codes: 0 success, 1 no match, 2 ambiguous match, 3 already deferred, 4 has active `(PR: ...)` annotation (deferring an in-PR entry would silently drop it from both `issues` and `in PR` counters; blocked with two-option recovery message).
+- **`found-issues promote-deferred <match>` subcommand**: inverse of defer. Flips [deferred] → [open] preserving all annotations as evidence of recurrence. Accepts positional or `--match` argument. Exit codes: 0/1/2/3 mirror defer's no-match / ambiguous / wrong-status semantics.
+- **Recurrence detection in `found-issues log`**: the dedup loop now scans both [open] AND [deferred] entries. On match against [open], existing "Skipped — already logged" behavior preserved. On match against [deferred], the matched entry's `(touched: ...)` annotation is appended with today's date instead of creating a fresh [open] entry. Threshold checks fire above the per-cycle limit (default `3 * 2^(N-1)`: cycle 1 = 3 touches, cycle 2 = 6, cycle 3 = 12, ...). Non-critical entries print a stderr nudge suggesting `promote-deferred`. Critical (`[!]`) entries auto-promote inline.
+- **Two new skills**: `/found-issues:defer` and `/found-issues:promote-deferred` wrap the new subcommands with prose guidance on when to use each.
+- **Two env vars**: `FOUND_ISSUES_DEFER_TOUCH_THRESHOLD` (base, default 3) and `FOUND_ISSUES_DEFER_ESCALATION_FACTOR` (factor, default 2) override the threshold formula. Invalid values warn to stderr and fall back to defaults.
+- **7 new lib helpers** in `lib/parse-entries.sh`: `fi_extract_touched_segment`, `fi_current_cycle_touch_count`, `fi_extract_defer_cycle`, `fi_extract_reason`, `fi_compute_threshold`, `fi_append_touch`, `fi_increment_defer_cycle`. All atomic (temp+mv pattern) for file mutations.
+- **Hook acceptance**: `format-enforcer` and `pre-commit` hook regexes already accept `(touched: ...)`, `(defer-cycle: N)`, `(reason: ...)` annotations (block-on-bad-pattern, not allowlist) — confirmed by regression tests.
+- **~60 new bats tests** across 4 phases. Total goes from 184 → 244. Density mirrors `cli-statusline.bats`.
+
+### Architecture notes
+
+- `[deferred]` is now a first-class lifecycle state with explicit transitions (`defer`, `promote-deferred`) and a passive recurrence signal (touch counter via dedup extension).
+- Touch annotations use a `;` separator within `(touched: ...)` to demarcate defer-cycle boundaries. Threshold counting is per-cycle (after the last `;`), not cumulative — persistent history serves as evidence for future maintainers, not as a count toward the next nudge.
+- Loop prevention: each defer→promote→re-defer cycle bumps `(defer-cycle: N)`. Each cycle's threshold doubles (configurable factor). Self-regulating — operator can keep deferring an entry they genuinely don't want to address; the plugin shuts up faster each cycle.
+- Statusline counter unchanged — promotion (auto for critical, manual for non-critical) is the visibility event that bumps the existing `issues` count.
+
+### Spec
+
+[`docs/superpowers/specs/2026-05-10-defer-recurrence-flow-design.md`](docs/superpowers/specs/2026-05-10-defer-recurrence-flow-design.md)
+
 ## [1.0.4] — 2026-05-10
 
 ### Fixed (legacy-snippet auto-migration is now the default — completes the v1.0.3 self-heal for AI-driven setup)
