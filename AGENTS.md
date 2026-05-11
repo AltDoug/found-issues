@@ -5,21 +5,28 @@ follow these instructions exactly. **Do not improvise.**
 
 ## How to install
 
-This is a Claude Code plugin. Install via the plugin marketplace,
-then run setup as the final step:
+This is a Claude Code plugin. Install via the plugin marketplace, then
+start a new session before running setup (the plugin's hooks load at
+session boundary):
 
 ```
 /plugin marketplace add AltDoug/claude-plugins
 /plugin install found-issues
-/reload-plugins
+```
+
+Then **start a new Claude Code session** so the plugin loads. Existing
+sessions only pick it up after a fresh start; `/reload-plugins` works in
+the *current* session if a restart isn't convenient.
+
+In the new (or reloaded) session, run:
+
+```
 /found-issues:setup
 ```
 
-**Run all four commands.** The first two install the plugin, the third
-activates it, and the fourth walks the user through orientation +
-offers optional polish (statusline integration, shorter alias, per-repo
-pre-commit hook). Skipping setup is fine functionally, but the user
-loses the polish prompts.
+This walks the user through orientation + offers optional polish
+(statusline integration, shorter `/fi` alias). Skipping setup is fine
+functionally, but the user loses the polish prompts.
 
 The plugin handles:
 
@@ -40,10 +47,10 @@ The plugin handles:
 
 ## After installation
 
-`/found-issues:setup` was the fourth install command above — running it
-during install is the canonical onboarding moment. If you got through
-install without it (e.g. the user ran the first two commands themselves
-before asking you), recommend they run it now.
+`/found-issues:setup` is the canonical onboarding moment — running it
+once after the first install gets the polish wired up. If the user ran
+the first two commands themselves before asking you, recommend they run
+setup now.
 
 There is intentionally **no auto-firing onboarding** at session start.
 Hijacking the user's first prompt with a banner is sloppy UX. Setup is
@@ -101,12 +108,34 @@ versions.
 
 ## Uninstalling
 
-Users uninstall via:
+**Order matters.** Run the plugin's own cleanup *before* the platform
+uninstall, or plugin-private state will be orphaned in `~/.claude/`.
 
 ```
-/plugin uninstall found-issues
+/found-issues:uninstall                            # 1. plugin's own cleanup
+/plugin uninstall found-issues                     # 2. platform uninstall
+/plugin marketplace remove altdoug-plugins         # 3. (only if also removing the marketplace)
 ```
 
-This removes hooks from their settings, removes the CLI from PATH, and
-deletes the plugin's data directory. Their `docs/found-issues.md` files
-are NOT touched (they're project files, not plugin state).
+Why the order: `/plugin uninstall` (Claude Code's built-in command) only
+removes the plugin code itself — it does **not** invoke our `uninstall`
+skill. If you run it first, the statusline segment, onboarding marker,
+mode cache, and `/fi` alias all stay behind in `~/.claude/`. They're
+invisible until reinstall, at which point they cause confusing state
+mismatches (silent broken statusline counter, orphaned alias, etc.).
+
+`/found-issues:uninstall` runs `found-issues uninstall` which removes
+only files our installer ever touched (manifest-tracked, conservative).
+Per-repo `docs/found-issues.md` and `docs/found-issues-archive.md` files
+are intentionally preserved — they're the user's project data.
+
+If the user has already run `/plugin uninstall found-issues` first
+(the common mistake), the plugin's CLI is no longer on PATH. Tell them
+either:
+
+- Reinstall the plugin temporarily (`/plugin install found-issues`),
+  then re-run `/found-issues:uninstall` in the right order; or
+- Manually `rm -rf ~/.claude/found-issues ~/.cache/found-issues` and
+  edit `~/.claude/statusline.sh` to remove the marker-bracketed block
+  (between `# === found-issues plugin segment ===` and
+  `# === end found-issues plugin segment ===`).
