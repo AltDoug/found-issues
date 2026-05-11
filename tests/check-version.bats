@@ -3,33 +3,51 @@
 #
 # The script enforces:
 #   1. FI_VERSION in bin/found-issues matches the top CHANGELOG version.
-#   2. A PATCH-only bump must NOT contain '### Added' in its section.
+#   2. "version" field in .claude-plugin/plugin.json matches FI_VERSION.
+#   3. A PATCH-only bump must NOT contain '### Added' in its section.
 
 load 'helpers'
 
 SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/scripts/check-version.sh"
 
+# Default plugin.json fixture, parameterised by version. Tests that care about
+# the plugin.json invariant override $PJ_VERSION before writing; tests that
+# don't care just inherit the matching default.
+fi_write_plugin_json() {
+  local version="$1"
+  mkdir -p "$TMP/.claude-plugin"
+  cat > "$TMP/.claude-plugin/plugin.json" <<EOF
+{
+  "name": "found-issues",
+  "version": "$version"
+}
+EOF
+}
+
 setup() {
   fi_setup_tmp
-  # Build a fresh minimal fixture (CLI file + CHANGELOG) per test, override
-  # the script's lookups via env vars. Keeps each test isolated and avoids
-  # depending on the real repo state.
+  # Build a fresh minimal fixture (CLI file + CHANGELOG + plugin.json) per test,
+  # override the script's lookups via env vars. Keeps each test isolated and
+  # avoids depending on the real repo state.
   CLI="$TMP/bin/found-issues"
   CL="$TMP/CHANGELOG.md"
+  PJ="$TMP/.claude-plugin/plugin.json"
   mkdir -p "$TMP/bin"
   export CHECK_VERSION_CLI_FILE="$CLI"
   export CHECK_VERSION_CHANGELOG="$CL"
+  export CHECK_VERSION_PLUGIN_JSON="$PJ"
 }
 
 teardown() {
   fi_teardown_tmp
-  unset CHECK_VERSION_CLI_FILE CHECK_VERSION_CHANGELOG
+  unset CHECK_VERSION_CLI_FILE CHECK_VERSION_CHANGELOG CHECK_VERSION_PLUGIN_JSON
 }
 
 # --- Positive paths ---
 
 @test "check-version: PATCH bump with no ### Added passes" {
   printf 'readonly FI_VERSION="1.0.6"\n' > "$CLI"
+  fi_write_plugin_json "1.0.6"
   cat > "$CL" <<'EOF'
 # Changelog
 
@@ -55,6 +73,7 @@ EOF
 
 @test "check-version: MINOR bump with ### Added passes" {
   printf 'readonly FI_VERSION="1.1.0"\n' > "$CLI"
+  fi_write_plugin_json "1.1.0"
   cat > "$CL" <<'EOF'
 # Changelog
 
@@ -79,6 +98,7 @@ EOF
 
 @test "check-version: MAJOR bump with ### Added passes" {
   printf 'readonly FI_VERSION="2.0.0"\n' > "$CLI"
+  fi_write_plugin_json "2.0.0"
   cat > "$CL" <<'EOF'
 # Changelog
 
@@ -105,6 +125,7 @@ EOF
 
 @test "check-version: first release (no previous version) passes" {
   printf 'readonly FI_VERSION="1.0.0"\n' > "$CLI"
+  fi_write_plugin_json "1.0.0"
   cat > "$CL" <<'EOF'
 # Changelog
 
@@ -123,6 +144,7 @@ EOF
 
 @test "check-version: FI_VERSION mismatch with CHANGELOG fails (exit 1)" {
   printf 'readonly FI_VERSION="1.0.5"\n' > "$CLI"
+  fi_write_plugin_json "1.0.5"
   cat > "$CL" <<'EOF'
 # Changelog
 
@@ -141,6 +163,7 @@ EOF
 
 @test "check-version: PATCH bump with ### Added fails (the v1.0.5 mistake)" {
   printf 'readonly FI_VERSION="1.0.7"\n' > "$CLI"
+  fi_write_plugin_json "1.0.7"
   cat > "$CL" <<'EOF'
 # Changelog
 
@@ -167,6 +190,7 @@ EOF
 
 @test "check-version: missing FI_VERSION line fails (exit 2)" {
   printf '# no version here\n' > "$CLI"
+  fi_write_plugin_json "1.0.0"
   cat > "$CL" <<'EOF'
 # Changelog
 
@@ -201,6 +225,7 @@ EOF
 
 @test "check-version: CHANGELOG with only [Unreleased] section fails (exit 2)" {
   printf 'readonly FI_VERSION="1.0.0"\n' > "$CLI"
+  fi_write_plugin_json "1.0.0"
   cat > "$CL" <<'EOF'
 # Changelog
 
@@ -219,6 +244,7 @@ EOF
   # Confirms the check only blocks on '### Added' — '### Changed' and
   # '### Fixed' are valid PATCH content.
   printf 'readonly FI_VERSION="1.0.6"\n' > "$CLI"
+  fi_write_plugin_json "1.0.6"
   cat > "$CL" <<'EOF'
 # Changelog
 
@@ -244,9 +270,57 @@ EOF
 }
 
 @test "check-version: real repo state passes" {
-  # Sanity check that the actual repo bin/found-issues + CHANGELOG.md pass
-  # the check (i.e. release branches that get to this point are valid).
-  unset CHECK_VERSION_CLI_FILE CHECK_VERSION_CHANGELOG
+  # Sanity check that the actual repo bin/found-issues + CHANGELOG.md +
+  # plugin.json pass the check (i.e. release branches that get to this
+  # point are valid).
+  unset CHECK_VERSION_CLI_FILE CHECK_VERSION_CHANGELOG CHECK_VERSION_PLUGIN_JSON
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
+}
+
+# --- plugin.json invariant ---
+# These guard the manifest-drift class of bug: plugin.json silently lags
+# behind FI_VERSION across releases (the 1.0.5 → 1.1.0 drift was caught by
+# a friend pre-launch — not by CI).
+
+@test "check-version: plugin.json version mismatch with FI_VERSION fails (exit 1)" {
+  printf 'readonly FI_VERSION="1.1.0"\n' > "$CLI"
+  fi_write_plugin_json "1.0.5"
+  cat > "$CL" <<'EOF'
+# Changelog
+
+## [1.1.0] — 2026-05-11
+
+### Added
+
+- New thing
+EOF
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"plugin.json version mismatch"* ]]
+  [[ "$output" == *"1.0.5"* ]]
+  [[ "$output" == *"1.1.0"* ]]
+}
+
+@test "check-version: missing plugin.json fails (exit 2)" {
+  printf 'readonly FI_VERSION="1.0.0"\n' > "$CLI"
+  rm -f "$PJ"
+  cat > "$CL" <<'EOF'
+## [1.0.0] — 2026-05-09
+EOF
+  run bash "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"plugin.json not found"* ]]
+}
+
+@test "check-version: malformed plugin.json (no version field) fails (exit 2)" {
+  printf 'readonly FI_VERSION="1.0.0"\n' > "$CLI"
+  mkdir -p "$TMP/.claude-plugin"
+  printf '{ "name": "found-issues" }\n' > "$PJ"
+  cat > "$CL" <<'EOF'
+## [1.0.0] — 2026-05-09
+EOF
+  run bash "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"could not parse \"version\""* ]]
 }
