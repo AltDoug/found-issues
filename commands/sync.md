@@ -28,9 +28,16 @@ The CLI prints a one-line summary: `Synced. Closed: N (P PR + C commit + T tombs
 
 This is your job — the CLI cannot do it without invoking you.
 
-After phase 1, read the issues file and find every `[open]` entry that has
-**neither** a `(PR: ...)` annotation **nor** a `(commit: ...)` annotation.
-For each one:
+After phase 1, read the issues file and find every `[open]` entry eligible
+for AI verification. An entry is eligible when it has:
+
+- **No annotations** (unannotated path:line entries), OR
+- Only demoted annotations: `(PR-closed: ...)` and/or `(commit-stale: ...)`.
+
+Entries with an active `(PR: ...)` or `(commit: ...)` annotation are NOT
+eligible — those represent in-flight work and should be left alone.
+
+For each eligible entry:
 
 1. **Read the code at `path:line`** (use the `Read` tool, with appropriate offset/limit around the referenced line).
 2. **Re-read the entry's symptom and suggested fix** — they describe what the bug was.
@@ -64,6 +71,19 @@ Do flip on:
   callsite or function was renamed/removed)
 - The symptom describes a missing feature/field that is now clearly in
   place at the referenced location
+
+## Reading demoted annotations as hints
+
+When an entry has `(PR-closed: ...)` or `(commit-stale: ...)`, treat the
+annotation as **weak evidence that someone tried to fix this**, not proof
+the bug is gone. Apply the same conservative bias as for unannotated
+entries: verify by reading the code at `path:line`; flip only on clear
+evidence the symptom is no longer present.
+
+The demoted annotation stays on the line as audit trail regardless of
+your verdict — if you flip the entry, append `(verified: ai) (fixed: ...)`
+in addition to the existing demoted annotation. Do not strip the demoted
+annotation.
 
 ## Reporting
 
