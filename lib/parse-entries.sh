@@ -105,12 +105,33 @@ fi_parse_entry() {
     | sed -E 's/^\(PR: //; s/\)$//' \
     | paste -sd , - 2>/dev/null || true)"
 
+  # PR-closed annotations (sync-demoted form; multiple allowed)
+  local prs_closed
+  prs_closed="$(printf '%s' "$line" \
+    | grep -oE '\(PR-closed: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' \
+    | sed -E 's/^\(PR-closed: //; s/\)$//' \
+    | paste -sd , - 2>/dev/null || true)"
+
   # Commit annotations (multiple allowed)
   local commits
   commits="$(printf '%s' "$line" \
     | grep -oE '\(commit: [a-f0-9]{7,40}\)' \
     | sed -E 's/^\(commit: //; s/\)$//' \
     | paste -sd , - 2>/dev/null || true)"
+
+  # Commit-stale annotations (sync-demoted form; multiple allowed)
+  local commits_stale
+  commits_stale="$(printf '%s' "$line" \
+    | grep -oE '\(commit-stale: [a-f0-9]{7,40}\)' \
+    | sed -E 's/^\(commit-stale: //; s/\)$//' \
+    | paste -sd , - 2>/dev/null || true)"
+
+  # Renamed-from annotation (single occurrence — sync auto-correct trail)
+  local re_renamed='\(renamed-from: ([^)]+)\)'
+  local renamed_from=""
+  if [[ "$line" =~ $re_renamed ]]; then
+    renamed_from="${BASH_REMATCH[1]}"
+  fi
 
   # Fixed date
   local re_fixed='\(fixed: ([0-9]{4}-[0-9]{2}-[0-9]{2})\)'
@@ -134,7 +155,10 @@ fi_parse_entry() {
   printf 'symptom=%s\n' "$symptom"
   printf 'fix=%s\n' "$fix"
   printf 'prs=%s\n' "$prs"
+  printf 'prs_closed=%s\n' "$prs_closed"
   printf 'commits=%s\n' "$commits"
+  printf 'commits_stale=%s\n' "$commits_stale"
+  printf 'renamed_from=%s\n' "$renamed_from"
   printf 'fixed_date=%s\n' "$fixed_date"
   printf 'verified=%s\n' "$verified"
 }
