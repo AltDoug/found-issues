@@ -52,23 +52,31 @@ if ! [[ "$command" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+(merge|close
   exit 0
 fi
 
-# Locate CLI binary (same fallback chain as post-pr-create.sh).
-FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
-if ! command -v "$FI_BIN" >/dev/null 2>&1; then
-  if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/found-issues" ]]; then
-    FI_BIN="$CLAUDE_PLUGIN_ROOT/bin/found-issues"
-  else
-    # No CLI available — silent no-op, don't block.
-    exit 0
+# Resolve the dispatch command. FOUND_ISSUES_AUTOSYNC_CMD is a testing
+# knob — tests set it to a marker-creating command to verify dispatch
+# without invoking the real sync. When the override is set we skip the
+# FI_BIN resolution entirely: the override is self-contained, and
+# requiring `found-issues` on PATH for tests to work makes test setup
+# brittle (CI doesn't have the plugin installed).
+sync_cmd="${FOUND_ISSUES_AUTOSYNC_CMD:-}"
+if [[ -z "$sync_cmd" ]]; then
+  # Production path — locate the CLI binary (same fallback chain as
+  # post-pr-create.sh).
+  FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
+  if ! command -v "$FI_BIN" >/dev/null 2>&1; then
+    if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/found-issues" ]]; then
+      FI_BIN="$CLAUDE_PLUGIN_ROOT/bin/found-issues"
+    else
+      # No CLI available — silent no-op, don't block.
+      exit 0
+    fi
   fi
+  sync_cmd="$FI_BIN sync"
 fi
 
 # Fire-and-forget background sync. Detached subshell so the parent
 # (PostToolUse hook) exits immediately and Claude is never blocked
-# waiting on gh network calls. FOUND_ISSUES_AUTOSYNC_CMD is a testing
-# knob — tests set it to a marker-creating command to verify dispatch
-# without invoking the real sync.
-sync_cmd="${FOUND_ISSUES_AUTOSYNC_CMD:-$FI_BIN sync}"
+# waiting on gh network calls.
 ( bash -c "$sync_cmd" >/dev/null 2>&1 & ) >/dev/null 2>&1
 
 exit 0

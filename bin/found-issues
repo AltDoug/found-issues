@@ -907,10 +907,18 @@ cmd_status() {
     _autosync_now="$(date +%s)"
     _autosync_last=0
     if [[ -f "$_autosync_ts" ]]; then
-      _autosync_last="$(stat -f %m "$_autosync_ts" 2>/dev/null \
-                        || stat -c %Y "$_autosync_ts" 2>/dev/null \
+      # GNU first (Linux), then BSD (macOS). On Linux `stat -f` is the
+      # filesystem-status form, NOT file mtime — it can succeed-with-garbage
+      # and break the arithmetic below under `set -e`. Trying `-c` first
+      # lets Linux short-circuit cleanly.
+      _autosync_last="$(stat -c %Y "$_autosync_ts" 2>/dev/null \
+                        || stat -f %m "$_autosync_ts" 2>/dev/null \
                         || echo 0)"
     fi
+    # Defensive: if either stat returned non-numeric (rare but possible —
+    # e.g. an exotic platform whose stat accepts the format but emits text),
+    # treat as "no recent sync" rather than crashing.
+    [[ "$_autosync_last" =~ ^[0-9]+$ ]] || _autosync_last=0
     _autosync_age=$(( _autosync_now - _autosync_last ))
     if (( _autosync_age >= _autosync_interval )); then
       : >"$_autosync_ts" 2>/dev/null || true
