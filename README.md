@@ -206,7 +206,7 @@ three platforms.
 
 ## Status
 
-**v1.1.0** — 297 tests passing in CI on Linux + macOS + Windows (Git Bash). 7 hooks, 9 slash commands, 1 CLI binary, all wired through the Claude Code plugin spec.
+**v1.3.0** — 360 tests passing in CI on Linux + macOS + Windows (Git Bash). 8 hooks, 9 slash commands, 1 CLI binary, all wired through the Claude Code plugin spec.
 
 Have a use case the plugin doesn't cover? [Open an issue](https://github.com/AltDoug/found-issues/issues/new).
 
