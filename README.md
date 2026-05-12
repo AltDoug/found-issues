@@ -67,6 +67,25 @@ Run these in Claude Code:
 Then **start a new Claude Code session** so the plugin loads. The
 plugin is now active.
 
+<details>
+<summary>Install fails with <code>Permission denied (publickey)</code>?</summary>
+
+Claude Code's `/plugin install` currently shells out to git over SSH
+for some marketplaces. Users without an SSH key set up for GitHub
+will hit `Permission denied (publickey)` (even though
+`/plugin marketplace add` worked — that fetch uses HTTPS).
+
+Two paths forward:
+
+1. **Set up SSH for GitHub.** Run `gh auth setup-git` or follow
+   [GitHub's SSH key guide](https://docs.github.com/en/authentication/connecting-to-github-with-ssh).
+2. **Refresh the marketplace.** As of v1.2.0, the `altdoug-plugins`
+   marketplace metadata uses an explicit HTTPS clone URL. Re-run
+   `/plugin marketplace add AltDoug/claude-plugins` to pick up the
+   updated source, then retry `/plugin install found-issues`.
+
+</details>
+
 **Recommended next step** — run setup to wire up the statusline counter
 (so you actually see open issues at a glance), the `/fi` shortcut, and
 the optional per-repo git pre-commit hook:
