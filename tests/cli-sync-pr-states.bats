@@ -42,3 +42,21 @@ teardown() {
   # Negative assertion: tombstone closure must NOT be the mechanism
   ! grep -q 'closure: tombstone' docs/found-issues.md
 }
+
+@test "sync: gh-empty PR triggers warning but does not mutate" {
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_PR_VIEW=""  # no mocks → shim exits 1 → CLI sees empty
+
+  # Create the file so tombstone doesn't pre-empt
+  mkdir -p src
+  printf 'x\n' > src/foo.py
+
+  fi_run log "src/foo.py:1 — bug (PR: foo/bar#99)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  # Entry stays [open] with original annotation (no demotion, no flip)
+  grep -q '^- \[open\].*src/foo.py:1.*\(PR: foo/bar#99\)' docs/found-issues.md
+  # Warning surfaced via stderr (bats's `run` captures both stdout+stderr into $output)
+  [[ "$output" == *"could not be fetched"* ]]
+  [[ "$output" == *"foo/bar#99"* ]]
+}
