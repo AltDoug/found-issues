@@ -1070,6 +1070,7 @@ cmd_sync() {
   fi
 
   local closed_pr=0 closed_commit=0 closed_tomb=0
+  local demoted_pr=0
   local -a gh_empty_warnings=()
   local today
   today="$(fi_today)"
@@ -1080,6 +1081,7 @@ cmd_sync() {
   while IFS= read -r line; do
     if [[ "$line" =~ ^-\ \[open\] ]]; then
       local e_data e_path e_line e_prs e_commits
+      local -a demote_pr_refs=()
       e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
       e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
       e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
@@ -1112,6 +1114,13 @@ cmd_sync() {
             closure_label="(fixed: $today)"
             closed_pr=$((closed_pr + 1))
             break
+          fi
+
+          # A1: CLOSED-without-merge → mark for demotion (don't break — another PR may have merged)
+          local pr_merged_at
+          pr_merged_at="$(printf '%s' "$pr_json" | jq -r '.mergedAt // empty')"
+          if [[ "$pr_state" == "CLOSED" && -z "$pr_merged_at" ]]; then
+            demote_pr_refs+=("$pr_ref")
           fi
         done
         IFS="$IFS_old"
@@ -1162,6 +1171,15 @@ cmd_sync() {
         # Flip [open] -> [fixed], append closure_label
         local fixed_line="${line/\[open\]/[fixed]}"
         printf '%s %s\n' "$fixed_line" "$closure_label" >>"$tmp"
+      elif (( ${#demote_pr_refs[@]} > 0 )); then
+        # A1: demote (PR: <ref>) → (PR-closed: <ref>) for each closed-no-merge PR
+        local demoted_line="$line"
+        local ref
+        for ref in "${demote_pr_refs[@]}"; do
+          demoted_line="${demoted_line//(PR: $ref)/(PR-closed: $ref)}"
+        done
+        printf '%s\n' "$demoted_line" >>"$tmp"
+        demoted_pr=$((demoted_pr + 1))
       else
         printf '%s\n' "$line" >>"$tmp"
       fi
@@ -1174,9 +1192,11 @@ cmd_sync() {
   trap - EXIT
 
   local total_closed=$((closed_pr + closed_commit + closed_tomb))
-  if [[ "$total_closed" -gt 0 ]]; then
-    printf 'Synced. Closed: %d (%d PR + %d commit + %d tombstone).\n' \
-      "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb"
+  local total_demoted=$demoted_pr
+  if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 ]]; then
+    printf 'Synced. Closed: %d (%d PR + %d commit + %d tombstone). Demoted: %d PR-closed.\n' \
+      "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb" \
+      "$total_demoted"
   else
     printf 'Synced. Nothing to close.\n'
   fi

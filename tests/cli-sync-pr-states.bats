@@ -60,3 +60,31 @@ teardown() {
   [[ "$output" == *"could not be fetched"* ]]
   [[ "$output" == *"foo/bar#99"* ]]
 }
+
+@test "sync: CLOSED-without-merge PR demotes to (PR-closed: ...)" {
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_PR_VIEW=$'42\t{"state":"CLOSED","baseRefName":"main","mergedAt":null,"isDraft":false}'
+  mkdir -p src && printf 'x\n' > src/foo.py
+
+  fi_run log "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  # Entry stays [open], but annotation demoted
+  grep -q '^- \[open\].*\(PR-closed: foo/bar#42\)' docs/found-issues.md
+  ! grep -qE '\(PR: foo/bar#42\)' docs/found-issues.md
+}
+
+@test "sync: PR-closed demotion is idempotent (second sync is no-op)" {
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_PR_VIEW=$'42\t{"state":"CLOSED","baseRefName":"main","mergedAt":null,"isDraft":false}'
+  mkdir -p src && printf 'x\n' > src/foo.py
+
+  fi_run log "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_run sync
+  local snapshot
+  snapshot="$(cat docs/found-issues.md)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  # Second sync should produce identical file content
+  diff <(echo "$snapshot") docs/found-issues.md
+}
