@@ -69,3 +69,9 @@ Test fixture.
 - [deferred] 2026-05-05 docs/README.md — outdated examples
 EOF
 }
+
+# Activate the gh shim for this test by prepending bin-shims to PATH.
+# Caller must set GH_MOCK_PR_VIEW / GH_MOCK_REPO_VIEW / GH_MOCK_AUTH as needed.
+fi_use_gh_shim() {
+  export PATH="$TEST_REPO_ROOT/tests/bin-shims:$PATH"
+}

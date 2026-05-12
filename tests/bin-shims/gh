@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Mock gh CLI for bats tests.
+#
+# Reads mock responses from env vars:
+#   GH_MOCK_PR_VIEW       tab-separated: <pr_num>\t<json>   (newline-separated rows)
+#   GH_MOCK_REPO_VIEW     full JSON response for `gh repo view --json ...`
+#   GH_MOCK_AUTH          "ok" (default) or "fail" — controls `gh auth status` exit
+#   GH_MOCK_TRACE         path to write each invocation (for assertions)
+#
+# Behavior: print matching JSON to stdout and exit 0; exit 1 if no match.
+# Does NOT honor --jq filtering — callers should pipe to real jq in the CLI.
+
+set -euo pipefail
+
+# Trace invocation if requested
+if [[ -n "${GH_MOCK_TRACE:-}" ]]; then
+  printf '%s\n' "$*" >> "$GH_MOCK_TRACE"
+fi
+
+# Strip --json fields and --jq from argv (we don't filter)
+filtered_args=()
+skip_next=0
+for a in "$@"; do
+  if [[ "$skip_next" == "1" ]]; then
+    skip_next=0
+    continue
+  fi
+  case "$a" in
+    --json|--jq) skip_next=1 ;;
+    *) filtered_args+=("$a") ;;
+  esac
+done
+
+cmd="${filtered_args[0]:-}"
+sub="${filtered_args[1]:-}"
+
+case "$cmd $sub" in
+  "pr view")
+    pr_num="${filtered_args[2]:-}"
+    if [[ -n "${GH_MOCK_PR_VIEW:-}" ]]; then
+      while IFS=$'\t' read -r mock_num mock_json; do
+        [[ -z "$mock_num" ]] && continue
+        if [[ "$mock_num" == "$pr_num" ]]; then
+          printf '%s\n' "$mock_json"
+          exit 0
+        fi
+      done <<<"$GH_MOCK_PR_VIEW"
+    fi
+    printf 'GraphQL: Could not resolve PR\n' >&2
+    exit 1
+    ;;
+  "repo view")
+    if [[ -n "${GH_MOCK_REPO_VIEW:-}" ]]; then
+      printf '%s\n' "$GH_MOCK_REPO_VIEW"
+      exit 0
+    fi
+    exit 1
+    ;;
+  "auth status")
+    if [[ "${GH_MOCK_AUTH:-ok}" == "ok" ]]; then
+      printf 'Logged in to github.com\n'
+      exit 0
+    fi
+    printf 'not authenticated\n' >&2
+    exit 1
+    ;;
+  *)
+    printf 'gh-shim: unsupported command: %s %s\n' "$cmd" "$sub" >&2
+    exit 1
+    ;;
+esac
