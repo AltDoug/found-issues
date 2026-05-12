@@ -48,6 +48,55 @@ fi_today() { date +%Y-%m-%d; }
 # Print to stderr.
 fi_err() { printf '%s\n' "$@" >&2; }
 
+# Detect if a missing file was renamed via git. Returns the final path on
+# stdout if a rename target chain resolves to a file in the working tree;
+# returns nothing + exits 1 otherwise.
+#
+# Lists all rename events repo-wide via `git log --diff-filter=R -M
+# --name-status`. Follows the rename chain forward from $old_path until either
+# no further rename is found (current target) or the target exists on disk.
+# Format per rename line: R<score>\told_path\tnew_path
+fi_detect_rename() {
+  local old_path="$1"
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    return 1
+  fi
+  local renames
+  renames="$(git log --diff-filter=R -M --name-status --pretty=format: 2>/dev/null \
+    | awk -F'\t' '/^R[0-9]+\t/ { print $2 "\t" $3 }')"
+  if [[ -z "$renames" ]]; then
+    return 1
+  fi
+  # Follow rename chain: old → new → newer → ...
+  # Reverse the list so older renames come first (git log is reverse-chrono).
+  local rev_renames
+  rev_renames="$(printf '%s\n' "$renames" | awk '{ a[NR]=$0 } END { for(i=NR;i>=1;i--) print a[i] }')"
+  local current="$old_path"
+  local found=0
+  local hops=0
+  local line src dst
+  # Bound hops to avoid pathological loops (shouldn't happen in git history).
+  while (( hops < 100 )); do
+    local next=""
+    while IFS=$'\t' read -r src dst; do
+      if [[ "$src" == "$current" ]]; then
+        next="$dst"
+      fi
+    done <<<"$rev_renames"
+    if [[ -z "$next" ]]; then
+      break
+    fi
+    current="$next"
+    found=1
+    hops=$((hops + 1))
+  done
+  if (( found == 1 )) && [[ -f "$current" ]]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  return 1
+}
+
 # Find or create the issues file based on detected mode.
 # Echoes the path. Creates parent directory + initial header if missing.
 fi_resolve_issues_file() {
@@ -1072,6 +1121,7 @@ cmd_sync() {
   local closed_pr=0 closed_commit=0 closed_tomb=0
   local demoted_pr=0
   local demoted_commit=0
+  local renamed_count=0
   local -a gh_empty_warnings=()
   local today
   today="$(fi_today)"
@@ -1084,6 +1134,7 @@ cmd_sync() {
       local e_data e_path e_line e_prs e_commits
       local -a demote_pr_refs=()
       local -a demote_commit_refs=()
+      local rename_target="" rename_source=""
       e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
       e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
       e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
@@ -1158,9 +1209,17 @@ cmd_sync() {
           repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           local full_path="$repo_root/$e_path"
           if [[ ! -f "$full_path" ]]; then
-            closure_kind="tombstone"
-            closure_label="(closure: tombstone) (fixed: $today)"
-            closed_tomb=$((closed_tomb + 1))
+            # C1: check if file was renamed before declaring tombstone
+            local detected_new_path
+            if detected_new_path="$(cd "$repo_root" && fi_detect_rename "$e_path")"; then
+              rename_target="$detected_new_path"
+              rename_source="$e_path"
+              # don't set closure_kind — entry stays [open] with corrected path
+            else
+              closure_kind="tombstone"
+              closure_label="(closure: tombstone) (fixed: $today)"
+              closed_tomb=$((closed_tomb + 1))
+            fi
           elif [[ -n "$e_line" ]]; then
             local file_lines
             file_lines="$(wc -l <"$full_path" 2>/dev/null | tr -d ' ' || echo 0)"
@@ -1177,6 +1236,15 @@ cmd_sync() {
         # Flip [open] -> [fixed], append closure_label
         local fixed_line="${line/\[open\]/[fixed]}"
         printf '%s %s\n' "$fixed_line" "$closure_label" >>"$tmp"
+      elif [[ -n "$rename_target" ]]; then
+        # C1: auto-correct entry path after detecting git mv
+        local corrected_line="$line"
+        corrected_line="${corrected_line/$rename_source/$rename_target}"
+        if [[ "$corrected_line" != *"(renamed-from:"* ]]; then
+          corrected_line="$corrected_line (renamed-from: $rename_source)"
+        fi
+        printf '%s\n' "$corrected_line" >>"$tmp"
+        renamed_count=$((renamed_count + 1))
       elif (( ${#demote_pr_refs[@]} > 0 || ${#demote_commit_refs[@]} > 0 )); then
         # A1/B1: demote stale annotations while keeping entry [open]
         local demoted_line="$line"
@@ -1207,10 +1275,11 @@ cmd_sync() {
 
   local total_closed=$((closed_pr + closed_commit + closed_tomb))
   local total_demoted=$((demoted_pr + demoted_commit))
-  if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 ]]; then
-    printf 'Synced. Closed: %d (%d PR + %d commit + %d tombstone). Demoted: %d (%d PR-closed + %d commit-stale).\n' \
+  if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 || "$renamed_count" -gt 0 ]]; then
+    printf 'Synced. Closed: %d (%d PR + %d commit + %d tombstone). Demoted: %d (%d PR-closed + %d commit-stale). Renamed: %d.\n' \
       "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb" \
-      "$total_demoted" "$demoted_pr" "$demoted_commit"
+      "$total_demoted" "$demoted_pr" "$demoted_commit" \
+      "$renamed_count"
   else
     printf 'Synced. Nothing to close.\n'
   fi
