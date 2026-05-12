@@ -4,11 +4,19 @@
 # Reads mock responses from env vars:
 #   GH_MOCK_PR_VIEW       tab-separated: <pr_num>\t<json>   (newline-separated rows)
 #   GH_MOCK_REPO_VIEW     full JSON response for `gh repo view --json ...`
+#   GH_MOCK_PR_LIST       full JSON array for `gh pr list --json ...` (default "[]")
 #   GH_MOCK_AUTH          "ok" (default) or "fail" — controls `gh auth status` exit
 #   GH_MOCK_TRACE         path to write each invocation (for assertions)
 #
 # Behavior: print matching JSON to stdout and exit 0; exit 1 if no match.
 # Does NOT honor --jq filtering — callers should pipe to real jq in the CLI.
+#
+# Limitations (intentional):
+#   - Only space-separated --flag value form is recognized; --flag=value
+#     is NOT stripped from argv (no callers in this repo use the equals form).
+#   - --jq filters are stripped — tests must populate GH_MOCK_PR_VIEW with
+#     already-filtered output if the production CLI uses --jq for that call.
+#     (`bin/found-issues:cmd_annotate_pr` does this for `.files[].path`.)
 
 set -euo pipefail
 
@@ -48,6 +56,16 @@ case "$cmd $sub" in
     fi
     printf 'GraphQL: Could not resolve PR\n' >&2
     exit 1
+    ;;
+  "pr list")
+    # Mocked PR list. Reads GH_MOCK_PR_LIST (full JSON array, e.g. "[]" or
+    # '[{"number":1,"state":"OPEN"}]'). Defaults to "[]" (empty list, valid JSON).
+    if [[ -n "${GH_MOCK_PR_LIST:-}" ]]; then
+      printf '%s\n' "$GH_MOCK_PR_LIST"
+    else
+      printf '[]\n'
+    fi
+    exit 0
     ;;
   "repo view")
     if [[ -n "${GH_MOCK_REPO_VIEW:-}" ]]; then
