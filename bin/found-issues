@@ -1332,10 +1332,19 @@ cmd_sync() {
   local total_closed=$((closed_pr + closed_commit + closed_tomb))
   local total_demoted=$((demoted_pr + demoted_commit))
   if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 || "$renamed_count" -gt 0 ]]; then
-    printf 'Synced. Closed: %d (%d PR + %d commit + %d tombstone). Demoted: %d (%d PR-closed + %d commit-stale). Renamed: %d.\n' \
-      "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb" \
-      "$total_demoted" "$demoted_pr" "$demoted_commit" \
-      "$renamed_count"
+    local summary="Synced."
+    if (( total_closed > 0 )); then
+      summary+="$(printf ' Closed: %d (%d PR + %d commit + %d tombstone).' \
+        "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb")"
+    fi
+    if (( total_demoted > 0 )); then
+      summary+="$(printf ' Demoted: %d (%d PR-closed + %d commit-stale).' \
+        "$total_demoted" "$demoted_pr" "$demoted_commit")"
+    fi
+    if (( renamed_count > 0 )); then
+      summary+="$(printf ' Renamed: %d.' "$renamed_count")"
+    fi
+    printf '%s\n' "$summary"
   else
     printf 'Synced. Nothing to close.\n'
   fi

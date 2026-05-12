@@ -28,6 +28,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 No user action required. All annotation lifecycle work runs passively in `/found-issues:sync` (which fires on SessionStart). Existing `docs/found-issues.md` files are forward- and backward-compatible.
 
+### Known limitations
+
+- **Rename substitution scope.** When sync auto-corrects a renamed file's path, it uses string substitution on the entry line. If the entry's symptom text happens to contain the literal old path as a substring, that occurrence will also be rewritten. Rare in practice (symptom text is free-form English; paths are usually only in the location prefix), but worth flagging. If it bites, edit the entry by hand to restore the symptom text.
+
 ### Reference
 
 - Gap analysis: [`docs/superpowers/audits/2026-05-11-annotation-lifecycle-gaps.md`](docs/superpowers/audits/2026-05-11-annotation-lifecycle-gaps.md)
