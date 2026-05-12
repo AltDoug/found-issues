@@ -87,6 +87,27 @@ teardown() {
   [[ "$out" == *"line="*$'\n'* ]] || [[ "$(printf '%s' "$out" | grep '^line=')" == "line=" ]]
 }
 
+@test "parse_entry: extracts path correctly when symptom contains additional ISO dates (regression)" {
+  # Pre-fix, the location strip used a greedy `sed -E 's/^.*[0-9]{4}-[0-9]{2}-[0-9]{2} //'`
+  # so when the symptom contained extra ISO dates, the strip consumed past the
+  # leading entry-date and ate into the symptom — path extraction returned empty
+  # and annotate-pr / annotate-commit silently failed to match the entry's file
+  # against PR-touched files. Repros bug observed 2026-05-12 while annotating
+  # the stop-reminder entry against PR #83.
+  out="$(fi_parse_entry '- [open] 2026-05-12 hooks/stop-reminder.sh — Stop hook silent since 2026-05-08; auto-logging dried up ~2026-05-04 across all repos.')"
+  [[ "$out" == *"path=hooks/stop-reminder.sh"* ]]
+  [[ "$out" == *"date=2026-05-12"* ]]
+}
+
+@test "parse_entry: extracts path:line correctly when symptom contains multiple ISO dates" {
+  # Same root cause as above but with path:line shape; ensures the path/line
+  # regex still matches after the leading-date strip.
+  out="$(fi_parse_entry '- [open] 2026-05-12 lib/foo.sh:42 — regressed in 2026-04-30 release, surfaced 2026-05-10')"
+  [[ "$out" == *"path=lib/foo.sh"* ]]
+  [[ "$out" == *"line=42"* ]]
+  [[ "$out" == *"date=2026-05-12"* ]]
+}
+
 @test "parse_entry: extracts symptom (without parentheticals)" {
   out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — null check (suggested: add guard)')"
   [[ "$out" == *"symptom=null check"* ]]
