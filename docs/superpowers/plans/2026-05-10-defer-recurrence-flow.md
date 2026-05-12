@@ -1784,7 +1784,7 @@ The `--help` output (printed by `cmd_help` in `bin/found-issues`) lists each sub
 
 - [ ] **Step 1: Inspect the existing help section**
 
-Run: `sed -n '100,125p' /Users/diogosilvasena/Documents/projects/found-issues/bin/found-issues`
+Run: `sed -n '100,125p' bin/found-issues`
 Note where `archive`, `install-statusline`, etc. are listed. New `defer` + `promote-deferred` should logically slot between `log` and the install-* commands.
 
 - [ ] **Step 2: Add the new lines to the help block**
@@ -1802,7 +1802,7 @@ Find the section with subcommands like `log`, `status`, `sync`, `archive`. Inser
 
 - [ ] **Step 3: Verify help output**
 
-Run: `/Users/diogosilvasena/Documents/projects/found-issues/bin/found-issues --help | grep -A1 "defer"`
+Run: `bin/found-issues --help | grep -A1 "defer"`
 Expected: both new commands listed with descriptions.
 
 - [ ] **Step 4: Commit**
@@ -1825,7 +1825,7 @@ Markdown file that registers as the `/found-issues:defer` slash command. Mirrors
 
 - [ ] **Step 1: Inspect the existing log skill for style**
 
-Run: `cat /Users/diogosilvasena/Documents/projects/found-issues/commands/log.md`
+Run: `cat commands/log.md`
 Note the frontmatter format (description, argument-hint, allowed-tools) and the prose conventions.
 
 - [ ] **Step 2: Write `commands/defer.md`**
@@ -1876,7 +1876,7 @@ Captures a short human note explaining WHY this entry is being deferred. Stored 
 
 The skill is markdown; agent-sync will pick it up next render. No CLI test needed for the file itself, but inspect the frontmatter is well-formed:
 
-Run: `head -5 /Users/diogosilvasena/Documents/projects/found-issues/commands/defer.md`
+Run: `head -5 commands/defer.md`
 Expected: frontmatter looks like `commands/log.md`.
 
 - [ ] **Step 4: Commit**
@@ -2024,7 +2024,7 @@ Currently `cmd_log` calls `fi_entries "$file" open` (`bin/found-issues:249`) for
 
 - [ ] **Step 1: Read the current dedup loop**
 
-Run: `sed -n '215,255p' /Users/diogosilvasena/Documents/projects/found-issues/bin/found-issues`
+Run: `sed -n '215,255p' bin/found-issues`
 Note the structure: builds `new_key`, iterates `fi_entries "$file" open`, computes `existing_key`, on match prints "Skipped" and returns 0.
 
 - [ ] **Step 2: Refactor the dedup loop to handle two cases**
@@ -2788,7 +2788,7 @@ git checkout -b feat/defer-recurrence-flow-phase-4-docs
 
 - [ ] **Step 1: Inspect the existing CHANGELOG structure**
 
-Run: `head -10 /Users/diogosilvasena/Documents/projects/found-issues/CHANGELOG.md`
+Run: `head -10 CHANGELOG.md`
 Note the version-section pattern (`## [N.N.N] — YYYY-MM-DD` followed by `### Added` / `### Fixed` / etc.).
 
 - [ ] **Step 2: Insert the 1.0.5 entry**
@@ -2841,7 +2841,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 - [ ] **Step 1: Inspect README structure**
 
-Run: `grep -nE '^## |^### ' /Users/diogosilvasena/Documents/projects/found-issues/README.md | head -20`
+Run: `grep -nE '^## |^### ' README.md | head -20`
 Find the "What it does" section and a logical insertion point — probably after the section that explains the current open/fixed/deferred statuses.
 
 - [ ] **Step 2: Add the new subsection**
