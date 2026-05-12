@@ -20,6 +20,36 @@
 #
 #   fi_invalidate_mode_cache
 #       Removes cached mode for current repo. Useful in tests / after auth changes.
+#
+#   fi_file_mtime <path>
+#       Echoes the file's epoch-seconds mtime. Cross-platform safe
+#       (BSD stat -f vs GNU stat -c) and guaranteed numeric. Echoes "0"
+#       on any failure or non-numeric output.
+
+# Echo a file's mtime as epoch seconds. Cross-platform.
+#
+# Why this exists: `stat -f %m` (BSD/macOS) and `stat -c %Y` (GNU/Linux)
+# are not interchangeable. On GNU stat, `-f` means `--file-system` and
+# treats subsequent args as files — it prints multi-line FS info starting
+# with "File:" instead of failing. The previous `stat -f %m || stat -c %Y
+# || echo 0` chain therefore "succeeded" on Linux with garbage output,
+# which then blew up `$(( now - mtime ))` arithmetic under `set -u` (bash
+# 5.2+ tries to look up the bareword "File" as a variable, hits unbound).
+# We now try GNU first (matches Linux + Windows Git Bash, the common CI
+# runners) and validate the result is numeric before returning it.
+fi_file_mtime() {
+  local path="$1"
+  local m
+  # Try GNU first (Linux, Windows Git Bash), then BSD (macOS).
+  m="$(stat -c %Y -- "$path" 2>/dev/null)" || m=""
+  if [[ ! "$m" =~ ^[0-9]+$ ]]; then
+    m="$(stat -f %m -- "$path" 2>/dev/null)" || m=""
+  fi
+  if [[ ! "$m" =~ ^[0-9]+$ ]]; then
+    m=0
+  fi
+  printf '%s' "$m"
+}
 
 # Echo the detected mode for the current working directory.
 fi_detect_mode() {
@@ -75,7 +105,7 @@ fi_detect_mode() {
   local ttl=3600  # 1 hour
   if [[ -f "$cache_file" ]]; then
     local mtime now age
-    mtime="$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo 0)"
+    mtime="$(fi_file_mtime "$cache_file")"
     now="$(date +%s)"
     age=$((now - mtime))
     if [[ "$age" -lt "$ttl" ]]; then
@@ -92,13 +122,19 @@ fi_detect_mode() {
 
   local recent_count=0
   if [[ -n "$cutoff" ]]; then
+    # `grep -c` prints "0" + exits 1 on no-match. The previous `|| echo 0`
+    # appended a SECOND "0", yielding "0\n0" — which then blew up the
+    # `[[ "$recent_count" -gt 0 ]]` arithmetic on bash 5.2 (Linux/Windows CI)
+    # with `set -e` active. Use `|| true` and rely on grep's own "0" output;
+    # sanitize defensively in case grep returns empty for any reason.
     recent_count="$(gh pr list --state merged --limit 5 \
       --search "merged:>$cutoff" --json number 2>/dev/null \
-      | grep -c '"number"' || echo 0)"
+      | grep -c '"number"' 2>/dev/null || true)"
+    [[ "$recent_count" =~ ^[0-9]+$ ]] || recent_count=0
   fi
 
   local mode
-  if [[ "$recent_count" -gt 0 ]]; then
+  if (( recent_count > 0 )); then
     mode="github-pr"
   else
     mode="github-direct"

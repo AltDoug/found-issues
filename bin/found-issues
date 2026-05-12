@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.1.0"
+readonly FI_VERSION="1.2.0"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -48,6 +48,55 @@ fi_today() { date +%Y-%m-%d; }
 # Print to stderr.
 fi_err() { printf '%s\n' "$@" >&2; }
 
+# Detect if a missing file was renamed via git. Returns the final path on
+# stdout if a rename target chain resolves to a file in the working tree;
+# returns nothing + exits 1 otherwise.
+#
+# Lists all rename events repo-wide via `git log --diff-filter=R -M
+# --name-status`. Follows the rename chain forward from $old_path until either
+# no further rename is found (current target) or the target exists on disk.
+# Format per rename line: R<score>\told_path\tnew_path
+fi_detect_rename() {
+  local old_path="$1"
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    return 1
+  fi
+  local renames
+  renames="$(git log --diff-filter=R -M --name-status --pretty=format: 2>/dev/null \
+    | awk -F'\t' '/^R[0-9]+\t/ { print $2 "\t" $3 }')"
+  if [[ -z "$renames" ]]; then
+    return 1
+  fi
+  # Follow rename chain: old → new → newer → ...
+  # Reverse the list so older renames come first (git log is reverse-chrono).
+  local rev_renames
+  rev_renames="$(printf '%s\n' "$renames" | awk '{ a[NR]=$0 } END { for(i=NR;i>=1;i--) print a[i] }')"
+  local current="$old_path"
+  local found=0
+  local hops=0
+  local line src dst
+  # Bound hops to avoid pathological loops (shouldn't happen in git history).
+  while (( hops < 100 )); do
+    local next=""
+    while IFS=$'\t' read -r src dst; do
+      if [[ "$src" == "$current" ]]; then
+        next="$dst"
+      fi
+    done <<<"$rev_renames"
+    if [[ -z "$next" ]]; then
+      break
+    fi
+    current="$next"
+    found=1
+    hops=$((hops + 1))
+  done
+  if (( found == 1 )) && [[ -f "$current" ]]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  return 1
+}
+
 # Find or create the issues file based on detected mode.
 # Echoes the path. Creates parent directory + initial header if missing.
 fi_resolve_issues_file() {
@@ -88,6 +137,66 @@ fi_repo_id() {
   fi
   printf '%s' "$remote_url" \
     | sed -E 's|.*github\.com[:/]([^/]+/[^/.]+)(\.git)?.*|\1|'
+}
+
+# Resolve the default branch with a layered fallback chain:
+#   1. git symbolic-ref refs/remotes/origin/HEAD (primary, fast, no network)
+#   2. gh repo view --json defaultBranchRef.name (fallback when origin/HEAD unset)
+#   3. literal "main" (last-resort guess)
+#
+# Caches the gh-result per-repo for 1h to avoid repeated network calls.
+# Cache file: ${XDG_CACHE_HOME:-$HOME/.cache}/found-issues/default-branch-<slug>.txt
+fi_resolve_default_branch() {
+  local default_branch
+
+  # Primary: origin/HEAD symref
+  default_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+    | sed 's|^refs/remotes/origin/||' || true)"
+  if [[ -n "$default_branch" ]]; then
+    printf '%s' "$default_branch"
+    return 0
+  fi
+
+  # Fallback: gh repo view, with cache
+  local repo_slug
+  repo_slug="$(fi_repo_id 2>/dev/null || true)"
+  if [[ -n "$repo_slug" ]] && command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+    local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/found-issues"
+    local cache_file="$cache_dir/default-branch-${repo_slug//\//-}.txt"
+    mkdir -p "$cache_dir" 2>/dev/null || true
+
+    # Check cache freshness (1h TTL). fi_file_mtime is the cross-platform
+    # mtime helper (see lib/detect-mode.sh) — guarantees a numeric result
+    # so `$(( now - mtime ))` is safe under `set -u`.
+    if [[ -f "$cache_file" ]]; then
+      local mtime now age
+      mtime="$(fi_file_mtime "$cache_file")"
+      now="$(date +%s)"
+      age=$((now - mtime))
+      if (( age < 3600 )); then
+        local cached
+        cached="$(cat "$cache_file" 2>/dev/null)"
+        if [[ -n "$cached" ]]; then
+          printf '%s' "$cached"
+          return 0
+        fi
+      fi
+    fi
+
+    # Fetch fresh
+    local gh_result
+    gh_result="$(gh repo view --json defaultBranchRef 2>/dev/null \
+      | jq -r '.defaultBranchRef.name // empty' 2>/dev/null || true)"
+    if [[ -n "$gh_result" ]]; then
+      printf '%s' "$gh_result" > "$cache_file"
+      printf '%s' "$gh_result"
+      return 0
+    fi
+  fi
+
+  # Last resort
+  printf 'main'
+  return 0
 }
 
 # === Subcommand: help ===
@@ -1064,12 +1173,14 @@ cmd_sync() {
 
   local default_branch=""
   if git rev-parse --git-dir >/dev/null 2>&1; then
-    default_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
-      | sed 's|^refs/remotes/origin/||' || true)"
-    [[ -z "$default_branch" ]] && default_branch="main"
+    default_branch="$(fi_resolve_default_branch)"
   fi
 
   local closed_pr=0 closed_commit=0 closed_tomb=0
+  local demoted_pr=0
+  local demoted_commit=0
+  local renamed_count=0
+  local -a gh_empty_warnings=()
   local today
   today="$(fi_today)"
   local tmp
@@ -1079,6 +1190,9 @@ cmd_sync() {
   while IFS= read -r line; do
     if [[ "$line" =~ ^-\ \[open\] ]]; then
       local e_data e_path e_line e_prs e_commits
+      local -a demote_pr_refs=()
+      local -a demote_commit_refs=()
+      local rename_target="" rename_source=""
       e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
       e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
       e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
@@ -1087,25 +1201,37 @@ cmd_sync() {
 
       local closure_kind="" closure_label=""
 
-      # Check PR annotations
-      if [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1; then
+      # Check PR annotations (single gh call per PR returning all needed fields)
+      if [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
         local IFS_old="$IFS"
         IFS=','
         for pr_ref in $e_prs; do
           IFS="$IFS_old"
-          # pr_ref is org/repo#N
           local pr_num="${pr_ref##*#}"
           local pr_repo="${pr_ref%#*}"
+          local pr_json
+          pr_json="$(gh pr view "$pr_num" --repo "$pr_repo" \
+            --json state,baseRefName,mergedAt,isDraft 2>/dev/null || true)"
+          if [[ -z "$pr_json" ]]; then
+            # gh empty: warn at end of sync (don't demote — could be transient)
+            gh_empty_warnings+=("$pr_ref")
+            continue
+          fi
           local pr_state pr_branch
-          pr_state="$(gh pr view "$pr_num" --repo "$pr_repo" \
-            --json state,baseRefName --jq '.state' 2>/dev/null || true)"
-          pr_branch="$(gh pr view "$pr_num" --repo "$pr_repo" \
-            --json baseRefName --jq '.baseRefName' 2>/dev/null || true)"
+          pr_state="$(printf '%s' "$pr_json" | jq -r '.state // empty')"
+          pr_branch="$(printf '%s' "$pr_json" | jq -r '.baseRefName // empty')"
           if [[ "$pr_state" == "MERGED" && ( -z "$default_branch" || "$pr_branch" == "$default_branch" ) ]]; then
             closure_kind="pr"
             closure_label="(fixed: $today)"
             closed_pr=$((closed_pr + 1))
             break
+          fi
+
+          # A1: CLOSED-without-merge → mark for demotion (don't break — another PR may have merged)
+          local pr_merged_at
+          pr_merged_at="$(printf '%s' "$pr_json" | jq -r '.mergedAt // empty')"
+          if [[ "$pr_state" == "CLOSED" && -z "$pr_merged_at" ]]; then
+            demote_pr_refs+=("$pr_ref")
           fi
         done
         IFS="$IFS_old"
@@ -1125,6 +1251,10 @@ cmd_sync() {
               closed_commit=$((closed_commit + 1))
               break
             fi
+            # SHA exists but isn't ancestor — leave alone (unmerged feature branch)
+          else
+            # B1/B2: SHA doesn't resolve (squash-merge dropped it, force-push removed it) → demote
+            demote_commit_refs+=("$sha")
           fi
         done
         IFS="$IFS_old"
@@ -1137,9 +1267,17 @@ cmd_sync() {
           repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           local full_path="$repo_root/$e_path"
           if [[ ! -f "$full_path" ]]; then
-            closure_kind="tombstone"
-            closure_label="(closure: tombstone) (fixed: $today)"
-            closed_tomb=$((closed_tomb + 1))
+            # C1: check if file was renamed before declaring tombstone
+            local detected_new_path
+            if detected_new_path="$(cd "$repo_root" && fi_detect_rename "$e_path")"; then
+              rename_target="$detected_new_path"
+              rename_source="$e_path"
+              # don't set closure_kind — entry stays [open] with corrected path
+            else
+              closure_kind="tombstone"
+              closure_label="(closure: tombstone) (fixed: $today)"
+              closed_tomb=$((closed_tomb + 1))
+            fi
           elif [[ -n "$e_line" ]]; then
             local file_lines
             file_lines="$(wc -l <"$full_path" 2>/dev/null | tr -d ' ' || echo 0)"
@@ -1156,6 +1294,32 @@ cmd_sync() {
         # Flip [open] -> [fixed], append closure_label
         local fixed_line="${line/\[open\]/[fixed]}"
         printf '%s %s\n' "$fixed_line" "$closure_label" >>"$tmp"
+      elif [[ -n "$rename_target" ]]; then
+        # C1: auto-correct entry path after detecting git mv
+        local corrected_line="$line"
+        corrected_line="${corrected_line/$rename_source/$rename_target}"
+        if [[ "$corrected_line" != *"(renamed-from:"* ]]; then
+          corrected_line="$corrected_line (renamed-from: $rename_source)"
+        fi
+        printf '%s\n' "$corrected_line" >>"$tmp"
+        renamed_count=$((renamed_count + 1))
+      elif (( ${#demote_pr_refs[@]} > 0 || ${#demote_commit_refs[@]} > 0 )); then
+        # A1/B1: demote stale annotations while keeping entry [open]
+        local demoted_line="$line"
+        local ref
+        if (( ${#demote_pr_refs[@]} > 0 )); then
+          for ref in "${demote_pr_refs[@]}"; do
+            demoted_line="${demoted_line//(PR: $ref)/(PR-closed: $ref)}"
+          done
+          demoted_pr=$((demoted_pr + 1))
+        fi
+        if (( ${#demote_commit_refs[@]} > 0 )); then
+          for ref in "${demote_commit_refs[@]}"; do
+            demoted_line="${demoted_line//(commit: $ref)/(commit-stale: $ref)}"
+          done
+          demoted_commit=$((demoted_commit + 1))
+        fi
+        printf '%s\n' "$demoted_line" >>"$tmp"
       else
         printf '%s\n' "$line" >>"$tmp"
       fi
@@ -1168,13 +1332,36 @@ cmd_sync() {
   trap - EXIT
 
   local total_closed=$((closed_pr + closed_commit + closed_tomb))
-  if [[ "$total_closed" -gt 0 ]]; then
-    printf 'Synced. Closed: %d (%d PR + %d commit + %d tombstone).\n' \
-      "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb"
+  local total_demoted=$((demoted_pr + demoted_commit))
+  if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 || "$renamed_count" -gt 0 ]]; then
+    local summary="Synced."
+    if (( total_closed > 0 )); then
+      summary+="$(printf ' Closed: %d (%d PR + %d commit + %d tombstone).' \
+        "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb")"
+    fi
+    if (( total_demoted > 0 )); then
+      summary+="$(printf ' Demoted: %d (%d PR-closed + %d commit-stale).' \
+        "$total_demoted" "$demoted_pr" "$demoted_commit")"
+    fi
+    if (( renamed_count > 0 )); then
+      summary+="$(printf ' Renamed: %d.' "$renamed_count")"
+    fi
+    printf '%s\n' "$summary"
   else
     printf 'Synced. Nothing to close.\n'
   fi
   cmd_status plain
+
+  # Surface gh-empty warnings: PRs that couldn't be fetched.
+  # Don't demote — could be transient auth/network/rate-limit.
+  if (( ${#gh_empty_warnings[@]} > 0 )); then
+    printf '\nWarning: %d PR annotation(s) could not be fetched via gh:\n' "${#gh_empty_warnings[@]}" >&2
+    local w
+    for w in "${gh_empty_warnings[@]}"; do
+      printf '  - %s\n' "$w" >&2
+    done
+    printf '  (Check gh auth status or verify the PR numbers are correct.)\n' >&2
+  fi
 
   # Auto-archive: enforced by default. Users who want pure manual control set
   # FOUND_ISSUES_AUTO_ARCHIVE=off in their shell rc. Without enforcement, users
@@ -1212,9 +1399,7 @@ cmd_promote() {
 
   local current_branch default_branch
   current_branch="$(git branch --show-current 2>/dev/null || true)"
-  default_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
-    | sed 's|^refs/remotes/origin/||' || true)"
-  [[ -z "$default_branch" ]] && default_branch="main"
+  default_branch="$(fi_resolve_default_branch)"
 
   if [[ -z "$current_branch" ]]; then
     fi_err "promote: detached HEAD; check out a branch first"
@@ -1919,6 +2104,23 @@ cmd_doctor() {
     fi
   else
     printf '%s gh CLI not on PATH. PR-related features (annotate-pr, sync against PR merges) are disabled.\n' "$section_warn"
+  fi
+
+  # origin/HEAD symref (5.2: default-branch detection for PR-state sync).
+  # When unset, fi_default_branch falls back to `gh repo view` then literal "main".
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    if git symbolic-ref refs/remotes/origin/HEAD >/dev/null 2>&1; then
+      local origin_head
+      origin_head="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo unknown)"
+      printf '%s origin/HEAD: set (%s)\n' "$section_pass" "$origin_head"
+    else
+      if git remote get-url origin >/dev/null 2>&1; then
+        printf '%s origin/HEAD: unset. Sync falls back to `gh repo view`, then literal "main".\n' "$section_warn"
+        printf '   Fix: git remote set-head origin --auto\n'
+      else
+        printf '%s origin/HEAD: no `origin` remote — default-branch detection skipped.\n' "$section_warn"
+      fi
+    fi
   fi
   printf '\n'
 
