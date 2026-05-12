@@ -32,7 +32,7 @@ The closure loop runs **on its own**:
 | Claude notices an out-of-scope issue | Logs it via `/found-issues:log` per the auto-loaded [rules](skills/rules/SKILL.md) |
 | Claude opens a PR addressing an entry | Hook surfaces matching entries, prompts `/found-issues:annotate-pr <N>` |
 | Claude commits a fix directly to main | Hook prompts `/found-issues:annotate-commit` |
-| PR merges or commit lands on main | Next `SessionStart` flips `[open]` → `[fixed]` automatically |
+| PR merges or commit lands on main | Background sync flips `[open]` → `[fixed]` automatically — instantly when merged from inside the session, within ~10min for external merges (web UI, teammate), and always at the next `SessionStart` as a fallback |
 | Referenced file/line is deleted | Tombstone detection auto-closes the entry |
 | Branch with un-promoted entries about to be deleted | `pre-branch-delete` hook blocks until `/found-issues:promote` runs |
 
