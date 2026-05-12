@@ -4,6 +4,40 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-05-11
+
+### Added — sync self-healing
+
+- **Auto-demote closed-without-merge PR annotations.** `(PR: org/repo#N)` on a CLOSED PR is rewritten to `(PR-closed: org/repo#N)`. Entry becomes eligible for AI verification in `/found-issues:sync` Phase 2, and stops inflating the statusline's `in PR` counter.
+- **Auto-demote unresolvable commit annotations.** `(commit: <sha>)` whose SHA no longer resolves on the default branch (squash-merged, force-pushed) is rewritten to `(commit-stale: <sha>)`. Same eligibility + counter treatment as PR-closed.
+- **Auto-correct file renames before tombstone closure.** When a missing file is detected, sync now checks `git log --diff-filter=R` for a rename target. If found, the entry's path is updated in-place and a `(renamed-from: ...)` annotation preserves the original path. Replaces the silent false-positive `[fixed]` flip.
+- **gh-based default-branch fallback.** When `origin/HEAD` symref is unset, sync falls back to `gh repo view --json defaultBranchRef` (1h session cache) before the last-resort literal `main`. Fixes silent PR-merge misdetection on `master`/`trunk`/`develop` repos.
+- **`doctor` extensions.** Now reports `gh auth status` and `origin/HEAD` symref status with remediation hints.
+- **Loud warning on gh-empty.** When `gh pr view` returns empty for an annotated PR (typo, deleted, network), sync now emits an aggregated warning at the end of the run instead of silently skipping.
+
+### Changed
+
+- **Counter semantics.** `in PR` now counts only active `(PR: ...)` — demoted forms are excluded. `stale` now absorbs `(PR-closed: ...)` and `(commit-stale: ...)` regardless of date. Existing date-based stale logic unchanged.
+
+### Internal
+
+- Sync's per-PR gh calls consolidated: one `gh pr view` per PR returning `state`, `baseRefName`, `mergedAt`, `isDraft` in one shot.
+- New gh-mock PATH shim (`tests/bin-shims/gh`) gives bats tests deterministic coverage of PR-state branches that were previously untested.
+
+### Migration notes
+
+No user action required. All annotation lifecycle work runs passively in `/found-issues:sync` (which fires on SessionStart). Existing `docs/found-issues.md` files are forward- and backward-compatible.
+
+### Known limitations
+
+- **Rename substitution scope.** When sync auto-corrects a renamed file's path, it uses string substitution on the entry line. If the entry's symptom text happens to contain the literal old path as a substring, that occurrence will also be rewritten. Rare in practice (symptom text is free-form English; paths are usually only in the location prefix), but worth flagging. If it bites, edit the entry by hand to restore the symptom text.
+
+### Reference
+
+- Gap analysis: [`docs/superpowers/audits/2026-05-11-annotation-lifecycle-gaps.md`](docs/superpowers/audits/2026-05-11-annotation-lifecycle-gaps.md)
+- Design spec: [`docs/superpowers/specs/2026-05-11-sync-self-healing-design.md`](docs/superpowers/specs/2026-05-11-sync-self-healing-design.md)
+- Implementation plan: [`docs/superpowers/plans/2026-05-11-sync-self-healing.md`](docs/superpowers/plans/2026-05-11-sync-self-healing.md)
+
 ## [Unreleased]
 
 ### Planned

@@ -45,6 +45,7 @@ user see all options at once, pick what they want, and submit in one step.
 shows actionable items:
 
 - `~/.claude/statusline.sh` contains `# === found-issues plugin segment ===` → omit option 1
+- `~/.claude/settings.json` has `statusLine.command` set to a path OTHER than `~/.claude/statusline.sh` → omit option 1 (user has a custom statusline our `install-statusline` can't safely modify; surface the manual-integration message instead, see Optional 1 below)
 - `~/.claude/commands/fi.md` contains `Run /found-issues:$ARGUMENTS` → omit option 2
 
 **Doctor pass before the picker (informational, v1.0.4+):** running
@@ -91,35 +92,73 @@ and adds a clearly-bracketed block that's trivially removable.
 
 Flow:
 
-1. Check if the user has a statusline: `ls ~/.claude/statusline.sh`
-2. **Check if the segment is already installed.** Use the marker grep
-   (NOT a generic "found-issues" string match — comments and other
-   references can produce false positives):
+1. **Detect where the user's statusline lives.** Claude Code supports two locations:
+   - The convention path: `~/.claude/statusline.sh` (what `install-statusline` writes to)
+   - A custom path set in `~/.claude/settings.json` under `statusLine.command`
+
+   Run this single check:
+
    ```bash
-   grep -Fq "# === found-issues plugin segment ===" ~/.claude/statusline.sh && echo INSTALLED || echo NOT_INSTALLED
+   # Resolve where the statusline (if any) actually lives
+   custom_cmd=""
+   if [[ -f "$HOME/.claude/settings.json" ]] && command -v jq >/dev/null 2>&1; then
+     custom_cmd="$(jq -r '.statusLine.command // empty' "$HOME/.claude/settings.json" 2>/dev/null || true)"
+   fi
+   custom_cmd_local=""
+   if [[ -f "$HOME/.claude/settings.local.json" ]] && command -v jq >/dev/null 2>&1; then
+     custom_cmd_local="$(jq -r '.statusLine.command // empty' "$HOME/.claude/settings.local.json" 2>/dev/null || true)"
+   fi
+   # settings.local.json takes precedence over settings.json (per-machine override)
+   [[ -n "$custom_cmd_local" ]] && custom_cmd="$custom_cmd_local"
+
+   # Normalize ~ → $HOME for comparison
+   custom_cmd_expanded="${custom_cmd/#\~/$HOME}"
+
+   convention="$HOME/.claude/statusline.sh"
+
+   if [[ -n "$custom_cmd_expanded" && "$custom_cmd_expanded" != "$convention" ]]; then
+     echo "STATUSLINE_CUSTOM_ELSEWHERE: $custom_cmd_expanded"
+   elif [[ -f "$convention" ]]; then
+     echo "STATUSLINE_AT_CONVENTION"
+   else
+     echo "STATUSLINE_DEFAULT"
+   fi
    ```
-3. If NOT installed, ask: *"Want me to add the found-issues counter
-   segment to your statusline? It inserts a small marker-bracketed
-   block — fully reversible with `found-issues uninstall-statusline`."*
-4. On yes, run `found-issues install-statusline`. The command auto-detects
-   whether the user's statusline has a LINE1 assembly pattern:
-   - **LINE1 pattern detected** (multi-line statuslines): inserts the
-     segment inline so it appears next to repo/branch on the same line
-   - **No LINE1 pattern** (simple printf statuslines): appends the
-     segment as a standalone new line
-   - Either way: idempotent (marker prevents double-install), reversible
-     (`uninstall-statusline`), guarded against `set -e`
-5. Tell the user to restart their session to see the segment render.
 
-If `~/.claude/statusline.sh` doesn't exist, the user uses the default
-Claude Code statusline. Tell them: *"You'll see the count via the
-SessionStart hook on session start regardless. If you want a custom
-statusline with the counter inline, create `~/.claude/statusline.sh`
-first, then run `found-issues install-statusline`."*
+2. **Branch on the result:**
 
-If the user has **claude-hud** or another statusline tool that owns the
-slot, integration won't show. Tell them the SessionStart hook still
-prints the count once per session.
+   - **`STATUSLINE_CUSTOM_ELSEWHERE: <path>`** — the user has a custom statusline at a path our `install-statusline` doesn't manage. Tell them:
+
+     > _You have a custom statusline at `<path>`. The plugin's `install-statusline` writes to `~/.claude/statusline.sh` specifically, so it won't fit your setup. To add the inline counter manually, call this from your statusline script wherever you want the count rendered:_
+     >
+     > ```bash
+     > found-issues status --format=segment 2>/dev/null
+     > ```
+     >
+     > _The output is empty when counts are zero and colorized when non-zero. Cached for 10s (see `FI_CACHE_TTL`) so subprocess cost is negligible. The SessionStart hook still prints the open count once per session regardless._
+
+     Then **omit the statusline option from the picker** (it would mislead the user).
+
+   - **`STATUSLINE_AT_CONVENTION`** — user has `~/.claude/statusline.sh`. Continue with the normal flow:
+
+     **Check if the segment is already installed.** Use the marker grep (NOT a generic "found-issues" string match — comments and other references can produce false positives):
+
+     ```bash
+     grep -Fq "# === found-issues plugin segment ===" ~/.claude/statusline.sh && echo INSTALLED || echo NOT_INSTALLED
+     ```
+
+     If NOT installed, ask: *"Want me to add the found-issues counter segment to your statusline? It inserts a small marker-bracketed block — fully reversible with `found-issues uninstall-statusline`."*
+
+     On yes, run `found-issues install-statusline`. The command auto-detects whether the user's statusline has a LINE1 assembly pattern:
+     - **LINE1 pattern detected** (multi-line statuslines): inserts the segment inline so it appears next to repo/branch on the same line
+     - **No LINE1 pattern** (simple printf statuslines): appends the segment as a standalone new line
+     - Either way: idempotent (marker prevents double-install), reversible (`uninstall-statusline`), guarded against `set -e`
+
+     Tell the user to restart their session to see the segment render.
+
+   - **`STATUSLINE_DEFAULT`** — no custom statusline anywhere. Tell them: *"You'll see the count via the SessionStart hook on session start regardless. If you want a custom statusline with the counter inline, create `~/.claude/statusline.sh` first, then run `found-issues install-statusline`."*
+
+If the user has **claude-hud** or another statusline tool that owns the slot (and configures via `settings.json`), the `STATUSLINE_CUSTOM_ELSEWHERE` branch handles them — they get the manual-integration message above. The SessionStart hook still prints the count once per session.
 
 To uninstall later: `found-issues uninstall-statusline` removes the
 block cleanly without touching the rest of the file.

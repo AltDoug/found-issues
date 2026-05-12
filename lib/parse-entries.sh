@@ -105,12 +105,33 @@ fi_parse_entry() {
     | sed -E 's/^\(PR: //; s/\)$//' \
     | paste -sd , - 2>/dev/null || true)"
 
+  # PR-closed annotations (sync-demoted form; multiple allowed)
+  local prs_closed
+  prs_closed="$(printf '%s' "$line" \
+    | grep -oE '\(PR-closed: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' \
+    | sed -E 's/^\(PR-closed: //; s/\)$//' \
+    | paste -sd , - 2>/dev/null || true)"
+
   # Commit annotations (multiple allowed)
   local commits
   commits="$(printf '%s' "$line" \
     | grep -oE '\(commit: [a-f0-9]{7,40}\)' \
     | sed -E 's/^\(commit: //; s/\)$//' \
     | paste -sd , - 2>/dev/null || true)"
+
+  # Commit-stale annotations (sync-demoted form; multiple allowed)
+  local commits_stale
+  commits_stale="$(printf '%s' "$line" \
+    | grep -oE '\(commit-stale: [a-f0-9]{7,40}\)' \
+    | sed -E 's/^\(commit-stale: //; s/\)$//' \
+    | paste -sd , - 2>/dev/null || true)"
+
+  # Renamed-from annotation (single occurrence — sync auto-correct trail)
+  local re_renamed='\(renamed-from: ([^)]+)\)'
+  local renamed_from=""
+  if [[ "$line" =~ $re_renamed ]]; then
+    renamed_from="${BASH_REMATCH[1]}"
+  fi
 
   # Fixed date
   local re_fixed='\(fixed: ([0-9]{4}-[0-9]{2}-[0-9]{2})\)'
@@ -134,7 +155,10 @@ fi_parse_entry() {
   printf 'symptom=%s\n' "$symptom"
   printf 'fix=%s\n' "$fix"
   printf 'prs=%s\n' "$prs"
+  printf 'prs_closed=%s\n' "$prs_closed"
   printf 'commits=%s\n' "$commits"
+  printf 'commits_stale=%s\n' "$commits_stale"
+  printf 'renamed_from=%s\n' "$renamed_from"
   printf 'fixed_date=%s\n' "$fixed_date"
   printf 'verified=%s\n' "$verified"
 }
@@ -177,7 +201,10 @@ fi_count() {
   printf '%s' "${count:-0}"
 }
 
-# Count [open] entries with at least one (PR: ...) annotation.
+# Count [open] entries with at least one ACTIVE (PR: ...) annotation.
+# Excludes (PR-closed: ...) demoted forms: the literal colon-space in
+# '(PR: ' cannot match '(PR-closed:' (hyphen-c), so the regex naturally
+# distinguishes the two. Demoted forms flow into fi_count_stale instead.
 fi_count_in_pr() {
   local file="$1"
 
@@ -205,7 +232,12 @@ fi_count_critical() {
   printf '%s' "${count:-0}"
 }
 
-# Count [open] entries older than N days (default 30).
+# Count [open] entries that are stale.
+# Stale ≡ (date older than N days) ∪ (has demoted annotation).
+# Demoted forms: (PR-closed: ...) and (commit-stale: ...) — these signal
+# the linked artifact is gone, so the entry is "abandoned" regardless of age.
+# Math: |A ∪ B| = |A| + |B| − |A ∩ B| (inclusion-exclusion), so an entry
+# that is BOTH date-stale AND demoted counts once, not twice.
 # Cross-platform: BSD `date -v` and GNU `date -d` both supported.
 fi_count_stale() {
   local file="$1"
@@ -226,18 +258,30 @@ fi_count_stale() {
     return
   fi
 
+  # |A| — date-based stale count (existing behavior).
   local re_open_date='^- \[open\].*\ ([0-9]{4}-[0-9]{2}-[0-9]{2})\ '
-  local count=0
+  local re_demoted='\((PR-closed|commit-stale): '
+  local date_stale=0
+  local overlap=0
   while IFS= read -r line; do
     if [[ "$line" =~ $re_open_date ]]; then
       local entry_date="${BASH_REMATCH[1]}"
       if [[ "$entry_date" < "$cutoff" ]]; then
-        count=$((count + 1))
+        date_stale=$((date_stale + 1))
+        # |A ∩ B| — entries that are BOTH date-stale AND demoted.
+        if [[ "$line" =~ $re_demoted ]]; then
+          overlap=$((overlap + 1))
+        fi
       fi
     fi
   done < <(fi_entries "$file" open 2>/dev/null)
 
-  printf '%d' "$count"
+  # |B| — entries with a demoted annotation, regardless of date.
+  local demoted
+  demoted="$(grep -cE '^- \[open\].*\((PR-closed|commit-stale): ' "$file" 2>/dev/null || true)"
+  demoted="${demoted:-0}"
+
+  printf '%d' "$((date_stale + demoted - overlap))"
 }
 
 # Extract the value of the (touched: ...) annotation from an entry line.

@@ -69,3 +69,25 @@ Test fixture.
 - [deferred] 2026-05-05 docs/README.md — outdated examples
 EOF
 }
+
+# Activate the gh shim for this test by prepending bin-shims to PATH.
+# Caller must set GH_MOCK_PR_VIEW / GH_MOCK_REPO_VIEW / GH_MOCK_AUTH as needed.
+fi_use_gh_shim() {
+  export PATH="$TEST_REPO_ROOT/tests/bin-shims:$PATH"
+}
+
+# Set up a fake GitHub repo for tests exercising sync's PR-check paths.
+# Combines fi_init_git with: an empty initial commit, a github.com origin
+# remote, origin/HEAD pointing at main, and FOUND_ISSUES_MODE=github-pr
+# to short-circuit detect-mode (avoiding gh-shim/cache dependence).
+#
+# Caller-controllable: pass org/repo as $1 (default foo/bar) and branch as $2 (default main).
+fi_init_github_repo() {
+  local repo_slug="${1:-foo/bar}"
+  local branch="${2:-main}"
+  git checkout -q -b "$branch" 2>/dev/null || true
+  git commit --allow-empty -q -m "init" 2>/dev/null || true
+  git remote add origin "https://github.com/${repo_slug}.git" 2>/dev/null || true
+  git symbolic-ref "refs/remotes/origin/HEAD" "refs/remotes/origin/${branch}" 2>/dev/null || true
+  export FOUND_ISSUES_MODE=github-pr
+}

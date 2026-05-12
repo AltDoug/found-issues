@@ -137,3 +137,27 @@ EOF
   [[ "$output" == *"github-pr"* ]]
   [[ "$output" == *"FOUND_ISSUES_MODE"* ]]
 }
+
+@test "doctor: reports gh auth status when authenticated" {
+  fi_use_gh_shim
+  export GH_MOCK_AUTH=ok
+  fi_run doctor
+  # The shim returns success on `gh auth status` — doctor should reflect this positively
+  [[ "$output" == *"gh"*"auth"* ]] || [[ "$output" == *"gh CLI"* ]]
+}
+
+@test "doctor: warns when gh is not authenticated" {
+  fi_use_gh_shim
+  export GH_MOCK_AUTH=fail
+  fi_run doctor
+  # Doctor should mention auth in some way
+  [[ "$output" == *"not authenticated"* ]] || [[ "$output" == *"gh auth"* ]]
+}
+
+@test "doctor: warns when origin/HEAD symref is unset" {
+  git commit --allow-empty -q -m "init"
+  git remote add origin https://example.com/foo/bar.git
+  # Intentionally do NOT set origin/HEAD
+  fi_run doctor
+  [[ "$output" == *"origin/HEAD"* ]] || [[ "$output" == *"default branch"* ]]
+}

@@ -29,7 +29,10 @@ Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract
 | Line | `:N` (after path, no space) | `:42` | When line is concrete |
 | Suggested fix | `(suggested: ...)` | `(suggested: add zero-check)` | Encouraged but optional |
 | PR annotation | `(PR: ORG/REPO#N)` | `(PR: AltDoug/found-issues#5)` | Added by `/found-issues:annotate-pr` |
+| PR-closed annotation | `(PR-closed: ORG/REPO#N)` | `(PR-closed: AltDoug/found-issues#5)` | Added by `/found-issues:sync` when linked PR closed without merge |
 | Commit annotation | `(commit: SHA)` (7+ hex chars) | `(commit: a1b2c3d)` | Added by `/found-issues:annotate-commit` |
+| Commit-stale annotation | `(commit-stale: SHA)` (7+ hex chars) | `(commit-stale: a1b2c3d)` | Added by `/found-issues:sync` when commit SHA no longer reachable |
+| Renamed-from annotation | `(renamed-from: PATH)` | `(renamed-from: lib/old-name.py)` | Added by `/found-issues:sync` when entry path was git-mv'd |
 | Fixed date | `(fixed: YYYY-MM-DD)` | `(fixed: 2026-05-08)` | Added by `/found-issues:sync` on closure |
 | Verification | `(verified: ai)` or `(verified: review)` | `(verified: ai)` | Added when sync verifies via AI |
 
@@ -112,11 +115,20 @@ For programmatic validation in hooks and CLI:
 # Match an entry start (any status, optional critical flag, with date)
 '^- \[(open|deferred|fixed)\]( \[!\])? [0-9]{4}-[0-9]{2}-[0-9]{2}( [^ ].*?)? — '
 
-# Extract PR annotation
+# Extract PR annotation (active form)
 '\(PR: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)\)'
 
-# Extract commit annotation (7-40 hex chars)
+# Extract PR-closed annotation (demoted form)
+'\(PR-closed: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)\)'
+
+# Extract commit annotation (active form, 7-40 hex chars)
 '\(commit: ([a-f0-9]{7,40})\)'
+
+# Extract commit-stale annotation (demoted form, 7-40 hex chars)
+'\(commit-stale: ([a-f0-9]{7,40})\)'
+
+# Extract renamed-from annotation (old path)
+'\(renamed-from: ([A-Za-z0-9_./-]+)\)'
 
 # Extract fixed date
 '\(fixed: ([0-9]{4}-[0-9]{2}-[0-9]{2})\)'
@@ -173,3 +185,16 @@ A single entry may be addressed by multiple PRs over time (e.g., partial fix →
 ```
 
 Sync checks each PR independently. Closure happens when any one merges to default branch.
+
+## Annotation lifecycle
+
+The `(PR: ...)` and `(commit: ...)` active forms are written by Claude or users via `/found-issues:annotate-pr` and `/found-issues:annotate-commit`. Sync normally flips them to `[fixed]` on merge or commit-reaches-default-branch.
+
+However, if a linked PR is closed without merge or a commit SHA becomes unreachable (e.g., squash-merged, force-pushed), sync auto-demotes the annotation:
+
+- `(PR: ...)` → `(PR-closed: ...)` — entry stays `[open]`, eligible for AI re-verification since the closure signal is stale
+- `(commit: ...)` → `(commit-stale: ...)` — entry stays `[open]`, eligible for AI re-verification since the SHA no longer resolves on default branch
+
+These demoted forms are written **only** by `found-issues sync` during its audit phase; they are never produced by user commands or `/found-issues:annotate-*` calls. They serve as an audit trail of link staleness.
+
+The `(renamed-from: ...)` annotation is written **only** by sync when tombstone detection finds a file path that was git-moved. The entry's path is updated in-place and the old path is preserved here for traceability. Idempotent on subsequent syncs.
