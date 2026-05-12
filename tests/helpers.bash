@@ -10,6 +10,16 @@ export FI_BIN="$TEST_REPO_ROOT/bin/found-issues"
 export FI_LIB_DIR="$TEST_REPO_ROOT/lib"
 export FOUND_ISSUES_LIB_DIR="$FI_LIB_DIR"
 
+# Default-off the segment auto-sync background spawn for tests that don't
+# care about it. Otherwise any test that calls `found-issues status
+# --format=segment` triggers a backgrounded `found-issues sync` whose
+# subprocess can outlive the test and hold open handles to the tmpdir —
+# bats teardown's `rm -rf $TMP` then fails with "Device or resource busy"
+# on Windows runners (observed in CI run 25743626711 / PR #86). Tests that
+# explicitly exercise the autosync path opt back in via `unset` in their
+# setup() (see tests/cli-status-autosync.bats).
+export FOUND_ISSUES_SEGMENT_AUTOSYNC=off
+
 # Ensure the CLI is executable (bats clones into a tempdir, may lose +x)
 chmod +x "$FI_BIN" 2>/dev/null || true
 
