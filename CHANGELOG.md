@@ -4,6 +4,41 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-05-12
+
+### Added — mid-session statusline freshness
+
+Pre-1.3, the `in PR` counter in the statusline only flipped when sync ran — and sync only ran at SessionStart. Users monitoring their own PRs from a long-running Claude Code session would merge a PR, see the count stay stuck, and assume something was broken. The workaround was to start a new session, which is heavy. v1.3.0 closes the loop with two complementary auto-refresh paths.
+
+- **`hooks/post-pr-state.sh`** — new PostToolUse Bash hook. Fires when Claude (or the user via `!`) runs `gh pr merge`, `gh pr close`, or `gh pr reopen`. The hook spawns `found-issues sync` in a detached subshell; the user's session is never blocked on the gh network calls. Next statusline render — typically within a second of the merge command exiting — shows the new count. Catches the high-frequency case of self-initiated PR state changes inside the session.
+
+- **Segment auto-sync in `found-issues status --format=segment`.** The statusline command itself opportunistically refreshes the on-disk file in the background. Throttled by `~/.cache/found-issues/segment-autosync-ts` (default 10 min — tunable via `FOUND_ISSUES_SEGMENT_AUTOSYNC_INTERVAL`). Catches external state changes that the PostToolUse hook can't see — teammate merges your PR on GitHub web, you merge from another terminal, etc. The timestamp is touched *before* the background sync spawns so concurrent renders in parallel sessions don't double-spawn.
+
+Both paths are fire-and-forget — zero AI latency, no foreground network I/O during a turn. Together they give "feels live" statusline behavior without the cost of an actual long-running daemon or per-turn sync.
+
+### Added — env-var tunables
+
+- `FOUND_ISSUES_POST_PR_STATE=off` — disable the PostToolUse hook entirely
+- `FOUND_ISSUES_SEGMENT_AUTOSYNC=off` — disable segment auto-sync entirely
+- `FOUND_ISSUES_SEGMENT_AUTOSYNC_INTERVAL=<seconds>` — override the throttle window (default 600)
+- `FOUND_ISSUES_AUTOSYNC_CMD` — internal/testing knob: overrides the dispatched sync command. Lets bats tests substitute a marker-writer without invoking real `gh pr view` calls.
+- `FOUND_ISSUES_CACHE_DIR` — internal: override the cache root for the autosync timestamp (used by tests for isolation; in production defaults to `~/.cache/found-issues`).
+
+All documented in [`docs/configuration.md`](docs/configuration.md).
+
+### Tests
+
+`tests/post-pr-state.bats` (10 cases): match/no-match logic for `gh pr merge|close|reopen`, command-chain matching (`&& gh pr merge`), false-positive avoidance (`mergeable` substring), opt-out behavior, non-Bash tool ignore.
+
+`tests/cli-status-autosync.bats` (7 cases): trigger on first render, skip within throttle, re-trigger after interval, opt-out, format gating (segment only, not plain/json), output preservation, no-op when issues file is missing.
+
+Full suite: **360/360** passing.
+
+### Reference
+
+- PR: [#86](https://github.com/AltDoug/found-issues/pull/86)
+- Background: triggered by the v1.2.1/v1.2.2 release dogfood — counter stayed at "2 in PR" through both PR merges until the operator manually ran `/found-issues:sync`. Confirmed the design hole and motivated this release.
+
 ## [1.2.2] — 2026-05-12
 
 ### Fixed — annotate-pr / annotate-commit silent path mismatch

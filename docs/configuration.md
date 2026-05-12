@@ -11,7 +11,7 @@ overrides.
 
 ## Hook opt-outs
 
-The plugin registers 7 hooks. Each one has an `=off` switch.
+The plugin registers 8 hooks. Each one has an `=off` switch.
 
 | Variable | Default | What it controls |
 |---|---|---|
@@ -20,6 +20,8 @@ The plugin registers 7 hooks. Each one has an `=off` switch.
 | `FOUND_ISSUES_FORMAT_ENFORCER` | `on` | The `PreToolUse` format-enforcer that validates entries written via `Write` / `Edit` / `MultiEdit`. In `local` mode it's already off; in `git` mode it warns-only; in `github-*` modes it hard-blocks. Set to `off` to disable globally. |
 | `FOUND_ISSUES_PRE_COMMIT` | `on` | The optional per-repo `pre-commit.sh` (installed via `found-issues install-precommit`). Same validation rules as the in-Claude-Code enforcer but at git commit time. Set to `off` to disable. |
 | `FOUND_ISSUES_AUTO_ARCHIVE` | `on` | The auto-archive that runs after every `/found-issues:sync`. Moves old `[fixed]` entries to `docs/found-issues-archive.md` per the count + days thresholds. Set to `off` if you'd rather control archiving manually via `/found-issues:archive`. |
+| `FOUND_ISSUES_POST_PR_STATE` | `on` | The PostToolUse Bash hook that fires `found-issues sync` in the background after `gh pr merge` / `gh pr close` / `gh pr reopen`. Lets the statusline reflect the new state immediately instead of waiting for the next session start. Set to `off` if you'd rather sync only at SessionStart. |
+| `FOUND_ISSUES_SEGMENT_AUTOSYNC` | `on` | Throttled in-segment background sync (default once per 10 min). Triggered from `found-issues status --format=segment` — runs detached, statusline returns immediately. Set to `off` to disable the auto-refresh entirely. |
 
 Example — silence the Stop reminder and disable auto-archive, but keep
 everything else:
@@ -60,10 +62,14 @@ touches a deferred entry, not on shell startup.
 | Variable | Default | What it controls |
 |---|---|---|
 | `FOUND_ISSUES_STALE_DAYS` | `30` | The "stale" counter in `found-issues status` flags `[open]` entries older than this many days. Drop it to surface bit-rot sooner; raise it for projects that genuinely revisit entries quarterly. |
+| `FOUND_ISSUES_SEGMENT_AUTOSYNC_INTERVAL` | `600` | Seconds between background syncs fired from the statusline-segment renderer. Lower for fresher counts at the cost of more `gh pr view` calls; raise for long sessions where you don't need second-by-second accuracy. Has no effect when `FOUND_ISSUES_SEGMENT_AUTOSYNC=off`. |
 
 ```bash
 # Surface stale entries after a week instead of a month
 export FOUND_ISSUES_STALE_DAYS=7
+
+# Tighter segment-autosync — refresh every 2 minutes instead of 10
+export FOUND_ISSUES_SEGMENT_AUTOSYNC_INTERVAL=120
 ```
 
 ## Mode override
@@ -91,6 +97,8 @@ These exist for testing and edge cases. Most users never touch them.
 | `FOUND_ISSUES_LIB_DIR` | (resolved relative to `$FOUND_ISSUES_BIN`) | Path to the `lib/` directory. Hooks source `parse-entries.sh`, `canonicalize.sh`, and `detect-mode.sh` from here. Override when running tests outside the installed-plugin layout. |
 | `CLAUDE_PROJECT_DIR` | (set by Claude Code) | Used as the search root by `found-issues status` when invoked from a statusline subprocess (which doesn't inherit the workspace as cwd). Falls back to `$PWD`. The `--cwd PATH` flag overrides this. |
 | `CLAUDE_PLUGIN_ROOT` | (set by Claude Code) | Used by hooks to locate the plugin's `lib/` when `FOUND_ISSUES_LIB_DIR` isn't set. |
+| `FOUND_ISSUES_AUTOSYNC_CMD` | (none) | Overrides the command dispatched by the segment-autosync and `post-pr-state.sh` hooks. Tests set this to a marker-writer so they can verify dispatch without invoking real `gh pr view` traffic. Production users have no reason to set it. |
+| `FOUND_ISSUES_CACHE_DIR` | `$HOME/.cache/found-issues` | Override the cache root that holds segment-autosync's timestamp file (`segment-autosync-ts`) and other plugin caches. Tests use this for isolation. |
 
 ## Discoverability
 
