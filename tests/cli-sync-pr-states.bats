@@ -25,3 +25,15 @@ teardown() {
   run gh pr view 99 --repo foo/bar --json state
   [ "$status" -eq 1 ]
 }
+
+@test "sync: MERGED PR on default branch flips entry to [fixed]" {
+  export GH_MOCK_PR_VIEW=$'42\t{"state":"MERGED","baseRefName":"main","mergedAt":"2026-05-01T12:00:00Z","isDraft":false}'
+  git commit --allow-empty -q -m "init"
+  git remote add origin https://example.com/foo/bar.git
+  git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+
+  fi_run log "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '\[fixed\].*\(PR: foo/bar#42\)' docs/found-issues.md
+}

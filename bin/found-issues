@@ -1070,6 +1070,7 @@ cmd_sync() {
   fi
 
   local closed_pr=0 closed_commit=0 closed_tomb=0
+  local -a gh_empty_warnings=()
   local today
   today="$(fi_today)"
   local tmp
@@ -1087,20 +1088,25 @@ cmd_sync() {
 
       local closure_kind="" closure_label=""
 
-      # Check PR annotations
-      if [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1; then
+      # Check PR annotations (single gh call per PR returning all needed fields)
+      if [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
         local IFS_old="$IFS"
         IFS=','
         for pr_ref in $e_prs; do
           IFS="$IFS_old"
-          # pr_ref is org/repo#N
           local pr_num="${pr_ref##*#}"
           local pr_repo="${pr_ref%#*}"
+          local pr_json
+          pr_json="$(gh pr view "$pr_num" --repo "$pr_repo" \
+            --json state,baseRefName,mergedAt,isDraft 2>/dev/null || true)"
+          if [[ -z "$pr_json" ]]; then
+            # gh empty: warn at end of sync (don't demote — could be transient)
+            gh_empty_warnings+=("$pr_ref")
+            continue
+          fi
           local pr_state pr_branch
-          pr_state="$(gh pr view "$pr_num" --repo "$pr_repo" \
-            --json state,baseRefName --jq '.state' 2>/dev/null || true)"
-          pr_branch="$(gh pr view "$pr_num" --repo "$pr_repo" \
-            --json baseRefName --jq '.baseRefName' 2>/dev/null || true)"
+          pr_state="$(printf '%s' "$pr_json" | jq -r '.state // empty')"
+          pr_branch="$(printf '%s' "$pr_json" | jq -r '.baseRefName // empty')"
           if [[ "$pr_state" == "MERGED" && ( -z "$default_branch" || "$pr_branch" == "$default_branch" ) ]]; then
             closure_kind="pr"
             closure_label="(fixed: $today)"
@@ -1175,6 +1181,17 @@ cmd_sync() {
     printf 'Synced. Nothing to close.\n'
   fi
   cmd_status plain
+
+  # Surface gh-empty warnings: PRs that couldn't be fetched.
+  # Don't demote — could be transient auth/network/rate-limit.
+  if (( ${#gh_empty_warnings[@]} > 0 )); then
+    printf '\nWarning: %d PR annotation(s) could not be fetched via gh:\n' "${#gh_empty_warnings[@]}" >&2
+    local w
+    for w in "${gh_empty_warnings[@]}"; do
+      printf '  - %s\n' "$w" >&2
+    done
+    printf '  (Check gh auth status or verify the PR numbers are correct.)\n' >&2
+  fi
 
   # Auto-archive: enforced by default. Users who want pure manual control set
   # FOUND_ISSUES_AUTO_ARCHIVE=off in their shell rc. Without enforcement, users
