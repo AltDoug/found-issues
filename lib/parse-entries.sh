@@ -70,7 +70,13 @@ fi_parse_entry() {
   # Note: em-dash is U+2014 (—); using grep for portability instead of inline regex
   local path="" line_num=""
   local after_date
-  after_date="$(printf '%s' "$line" | sed -E 's/^.*[0-9]{4}-[0-9]{2}-[0-9]{2} //')"
+  # Anchor the strip to the status-prefix pattern so only the entry's leading
+  # date is consumed. The earlier `^.*[0-9]{4}-…` form was greedy: if the
+  # symptom mentioned another ISO date (very common — "regressed on YYYY-MM-DD",
+  # "surfaced YYYY-MM-DD"), `.*` happily ate past the entry-date and stripped
+  # into the symptom, returning a broken location and silently breaking
+  # annotate-pr / annotate-commit path matching.
+  after_date="$(printf '%s' "$line" | sed -E 's/^- \[(open|deferred|fixed)\]( \[!\])? [0-9]{4}-[0-9]{2}-[0-9]{2} //')"
   # after_date now starts with location followed by ' — symptom...'
   local location_part="${after_date%% — *}"
 
