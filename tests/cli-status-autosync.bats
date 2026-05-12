@@ -15,6 +15,12 @@ setup() {
   mkdir -p docs
   printf '# found-issues\n\n- [open] 2026-05-12 src/foo.py — bug\n' > docs/found-issues.md
 
+  # helpers.bash defaults FOUND_ISSUES_SEGMENT_AUTOSYNC=off for test
+  # isolation; unset here so THIS test file actually exercises the
+  # autosync path. (Individual tests that want it off explicitly re-export
+  # it — see the "respects =off" case below.)
+  unset FOUND_ISSUES_SEGMENT_AUTOSYNC
+
   # Redirect the autosync cache into the test tmpdir so concurrent test runs
   # don't share state through ~/.cache/found-issues.
   export FOUND_ISSUES_CACHE_DIR="$TMP/autosync-cache"
