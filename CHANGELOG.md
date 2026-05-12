@@ -4,6 +4,26 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] — 2026-05-12
+
+### Fixed — Stop hook actually enforces the marker again
+
+The plugin's central discipline-enforcer — the Stop hook that nudges Claude to acknowledge `docs/found-issues.md` at the end of every code-modifying turn — has been a silent no-op since the v0.1.2 smart-fire patch (2026-05-08). Two compounding bugs were masking each other.
+
+- **Smart-fire awk treated tool_result envelopes as user-message boundaries.** Real Claude Code transcripts wrap tool_result content in a top-level `"type":"user"` envelope (role:`user`, content:tool_result). The awk in `hooks/stop-reminder.sh` used `/"type":"user"/` to find the most-recent user boundary, so every tool_result reset the buffer and discarded the earlier assistant tool_use. On a normal tool-use turn (assistant tool_use → tool_result envelope → assistant final text), `last_turn` ended up containing only the closing text — no `"name":"Bash|Edit|…"` match — and smart-fire exited 0 silently. The hook fired but never reached the marker check. Fixed by adding `&& !/"tool_use_id"/` to the awk pattern; tool_result envelopes always carry `tool_use_id` on the same line, real user messages never do.
+
+- **Marker check raced the transcript flush.** Once smart-fire was patched, the hook started blocking turns where the assistant *had* included the marker. Forensics: slicing the transcript to its byte length at the moment Stop fired (immediately after the assistant message was created) and replaying the hook against the slice returned `exit=0` correctly. The live run had returned `exit=2`. Claude Code streams tool results to the transcript as tools run but buffers the closing assistant text until end-of-turn flush; Stop fires in between, so the marker check reads stale content. Fixed by (a) honoring `stop_hook_active` to break the re-prompt loop on retry-fires (matches the convention from `~/.claude/hooks/stop-tests-pass.sh`), and (b) one 300ms retry on the marker grep to absorb the flush race.
+
+### Tests
+
+Four new bats cases in `tests/stop-reminder.bats` cover the realistic transcript shape (tool_result envelope present), the marker-present variant, and both `stop_hook_active` arms. Existing smart-fire and FOUND_ISSUES_STOP_REMINDER tests intact. Full suite: 341/341.
+
+### Reference
+
+- PR: [#83](https://github.com/AltDoug/found-issues/pull/83)
+- Regression introduced by: [#18](https://github.com/AltDoug/found-issues/pull/18) (v0.1.2 smart-fire patch)
+- Why it survived testing: pre-existing bats fixtures used simplified JSON without the `tool_use_id`-bearing envelope shape that real transcripts emit.
+
 ## [1.2.0] — 2026-05-11
 
 ### Added — sync self-healing
