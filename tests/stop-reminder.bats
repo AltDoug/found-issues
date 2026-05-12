@@ -125,6 +125,38 @@ TRANSCRIPT
   rm -f "$TR"
 }
 
+@test "stop-reminder: honors stop_hook_active=true (skip on retry-fire)" {
+  # Claude Code fires Stop before the final assistant text is flushed to
+  # disk, so the first-fire marker check can race. On retry, Claude Code
+  # sets stop_hook_active=true; the hook must exit 0 unconditionally to
+  # break the loop, regardless of marker / smart-fire state.
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"fix this"}
+{"type":"assistant","message":"done","tool_uses":[{"name":"Edit","input":{}}]}
+no marker
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"stop_hook_active\":true,\"transcript_path\":\"$TR\"}"
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: stop_hook_active=false still enforces marker" {
+  # Sanity: the stop_hook_active escape hatch must only fire on `true`.
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"fix this"}
+{"type":"assistant","message":"done","tool_uses":[{"name":"Edit","input":{}}]}
+no marker
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"transcript_path\":\"$TR\"}"
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"acknowledgment"* ]]
+  rm -f "$TR"
+}
+
 @test "stop-reminder: allows realistic transcript with marker present" {
   # Same realistic shape, with the marker baked into the assistant's
   # final text response. Hook must allow.
