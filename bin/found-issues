@@ -1071,6 +1071,7 @@ cmd_sync() {
 
   local closed_pr=0 closed_commit=0 closed_tomb=0
   local demoted_pr=0
+  local demoted_commit=0
   local -a gh_empty_warnings=()
   local today
   today="$(fi_today)"
@@ -1082,6 +1083,7 @@ cmd_sync() {
     if [[ "$line" =~ ^-\ \[open\] ]]; then
       local e_data e_path e_line e_prs e_commits
       local -a demote_pr_refs=()
+      local -a demote_commit_refs=()
       e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
       e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
       e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
@@ -1140,6 +1142,10 @@ cmd_sync() {
               closed_commit=$((closed_commit + 1))
               break
             fi
+            # SHA exists but isn't ancestor — leave alone (unmerged feature branch)
+          else
+            # B1/B2: SHA doesn't resolve (squash-merge dropped it, force-push removed it) → demote
+            demote_commit_refs+=("$sha")
           fi
         done
         IFS="$IFS_old"
@@ -1171,15 +1177,23 @@ cmd_sync() {
         # Flip [open] -> [fixed], append closure_label
         local fixed_line="${line/\[open\]/[fixed]}"
         printf '%s %s\n' "$fixed_line" "$closure_label" >>"$tmp"
-      elif (( ${#demote_pr_refs[@]} > 0 )); then
-        # A1: demote (PR: <ref>) → (PR-closed: <ref>) for each closed-no-merge PR
+      elif (( ${#demote_pr_refs[@]} > 0 || ${#demote_commit_refs[@]} > 0 )); then
+        # A1/B1: demote stale annotations while keeping entry [open]
         local demoted_line="$line"
         local ref
-        for ref in "${demote_pr_refs[@]}"; do
-          demoted_line="${demoted_line//(PR: $ref)/(PR-closed: $ref)}"
-        done
+        if (( ${#demote_pr_refs[@]} > 0 )); then
+          for ref in "${demote_pr_refs[@]}"; do
+            demoted_line="${demoted_line//(PR: $ref)/(PR-closed: $ref)}"
+          done
+          demoted_pr=$((demoted_pr + 1))
+        fi
+        if (( ${#demote_commit_refs[@]} > 0 )); then
+          for ref in "${demote_commit_refs[@]}"; do
+            demoted_line="${demoted_line//(commit: $ref)/(commit-stale: $ref)}"
+          done
+          demoted_commit=$((demoted_commit + 1))
+        fi
         printf '%s\n' "$demoted_line" >>"$tmp"
-        demoted_pr=$((demoted_pr + 1))
       else
         printf '%s\n' "$line" >>"$tmp"
       fi
@@ -1192,11 +1206,11 @@ cmd_sync() {
   trap - EXIT
 
   local total_closed=$((closed_pr + closed_commit + closed_tomb))
-  local total_demoted=$demoted_pr
+  local total_demoted=$((demoted_pr + demoted_commit))
   if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 ]]; then
-    printf 'Synced. Closed: %d (%d PR + %d commit + %d tombstone). Demoted: %d PR-closed.\n' \
+    printf 'Synced. Closed: %d (%d PR + %d commit + %d tombstone). Demoted: %d (%d PR-closed + %d commit-stale).\n' \
       "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb" \
-      "$total_demoted"
+      "$total_demoted" "$demoted_pr" "$demoted_commit"
   else
     printf 'Synced. Nothing to close.\n'
   fi
