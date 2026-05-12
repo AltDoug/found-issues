@@ -53,42 +53,7 @@ teardown() {
   # No origin/HEAD set, no gh response → fall back to main
 
   fi_run log "src/a.py:1 — bug"
-  echo "===LOG_STATUS===" >&2
-  echo "$status" >&2
-  echo "===LOG_OUTPUT===" >&2
-  echo "$output" >&2
-
-  # DEBUG: capture sync stderr separately
-  local err_file
-  err_file="$(mktemp)"
-  set +e
-  local out
-  out="$($FI_BIN sync 2>"$err_file")"
-  local sync_exit=$?
-  set -e
-  local err
-  err="$(cat "$err_file")"
-  rm -f "$err_file"
-  echo "===SYNC_STDOUT===" >&2
-  echo "$out" >&2
-  echo "===SYNC_STDERR===" >&2
-  echo "$err" >&2
-  echo "===SYNC_EXIT===" >&2
-  echo "$sync_exit" >&2
-  echo "===BASH_VERSION===" >&2
-  echo "$BASH_VERSION" >&2
-  echo "===OS===" >&2
-  uname -a >&2 || true
-  echo "===GH_PATH===" >&2
-  command -v gh >&2 || true
-  echo "===JQ_PATH===" >&2
-  command -v jq >&2 || true
-
   fi_run sync
-  echo "===FI_RUN_SYNC_STATUS===" >&2
-  echo "$status" >&2
-  echo "===FI_RUN_SYNC_OUTPUT===" >&2
-  echo "$output" >&2
   # Should not crash; entry stays open (no closure mechanism applies)
   [ "$status" -eq 0 ]
 }

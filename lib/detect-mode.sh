@@ -20,6 +20,36 @@
 #
 #   fi_invalidate_mode_cache
 #       Removes cached mode for current repo. Useful in tests / after auth changes.
+#
+#   fi_file_mtime <path>
+#       Echoes the file's epoch-seconds mtime. Cross-platform safe
+#       (BSD stat -f vs GNU stat -c) and guaranteed numeric. Echoes "0"
+#       on any failure or non-numeric output.
+
+# Echo a file's mtime as epoch seconds. Cross-platform.
+#
+# Why this exists: `stat -f %m` (BSD/macOS) and `stat -c %Y` (GNU/Linux)
+# are not interchangeable. On GNU stat, `-f` means `--file-system` and
+# treats subsequent args as files — it prints multi-line FS info starting
+# with "File:" instead of failing. The previous `stat -f %m || stat -c %Y
+# || echo 0` chain therefore "succeeded" on Linux with garbage output,
+# which then blew up `$(( now - mtime ))` arithmetic under `set -u` (bash
+# 5.2+ tries to look up the bareword "File" as a variable, hits unbound).
+# We now try GNU first (matches Linux + Windows Git Bash, the common CI
+# runners) and validate the result is numeric before returning it.
+fi_file_mtime() {
+  local path="$1"
+  local m
+  # Try GNU first (Linux, Windows Git Bash), then BSD (macOS).
+  m="$(stat -c %Y -- "$path" 2>/dev/null)" || m=""
+  if [[ ! "$m" =~ ^[0-9]+$ ]]; then
+    m="$(stat -f %m -- "$path" 2>/dev/null)" || m=""
+  fi
+  if [[ ! "$m" =~ ^[0-9]+$ ]]; then
+    m=0
+  fi
+  printf '%s' "$m"
+}
 
 # Echo the detected mode for the current working directory.
 fi_detect_mode() {
@@ -75,7 +105,7 @@ fi_detect_mode() {
   local ttl=3600  # 1 hour
   if [[ -f "$cache_file" ]]; then
     local mtime now age
-    mtime="$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo 0)"
+    mtime="$(fi_file_mtime "$cache_file")"
     now="$(date +%s)"
     age=$((now - mtime))
     if [[ "$age" -lt "$ttl" ]]; then

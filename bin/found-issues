@@ -165,10 +165,12 @@ fi_resolve_default_branch() {
     local cache_file="$cache_dir/default-branch-${repo_slug//\//-}.txt"
     mkdir -p "$cache_dir" 2>/dev/null || true
 
-    # Check cache freshness (1h TTL)
+    # Check cache freshness (1h TTL). fi_file_mtime is the cross-platform
+    # mtime helper (see lib/detect-mode.sh) — guarantees a numeric result
+    # so `$(( now - mtime ))` is safe under `set -u`.
     if [[ -f "$cache_file" ]]; then
       local mtime now age
-      mtime="$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo 0)"
+      mtime="$(fi_file_mtime "$cache_file")"
       now="$(date +%s)"
       age=$((now - mtime))
       if (( age < 3600 )); then
