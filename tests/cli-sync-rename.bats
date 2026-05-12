@@ -10,7 +10,7 @@ teardown() {
   fi_teardown_tmp
 }
 
-@test "sync: renamed file → entry path auto-corrected with (renamed-from: ...)" {
+@test "sync: renamed file gets path auto-corrected with (renamed-from: ...)" {
   mkdir -p src
   echo "content" > src/old.py
   git add src/old.py
@@ -45,7 +45,7 @@ teardown() {
   grep -q '\[fixed\].*closure: tombstone' docs/found-issues.md
 }
 
-@test "sync: rename then delete → tombstone fires on new path (correctly)" {
+@test "sync: rename then delete fires tombstone on new path (correctly)" {
   mkdir -p src
   echo "content" > src/a.py
   git add src/a.py

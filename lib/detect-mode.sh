@@ -92,13 +92,19 @@ fi_detect_mode() {
 
   local recent_count=0
   if [[ -n "$cutoff" ]]; then
+    # `grep -c` prints "0" + exits 1 on no-match. The previous `|| echo 0`
+    # appended a SECOND "0", yielding "0\n0" — which then blew up the
+    # `[[ "$recent_count" -gt 0 ]]` arithmetic on bash 5.2 (Linux/Windows CI)
+    # with `set -e` active. Use `|| true` and rely on grep's own "0" output;
+    # sanitize defensively in case grep returns empty for any reason.
     recent_count="$(gh pr list --state merged --limit 5 \
       --search "merged:>$cutoff" --json number 2>/dev/null \
-      | grep -c '"number"' || echo 0)"
+      | grep -c '"number"' 2>/dev/null || true)"
+    [[ "$recent_count" =~ ^[0-9]+$ ]] || recent_count=0
   fi
 
   local mode
-  if [[ "$recent_count" -gt 0 ]]; then
+  if (( recent_count > 0 )); then
     mode="github-pr"
   else
     mode="github-direct"
