@@ -47,11 +47,20 @@ fi
 # Logic: walk back through the last ~16KB of transcript, find the most
 # recent user message boundary, then check if any tool_use of a
 # substantive type appears between that boundary and end-of-transcript.
+#
+# Important: Claude Code wraps tool_result content in a top-level
+# `"type":"user"` envelope (role:"user" content:tool_result). Those are
+# NOT real user-message boundaries — they appear mid-turn after every
+# assistant tool_use. Detect them by the presence of `"tool_use_id"` on
+# the same line and skip them when finding the turn boundary; otherwise
+# every tool-call turn looks like "nothing happened after the user spoke"
+# and smart-fire silently exits 0.
 recent_tail="$(tail -c 16384 "$transcript_path" 2>/dev/null || true)"
 if [[ -n "$recent_tail" ]]; then
-  # Take everything after the last user message marker
+  # Take everything after the last real user message marker (excluding
+  # tool_result envelopes, which also carry "type":"user").
   last_turn="$(printf '%s' "$recent_tail" | awk '
-    /"type":"user"/ { buf=""; next }
+    /"type":"user"/ && !/"tool_use_id"/ { buf=""; next }
     { buf = buf "\n" $0 }
     END { print buf }
   ')"
