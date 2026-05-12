@@ -27,13 +27,18 @@ teardown() {
 }
 
 @test "sync: MERGED PR on default branch flips entry to [fixed]" {
+  fi_init_github_repo foo/bar main
   export GH_MOCK_PR_VIEW=$'42\t{"state":"MERGED","baseRefName":"main","mergedAt":"2026-05-01T12:00:00Z","isDraft":false}'
-  git commit --allow-empty -q -m "init"
-  git remote add origin https://example.com/foo/bar.git
-  git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+
+  # Create the file so tombstone doesn't pre-empt the PR-check path
+  mkdir -p src
+  printf 'x\n' > src/foo.py
 
   fi_run log "src/foo.py:1 — bug (PR: foo/bar#42)"
   fi_run sync
   [ "$status" -eq 0 ]
-  grep -q '\[fixed\].*\(PR: foo/bar#42\)' docs/found-issues.md
+  # Entry flipped to [fixed] via PR-merge path (not tombstone)
+  grep -q '^- \[fixed\].*src/foo.py:1.*\(PR: foo/bar#42\)' docs/found-issues.md
+  # Negative assertion: tombstone closure must NOT be the mechanism
+  ! grep -q 'closure: tombstone' docs/found-issues.md
 }
