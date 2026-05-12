@@ -144,3 +144,36 @@ EOF
   grep -F "(mute-until: 2099-12-31)" docs/found-issues.md
   ! grep -F "(mute-until: 2099-01-01)" docs/found-issues.md
 }
+
+@test "defer: allows entries with only (PR-closed: ...) annotation" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-05-11 src/a.py:1 — bug (PR-closed: foo/bar#42)
+EOF
+  fi_run defer "src/a.py:1"
+  [ "$status" -eq 0 ]
+  grep -q '^- \[deferred\].*src/a.py:1' docs/found-issues.md
+}
+
+@test "defer: still blocks entries with active (PR: ...) annotation (regression guard)" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-05-11 src/a.py:1 — bug (PR: foo/bar#42)
+EOF
+  fi_run defer "src/a.py:1"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"active PR annotation"* ]]
+}
+
+@test "defer: allows entries with (commit-stale: ...) annotation" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-05-11 src/a.py:1 — bug (commit-stale: deadbeef)
+EOF
+  fi_run defer "src/a.py:1"
+  [ "$status" -eq 0 ]
+  grep -q '^- \[deferred\].*src/a.py:1' docs/found-issues.md
+}
