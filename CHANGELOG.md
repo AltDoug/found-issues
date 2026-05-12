@@ -4,6 +4,28 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] — 2026-05-12
+
+### Fixed — annotate-pr / annotate-commit silent path mismatch
+
+`fi_parse_entry` in `lib/parse-entries.sh` used a greedy `sed -E 's/^.*[0-9]{4}-[0-9]{2}-[0-9]{2} //'` to skip past an entry's leading date and isolate the location field. When the symptom text contained *additional* ISO dates — very common in forensic timelines like "regressed on 2026-04-30" / "surfaced 2026-05-10" — `.*` ate past the entry-date and stripped into the symptom. The parsed `path=` field came back empty.
+
+Anything downstream that matched on `path=` silently failed. Most visibly: `found-issues annotate-pr <N>` and `found-issues annotate-commit <sha>` reported `"no [open] entries match"` even when the PR / commit clearly touched the entry's file. Discovered while annotating #83 against the stop-hook entry, whose symptom contained two dates — had to fall back to manual annotation.
+
+Fix anchors the strip to the actual entry-prefix pattern instead of `.*`:
+
+```diff
+-sed -E 's/^.*[0-9]{4}-[0-9]{2}-[0-9]{2} //'
++sed -E 's/^- \[(open|deferred|fixed)\]( \[!\])? [0-9]{4}-[0-9]{2}-[0-9]{2} //'
+```
+
+Only the leading entry-date can match — extra dates in the symptom are preserved verbatim. Two new bats regressions in `tests/parse-entries.bats` cover the path-only and `path:line` shapes against a multi-date symptom.
+
+### Reference
+
+- PR: [#84](https://github.com/AltDoug/found-issues/pull/84)
+- Surfaced by: trying to run `/found-issues:annotate-pr 83` against the stop-hook entry while shipping v1.2.1.
+
 ## [1.2.1] — 2026-05-12
 
 ### Fixed — Stop hook actually enforces the marker again
