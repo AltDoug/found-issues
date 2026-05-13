@@ -2114,10 +2114,44 @@ cmd_install_statusline_target_bash() {
     return 0
   fi
 
-  # TODO: apply mode — backup + atomic write (next task)
+  # Apply mode: backup + atomic write
+  local ts backup_path tmp_atomic
+  ts="$(date +%Y%m%d-%H%M%S)"
+  backup_path="${path}.fi-bak-${ts}"
+  cp -p "$path" "$backup_path" || {
+    fi_err "install-statusline --target: backup write failed: $backup_path"
+    rm -f "$tmp_modified"
+    return 15
+  }
+  # Atomic write: copy modified content to a tmp file alongside the target,
+  # then rename. Preserves permissions of the original.
+  tmp_atomic="${path}.fi-tmp-${ts}"
+  cp "$tmp_modified" "$tmp_atomic" || {
+    fi_err "install-statusline --target: tmp write failed: $tmp_atomic"
+    rm -f "$tmp_modified" "$tmp_atomic"
+    return 14
+  }
+  # Preserve original mode (including exec bit).
+  local original_mode
+  original_mode="$(fi_capture_mode "$path")"
+  chmod "$original_mode" "$tmp_atomic" 2>/dev/null || chmod +x "$tmp_atomic"
+  mv "$tmp_atomic" "$path" || {
+    fi_err "install-statusline --target: atomic rename failed"
+    rm -f "$tmp_modified" "$tmp_atomic"
+    return 14
+  }
   rm -f "$tmp_modified"
-  fi_err "install-statusline --target: apply mode not yet implemented"
-  return 1
+
+  # Symlink warning
+  if [[ -L "$path" ]]; then
+    local real
+    real="$(readlink "$path")"
+    fi_err "note: $path is a symlink to $real; your sync system may overwrite changes on next render"
+  fi
+
+  printf 'install-statusline --target: applied to %s (backup: %s)\n' "$path" "$backup_path"
+  printf 'Restart your Claude Code session to see the segment render.\n'
+  return 0
 }
 cmd_install_statusline_target_node() {
   fi_err "install-statusline --target: node splice not yet implemented"

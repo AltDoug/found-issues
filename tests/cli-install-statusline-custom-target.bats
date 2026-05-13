@@ -84,3 +84,46 @@ EOF
   fi_run install-statusline --target tmp/sl.sh --dry-run
   [ "$status" -eq 11 ]
 }
+
+@test "install-statusline --target bash --apply: writes backup at expected path" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/bin/bash
+LINE1="$REPO | $BRANCH"
+echo "$LINE1"
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  # Backup file should exist at tmp/sl.sh.fi-bak-<ts>
+  ls tmp/sl.sh.fi-bak-* >/dev/null 2>&1
+}
+
+@test "install-statusline --target bash --apply: target file contains marker + seg reference" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/bin/bash
+LINE1="$REPO | $BRANCH"
+echo "$LINE1"
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  grep -Fq "# === found-issues plugin segment ===" tmp/sl.sh
+  grep -Fq "__FI_SEG" tmp/sl.sh
+  grep -Fq "# found-issues:seg" tmp/sl.sh
+}
+
+@test "install-statusline --target bash --apply: idempotent re-apply" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/bin/bash
+LINE1="$REPO | $BRANCH"
+echo "$LINE1"
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  # Second --apply should be a no-op (already_installed)
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already integrated"* ]]
+  # Should NOT have inserted two marker blocks
+  local count
+  count="$(grep -cF "# === found-issues plugin segment ===" tmp/sl.sh)"
+  [ "$count" -eq 1 ]
+}
