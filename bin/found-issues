@@ -1922,6 +1922,30 @@ fi_strip_legacy_handwritten() {
 #   15 backup_failed
 #   16 multiple_splices_detected
 #   18 json_statusline_unsupported
+# Detect language of a target statusline script. Returns "bash"|"node"|"python"
+# on stdout, exits 0 if detected; exits 1 if unsupported.
+# Strategy: file extension first (cheap, deterministic), shebang fallback
+# (handles extensionless scripts).
+fi_detect_target_language() {
+  local path="$1"
+  case "$path" in
+    *.sh|*.bash) echo "bash"; return 0 ;;
+    *.js|*.mjs|*.cjs) echo "node"; return 0 ;;
+    *.py) echo "python"; return 0 ;;
+  esac
+  # Shebang fallback
+  if [[ -r "$path" ]]; then
+    local shebang
+    shebang="$(head -1 "$path" 2>/dev/null)"
+    case "$shebang" in
+      *node*) echo "node"; return 0 ;;
+      *python*) echo "python"; return 0 ;;
+      *bash*|*/sh*|*\ sh) echo "bash"; return 0 ;;
+    esac
+  fi
+  return 1
+}
+
 cmd_install_statusline_custom_target() {
   local target_path="$1"
   local target_language="${2:-auto}"
@@ -1941,10 +1965,42 @@ cmd_install_statusline_custom_target() {
     return 13
   fi
 
-  # TODO: language detection, splice point detection, generation, write
-  # (filled in by subsequent tasks)
-  fi_err "install-statusline --target: not yet implemented for language=$target_language"
-  return 10
+  # Step 2: detect language
+  local detected_lang
+  if [[ "$target_language" == "auto" ]]; then
+    detected_lang="$(fi_detect_target_language "$target_path")" || {
+      fi_err "install-statusline --target: unsupported language for $target_path (no .sh/.js/.py extension or recognized shebang)"
+      return 10
+    }
+  else
+    case "$target_language" in
+      bash|sh) detected_lang="bash" ;;
+      node|js) detected_lang="node" ;;
+      python|py) detected_lang="python" ;;
+      *) fi_err "install-statusline --target: --language must be auto|bash|node|python"; return 10 ;;
+    esac
+  fi
+
+  # Dispatch to per-language handler
+  case "$detected_lang" in
+    bash)   cmd_install_statusline_target_bash   "$target_path" "$target_mode" ;;
+    node)   cmd_install_statusline_target_node   "$target_path" "$target_mode" ;;
+    python) cmd_install_statusline_target_python "$target_path" "$target_mode" ;;
+  esac
+}
+
+# Stubs for per-language handlers — filled in by later tasks
+cmd_install_statusline_target_bash() {
+  fi_err "install-statusline --target: bash splice not yet implemented"
+  return 11
+}
+cmd_install_statusline_target_node() {
+  fi_err "install-statusline --target: node splice not yet implemented"
+  return 11
+}
+cmd_install_statusline_target_python() {
+  fi_err "install-statusline --target: python splice not yet implemented"
+  return 11
 }
 
 cmd_install_statusline() {
