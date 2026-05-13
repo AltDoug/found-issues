@@ -251,6 +251,13 @@ EOF
   if [ "$(id -u)" = "0" ]; then
     skip "root bypasses permission bits — can't simulate this case"
   fi
+  # Windows file systems (NTFS via Git Bash MSYS/MINGW) don't honor POSIX
+  # permission bits, so `chmod 000` is a no-op there and the segment finds
+  # the seeded entry instead of failing to read. The silent-fail contract
+  # property still holds on Windows — it just isn't testable via chmod.
+  case "${OSTYPE:-}" in
+    msys*|cygwin*|mingw*) skip "chmod 000 not honored on Windows file systems" ;;
+  esac
   chmod 000 docs
   fi_run status --format=segment
   local exit_code="$status"
