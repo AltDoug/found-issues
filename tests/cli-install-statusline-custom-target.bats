@@ -259,3 +259,44 @@ EOF
   [ "$status" -eq 0 ]
   [ "$original" = "$(cat tmp/sl.js)" ]
 }
+
+@test "install-statusline --target: detects python from .py extension" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+print(f"repo | main")
+EOF
+  fi_run install-statusline --target tmp/sl.py --dry-run
+  [ "$status" -ne 10 ]
+}
+
+@test "install-statusline --target python: finds print f-string (priority 1)" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+import os
+repo = "r"
+print(f"{repo} | main")
+EOF
+  fi_run install-statusline --target tmp/sl.py --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"_fi_seg"* ]]
+}
+
+@test "install-statusline --target python: finds print plain string (priority 2)" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+print("static line")
+EOF
+  fi_run install-statusline --target tmp/sl.py --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"_fi_seg"* ]]
+}
+
+@test "install-statusline --target python: exits 11 when no print/sys.stdout.write" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+import sys
+sys.exit(0)
+EOF
+  fi_run install-statusline --target tmp/sl.py --dry-run
+  [ "$status" -eq 11 ]
+}

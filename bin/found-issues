@@ -2296,9 +2296,147 @@ cmd_install_statusline_target_node() {
   printf 'Restart your Claude Code session to see the segment render.\n'
   return 0
 }
+fi_find_python_splice_point() {
+  local path="$1"
+  local line
+  # Priority 1: print(f"...") or print(f'...')
+  line="$(awk '/^[[:space:]]*print[[:space:]]*\(f["'"'"'][^)]*\)/ { print NR; exit }' "$path")"
+  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  # Priority 2: print("...") or print('...')
+  line="$(awk '/^[[:space:]]*print[[:space:]]*\(["'"'"'][^)]*\)/ { print NR; exit }' "$path")"
+  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  # Priority 3: sys.stdout.write(...)
+  line="$(awk '/^[[:space:]]*sys\.stdout\.write[[:space:]]*\(/ { print NR; exit }' "$path")"
+  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  return 1
+}
+
+fi_generate_python_marker_block() {
+  cat <<'BLOCK'
+# === found-issues plugin segment ===
+# PATH-resilience: prefer `found-issues` on PATH; fall back to plugin cache glob.
+# Cwd resolution: prefer CLAUDE_PROJECT_DIR; fall back to $HOME.
+import subprocess as _fi_subprocess
+import shutil as _fi_shutil
+import glob as _fi_glob
+import os as _fi_os
+_fi_seg = ''
+try:
+    _fi_cli = _fi_shutil.which('found-issues')
+    if not _fi_cli:
+        _fi_candidates = sorted(_fi_glob.glob(
+            _fi_os.path.expanduser('~/.claude/plugins/cache/*/found-issues/*/bin/found-issues')
+        ))
+        _fi_cli = _fi_candidates[-1] if _fi_candidates else None
+    if _fi_cli and _fi_os.access(_fi_cli, _fi_os.X_OK):
+        _fi_cwd = _fi_os.environ.get('CLAUDE_PROJECT_DIR') or _fi_os.environ.get('HOME', '.')
+        _fi_seg = _fi_subprocess.run(
+            [_fi_cli, 'status', '--format=segment'],
+            cwd=_fi_cwd, capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+except Exception:
+    _fi_seg = ''
+# === end found-issues plugin segment ===
+BLOCK
+}
+
 cmd_install_statusline_target_python() {
-  fi_err "install-statusline --target: python splice not yet implemented"
-  return 11
+  local path="$1"
+  local mode="$2"
+
+  # Idempotency
+  if grep -Fq "# === found-issues plugin segment ===" "$path"; then
+    printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
+    return 0
+  fi
+
+  local splice_line
+  splice_line="$(fi_find_python_splice_point "$path")" || {
+    fi_err "install-statusline --target python: no splice point found in $path"
+    fi_err "  Tried: print(f\"...\"), print(\"...\"), sys.stdout.write(...)"
+    return 11
+  }
+
+  # Find insertion line for marker block: after leading imports
+  local insert_after
+  insert_after="$(awk '
+    NR == 1 && /^#!/ { last = 1; next }
+    /^[[:space:]]*import[[:space:]]+/ { last = NR; next }
+    /^[[:space:]]*from[[:space:]]+.*import/ { last = NR; next }
+    { exit }
+    END { print last + 0 }
+  ' "$path")"
+  [[ -z "$insert_after" || "$insert_after" -eq 0 ]] && insert_after=0
+
+  # Write marker block to tmp file (multi-line awk -v workaround)
+  local tmp_block tmp_modified
+  tmp_block="$(mktemp -t fi-target-python-block.XXXXXX)"
+  fi_generate_python_marker_block > "$tmp_block"
+
+  tmp_modified="$(mktemp -t fi-target-python-mod.XXXXXX)"
+  awk -v insert_after="$insert_after" \
+      -v splice_line="$splice_line" \
+      -v block_file="$tmp_block" '
+    function print_block(   line) {
+      while ((getline line < block_file) > 0) print line
+      close(block_file)
+    }
+    NR == insert_after && insert_after > 0 { print; print_block(); next }
+    NR == splice_line {
+      line = $0
+      # f-string with double quote: inject {_fi_seg} before closing "
+      # NOTE: macOS awk does not support \1 backreferences in sub() — manual splice.
+      if (match(line, /print[[:space:]]*\(f"/)) {
+        idx = index(line, "\")")
+        if (idx > 0) {
+          line = substr(line, 1, idx-1) "{_fi_seg}" substr(line, idx) "  # found-issues:seg"
+        }
+      } else if (match(line, /print[[:space:]]*\(f'"'"'/)) {
+        # f-string with single quote
+        idx = index(line, "'"'"')")
+        if (idx > 0) {
+          line = substr(line, 1, idx-1) "{_fi_seg}" substr(line, idx) "  # found-issues:seg"
+        }
+      } else if (match(line, /print[[:space:]]*\(["'"'"']/)) {
+        # Plain string: append + _fi_seg before closing paren
+        sub(/\)[[:space:]]*$/, " + _fi_seg)  # found-issues:seg", line)
+      } else if (match(line, /sys\.stdout\.write[[:space:]]*\(/)) {
+        sub(/\)[[:space:]]*$/, " + _fi_seg)  # found-issues:seg", line)
+      }
+      print line
+      next
+    }
+    NR == 1 && insert_after == 0 { print_block(); print; next }
+    { print }
+  ' "$path" > "$tmp_modified"
+
+  if [[ "$mode" == "dry-run" || -z "$mode" ]]; then
+    diff -u "$path" "$tmp_modified" || true
+    rm -f "$tmp_modified" "$tmp_block"
+    return 0
+  fi
+
+  # Apply: same backup + atomic write as bash/node
+  local ts backup_path tmp_atomic original_mode
+  ts="$(date +%Y%m%d-%H%M%S)"
+  backup_path="${path}.fi-bak-${ts}"
+  cp -p "$path" "$backup_path" || { rm -f "$tmp_modified" "$tmp_block"; return 15; }
+  tmp_atomic="${path}.fi-tmp-${ts}"
+  cp "$tmp_modified" "$tmp_atomic" || { rm -f "$tmp_modified" "$tmp_atomic" "$tmp_block"; return 14; }
+  original_mode="$(fi_capture_mode "$path")"
+  chmod "$original_mode" "$tmp_atomic" 2>/dev/null || chmod +x "$tmp_atomic"
+  mv "$tmp_atomic" "$path"
+  rm -f "$tmp_modified" "$tmp_block"
+
+  if [[ -L "$path" ]]; then
+    local real
+    real="$(readlink "$path")"
+    fi_err "note: $path is a symlink to $real; your sync system may overwrite changes on next render"
+  fi
+
+  printf 'install-statusline --target: applied to %s (backup: %s)\n' "$path" "$backup_path"
+  printf 'Restart your Claude Code session to see the segment render.\n'
+  return 0
 }
 
 cmd_install_statusline() {
