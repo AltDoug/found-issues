@@ -127,3 +127,41 @@ EOF
   count="$(grep -cF "# === found-issues plugin segment ===" tmp/sl.sh)"
   [ "$count" -eq 1 ]
 }
+
+@test "uninstall-statusline --target bash: removes marker block + seg reference cleanly" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/bin/bash
+LINE1="$REPO | $BRANCH"
+echo "$LINE1"
+EOF
+  local original_content
+  original_content="$(cat tmp/sl.sh)"
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  fi_run uninstall-statusline --target tmp/sl.sh
+  [ "$status" -eq 0 ]
+  # File should be byte-equal to the original
+  local restored_content
+  restored_content="$(cat tmp/sl.sh)"
+  [ "$original_content" = "$restored_content" ]
+}
+
+@test "uninstall-statusline --target bash: exits 17 when invocation present but markers stripped" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/bin/bash
+__FI_SEG=$(found-issues status --format=segment 2>/dev/null || true)
+LINE1="$REPO | $BRANCH${__FI_SEG}"
+echo "$LINE1"
+EOF
+  fi_run uninstall-statusline --target tmp/sl.sh
+  [ "$status" -eq 17 ]  # markers_missing_but_invocation_present
+}
+
+@test "uninstall-statusline --target bash: no-op when never installed" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/bin/bash
+echo "vanilla statusline"
+EOF
+  fi_run uninstall-statusline --target tmp/sl.sh
+  [ "$status" -eq 0 ]
+}
