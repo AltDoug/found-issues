@@ -81,7 +81,13 @@ recent_tail="$(tail -c 16384 "$transcript_path" 2>/dev/null || true)"
 if [[ -n "$recent_tail" ]]; then
   # Take everything after the last real user message marker (excluding
   # tool_result envelopes, which also carry "type":"user").
-  last_turn="$(printf '%s' "$recent_tail" | awk '
+  # LC_ALL=C: awk processes bytes opaquely; without this, GNU awk under
+  # UTF-8 locales (en_US.UTF-8 default on most Linux CI + dev environments)
+  # can fail with `towc: multibyte conversion failure` on transcript content
+  # containing em-dashes, check marks, smart quotes, etc. Our patterns are
+  # all ASCII so byte-mode awk is sufficient. See tests/stop-reminder.bats
+  # ("handles multibyte UTF-8 in transcript without awk towc errors").
+  last_turn="$(printf '%s' "$recent_tail" | LC_ALL=C awk '
     /"type":"user"/ && !/"tool_use_id"/ { buf=""; next }
     { buf = buf "\n" $0 }
     END { print buf }
