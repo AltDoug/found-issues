@@ -172,3 +172,32 @@ TRANSCRIPT
   [ "$status" -eq 0 ]
   rm -f "$TR"
 }
+
+@test "stop-reminder: handles multibyte UTF-8 in transcript without awk towc errors" {
+  # Regression for `awk: towc: multibyte conversion failure` on transcript
+  # tails containing em-dashes, check marks, smart quotes — content common in
+  # AI responses. GNU awk under UTF-8 locales (en_US.UTF-8, default on most
+  # Linux CI runners) calls libc's mbrtowc() per input byte, which can fail
+  # on certain byte boundaries even with valid UTF-8 input.
+  # Fix: LC_ALL=C prefix on the hook's awk call — awk processes bytes
+  # opaquely, no multibyte conversion attempted. The hook's patterns are
+  # all ASCII so byte-mode awk is sufficient.
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"parentUuid":"u-1","isSidechain":false,"type":"user","message":{"role":"user","content":[{"type":"text","text":"install the package"}]},"uuid":"user-1","timestamp":"2026-05-12T00:00:00Z","sessionId":"s-1"}
+{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_03","name":"Bash","input":{"command":"npm install"}}]},"uuid":"asst-1","timestamp":"2026-05-12T00:00:01Z","sessionId":"s-1"}
+{"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_03","type":"tool_result","content":"installed — package@1.0.0 ✅","is_error":false}]},"uuid":"toolres-1","timestamp":"2026-05-12T00:00:02Z","sessionId":"s-1"}
+{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done — installed the package ✓ and verified ✅. <!-- found-issues-checked: none-noticed -->"}]},"uuid":"asst-2","timestamp":"2026-05-12T00:00:03Z","sessionId":"s-1"}
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  # Force a UTF-8 locale so this test exercises the bug-prone code path even
+  # in CI environments that default to C/POSIX. If the awk call lacks the
+  # LC_ALL=C prefix, GNU awk will emit `towc: multibyte conversion failure`.
+  LC_ALL=en_US.UTF-8 run bash -c "echo '$input' | '$HOOK'"
+  # The towc error must not appear in stdout OR stderr (bats's $output combines them).
+  [[ "$output" != *"towc"* ]] || { echo "FAIL: awk towc error leaked through. Full output:"; echo "$output"; false; }
+  [[ "$output" != *"multibyte conversion failure"* ]] || { echo "FAIL: multibyte conversion failure leaked. Full output:"; echo "$output"; false; }
+  # The marker is present in the assistant's final text, so the hook must allow (exit 0).
+  [ "$status" -eq 0 ] || { echo "FAIL: expected exit 0 (marker present), got $status. Full output:"; echo "$output"; false; }
+  rm -f "$TR"
+}

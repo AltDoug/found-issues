@@ -58,7 +58,10 @@ if [[ ! -f "$STATUSLINE_NUDGE_MARKER" ]] && [[ -f "$HOME/.claude/statusline.sh" 
   has_marker=0; marker_block_fixed=0; has_legacy=0
   if grep -Fq "$STATUSLINE_START_MARKER" "$STATUSLINE_FILE" 2>/dev/null; then
     has_marker=1
-    if awk -v start="$STATUSLINE_START_MARKER" -v endm="$STATUSLINE_END_MARKER" '
+    # LC_ALL=C — see hooks/stop-reminder.sh:84 for the towc-multibyte rationale.
+    # User statuslines often contain UTF-8 (emoji, separators, smart quotes);
+    # byte-mode awk avoids GNU awk's libc towc failures.
+    if LC_ALL=C awk -v start="$STATUSLINE_START_MARKER" -v endm="$STATUSLINE_END_MARKER" '
         $0 == start { in_block = 1; next }
         $0 == endm { in_block = 0; next }
         in_block { print }
@@ -66,7 +69,7 @@ if [[ ! -f "$STATUSLINE_NUDGE_MARKER" ]] && [[ -f "$HOME/.claude/statusline.sh" 
       marker_block_fixed=1
     fi
   fi
-  if awk -v start="$STATUSLINE_START_MARKER" -v endm="$STATUSLINE_END_MARKER" '
+  if LC_ALL=C awk -v start="$STATUSLINE_START_MARKER" -v endm="$STATUSLINE_END_MARKER" '
       $0 == start { in_block = 1; next }
       $0 == endm { in_block = 0; next }
       !in_block && /found-issues[[:space:]]+status[[:space:]]+--format[=[:space:]]+segment/ { found = 1 }

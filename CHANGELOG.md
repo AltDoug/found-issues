@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-05-12
+
+### Fixed
+
+- **`hooks/stop-reminder.sh` + `hooks/session-start.sh` — `awk: towc: multibyte conversion failure`.** All 3 `awk` invocations in the hooks/ tree now run under `LC_ALL=C` so GNU awk treats input as opaque bytes rather than calling libc's `mbrtowc()` per byte. Without this, AI-response transcripts containing em-dashes, check marks, smart quotes, or any non-ASCII UTF-8 could trip awk's multibyte state machine on certain byte boundaries — the Stop hook then surfaced the raw `towc: multibyte conversion failure` error to the model and `last_turn` extraction was empty/garbled, breaking the marker-presence check silently across many sessions. Patterns matched in these awk scripts are all ASCII, so byte-mode is semantically correct (no character-class behavior is lost). Regression test in `tests/stop-reminder.bats` forces `LC_ALL=en_US.UTF-8` and asserts no `towc` error appears in hook output.
+
+### Internal
+
+- `bin/found-issues` awk calls in install/uninstall flows were NOT touched in this release. They operate on internally-controlled data shapes (statusline marker blocks, user splice scripts) and have not been reported as failing. If a user surfaces a multibyte failure in those code paths, follow up with the same `LC_ALL=C` prefix per-call.
+
 ## [1.4.0] - 2026-05-12
 
 ### Added
