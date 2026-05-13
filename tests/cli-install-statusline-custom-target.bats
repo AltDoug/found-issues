@@ -184,3 +184,49 @@ EOF
   fi_run install-statusline --target tmp/sl --dry-run
   [ "$status" -ne 10 ]
 }
+
+@test "install-statusline --target node: finds console.log template literal (priority 1)" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+const repo = 'r';
+const branch = 'b';
+console.log(`${repo} | ${branch}`);
+EOF
+  fi_run install-statusline --target tmp/sl.js --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"console.log"* ]]
+  [[ "$output" == *"__fiSeg"* ]]
+}
+
+@test "install-statusline --target node: finds console.log plain string (priority 2)" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+console.log("static line");
+EOF
+  fi_run install-statusline --target tmp/sl.js --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"__fiSeg"* ]]
+}
+
+@test "install-statusline --target node: exits 11 when no console.log/process.stdout.write" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+// just a comment, no output
+process.exit(0);
+EOF
+  fi_run install-statusline --target tmp/sl.js --dry-run
+  [ "$status" -eq 11 ]
+}
+
+@test "install-statusline --target node --apply: writes backup + modifies target" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+console.log(`repo | main`);
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  ls tmp/sl.js.fi-bak-* >/dev/null 2>&1
+  grep -Fq "// === found-issues plugin segment ===" tmp/sl.js
+  grep -Fq "__fiSeg" tmp/sl.js
+  grep -Fq "// found-issues:seg" tmp/sl.js
+}

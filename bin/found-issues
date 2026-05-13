@@ -2153,9 +2153,148 @@ cmd_install_statusline_target_bash() {
   printf 'Restart your Claude Code session to see the segment render.\n'
   return 0
 }
+fi_find_node_splice_point() {
+  local path="$1"
+  local line
+  # Priority 1: console.log with template literal (backticks)
+  line="$(awk '/console\.log[[:space:]]*\(`/ { print NR; exit }' "$path")"
+  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  # Priority 2: console.log with plain string (single or double quote)
+  line="$(awk '/console\.log[[:space:]]*\(("|'"'"')/ { print NR; exit }' "$path")"
+  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  # Priority 3: process.stdout.write
+  line="$(awk '/process\.stdout\.write[[:space:]]*\(/ { print NR; exit }' "$path")"
+  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  return 1
+}
+
+fi_generate_node_marker_block() {
+  cat <<'BLOCK'
+// === found-issues plugin segment ===
+// PATH-resilience: try `found-issues` on PATH, fall back to plugin cache glob.
+// Cwd resolution: prefer CLAUDE_PROJECT_DIR; fall back to $HOME.
+let __fiSeg = '';
+try {
+  const { execSync } = require('child_process');
+  const path = require('path');
+  const fs = require('fs');
+  let __fiCli = 'found-issues';
+  try { execSync('command -v found-issues', { stdio: 'ignore' }); }
+  catch (e) {
+    const cacheGlob = path.join(process.env.HOME, '.claude/plugins/cache');
+    try {
+      const candidates = require('child_process')
+        .execSync(`ls -d ${cacheGlob}/*/found-issues/*/bin/found-issues 2>/dev/null | sort -V | tail -1`, { encoding: 'utf8' })
+        .trim();
+      if (candidates && fs.existsSync(candidates)) __fiCli = candidates;
+      else throw new Error('no found-issues binary');
+    } catch (e2) { throw e2; }
+  }
+  const cwd = process.env.CLAUDE_PROJECT_DIR || process.env.HOME;
+  __fiSeg = execSync(`"${__fiCli}" status --format=segment`, { cwd, encoding: 'utf8', timeout: 5000 }).trim();
+} catch (e) {}
+// === end found-issues plugin segment ===
+BLOCK
+}
+
 cmd_install_statusline_target_node() {
-  fi_err "install-statusline --target: node splice not yet implemented"
-  return 11
+  local path="$1"
+  local mode="$2"
+
+  # Idempotency
+  if grep -Fq "// === found-issues plugin segment ===" "$path"; then
+    printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
+    return 0
+  fi
+
+  local splice_line
+  splice_line="$(fi_find_node_splice_point "$path")" || {
+    fi_err "install-statusline --target node: no splice point found in $path"
+    fi_err "  Tried: console.log(\`...\`), console.log(\"...\"), process.stdout.write(...)"
+    return 11
+  }
+
+  # Determine insertion line for marker block: after leading require/import lines.
+  local insert_after
+  insert_after="$(awk '
+    NR == 1 && /^#!/ { last = 1; next }
+    /^[[:space:]]*(const|let|var)[[:space:]]+.*=[[:space:]]+require\(/ { last = NR; next }
+    /^[[:space:]]*import[[:space:]]+/ { last = NR; next }
+    { exit }
+    END { print last + 0 }
+  ' "$path")"
+  [[ -z "$insert_after" || "$insert_after" -eq 0 ]] && insert_after=0
+
+  # Write marker block to tmp file (multi-line awk -v workaround, same as Task 1.4)
+  local tmp_block tmp_modified
+  tmp_block="$(mktemp -t fi-target-node-block.XXXXXX)"
+  fi_generate_node_marker_block > "$tmp_block"
+
+  tmp_modified="$(mktemp -t fi-target-node-mod.XXXXXX)"
+  awk -v insert_after="$insert_after" \
+      -v splice_line="$splice_line" \
+      -v block_file="$tmp_block" '
+    function print_block(   line) {
+      while ((getline line < block_file) > 0) print line
+      close(block_file)
+    }
+    NR == insert_after && insert_after > 0 { print; print_block(); next }
+    NR == splice_line {
+      line = $0
+      # Template literal: inject ${__fiSeg} before the last backtick.
+      # awk sub() does not support backreferences (\1), so we manually find
+      # the last backtick position and splice there.
+      if (match(line, /`/)) {
+        last_bt = 0
+        for (i = length(line); i >= 1; i--) {
+          if (substr(line, i, 1) == "`") { last_bt = i; break }
+        }
+        if (last_bt > 0) {
+          line = substr(line, 1, last_bt - 1) "${__fiSeg}" substr(line, last_bt)
+        }
+        # Add trailing comment marker (after the closing paren+semicolon)
+        sub(/;[[:space:]]*$/, ";  // found-issues:seg", line)
+        if (line !~ /found-issues:seg/) line = line "  // found-issues:seg"
+      } else if (match(line, /console\.log\(/) || match(line, /process\.stdout\.write\(/)) {
+        # Plain string or stdout.write: insert + __fiSeg before first closing paren
+        sub(/\)/, " + __fiSeg)", line)
+        sub(/;[[:space:]]*$/, ";  // found-issues:seg", line)
+        if (line !~ /found-issues:seg/) line = line "  // found-issues:seg"
+      }
+      print line
+      next
+    }
+    NR == 1 && insert_after == 0 { print_block(); print; next }
+    { print }
+  ' "$path" > "$tmp_modified"
+
+  if [[ "$mode" == "dry-run" || -z "$mode" ]]; then
+    diff -u "$path" "$tmp_modified" || true
+    rm -f "$tmp_modified" "$tmp_block"
+    return 0
+  fi
+
+  # Apply: backup + atomic write
+  local ts backup_path tmp_atomic original_mode
+  ts="$(date +%Y%m%d-%H%M%S)"
+  backup_path="${path}.fi-bak-${ts}"
+  cp -p "$path" "$backup_path" || { rm -f "$tmp_modified" "$tmp_block"; return 15; }
+  tmp_atomic="${path}.fi-tmp-${ts}"
+  cp "$tmp_modified" "$tmp_atomic" || { rm -f "$tmp_modified" "$tmp_atomic" "$tmp_block"; return 14; }
+  original_mode="$(fi_capture_mode "$path")"
+  chmod "$original_mode" "$tmp_atomic" 2>/dev/null || chmod +x "$tmp_atomic"
+  mv "$tmp_atomic" "$path"
+  rm -f "$tmp_modified" "$tmp_block"
+
+  if [[ -L "$path" ]]; then
+    local real
+    real="$(readlink "$path")"
+    fi_err "note: $path is a symlink to $real; your sync system may overwrite changes on next render"
+  fi
+
+  printf 'install-statusline --target: applied to %s (backup: %s)\n' "$path" "$backup_path"
+  printf 'Restart your Claude Code session to see the segment render.\n'
+  return 0
 }
 cmd_install_statusline_target_python() {
   fi_err "install-statusline --target: python splice not yet implemented"
