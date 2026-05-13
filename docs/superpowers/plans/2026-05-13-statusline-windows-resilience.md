@@ -37,6 +37,8 @@
 | `tests/cli-install-statusline-custom-target.bats` | Add Group 5 (Runtime end-to-end, 6 tests) and Group 6 (Migration detection, 3 tests) |
 | `tests/cli-status.bats` | Add 2 tests for conflict-aware counting |
 | `tests/helpers.bash` | Add `fi_synthetic_stdin <dir>` helper for synthetic Claude Code stdin JSON |
+| `hooks/stop-reminder.sh` | Replace fixed 8-line stderr message with adaptive verbosity (full/terse based on `.onboarded` marker or `FOUND_ISSUES_REMINDER_VERBOSITY` env override). UX prerequisite — see Phase 0 |
+| `docs/configuration.md` | Document `FOUND_ISSUES_REMINDER_VERBOSITY` env var |
 | `CHANGELOG.md` | New `## [1.5.0]` section |
 | `.claude-plugin/plugin.json` | Bump `version` from `1.4.1` to `1.5.0` |
 | `README.md` | Update test count line (`~390 tests` → `~410 tests`); add Windows-resilience note |
@@ -49,6 +51,216 @@
 | `docs/statusline-integration-contract.md` | The locked output contract; this plan does not modify the output surface |
 | `cmd_status --format=segment` emitter | The segment output bytes are frozen — only the parser feeding it changes (conflict-skipping changes counts but not format) |
 | `fi_generate_bash_marker_block` (line ~2014) | Bash shim already handles Windows via Git Bash + has `$input` jq fallback for cwd |
+
+---
+
+## Phase 0 — Stop-reminder UX prerequisite
+
+The stop hook (`hooks/stop-reminder.sh`) currently emits an 8-line message to stderr on every blocked-stop, which Claude Code surfaces in the user's transcript. Claude Code's hook API does not support hiding the reason while keeping it visible to Claude (verified: `additionalContext` is unsupported on `Stop` events; `suppressOutput` is binary). The mitigation is adaptive verbosity: full educational message on first runs, terse single-line message after onboarding.
+
+### Task 0.1: Adaptive verbosity in stop-reminder.sh
+
+**Files:**
+- Modify: `hooks/stop-reminder.sh:118-130`
+- Test: `tests/stop-reminder.bats`
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/stop-reminder.bats`:
+
+```bash
+@test "stop-reminder: terse message when FOUND_ISSUES_REMINDER_VERBOSITY=terse" {
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=terse echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=terse '$HOOK'"
+  [ "$status" -eq 2 ]
+  # Terse form: single line, no "Add ONE of these" enumeration.
+  [[ "$output" == *"Stop blocked"* ]]
+  [[ "$output" == *"missing"* ]]
+  [[ "$output" != *"Add ONE of these"* ]]
+  # Output is <= 2 lines.
+  line_count="$(printf '%s' "$output" | grep -c '' || true)"
+  [ "$line_count" -le 2 ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: full message when FOUND_ISSUES_REMINDER_VERBOSITY=full" {
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=full echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"acknowledgment"* ]]
+  [[ "$output" == *"Add ONE of these"* ]]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: auto-detects terse mode when .onboarded marker exists" {
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  # Synthetic HOME with the onboarded marker present.
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude/found-issues"
+  touch "$FAKE_HOME/.claude/found-issues/.onboarded"
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "HOME='$FAKE_HOME' echo '$input' | HOME='$FAKE_HOME' '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Add ONE of these"* ]]
+  rm -rf "$FAKE_HOME" "$TR"
+}
+
+@test "stop-reminder: auto-detects full mode when .onboarded marker absent" {
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  # Synthetic HOME with NO marker.
+  FAKE_HOME="$(mktemp -d)"
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "HOME='$FAKE_HOME' echo '$input' | HOME='$FAKE_HOME' '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Add ONE of these"* ]]
+  rm -rf "$FAKE_HOME" "$TR"
+}
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `bats tests/stop-reminder.bats -f "terse|full|auto-detects"`
+Expected: 4 tests FAIL — current hook always emits the full message and doesn't respect the env var or marker.
+
+- [ ] **Step 3: Make the existing test deterministic**
+
+The existing test `stop-reminder: blocks when marker missing AND substantive tool use occurred` asserts `[[ "$output" == *"acknowledgment"* ]]` which depends on full-mode output. Make it explicit so it doesn't break when the runner has the `.onboarded` marker:
+
+In `tests/stop-reminder.bats:17-30`, change the `run bash -c` line from:
+```bash
+  run bash -c "echo '$input' | '$HOOK'"
+```
+to:
+```bash
+  run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=full echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
+```
+
+- [ ] **Step 4: Replace the message block in `hooks/stop-reminder.sh`**
+
+Replace lines 118-130 of `hooks/stop-reminder.sh` with:
+
+```bash
+# Block with an adaptive message. Verbosity:
+#   FOUND_ISSUES_REMINDER_VERBOSITY=full  → 8-line educational form (default for new installs)
+#   FOUND_ISSUES_REMINDER_VERBOSITY=terse → 1-line form (post-onboarding default)
+#   FOUND_ISSUES_REMINDER_VERBOSITY=auto  → terse iff ~/.claude/found-issues/.onboarded exists
+# Default is auto, which gracefully degrades verbosity once the user has seen
+# the message enough times to internalize the marker options. Claude Code
+# always displays the stderr text to the user — there is no API for hiding
+# the reason while still passing it to Claude (verified 2026-05-13).
+__fi_verbosity="${FOUND_ISSUES_REMINDER_VERBOSITY:-auto}"
+if [[ "$__fi_verbosity" == "auto" ]]; then
+  if [[ -f "$HOME/.claude/found-issues/.onboarded" ]]; then
+    __fi_verbosity="terse"
+  else
+    __fi_verbosity="full"
+  fi
+fi
+
+if [[ "$__fi_verbosity" == "terse" ]]; then
+  printf 'Stop blocked: missing <!-- found-issues-checked: ... --> marker. (Options: none-noticed | logged | deferred)\n' >&2
+else
+  cat >&2 <<'EOF'
+Stop blocked: include a found-issues acknowledgment in your final message.
+
+Add ONE of these as an HTML comment anywhere in your response:
+  <!-- found-issues-checked: none-noticed -->
+  <!-- found-issues-checked: logged -->
+  <!-- found-issues-checked: deferred -->
+
+The marker forces conscious consideration; it does not auto-detect issues.
+Use /found-issues:log to log items frictionlessly.
+EOF
+fi
+exit 2
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `bats tests/stop-reminder.bats`
+Expected: all tests pass (the 4 new tests + all existing tests with the updated explicit-full override).
+
+- [ ] **Step 6: Run full test suite for regressions**
+
+Run: `bats tests/`
+Expected: full suite passes. No other test depends on stop-reminder verbosity.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add hooks/stop-reminder.sh tests/stop-reminder.bats
+git commit -m "$(cat <<'EOF'
+feat(stop-reminder): adaptive verbosity (full → terse after onboarding)
+
+The stop hook's reminder message is shown verbatim in the user's transcript
+on every blocked stop. Claude Code's hook API doesn't expose a "hide from
+user, show to Claude" mode (additionalContext is unsupported on Stop;
+suppressOutput is binary). The mitigation is to keep the educational
+8-line message only while it's still teaching value — once the user has
+seen it enough times that ~/.claude/found-issues/.onboarded exists, the
+message shrinks to one line:
+
+  Stop blocked: missing <!-- found-issues-checked: ... --> marker.
+    (Options: none-noticed | logged | deferred)
+
+Discipline mechanism is unchanged: still blocks via exit 2, still passes
+the reminder to Claude. Only the visible footprint shrinks.
+
+New env var FOUND_ISSUES_REMINDER_VERBOSITY accepts full/terse/auto
+(default: auto, which checks the .onboarded marker).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+### Task 0.2: Document the env var in configuration.md
+
+**Files:**
+- Modify: `docs/configuration.md`
+
+- [ ] **Step 1: Add `FOUND_ISSUES_REMINDER_VERBOSITY` to the canonical env-var table**
+
+Find the env-var reference table in `docs/configuration.md` and add a row:
+
+```markdown
+| `FOUND_ISSUES_REMINDER_VERBOSITY` | `auto` | Stop-hook message verbosity. `full` (8-line educational form), `terse` (1-line form), or `auto` (terse iff `~/.claude/found-issues/.onboarded` exists). |
+```
+
+- [ ] **Step 2: Verify the addition**
+
+Run: `grep -n REMINDER_VERBOSITY docs/configuration.md`
+Expected: a single new row.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add docs/configuration.md
+git commit -m "$(cat <<'EOF'
+docs(configuration): FOUND_ISSUES_REMINDER_VERBOSITY env var reference
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
 
 ---
 
@@ -2111,6 +2323,7 @@ Insert after the header section:
 - `doctor-statusline-runtime` subcommand: standalone runtime probe for iterative debugging.
 - Doctor now reads `~/.claude/settings.json` for custom statusline targets (`statusLine.command`) and extends static state detection to Node + Python marker formats.
 - `fi_has_conflict_markers` parser helper exposing merge-conflict source-file state.
+- `FOUND_ISSUES_REMINDER_VERBOSITY` env var (`full`/`terse`/`auto`) controls stop-hook message verbosity. Default `auto` shrinks the 8-line educational message to a single line once `~/.claude/found-issues/.onboarded` exists.
 
 ### Fixed
 - **Bug 1** (Windows breakage): The generated Node and Python shim blocks no longer use POSIX-only commands (`command -v`, `ls | sort -V | tail -1`, `process.env.HOME` / `os.environ['HOME']`). They now use `os.homedir()` / `pathlib.Path.home()`, enumerate the plugin cache via filesystem APIs, and invoke `bin/found-issues` via `bash -c` on Windows (Git Bash mediation).
@@ -2270,6 +2483,7 @@ Per memory `release-coupling-two-repos`: after this PR merges in `AltDoug/found-
 ## Self-review (executed by plan author after writing)
 
 **Spec coverage:**
+- Phase 0 (stop-reminder UX) is **out-of-spec** — added 2026-05-13 as a bundled UX prerequisite per operator request. Verified by claude-code-guide that `additionalContext` is unsupported on Stop hooks, so adaptive verbosity is the best available mitigation without breaking the discipline mechanism.
 - §2 Bug 1 → Tasks 3.1 (Node) + 4.1 (Python). ✓
 - §2 Bug 2 → Splice form change in Tasks 2.1 (Node), 2.2 (Python), shim rewrite in 3.1 + 4.1. ✓
 - §2 Bug 3 → Tasks 2.1, 2.2, 2.3 (multi-line splice all three languages). ✓
@@ -2292,6 +2506,7 @@ Per memory `release-coupling-two-repos`: after this PR merges in `AltDoug/found-
 
 ## Estimated execution time
 
+- Phase 0: ~20 min (stop-reminder UX prerequisite)
 - Phase 1: ~30 min (parser fixes)
 - Phase 2: ~60 min (multi-line splice × 3 languages, including bash commit)
 - Phase 3: ~30 min (Node shim)
@@ -2301,4 +2516,4 @@ Per memory `release-coupling-two-repos`: after this PR merges in `AltDoug/found-
 - Phase 7: ~75 min (doctor extension)
 - Phase 8: ~30 min (release prep + PR)
 
-Total: ~6 hours focused execution. Plus CI iteration time for any Windows-only failures.
+Total: ~6.5 hours focused execution. Plus CI iteration time for any Windows-only failures.
