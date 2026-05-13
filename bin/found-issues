@@ -1989,10 +1989,48 @@ cmd_install_statusline_custom_target() {
   esac
 }
 
-# Stubs for per-language handlers — filled in by later tasks
+# Returns line number of the splice point in a bash statusline, or empty.
+# Priority: LINE1= assignment, then first echo, then first printf.
+fi_find_bash_splice_point() {
+  local path="$1"
+  local line
+  # Priority 1: LINE1= assignment
+  line="$(awk '/^[[:space:]]*LINE1=/ { print NR; exit }' "$path")"
+  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  # Priority 2: first echo
+  line="$(awk '/^[[:space:]]*echo[[:space:]]/ { print NR; exit }' "$path")"
+  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  # Priority 3: first printf
+  line="$(awk '/^[[:space:]]*printf[[:space:]]/ { print NR; exit }' "$path")"
+  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  return 1
+}
+
 cmd_install_statusline_target_bash() {
-  fi_err "install-statusline --target: bash splice not yet implemented"
-  return 11
+  local path="$1"
+  local mode="$2"
+
+  # Idempotency: marker already present → no-op exit 0 already_installed
+  if grep -Fq "# === found-issues plugin segment ===" "$path"; then
+    printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
+    return 0
+  fi
+
+  # Detect splice point
+  local splice_line
+  splice_line="$(fi_find_bash_splice_point "$path")" || {
+    fi_err "install-statusline --target: no splice point found in $path"
+    fi_err "  Tried: LINE1= assignment, first 'echo', first 'printf'"
+    fi_err "  If your statusline uses a different output pattern, an AI-assisted"
+    fi_err "  edit can still install the segment manually — re-run /found-issues:setup"
+    fi_err "  to be offered the AI fallback."
+    return 11
+  }
+
+  # TODO: generate diff (dry-run) or apply (next task)
+  printf 'install-statusline --target: would splice at line %d of %s (dry-run not yet implemented)\n' \
+    "$splice_line" "$path"
+  return 0
 }
 cmd_install_statusline_target_node() {
   fi_err "install-statusline --target: node splice not yet implemented"
