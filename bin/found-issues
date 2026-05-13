@@ -1904,6 +1904,49 @@ fi_strip_legacy_handwritten() {
     || chmod +x "$file"
 }
 
+# === Subcommand: install-statusline --target <path> ===
+#
+# Custom-statusline integration. Splices the found-issues segment into a
+# user's existing statusline script at a non-canonical path. Supports
+# bash/sh, Node, Python. See:
+#   docs/superpowers/specs/2026-05-12-custom-statusline-auto-integration-design.md
+#   docs/statusline-integration-contract.md
+#
+# Exit codes:
+#   0  success or already_installed
+#   10 unsupported_language
+#   11 splice_point_not_found
+#   12 target_not_found
+#   13 target_unreadable
+#   14 target_unwritable
+#   15 backup_failed
+#   16 multiple_splices_detected
+#   18 json_statusline_unsupported
+cmd_install_statusline_custom_target() {
+  local target_path="$1"
+  local target_language="${2:-auto}"
+  local target_mode="${3:-dry-run}"
+
+  # Step 1: target must exist + be a regular file
+  if [[ ! -e "$target_path" ]]; then
+    fi_err "install-statusline --target: $target_path does not exist"
+    return 12
+  fi
+  if [[ ! -f "$target_path" ]]; then
+    fi_err "install-statusline --target: $target_path is not a regular file"
+    return 12
+  fi
+  if [[ ! -r "$target_path" ]]; then
+    fi_err "install-statusline --target: $target_path is not readable"
+    return 13
+  fi
+
+  # TODO: language detection, splice point detection, generation, write
+  # (filled in by subsequent tasks)
+  fi_err "install-statusline --target: not yet implemented for language=$target_language"
+  return 10
+}
+
 cmd_install_statusline() {
   # Argument parsing. As of v1.0.4 the default is to auto-migrate legacy
   # handwritten snippets (the 3-line pre-v0.1.7 setup.md template). v1.0.3
@@ -1919,6 +1962,53 @@ cmd_install_statusline() {
   #
   # `--migrate` / `--force` are kept as backwards-compat no-ops — invoking
   # them remains valid and behaves identically to the new default.
+  # Parse flags. Custom-target mode: --target <path> [--language=<X>] [--dry-run|--apply]
+  local target_path="" target_language="auto" target_mode=""
+  local positional_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target)
+        target_path="$2"
+        shift 2
+        ;;
+      --target=*)
+        target_path="${1#--target=}"
+        shift
+        ;;
+      --language=*)
+        target_language="${1#--language=}"
+        shift
+        ;;
+      --dry-run)
+        target_mode="dry-run"
+        shift
+        ;;
+      --apply)
+        target_mode="apply"
+        shift
+        ;;
+      --no-migrate|--migrate)
+        # Canonical-path migration flags — leave for existing code path below
+        positional_args+=("$1")
+        shift
+        ;;
+      *)
+        positional_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  # --target mode dispatches to custom-target handler; otherwise fall through
+  # to the existing canonical-path logic.
+  if [[ -n "$target_path" ]]; then
+    cmd_install_statusline_custom_target "$target_path" "$target_language" "$target_mode"
+    return $?
+  fi
+
+  # Re-set positional args for the rest of the function (existing canonical-path code)
+  set -- "${positional_args[@]}"
+
   local migrate=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
