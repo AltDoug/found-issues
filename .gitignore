@@ -27,6 +27,10 @@ ehthumbs.db
 *.log
 *.tmp
 .cache/
+# Bats test scratch dir — tests `cd` into a per-test mktemp via fi_setup_tmp,
+# but ad-hoc debugging that runs `mkdir -p tmp/` from the repo root (e.g.
+# manual reproduction of a test scenario) can pollute the working tree.
+tmp/
 
 # Secrets — prevent accidental commits of env files. We don't use them now,
 # but ignoring upfront eliminates a class of leaks if any contributor adds

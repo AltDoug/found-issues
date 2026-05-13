@@ -4,6 +4,21 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-05-12
+
+### Added
+
+- **Custom-statusline auto-integration.** `/found-issues:setup` now offers to splice the counter into user statuslines at non-canonical paths (`statusLine.command` in `settings.json` pointing somewhere other than `~/.claude/statusline.sh`). Supports bash/sh, Node, Python — language detected from extension + shebang. Behind a new CLI flag: `found-issues install-statusline --target <path> --language=<auto|bash|node|python> [--dry-run|--apply]`. Mirrors all canonical-install safety guarantees: timestamped backup, atomic write, idempotent re-install, pure-CLI reversible uninstall via `uninstall-statusline --target <path>`.
+- **Public contract for the segment surface.** New [`docs/statusline-integration-contract.md`](docs/statusline-integration-contract.md) documents the frozen public-surface behavior of `found-issues status --format=segment`. Snapshot-tested in `tests/contract-segment.bats` (12 tests). User statusline integrations depend on this contract holding across versions; the document specifies the only-allowed evolution path (additive `--format=segment-v2`).
+- **AI-mediated fallback paths** in `/found-issues:setup` for the three edge cases where deterministic splice can't proceed: splice point not found (exit 11), multiple existing splices (exit 16), markers stripped from a prior install (exit 17). `Edit` is now in setup.md's allowed-tools — scope-limited to these fallback paths.
+
+### Internal
+
+- New CLI subcommand functions in `bin/found-issues`: `fi_detect_target_language`, `fi_find_bash_splice_point`, `fi_find_node_splice_point`, `fi_find_python_splice_point`, `fi_generate_bash_marker_block`, `fi_generate_node_marker_block`, `fi_generate_python_marker_block`, `cmd_install_statusline_custom_target` (+ per-language handlers), `cmd_uninstall_statusline_custom_target`.
+- New test files: `tests/cli-install-statusline-custom-target.bats` (27 tests), `tests/setup-custom-statusline-flow.bats` (6 tests).
+- macOS awk compatibility workaround: marker blocks are written to a temp file and read via `getline` inside the per-language awk scripts (the simpler `-v block="$(...)"` form fails on BSD awk with multi-line values). Template-literal and f-string injections use manual `substr`/`index` splicing instead of `sub` with `\1` backreferences (also unsupported on BSD awk).
+- `.gitignore` adds `tmp/` to protect against ad-hoc test debugging that bypasses bats's `fi_setup_tmp` isolation.
+
 ## [1.3.0] — 2026-05-12
 
 ### Added — mid-session statusline freshness
