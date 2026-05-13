@@ -2006,17 +2006,48 @@ fi_find_bash_splice_point() {
   return 1
 }
 
+# Emit the bash marker block (multi-line). Includes PATH-resilience and
+# two-tier cwd resolution (CLAUDE_PROJECT_DIR → $input JSON via jq → empty).
+# Mirrors the canonical install's robustness; see bin/found-issues:2360+.
+fi_generate_bash_marker_block() {
+  cat <<'BLOCK'
+# === found-issues plugin segment ===
+# Tries `found-issues` on PATH first; falls back to globbing the plugin cache
+# for the latest installed binary (statusline subprocess may not inherit the
+# plugin's auto-PATH).
+__FI_CLI=""
+if command -v found-issues >/dev/null 2>&1; then
+  __FI_CLI=found-issues
+else
+  __FI_CLI=$(ls -d "$HOME"/.claude/plugins/cache/*/found-issues/*/bin/found-issues 2>/dev/null | sort -V | tail -1 || true)
+  [[ -x "$__FI_CLI" ]] || __FI_CLI=""
+fi
+# Cwd resolution: prefer CLAUDE_PROJECT_DIR; fall back to $input JSON.
+__FI_DIR="${CLAUDE_PROJECT_DIR:-}"
+if [[ -z "$__FI_DIR" && -n "${input:-}" ]] && command -v jq >/dev/null 2>&1; then
+  __FI_DIR=$(echo "$input" | jq -r '.workspace.current_dir // ""' 2>/dev/null || true)
+fi
+__FI_SEG=""
+if [[ -n "$__FI_CLI" ]]; then
+  if [[ -n "$__FI_DIR" ]]; then
+    __FI_SEG=$( cd "$__FI_DIR" 2>/dev/null && "$__FI_CLI" status --format=segment 2>/dev/null || true )
+  else
+    __FI_SEG=$("$__FI_CLI" status --format=segment 2>/dev/null || true)
+  fi
+fi
+# === end found-issues plugin segment ===
+BLOCK
+}
+
 cmd_install_statusline_target_bash() {
   local path="$1"
   local mode="$2"
 
-  # Idempotency: marker already present → no-op exit 0 already_installed
   if grep -Fq "# === found-issues plugin segment ===" "$path"; then
     printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
     return 0
   fi
 
-  # Detect splice point
   local splice_line
   splice_line="$(fi_find_bash_splice_point "$path")" || {
     fi_err "install-statusline --target: no splice point found in $path"
@@ -2027,10 +2058,66 @@ cmd_install_statusline_target_bash() {
     return 11
   }
 
-  # TODO: generate diff (dry-run) or apply (next task)
-  printf 'install-statusline --target: would splice at line %d of %s (dry-run not yet implemented)\n' \
-    "$splice_line" "$path"
-  return 0
+  # Insertion line for the marker block: right before the splice line, but
+  # after any leading shebang/set lines. For simplicity, insert at line 2
+  # (after shebang); the reference line gets ${__FI_SEG} appended.
+  local insert_after
+  insert_after="$(awk '
+    NR == 1 && /^#!/ { last = 1; next }
+    /^[[:space:]]*set[[:space:]]/ { last = NR; next }
+    { exit }
+    END { print last + 0 }
+  ' "$path")"
+  [[ -z "$insert_after" || "$insert_after" -eq 0 ]] && insert_after=0
+
+  # Generate the modified content into a temp file.
+  # Write the marker block to its own temp file so awk can read it via getline
+  # rather than via -v (awk -v does not support multi-line values portably).
+  local tmp_block tmp_modified
+  tmp_block="$(mktemp -t fi-target-block.XXXXXX)"
+  fi_generate_bash_marker_block > "$tmp_block"
+  tmp_modified="$(mktemp -t fi-target-mod.XXXXXX)"
+  awk -v insert_after="$insert_after" \
+      -v splice_line="$splice_line" \
+      -v block_file="$tmp_block" '
+    function print_block(    line) {
+      while ((getline line < block_file) > 0) print line
+      close(block_file)
+    }
+    NR == insert_after && insert_after > 0 { print; print_block(); next }
+    NR == splice_line {
+      # Append ${__FI_SEG} to the line; preserve trailing whitespace.
+      # Strategy: insert before the closing quote of the last string arg, or
+      # at end of line if no clear quote boundary.
+      line = $0
+      # Simple heuristic: append before any trailing " or end-of-line.
+      if (match(line, /"[^"]*"$/)) {
+        # Has trailing quoted string: append inside the quotes
+        sub(/"$/, "${__FI_SEG}\"  # found-issues:seg", line)
+      } else {
+        # Append at end of line with trailing comment
+        line = line "${__FI_SEG}  # found-issues:seg"
+      }
+      print line
+      next
+    }
+    # Special case: insert_after == 0 (no shebang/set) → insert block at very start
+    NR == 1 && insert_after == 0 { print_block(); print; next }
+    { print }
+  ' "$path" > "$tmp_modified"
+  rm -f "$tmp_block"
+
+  if [[ "$mode" == "dry-run" || -z "$mode" ]]; then
+    # Print unified diff
+    diff -u "$path" "$tmp_modified" || true
+    rm -f "$tmp_modified"
+    return 0
+  fi
+
+  # TODO: apply mode — backup + atomic write (next task)
+  rm -f "$tmp_modified"
+  fi_err "install-statusline --target: apply mode not yet implemented"
+  return 1
 }
 cmd_install_statusline_target_node() {
   fi_err "install-statusline --target: node splice not yet implemented"
