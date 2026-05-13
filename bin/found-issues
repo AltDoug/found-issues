@@ -2498,8 +2498,14 @@ cmd_install_statusline() {
     return $?
   fi
 
-  # Re-set positional args for the rest of the function (existing canonical-path code)
-  set -- "${positional_args[@]}"
+  # Re-set positional args for the rest of the function (existing canonical-path code).
+  # Bash 3.2 (macOS default) under `set -u` treats `"${arr[@]}"` of an empty array
+  # as unbound — branch on size to stay portable.
+  if [[ ${#positional_args[@]} -gt 0 ]]; then
+    set -- "${positional_args[@]}"
+  else
+    set --
+  fi
 
   local migrate=1
   while [[ $# -gt 0 ]]; do

@@ -97,7 +97,7 @@ EOF
 # wording that would re-render every user's statusline differently.
 # ============================================================================
 
-@test "contract(segment): single [open] entry → ' | <red>1 issue<reset>'" {
+@test "contract(segment): single [open] entry -> ' | <red>1 issue<reset>'" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
 # found-issues
@@ -114,7 +114,7 @@ EOF
   }
 }
 
-@test "contract(segment): three [open] entries → ' | <red>3 issues<reset>' (plural)" {
+@test "contract(segment): three [open] entries -> ' | <red>3 issues<reset>' (plural)" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
 # found-issues
@@ -133,7 +133,7 @@ EOF
   }
 }
 
-@test "contract(segment): single critical → ' | <bold-red>1 critical<reset>'" {
+@test "contract(segment): single critical -> ' | <bold-red>1 critical<reset>'" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
 # found-issues
@@ -150,7 +150,7 @@ EOF
   }
 }
 
-@test "contract(segment): mixed critical + open → relabels residual to 'other', joined by ' · '" {
+@test "contract(segment): mixed critical + open -> relabels residual to other, joined by space-middot-space" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'
 # found-issues
