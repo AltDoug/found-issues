@@ -165,3 +165,22 @@ EOF
   fi_run uninstall-statusline --target tmp/sl.sh
   [ "$status" -eq 0 ]
 }
+
+@test "install-statusline --target: detects node from .js extension" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+console.log(`repo | main`);
+EOF
+  fi_run install-statusline --target tmp/sl.js --dry-run
+  [ "$status" -ne 10 ]
+}
+
+@test "install-statusline --target: detects node from #!/usr/bin/env node shebang" {
+  mkdir -p tmp && cat > tmp/sl <<'EOF'
+#!/usr/bin/env node
+console.log(`repo | main`);
+EOF
+  chmod +x tmp/sl
+  fi_run install-statusline --target tmp/sl --dry-run
+  [ "$status" -ne 10 ]
+}
