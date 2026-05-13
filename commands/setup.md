@@ -1,8 +1,10 @@
 ---
 description: First-run setup for found-issues — explains the system, surfaces optional config, walks user through statusline integration if desired
 argument-hint: (no arguments)
-allowed-tools: Bash(found-issues:*), Read
+allowed-tools: Bash(found-issues:*), Read, Edit
 ---
+
+> **Note on the Edit permission (v1.4.0+):** Used ONLY when CLI returns an AI-fallback exit code (11 splice_point_not_found, 16 multiple_splices_detected, 17 markers_missing_but_invocation_present) during custom-statusline auto-integration. Never used in the happy path — `found-issues install-statusline --target --apply` does the file write deterministically.
 
 Walk the user through what `found-issues` does and the few optional things
 they can enable. The plugin is already fully active — they don't need to
@@ -127,17 +129,88 @@ Flow:
 
 2. **Branch on the result:**
 
-   - **`STATUSLINE_CUSTOM_ELSEWHERE: <path>`** — the user has a custom statusline at a path our `install-statusline` doesn't manage. Tell them:
+   - **`STATUSLINE_CUSTOM_ELSEWHERE: <path>`** — the user has a custom statusline at a path our default `install-statusline` doesn't manage. **Auto-integration is now available** via `install-statusline --target` (v1.4.0+).
 
-     > _You have a custom statusline at `<path>`. The plugin's `install-statusline` writes to `~/.claude/statusline.sh` specifically, so it won't fit your setup. To add the inline counter manually, call this from your statusline script wherever you want the count rendered:_
+     **Step 1 — Detect language + identify splice point:**
+
+     ```bash
+     # Try to produce a dry-run diff for the custom statusline.
+     # CLI auto-detects language from extension + shebang and identifies splice point.
+     found-issues install-statusline --target "<path>" --dry-run >/tmp/fi-dry-run.diff 2>/tmp/fi-dry-run.err
+     dry_status=$?
+     ```
+
+     Branch on `dry_status`:
+     - **0** — language detected, splice point found, diff written to `/tmp/fi-dry-run.diff`. **Continue to Step 2 (offer the picker).**
+     - **10** (`unsupported_language`) — fall through to the legacy manual-instructions message below; omit the picker option.
+     - **11** (`splice_point_not_found`) — language detected but CLI couldn't identify a clean splice point. **Continue to Step 3 (AI-mediated fallback).**
+     - **12** / **13** / **14** (`target_not_found` / `target_unreadable` / `target_unwritable`) — print the CLI's stderr output (from `/tmp/fi-dry-run.err`); abort the picker.
+
+     **Step 2 — Picker option (when dry-run returned exit 0):**
+
+     Add this option to the multi-select picker, FIRST, with the `(Recommended)` suffix:
+
+     - **`Statusline integration (custom path) (Recommended)`** — _Splices the found-issues counter into your custom statusline at `<path>`. Reversible via `found-issues uninstall-statusline --target <path>`._
+
+     On user yes, show the diff before applying:
+
+     > _Here's what I'd add to `<path>` (a timestamped backup will be saved before any change):_
+     >
+     > ```diff
+     > <paste contents of /tmp/fi-dry-run.diff>
+     > ```
+
+     Then `AskUserQuestion`: **"Apply this edit?"** → yes / no.
+
+     On yes:
+     ```bash
+     found-issues install-statusline --target "<path>" --apply
+     ```
+     Report success. Tell the user to restart their Claude Code session.
+
+     If `--apply` returns exit **16** (`multiple_splices_detected` — rare race condition where a second installation got partially inserted): fall through to Step 3 (AI-mediated repair).
+
+     **Step 3 — AI-mediated fallback (only when CLI returns exit 11 or 16):**
+
+     ```bash
+     # Show the user what the CLI tried, so they understand why fallback is needed
+     cat /tmp/fi-dry-run.err
+     ```
+
+     Tell the user: _"My deterministic splice couldn't find a clean insertion point in `<path>` (or detected conflicting markers from a prior partial install). Want me to read the file and propose an Edit manually?"_
+
+     On yes:
+     1. Use the `Read` tool on `<path>` to load the user's statusline script
+     2. Identify where their statusline emits its first stdout line (the line that produces the visible statusline content)
+     3. Compose an `Edit` that:
+        - Inserts the language-appropriate marker block from `docs/statusline-integration-contract.md`'s "splice mechanics" section (the bash / Node / Python snippets the contract enumerates)
+        - Appends the variable reference (`${__FI_SEG}` / `${__fiSeg}` / `{_fi_seg}`) to the first stdout line
+        - Adds the `# found-issues:seg` (or `// found-issues:seg`) trailing comment on the modified line — **critical for uninstall to find it**
+     4. Show the diff via Edit's normal preview; apply on user confirm.
+
+     **Step 4 — Markers-stripped repair path (only when invocation is present but markers are missing):**
+
+     If the detection at the top of this branch finds `found-issues status --format=segment` invoked in the user's statusline file but **no marker comments**, the file was previously integrated and then hand-edited to remove the markers. Without markers, the pure-CLI uninstall can't find the splice cleanly (exits 17).
+
+     Detect this state explicitly. If `grep -F "found-issues status --format=segment" "<path>"` matches AND `grep -F "# === found-issues plugin segment ===" "<path>"` does NOT match AND `grep -F "// === found-issues plugin segment ===" "<path>"` does NOT match, surface it:
+
+     > _Your statusline at `<path>` calls `found-issues status --format=segment` but the marker comments are missing — likely a manual edit. Want me to read the file and propose a clean Edit to add the markers back?_
+
+     On yes: Use `Read` + `Edit` to:
+     1. Locate the invocation line and any nearby setup of the `__FI_SEG` / `__fiSeg` / `_fi_seg` variable
+     2. Wrap them in the language-appropriate marker block (`# === found-issues plugin segment ===` / `# === end ... ===` for bash & python; `// ===` for node)
+     3. Add the `# found-issues:seg` / `// found-issues:seg` trailing comment to the reference splice line
+     4. After this, `uninstall-statusline --target <path>` will work cleanly via the CLI.
+
+     **Legacy manual-instructions message (only fired when dry-run returns exit 10 `unsupported_language`):**
+
+     > _You have a custom statusline at `<path>` in a language we don't yet auto-integrate (currently supported: bash/sh, Node, Python). To add the counter manually, insert this call wherever your statusline assembles its first-line output:_
      >
      > ```bash
      > found-issues status --format=segment 2>/dev/null
      > ```
      >
-     > _The output is empty when counts are zero and colorized when non-zero. Cached for 10s (see `FI_CACHE_TTL`) so subprocess cost is negligible. The SessionStart hook still prints the open count once per session regardless._
-
-     Then **omit the statusline option from the picker** (it would mislead the user).
+     > _The output is empty when counts are zero and colorized when non-zero. The SessionStart hook still prints the open count once per session regardless._
 
    - **`STATUSLINE_AT_CONVENTION`** — user has `~/.claude/statusline.sh`. Continue with the normal flow:
 
