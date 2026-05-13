@@ -38,6 +38,8 @@
 | `tests/cli-status.bats` | Add 2 tests for conflict-aware counting |
 | `tests/helpers.bash` | Add `fi_synthetic_stdin <dir>` helper for synthetic Claude Code stdin JSON |
 | `hooks/stop-reminder.sh` | Replace fixed 8-line stderr message with adaptive verbosity (full/terse based on `.onboarded` marker or `FOUND_ISSUES_REMINDER_VERBOSITY` env override). UX prerequisite — see Phase 0 |
+| `hooks/session-start.sh` | Auto-migrate v1.4.x POSIX-only marker blocks in custom Node/Python statusline targets. Opt-out via `FOUND_ISSUES_AUTO_MIGRATE=off`. Skipped on symlinks. See Task 5.2 |
+| `tests/session-start.bats` | Tests for v1.4.x auto-migration on SessionStart (4 new tests) |
 | `docs/configuration.md` | Document `FOUND_ISSUES_REMINDER_VERBOSITY` env var |
 | `CHANGELOG.md` | New `## [1.5.0]` section |
 | `.claude-plugin/plugin.json` | Bump `version` from `1.4.1` to `1.5.0` |
@@ -1403,6 +1405,239 @@ EOF
 )"
 ```
 
+### Task 5.2: SessionStart auto-migration for v1.4.x marker blocks
+
+Mirrors the v1.0.0→v1.0.2 canonical-bash migration pattern: detect a broken v1.4.x marker on SessionStart, auto-migrate with timestamped backup, print a one-line notice. Opt-out: `FOUND_ISSUES_AUTO_MIGRATE=off`.
+
+**Files:**
+- Modify: `hooks/session-start.sh`
+- Modify: `tests/session-start.bats` (if exists — otherwise create)
+
+- [ ] **Step 1: Read existing hook to find the insertion point**
+
+Run: `cat hooks/session-start.sh`
+Goal: understand current structure (existing v1.0.0→v1.0.2 migration if any; where to insert v1.4.x→v1.5.0 migration; what stdin/env it has access to).
+
+- [ ] **Step 2: Write the failing tests**
+
+If `tests/session-start.bats` doesn't exist, create it with the standard `load helpers` / `setup` / `teardown` scaffold from other bats files in the repo. Then add:
+
+```bash
+@test "session-start: auto-migrates v1.4.x POSIX-only marker in canonical statusline" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  cat > "$FAKE_HOME/.claude/statusline.sh" <<'EOF'
+#!/usr/bin/env bash
+# === found-issues plugin segment ===
+# (legacy v1.0.0/1.0.1 form without __FI_DIR — already covered by existing migration)
+FI_SEG="$(found-issues status --format=segment 2>/dev/null || true)"
+# === end found-issues plugin segment ===
+LINE1="repo | main${FI_SEG}"
+echo "$LINE1"
+EOF
+  # Use the v1.4.x signature: this test exercises the NEW migration path.
+  # Note: bash shim was always correct, so the "broken-posix" state only
+  # applies to custom Node/Python targets — see settings.json variant below.
+  HOME="$FAKE_HOME" run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  [ "$status" -eq 0 ]
+  # Canonical bash statusline is not v1.4.x-broken (bash shim was always correct).
+  # No migration message expected for this case.
+  ! echo "$output" | grep -q "migrating v1.4.x"
+  rm -rf "$FAKE_HOME"
+}
+
+@test "session-start: auto-migrates v1.4.x POSIX-only marker in custom Node statusline" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  # Custom Node statusline with v1.4.x signature.
+  cat > "$FAKE_HOME/custom.js" <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+let __fiSeg = '';
+try {
+  const { execSync } = require('child_process');
+  const cacheGlob = process.env.HOME + '/.claude/plugins/cache';
+  execSync('command -v found-issues');
+} catch (e) {}
+// === end found-issues plugin segment ===
+console.log(`repo${__fiSeg}`);  // found-issues:seg
+EOF
+  cat > "$FAKE_HOME/.claude/settings.json" <<EOF
+{"statusLine": {"command": "node $FAKE_HOME/custom.js"}}
+EOF
+  HOME="$FAKE_HOME" run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  [ "$status" -eq 0 ]
+  # Migration notice in output.
+  echo "$output" | grep -q "v1.4.x"
+  # Backup written.
+  ls "$FAKE_HOME"/custom.js.fi-bak-* >/dev/null 2>&1
+  # File updated to v1.5.0 form.
+  ! grep -q "process.env.HOME" "$FAKE_HOME/custom.js"
+  grep -q "os.homedir" "$FAKE_HOME/custom.js"
+  rm -rf "$FAKE_HOME"
+}
+
+@test "session-start: respects FOUND_ISSUES_AUTO_MIGRATE=off" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  cat > "$FAKE_HOME/custom.js" <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+let __fiSeg = '';
+try { require('child_process').execSync('command -v found-issues'); } catch(e) {}
+// === end found-issues plugin segment ===
+console.log(`repo${__fiSeg}`);  // found-issues:seg
+EOF
+  cat > "$FAKE_HOME/.claude/settings.json" <<EOF
+{"statusLine": {"command": "node $FAKE_HOME/custom.js"}}
+EOF
+  HOME="$FAKE_HOME" FOUND_ISSUES_AUTO_MIGRATE=off run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  [ "$status" -eq 0 ]
+  # No migration occurred — file unchanged.
+  grep -q "process.env.HOME\|command -v" "$FAKE_HOME/custom.js" || \
+    grep -q "execSync\('command -v" "$FAKE_HOME/custom.js"
+  ! ls "$FAKE_HOME"/custom.js.fi-bak-* 2>/dev/null
+  rm -rf "$FAKE_HOME"
+}
+
+@test "session-start: skips migration when target file is a symlink" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude" "$FAKE_HOME/dotfiles"
+  cat > "$FAKE_HOME/dotfiles/custom.js" <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+let __fiSeg = '';
+try { require('child_process').execSync('command -v found-issues'); } catch(e) {}
+// === end found-issues plugin segment ===
+console.log(`repo${__fiSeg}`);  // found-issues:seg
+EOF
+  ln -s "$FAKE_HOME/dotfiles/custom.js" "$FAKE_HOME/custom.js"
+  cat > "$FAKE_HOME/.claude/settings.json" <<EOF
+{"statusLine": {"command": "node $FAKE_HOME/custom.js"}}
+EOF
+  HOME="$FAKE_HOME" run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  [ "$status" -eq 0 ]
+  # Notice mentions skip-due-to-symlink.
+  echo "$output" | grep -qi "symlink"
+  # File NOT modified.
+  grep -q "command -v" "$FAKE_HOME/dotfiles/custom.js"
+  rm -rf "$FAKE_HOME"
+}
+```
+
+- [ ] **Step 3: Run tests to verify they fail**
+
+Run: `bats tests/session-start.bats -f "v1.4.x|AUTO_MIGRATE|symlink"`
+Expected: all 4 new tests FAIL — current session-start hook has no v1.4.x migration logic.
+
+- [ ] **Step 4: Implement the migration block in `hooks/session-start.sh`**
+
+Add a new section near the end of `hooks/session-start.sh` (after any existing v1.0.0→v1.0.2 migration block; before the final exit). The exact placement depends on existing hook structure (read in Step 1) — insert before the final `exit 0` and after any existing diagnostics:
+
+```bash
+# --- v1.4.x → v1.5.0 marker migration (auto-trigger) ---
+# Detect v1.4.0/v1.4.1 POSIX-only marker blocks in custom Node/Python
+# statusline targets and auto-migrate them in place. Mirrors the v1.0.0
+# bash migration pattern. Opt-out: FOUND_ISSUES_AUTO_MIGRATE=off.
+#
+# Canonical bash statusline (~/.claude/statusline.sh) was always correct on
+# Windows (runs in Git Bash) so this migration only applies to custom Node
+# and Python targets reachable via ~/.claude/settings.json statusLine.command.
+if [[ "${FOUND_ISSUES_AUTO_MIGRATE:-on}" != "off" ]]; then
+  __fi_settings="$HOME/.claude/settings.json"
+  if [[ -f "$__fi_settings" ]] && command -v jq >/dev/null 2>&1; then
+    __fi_cmd="$(jq -r '.statusLine.command // ""' "$__fi_settings" 2>/dev/null || true)"
+    if [[ -n "$__fi_cmd" ]]; then
+      # Last whitespace-separated token is the file path.
+      __fi_target="$(printf '%s' "$__fi_cmd" | LC_ALL=C awk '{print $NF}' | sed "s|\${HOME}|$HOME|g; s|^~|$HOME|")"
+      case "$__fi_target" in
+        *.js|*.mjs|*.cjs) __fi_lang=node ;;
+        *.py)             __fi_lang=python ;;
+        *)                __fi_lang="" ;;
+      esac
+      if [[ -n "$__fi_lang" && -f "$__fi_target" ]]; then
+        # Source the helper so we can call fi_target_is_v14x_broken.
+        # FI_BIN_DIR is the plugin's bin directory (resolved by Claude Code's
+        # ${CLAUDE_PLUGIN_ROOT} substitution before this hook is invoked).
+        if "${FI_BIN_DIR:-$(dirname "$0")/../bin}/found-issues" --help >/dev/null 2>&1; then
+          # Use the CLI's own detection via a hidden subcommand surface:
+          # `install-statusline --target <path> --apply` is idempotent and
+          # auto-migrates v1.4.x marker blocks (Task 5.1). Calling it with
+          # --apply on an already-correct file is a no-op.
+          if [[ -L "$__fi_target" ]]; then
+            printf 'found-issues: skipping v1.4.x migration — %s is a symlink; rerun install-statusline manually after dotfile sync.\n' "$__fi_target" >&2
+          else
+            # Probe whether migration is needed before invoking install.
+            __fi_needs_migrate=0
+            if [[ "$__fi_lang" == "node" ]]; then
+              LC_ALL=C awk '
+                /^\/\/ === found-issues plugin segment ===/ { in_block = 1; next }
+                /^\/\/ === end found-issues plugin segment ===/ { in_block = 0; next }
+                in_block && (/process\.env\.HOME/ || /command -v found-issues/) { found = 1 }
+                END { exit (found ? 0 : 1) }
+              ' "$__fi_target" 2>/dev/null && __fi_needs_migrate=1
+            elif [[ "$__fi_lang" == "python" ]]; then
+              LC_ALL=C awk '
+                /^# === found-issues plugin segment ===/ { in_block = 1; next }
+                /^# === end found-issues plugin segment ===/ { in_block = 0; next }
+                in_block && /environ\.get\(.HOME./ { has_old = 1 }
+                in_block && /pathlib/ { has_new = 1 }
+                END { exit (has_old && !has_new ? 0 : 1) }
+              ' "$__fi_target" 2>/dev/null && __fi_needs_migrate=1
+            fi
+            if [[ "$__fi_needs_migrate" == "1" ]]; then
+              if "${FI_BIN_DIR:-$(dirname "$0")/../bin}/found-issues" install-statusline --target "$__fi_target" --apply >/dev/null 2>&1; then
+                printf 'found-issues: auto-migrated v1.4.x statusline shim in %s (timestamped backup written; opt-out: FOUND_ISSUES_AUTO_MIGRATE=off)\n' "$__fi_target" >&2
+              else
+                printf 'found-issues: v1.4.x migration FAILED for %s — run `found-issues install-statusline --target %s --apply` manually.\n' "$__fi_target" "$__fi_target" >&2
+              fi
+            fi
+          fi
+        fi
+      fi
+    fi
+  fi
+fi
+# --- end v1.4.x → v1.5.0 marker migration ---
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `bats tests/session-start.bats -f "v1.4.x|AUTO_MIGRATE|symlink"`
+Expected: all 4 new tests PASS.
+
+- [ ] **Step 6: Run full test suite for regressions**
+
+Run: `bats tests/`
+Expected: full suite passes. Existing session-start tests unaffected (the migration block is no-op when no v1.4.x signature present).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add hooks/session-start.sh tests/session-start.bats
+git commit -m "$(cat <<'EOF'
+feat(session-start): auto-migrate v1.4.x marker blocks (Layer 1)
+
+Existing v1.4.0/v1.4.1 installs into custom Node/Python statuslines are
+silently broken on Windows (POSIX-only shim) and on multi-branch
+statuslines (splice gap). Without auto-migration, users only discover the
+fix by happening to run `doctor`. Auto-trigger on SessionStart matches
+the v1.0.0→v1.0.2 bash migration precedent and gets the fix to users who
+don't read CHANGELOGs.
+
+Safety rails:
+- Symlinks are skipped (dotfile-sync incompatibility) with a stderr notice
+- Opt-out via FOUND_ISSUES_AUTO_MIGRATE=off
+- Timestamped backup written (via install-statusline --apply)
+- Failure mode is silent — a broken migration prints a fix-it hint but
+  doesn't block session start
+- Bash canonical statusline is unaffected (the shim was always correct)
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
 ---
 
 ## Phase 6 — Layer 2: End-to-end CI runtime tests
@@ -2324,6 +2559,7 @@ Insert after the header section:
 - Doctor now reads `~/.claude/settings.json` for custom statusline targets (`statusLine.command`) and extends static state detection to Node + Python marker formats.
 - `fi_has_conflict_markers` parser helper exposing merge-conflict source-file state.
 - `FOUND_ISSUES_REMINDER_VERBOSITY` env var (`full`/`terse`/`auto`) controls stop-hook message verbosity. Default `auto` shrinks the 8-line educational message to a single line once `~/.claude/found-issues/.onboarded` exists.
+- SessionStart auto-migration for v1.4.x marker blocks: existing custom Node/Python statusline integrations are rewritten in place on next session start, with timestamped backup. Opt-out: `FOUND_ISSUES_AUTO_MIGRATE=off`. Symlinks are skipped.
 
 ### Fixed
 - **Bug 1** (Windows breakage): The generated Node and Python shim blocks no longer use POSIX-only commands (`command -v`, `ls | sort -V | tail -1`, `process.env.HOME` / `os.environ['HOME']`). They now use `os.homedir()` / `pathlib.Path.home()`, enumerate the plugin cache via filesystem APIs, and invoke `bin/found-issues` via `bash -c` on Windows (Git Bash mediation).
@@ -2492,7 +2728,7 @@ Per memory `release-coupling-two-repos`: after this PR merges in `AltDoug/found-
 - §4 Layer 2 → Phase 6. ✓
 - §4 Layer 3 → Phase 7. ✓
 - §5.7 Migration → Phase 5. ✓
-- §8 Migration story (SessionStart auto-trigger) — **deliberately out of scope for this plan**. Migration is triggered by user-invoked commands (`install-statusline`, `doctor`). Auto-migrate on SessionStart was raised as an open question after the spec; if the user approves it in scrutiny review, add as Task 5.2 before Phase 6.
+- §8 Migration story (SessionStart auto-trigger) → Task 5.2. ✓ Approved 2026-05-13.
 - §10 Versioning → Task 8.2. ✓
 - §11 Testing strategy → Phases 1-7. ✓
 
@@ -2511,9 +2747,9 @@ Per memory `release-coupling-two-repos`: after this PR merges in `AltDoug/found-
 - Phase 2: ~60 min (multi-line splice × 3 languages, including bash commit)
 - Phase 3: ~30 min (Node shim)
 - Phase 4: ~30 min (Python shim)
-- Phase 5: ~60 min (migration detection + strip helper)
+- Phase 5: ~90 min (migration detection + strip helper + SessionStart auto-migrate)
 - Phase 6: ~45 min (Group 5 e2e tests × 3 languages)
 - Phase 7: ~75 min (doctor extension)
 - Phase 8: ~30 min (release prep + PR)
 
-Total: ~6.5 hours focused execution. Plus CI iteration time for any Windows-only failures.
+Total: ~7 hours focused execution. Plus CI iteration time for any Windows-only failures.
