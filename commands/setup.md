@@ -183,7 +183,7 @@ Flow:
      1. Use the `Read` tool on `<path>` to load the user's statusline script
      2. Identify where their statusline emits its first stdout line (the line that produces the visible statusline content)
      3. Compose an `Edit` that:
-        - Inserts the language-appropriate marker block from `docs/statusline-integration-contract.md`'s "splice mechanics" section (the bash / Node / Python snippets the contract enumerates)
+        - Inserts the language-appropriate marker block. The canonical snippet content lives in `bin/found-issues` (the `fi_generate_bash_marker_block` / `fi_generate_node_marker_block` / `fi_generate_python_marker_block` helpers); the design spec at `docs/superpowers/specs/2026-05-12-custom-statusline-auto-integration-design.md` has the same snippets in its "Per-language splice mechanics" section if copying from prose is easier
         - Appends the variable reference (`${__FI_SEG}` / `${__fiSeg}` / `{_fi_seg}`) to the first stdout line
         - Adds the `# found-issues:seg` (or `// found-issues:seg`) trailing comment on the modified line — **critical for uninstall to find it**
      4. Show the diff via Edit's normal preview; apply on user confirm.
