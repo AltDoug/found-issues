@@ -230,3 +230,32 @@ EOF
   grep -Fq "__fiSeg" tmp/sl.js
   grep -Fq "// found-issues:seg" tmp/sl.js
 }
+
+@test "install-statusline --target node --apply: produces a script that parses without error" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+console.log(`repo | main`);
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  # Syntax-check the modified script if node is available
+  if command -v node >/dev/null 2>&1; then
+    node --check tmp/sl.js
+  else
+    skip "node not available; cannot syntax-check"
+  fi
+}
+
+@test "uninstall-statusline --target node: byte-equal restore" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+console.log(`repo | main`);
+EOF
+  local original
+  original="$(cat tmp/sl.js)"
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  fi_run uninstall-statusline --target tmp/sl.js
+  [ "$status" -eq 0 ]
+  [ "$original" = "$(cat tmp/sl.js)" ]
+}
