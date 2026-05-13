@@ -300,3 +300,31 @@ EOF
   fi_run install-statusline --target tmp/sl.py --dry-run
   [ "$status" -eq 11 ]
 }
+
+@test "install-statusline --target python --apply: produces script that parses without error" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+print(f"repo | main")
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -m py_compile tmp/sl.py
+  else
+    skip "python3 not available; cannot syntax-check"
+  fi
+}
+
+@test "uninstall-statusline --target python: byte-equal restore" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+print(f"repo | main")
+EOF
+  local original
+  original="$(cat tmp/sl.py)"
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  fi_run uninstall-statusline --target tmp/sl.py
+  [ "$status" -eq 0 ]
+  [ "$original" = "$(cat tmp/sl.py)" ]
+}

@@ -3071,9 +3071,12 @@ cmd_uninstall_statusline_custom_target() {
       # Node: ${__fiSeg}`); // found-issues:seg
       sub(/\$\{__fiSeg\}[^`]*`[[:space:]]*\)?;[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, "`);")
       sub(/\+[[:space:]]*__fiSeg[[:space:]]*\);[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, ");")
-      # Python: {_fi_seg}"  # found-issues:seg
-      sub(/\{_fi_seg\}"?[[:space:]]*#[[:space:]]*found-issues:seg.*$/, "\"")
-      sub(/\+[[:space:]]*_fi_seg[[:space:]]*\)?[[:space:]]*#[[:space:]]*found-issues:seg.*$/, ")")
+      # Python f-string with double quote: print(f"...{_fi_seg}")  # found-issues:seg
+      sub(/\{_fi_seg\}"\)[[:space:]]*#[[:space:]]*found-issues:seg.*$/, "\")")
+      # Python f-string with single quote: print(f'"'"'...{_fi_seg}'"'"')  # found-issues:seg
+      sub(/\{_fi_seg\}['"'"'][)][[:space:]]*#[[:space:]]*found-issues:seg.*$/, "'"'"')")
+      # Python plain-string concat: print("..." + _fi_seg)  # found-issues:seg
+      sub(/\+[[:space:]]*_fi_seg[[:space:]]*\)[[:space:]]*#[[:space:]]*found-issues:seg.*$/, ")")
     }
     /\/\/ found-issues:seg/ {
       sub(/\$\{__fiSeg\}[^`]*`[[:space:]]*\)?;[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, "`);")
