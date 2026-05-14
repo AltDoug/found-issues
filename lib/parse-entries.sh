@@ -213,8 +213,13 @@ fi_entries() {
     /^>>>>>>> / { in_conflict = 0; next }
     /^=======$/ && in_conflict { next }
     !in_conflict && /^- \[/ {
-      if (sf == "all") { print; next }
-      if (index($0, "- [" sf "]") == 1) print
+      if (sf == "all") {
+        if (index($0, "- [open]")     == 1 ||
+            index($0, "- [deferred]") == 1 ||
+            index($0, "- [fixed]")    == 1) { print; next }
+      } else {
+        if (index($0, "- [" sf "]") == 1) print
+      }
     }
   ' "$file"
 }

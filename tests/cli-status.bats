@@ -259,3 +259,23 @@ EOF
   [ "$status" -eq 0 ]
   [ "$output" = "2" ]
 }
+
+@test "fi_entries: 'all' ignores non-canonical statuses (e.g. [TODO], [in-progress])" {
+  mkdir -p tmp
+  cat > tmp/mixed.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — canonical open
+- [deferred] 2026-05-02 b.ts:1 — canonical deferred
+- [fixed] 2026-05-03 c.ts:1 — canonical fixed
+- [TODO] 2026-05-04 d.ts:1 — non-canonical status
+- [in-progress] 2026-05-05 e.ts:1 — non-canonical status
+EOF
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_entries tmp/mixed.md all
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | wc -l | tr -d ' ')" = "3" ]
+  echo "$output" | grep -q 'a.ts:1'
+  echo "$output" | grep -q 'b.ts:1'
+  echo "$output" | grep -q 'c.ts:1'
+  ! echo "$output" | grep -q 'd.ts:1'
+  ! echo "$output" | grep -q 'e.ts:1'
+}
