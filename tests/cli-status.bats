@@ -189,3 +189,36 @@ EOF
   [[ "$output" == *'"issues":'* ]]
   [[ "$output" != *'"other":'* ]]
 }
+
+@test "fi_has_conflict_markers: returns 0 when file contains <<<<<<< markers" {
+  mkdir -p tmp
+  cat > tmp/conflict.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+<<<<<<< HEAD
+- [open] 2026-05-02 b.ts:1 — branch HEAD
+=======
+- [fixed] 2026-05-02 b.ts:1 — branch OTHER
+>>>>>>> other
+- [open] 2026-05-03 c.ts:1 — entry two
+EOF
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_has_conflict_markers tmp/conflict.md
+  [ "$status" -eq 0 ]
+}
+
+@test "fi_has_conflict_markers: returns 1 when file has no markers" {
+  mkdir -p tmp
+  cat > tmp/clean.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+- [open] 2026-05-03 c.ts:1 — entry two
+EOF
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_has_conflict_markers tmp/clean.md
+  [ "$status" -eq 1 ]
+}
+
+@test "fi_has_conflict_markers: returns 1 when file does not exist" {
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_has_conflict_markers tmp/nonexistent.md
+  [ "$status" -eq 1 ]
+}

@@ -38,6 +38,18 @@ fi_find_issues_file() {
   return 1
 }
 
+# Return 0 iff $1 is a regular file containing merge-conflict markers.
+# A conflict marker is any line beginning with `<<<<<<< `, `=======`, or
+# `>>>>>>> ` — git's canonical merge conflict syntax. Used by the parser
+# (skip counting inside conflict regions) and by doctor (FAIL-level finding
+# when source file is degraded). Cheap: single grep pass, exits on first
+# match.
+fi_has_conflict_markers() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  LC_ALL=C grep -qE '^(<<<<<<< |=======$|>>>>>>> )' "$file"
+}
+
 # Parse a single entry line into KEY=VALUE pairs (one per line).
 # Returns 1 if the line is not a valid entry.
 fi_parse_entry() {
