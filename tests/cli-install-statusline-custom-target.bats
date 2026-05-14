@@ -610,9 +610,7 @@ EOF
   local sl_output
   # Pipe through tr -d '\000' to strip any null bytes that Windows Python may
   # output when the console code page uses a wide encoding (e.g. UTF-16).
-  # 2>&1: capture stderr to help diagnose CI failures; harmless on POSIX.
-  sl_output="$(fi_synthetic_stdin "$(pwd)" | python3 -X utf8 tmp/sl.py 2>&1 | tr -d '\000')"
-  echo "DEBUG sl_output=${sl_output}" >&2
+  sl_output="$(fi_synthetic_stdin "$(pwd)" | python3 -X utf8 tmp/sl.py 2>/dev/null | tr -d '\000')"
   echo "$sl_output" | grep -qE ' \| .*issue'
 }
 

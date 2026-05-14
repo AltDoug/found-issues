@@ -2513,10 +2513,22 @@ def _fi_seg(_dir=None):
             _fi_posix = _fi_cli.replace('\\', '/')
             # On Windows, Python's cwd arg passes to the Windows API which cannot
             # resolve POSIX Git Bash paths (e.g. /d/a/...). cd inside bash instead.
-            # Use explicit UTF-8 encoding to avoid Windows console code page issues.
+            # Use FOUND_ISSUES_BASH if set (avoids Windows PATH resolving to WSL
+            # bash.exe instead of Git Bash when wsl.exe is earlier in PATH).
+            # Fall back to known Git for Windows install paths, then plain 'bash'.
+            _fi_bash_env = _fi_os.environ.get('FOUND_ISSUES_BASH', '')
+            _fi_bash_bin = _fi_bash_env or 'bash'
+            if not _fi_bash_env:
+                for _fi_candidate in [
+                    r'C:\Program Files\Git\bin\bash.exe',
+                    r'C:\Program Files\Git\usr\bin\bash.exe',
+                ]:
+                    if _fi_pathlib.Path(_fi_candidate).is_file():
+                        _fi_bash_bin = _fi_candidate
+                        break
             _fi_safe_cwd = _fi_cwd.replace('\\', '/').replace("'", "'\\''")
             _fi_result = _fi_subprocess.run(
-                ['bash', '-c', f"cd '{_fi_safe_cwd}' && \"{_fi_posix}\" status --format=segment"],
+                [_fi_bash_bin, '-c', f"cd '{_fi_safe_cwd}' && \"{_fi_posix}\" status --format=segment"],
                 capture_output=True, timeout=5
             )
             return _fi_result.stdout.decode('utf-8', errors='replace').strip()
