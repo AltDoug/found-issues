@@ -582,6 +582,11 @@ EOF
   # resolves on ALL platforms without relying on PATH (which python shims don't
   # use on Windows) or the plugin cache (which doesn't exist on bare CI runners).
   export FOUND_ISSUES_BIN="${TEST_REPO_ROOT}/bin/found-issues"
+  # PYTHONUTF8=1: force Python stdout/stdin to UTF-8 on Windows. Without this,
+  # Windows Python uses the console code page (e.g. cp1252 or UTF-16) for
+  # pipes, which produces null bytes that bash command substitution strips,
+  # leaving a garbled or empty string.
+  export PYTHONUTF8=1
   # Also prepend repo bin/ for POSIX (shutil.which path, harmless elsewhere).
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
@@ -612,6 +617,8 @@ EOF
   # resolves on ALL platforms without relying on PATH (which python shims don't
   # use on Windows) or the plugin cache (which doesn't exist on bare CI runners).
   export FOUND_ISSUES_BIN="${TEST_REPO_ROOT}/bin/found-issues"
+  # PYTHONUTF8=1: force Python stdout/stdin to UTF-8 on Windows (see above).
+  export PYTHONUTF8=1
   # Also prepend repo bin/ for POSIX (shutil.which path, harmless elsewhere).
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
