@@ -2283,8 +2283,12 @@ function __fiSeg(dir) {
       || require('os').homedir();
     if (process.platform === 'win32') {
       const posixPath = __fiCli.replace(/\\/g, '/');
-      return execFileSync('bash', ['-c', `"${posixPath}" status --format=segment`],
-        { cwd, encoding: 'utf8', timeout: 5000 }).trim();
+      // On Windows, Node's cwd option passes to the Windows API which cannot
+      // resolve POSIX Git Bash paths (e.g. /d/a/...). Instead, cd inside bash
+      // so bash handles the POSIX path resolution natively.
+      const safeCwd = cwd.replace(/\\/g, '/').replace(/'/g, "'\\''");
+      return execFileSync('bash', ['-c', `cd '${safeCwd}' && "${posixPath}" status --format=segment`],
+        { encoding: 'utf8', timeout: 5000 }).trim();
     }
     return execFileSync(__fiCli, ['status', '--format=segment'],
       { cwd, encoding: 'utf8', timeout: 5000 }).trim();
@@ -2295,7 +2299,9 @@ try {
   const _fs = require('fs');
   const _os = require('os');
   // FOUND_ISSUES_BIN: explicit override — used by tests and advanced installs.
-  if (process.env.FOUND_ISSUES_BIN && _fs.existsSync(process.env.FOUND_ISSUES_BIN)) {
+  // No existsSync check: on Windows, Node.js cannot resolve POSIX Git Bash
+  // paths (/d/a/...) via the Windows filesystem API. Trust the caller.
+  if (process.env.FOUND_ISSUES_BIN) {
     __fiCli = process.env.FOUND_ISSUES_BIN;
   }
   if (!__fiCli && process.platform !== 'win32') {
@@ -2468,8 +2474,10 @@ import pathlib as _fi_pathlib
 _fi_cli = None
 try:
     # FOUND_ISSUES_BIN: explicit override — used by tests and advanced installs.
+    # No is_file() check: on Windows, Python cannot resolve POSIX Git Bash
+    # paths (/d/a/...) via the Windows filesystem API. Trust the caller.
     _fi_env_bin = _fi_os.environ.get('FOUND_ISSUES_BIN', '')
-    if _fi_env_bin and _fi_pathlib.Path(_fi_env_bin).is_file():
+    if _fi_env_bin:
         _fi_cli = _fi_env_bin
     if not _fi_cli and _fi_platform.system() != 'Windows':
         _fi_cli = _fi_shutil.which('found-issues')
@@ -2503,9 +2511,12 @@ def _fi_seg(_dir=None):
         )
         if _fi_platform.system() == 'Windows':
             _fi_posix = _fi_cli.replace('\\', '/')
+            # On Windows, Python's cwd arg passes to the Windows API which cannot
+            # resolve POSIX Git Bash paths (e.g. /d/a/...). cd inside bash instead.
+            _fi_safe_cwd = _fi_cwd.replace('\\', '/').replace("'", "'\\''")
             return _fi_subprocess.run(
-                ['bash', '-c', f'"{_fi_posix}" status --format=segment'],
-                cwd=_fi_cwd, capture_output=True, text=True, timeout=5
+                ['bash', '-c', f"cd '{_fi_safe_cwd}' && \"{_fi_posix}\" status --format=segment"],
+                capture_output=True, text=True, timeout=5
             ).stdout.strip()
         return _fi_subprocess.run(
             [_fi_cli, 'status', '--format=segment'],
