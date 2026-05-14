@@ -507,6 +507,10 @@ EOF
 @test "runtime e2e (node): single-branch statusline emits segment" {
   if ! command -v node >/dev/null 2>&1; then skip "node not available"; fi
 
+  # Prepend repo bin/ so the shim's `command -v found-issues` resolves on CI
+  # (no global install, no plugin cache on bare checkout).
+  PATH="${TEST_REPO_ROOT}/bin:$PATH"
+
   cat > .found-issues.md <<'EOF'
 - [open] 2026-05-13 a.ts:1 — synthetic test entry
 EOF
@@ -530,6 +534,10 @@ EOF
 
 @test "runtime e2e (node): multi-branch statusline emits segment in both branches" {
   if ! command -v node >/dev/null 2>&1; then skip "node not available"; fi
+
+  # Prepend repo bin/ so the shim's `command -v found-issues` resolves on CI
+  # (no global install, no plugin cache on bare checkout).
+  PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
   cat > .found-issues.md <<'EOF'
 - [open] 2026-05-13 a.ts:1 — synthetic test entry
@@ -564,6 +572,10 @@ EOF
 @test "runtime e2e (python): single-branch statusline emits segment" {
   if ! command -v python3 >/dev/null 2>&1; then skip "python3 not available"; fi
 
+  # Prepend repo bin/ so the shim's binary resolution resolves on CI
+  # (no global install, no plugin cache on bare checkout).
+  PATH="${TEST_REPO_ROOT}/bin:$PATH"
+
   cat > .found-issues.md <<'EOF'
 - [open] 2026-05-13 a.ts:1 — synthetic test entry
 EOF
@@ -586,6 +598,10 @@ EOF
 
 @test "runtime e2e (python): multi-branch statusline emits segment in both branches" {
   if ! command -v python3 >/dev/null 2>&1; then skip "python3 not available"; fi
+
+  # Prepend repo bin/ so the shim's binary resolution resolves on CI
+  # (no global install, no plugin cache on bare checkout).
+  PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
   cat > .found-issues.md <<'EOF'
 - [open] 2026-05-13 a.ts:1 — synthetic test entry
@@ -617,6 +633,10 @@ EOF
 }
 
 @test "runtime e2e (bash): multi-branch statusline emits segment in both branches" {
+  # Prepend repo bin/ so the shim's `command -v found-issues` resolves on CI
+  # (no global install, no plugin cache on bare checkout).
+  PATH="${TEST_REPO_ROOT}/bin:$PATH"
+
   mkdir -p tmp
   cat > .found-issues.md <<'EOF'
 - [open] 2026-05-13 a.ts:1 — synthetic test entry
