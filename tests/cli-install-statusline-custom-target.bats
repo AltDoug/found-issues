@@ -490,3 +490,74 @@ EOF
   ! grep -q "environ.get('HOME'" tmp/sl.py
   grep -q "pathlib" tmp/sl.py
 }
+
+# =====================================================================
+# Group 5 — Runtime end-to-end
+# Verifies that the generated shim, after install-statusline --apply,
+# actually emits the segment in real conditions: piped Claude Code stdin,
+# real binary, real .found-issues.md file.
+#
+# .found-issues.md lives at $(pwd) (the test tmpdir root) so that:
+#   - bash shim (no cwd from stdin at block-run time) finds it via CWD
+#   - node/python shims receive $(pwd) as workspace.current_dir and find
+#     it directly; the $(pwd)/tmp variant in out_b walks up one level and
+#     still finds it — both paths exercise fi_find_issues_file.
+# =====================================================================
+
+@test "runtime e2e (node): single-branch statusline emits segment" {
+  if ! command -v node >/dev/null 2>&1; then skip "node not available"; fi
+
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — synthetic test entry
+EOF
+  mkdir -p tmp
+  cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+const fs = require('fs');
+const data = JSON.parse(fs.readFileSync(0, 'utf8'));
+const dir = data.workspace.current_dir;
+console.log(`repo | ${dir}`);
+EOF
+
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+
+  local sl_output
+  sl_output="$(fi_synthetic_stdin "$(pwd)" | node tmp/sl.js 2>/dev/null)"
+
+  echo "$sl_output" | grep -qE ' \| .*issue'
+}
+
+@test "runtime e2e (node): multi-branch statusline emits segment in both branches" {
+  if ! command -v node >/dev/null 2>&1; then skip "node not available"; fi
+
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — synthetic test entry
+EOF
+  mkdir -p tmp
+  cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+const fs = require('fs');
+const data = JSON.parse(fs.readFileSync(0, 'utf8'));
+const dir = data.workspace.current_dir;
+if (data.session_id) {
+  console.log(`branch-A | ${dir}`);
+} else {
+  console.log(`branch-B | ${dir}`);
+}
+EOF
+
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+
+  local out_a
+  out_a="$(fi_synthetic_stdin "$(pwd)" | node tmp/sl.js 2>/dev/null)"
+  echo "$out_a" | grep -q "branch-A"
+  echo "$out_a" | grep -qE ' \| .*issue'
+
+  local out_b
+  out_b="$(printf '{"workspace":{"current_dir":"%s"}}' "$(pwd)/tmp" | node tmp/sl.js 2>/dev/null)"
+  echo "$out_b" | grep -q "branch-B"
+  echo "$out_b" | grep -qE ' \| .*issue'
+}
+
