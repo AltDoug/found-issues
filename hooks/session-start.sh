@@ -108,14 +108,21 @@ EOF
   fi
 fi
 
-# Locate the CLI binary
+# Locate the CLI binary.
+# Use BASH_SOURCE[0] (the script's own path) for co-located resolution — $0
+# is unreliable when the caller passes a relative path or pipes via bash -c.
+__fi_hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+__fi_colocated_bin="${FI_BIN_DIR:-$__fi_hook_dir/../bin}/found-issues"
 FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
 if ! command -v "$FI_BIN" >/dev/null 2>&1; then
-  # Try the common install location
+  # Try the common install locations, then the co-located binary (covers
+  # direct checkout runs and CI environments where found-issues isn't installed).
   if [[ -x "$HOME/.local/bin/found-issues" ]]; then
     FI_BIN="$HOME/.local/bin/found-issues"
   elif [[ -x "$HOME/.found-issues/cli/found-issues" ]]; then
     FI_BIN="$HOME/.found-issues/cli/found-issues"
+  elif [[ -x "$__fi_colocated_bin" ]]; then
+    FI_BIN="$__fi_colocated_bin"
   else
     # CLI not found — fail silently (hook should never break a session)
     exit 0
@@ -170,9 +177,9 @@ if [[ "${FOUND_ISSUES_AUTO_MIGRATE:-on}" != "off" ]]; then
             fi
           fi
           if [[ "$__fi_needs_migrate" == "1" ]]; then
-            # Use the hook's co-located binary (plugin runtime sets FI_BIN_DIR;
-            # fall back to dirname-relative path for tests / manual invocations).
-            __fi_migrate_bin="${FI_BIN_DIR:-$(dirname "$0")/../bin}/found-issues"
+            # Use the already-resolved co-located binary path (set near the top
+            # of this file via BASH_SOURCE; avoids dirname "$0" fragility in CI).
+            __fi_migrate_bin="$__fi_colocated_bin"
             if [[ ! -x "$__fi_migrate_bin" ]]; then
               __fi_migrate_bin="$FI_BIN"
             fi
