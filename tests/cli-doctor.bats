@@ -161,3 +161,29 @@ EOF
   fi_run doctor
   [[ "$output" == *"origin/HEAD"* ]] || [[ "$output" == *"default branch"* ]]
 }
+
+@test "doctor: reports FAIL when issues file has merge conflict markers" {
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+<<<<<<< HEAD
+- [open] 2026-05-02 b.ts:1 — branch HEAD
+=======
+- [open] 2026-05-02 b.ts:1 — branch OTHER
+>>>>>>> other
+EOF
+  fi_run doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Source file health"
+  echo "$output" | grep -qE "(FAIL|✗).*conflict marker"
+}
+
+@test "doctor: reports OK when issues file is clean" {
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+- [open] 2026-05-02 b.ts:1 — entry two
+EOF
+  fi_run doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Source file health"
+  echo "$output" | grep -qE "(OK|✓).*Source file"
+}

@@ -2849,6 +2849,27 @@ cmd_doctor() {
 
   printf 'found-issues doctor — v%s\n\n' "$FI_VERSION"
 
+  # --- Source file health (NEW) ---
+  printf '== Source file health ==\n'
+  local issues_file_health
+  issues_file_health="$(fi_find_issues_file 2>/dev/null || true)"
+  if [[ -n "$issues_file_health" && -f "$issues_file_health" ]]; then
+    if fi_has_conflict_markers "$issues_file_health"; then
+      printf '%s Source file has merge conflict markers: %s\n' "$section_fail" "$issues_file_health"
+      local conflict_lines
+      conflict_lines="$(LC_ALL=C grep -nE '^(<<<<<<< |=======$|>>>>>>> )' "$issues_file_health" | head -10 | sed 's/^/   /')"
+      printf '%s\n' "$conflict_lines"
+      printf '   Resolve the conflict (git status, then manual edit) before trusting any counts.\n'
+      printf '   Counts in the statusline below skip lines inside conflict regions, so they\n'
+      printf '   may differ from what you expect during a merge.\n'
+    else
+      printf '%s Source file: %s (no conflict markers)\n' "$section_pass" "$issues_file_health"
+    fi
+  else
+    printf '%s No issues file found in current dir or its parents.\n' "$section_warn"
+  fi
+  printf '\n'
+
   # --- Plugin runtime ---
   printf '== Plugin runtime ==\n'
   printf '%s CLI: %s\n' "$section_pass" "${FI_BIN_DIR}/found-issues"
