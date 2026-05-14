@@ -166,6 +166,24 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "install-statusline --target bash --apply: patches every echo in multi-branch statusline" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+dir="$(echo "$input" | jq -r '.workspace.current_dir // ""')"
+if [[ -n "$dir" ]]; then
+  echo "A | $dir"
+else
+  echo "B | none"
+fi
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  local seg_count
+  seg_count="$(grep -c 'found-issues:seg' tmp/sl.sh)"
+  [ "$seg_count" = "2" ]
+}
+
 @test "install-statusline --target: detects node from .js extension" {
   mkdir -p tmp && cat > tmp/sl.js <<'EOF'
 #!/usr/bin/env node
@@ -328,3 +346,350 @@ EOF
   [ "$status" -eq 0 ]
   [ "$original" = "$(cat tmp/sl.py)" ]
 }
+
+@test "install-statusline --target node: marker block uses os.homedir not process.env.HOME" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+console.log(`repo | main`);
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  # New shim: no process.env.HOME; uses os.homedir.
+  ! grep -q "process.env.HOME" tmp/sl.js
+  grep -q "os.homedir" tmp/sl.js
+  # Platform-gated: shim has process.platform check.
+  grep -q "process.platform" tmp/sl.js
+  # __fiSeg is now a function, not a value.
+  grep -q "function __fiSeg" tmp/sl.js
+}
+
+@test "install-statusline --target node: shim parses + binary resolution executes without throwing" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+console.log(`repo | main`);
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  if command -v node >/dev/null 2>&1; then
+    node --check tmp/sl.js
+  else
+    skip "node not available"
+  fi
+}
+
+@test "install-statusline --target node --apply: patches every console.log in multi-branch statusline" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+const data = { workspace: { current_dir: '/tmp/x' } };
+const dir = data.workspace.current_dir;
+if (dir) {
+  console.log(`A | ${dir}`);
+} else {
+  console.log(`B | none`);
+}
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  local seg_count
+  seg_count="$(grep -c 'found-issues:seg' tmp/sl.js)"
+  [ "$seg_count" = "2" ]
+}
+
+@test "install-statusline --target python --apply: patches every print in multi-branch statusline" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+import json, sys
+data = json.loads(sys.stdin.read() or '{}')
+dir = data.get('workspace', {}).get('current_dir', '/tmp/x')
+if dir:
+    print(f"A | {dir}")
+else:
+    print(f"B | none")
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  local seg_count
+  seg_count="$(grep -c 'found-issues:seg' tmp/sl.py)"
+  [ "$seg_count" = "2" ]
+}
+
+@test "install-statusline --target python: marker block uses pathlib.Path.home not HOME env" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+print(f"repo | main")
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  ! grep -q "environ.get('HOME'" tmp/sl.py
+  grep -q "pathlib" tmp/sl.py
+  grep -q "platform.system" tmp/sl.py
+  grep -q "def _fi_seg" tmp/sl.py
+}
+
+@test "install-statusline --target python: shim parses without error" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+print(f"repo | main")
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import ast; ast.parse(open('tmp/sl.py').read())"
+  else
+    skip "python3 not available"
+  fi
+}
+
+@test "install-statusline --target node: detects v1.4.x POSIX-only marker block as broken" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+// PATH-resilience: try `found-issues` on PATH, fall back to plugin cache glob.
+let __fiSeg = '';
+try {
+  const { execSync } = require('child_process');
+  let __fiCli = 'found-issues';
+  try { execSync('command -v found-issues', { stdio: 'ignore' }); }
+  catch (e) {
+    const cacheGlob = process.env.HOME + '/.claude/plugins/cache';
+    // ... rest of v1.4.x form
+  }
+} catch (e) {}
+// === end found-issues plugin segment ===
+console.log(`repo | main${__fiSeg}`);  // found-issues:seg
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.4.x"
+  ! grep -q "process.env.HOME" tmp/sl.js
+  grep -q "os.homedir" tmp/sl.js
+  ls tmp/sl.js.fi-bak-* >/dev/null 2>&1
+}
+
+@test "install-statusline --target python: detects v1.4.x POSIX-only marker block as broken" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+# === found-issues plugin segment ===
+import subprocess as _fi_subprocess
+import shutil as _fi_shutil
+import os as _fi_os
+_fi_seg = ''
+try:
+    _fi_cli = _fi_shutil.which('found-issues')
+    if _fi_cli:
+        _fi_cwd = _fi_os.environ.get('CLAUDE_PROJECT_DIR') or _fi_os.environ.get('HOME', '.')
+        _fi_seg = _fi_subprocess.run([_fi_cli, 'status', '--format=segment'], cwd=_fi_cwd, capture_output=True, text=True, timeout=5).stdout.strip()
+except Exception:
+    _fi_seg = ''
+# === end found-issues plugin segment ===
+print(f"repo | main{_fi_seg}")  # found-issues:seg
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.4.x"
+  ! grep -q "environ.get('HOME'" tmp/sl.py
+  grep -q "pathlib" tmp/sl.py
+}
+
+# =====================================================================
+# Group 5 — Runtime end-to-end
+# Verifies that the generated shim, after install-statusline --apply,
+# actually emits the segment in real conditions: piped Claude Code stdin,
+# real binary, real .found-issues.md file.
+#
+# .found-issues.md lives at $(pwd) (the test tmpdir root) so that:
+#   - bash shim (no cwd from stdin at block-run time) finds it via CWD
+#   - node/python shims receive $(pwd) as workspace.current_dir and find
+#     it directly; the $(pwd)/tmp variant in out_b walks up one level and
+#     still finds it — both paths exercise fi_find_issues_file.
+# =====================================================================
+
+@test "runtime e2e (node): single-branch statusline emits segment" {
+  if ! command -v node >/dev/null 2>&1; then skip "node not available"; fi
+
+  # FOUND_ISSUES_BIN: cross-platform override so the shim's binary discovery
+  # resolves on ALL platforms without relying on PATH (which node shims don't
+  # use on Windows) or the plugin cache (which doesn't exist on bare CI runners).
+  export FOUND_ISSUES_BIN="${TEST_REPO_ROOT}/bin/found-issues"
+  # Also prepend repo bin/ for POSIX (command -v path, harmless elsewhere).
+  PATH="${TEST_REPO_ROOT}/bin:$PATH"
+
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — synthetic test entry
+EOF
+  mkdir -p tmp
+  cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+const fs = require('fs');
+const data = JSON.parse(fs.readFileSync(0, 'utf8'));
+const dir = data.workspace.current_dir;
+console.log(`repo | ${dir}`);
+EOF
+
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+
+  local sl_output
+  sl_output="$(fi_synthetic_stdin "$(pwd)" | node tmp/sl.js 2>/dev/null)"
+
+  echo "$sl_output" | grep -qE ' \| .*issue'
+}
+
+@test "runtime e2e (node): multi-branch statusline emits segment in both branches" {
+  if ! command -v node >/dev/null 2>&1; then skip "node not available"; fi
+
+  # FOUND_ISSUES_BIN: cross-platform override so the shim's binary discovery
+  # resolves on ALL platforms without relying on PATH (which node shims don't
+  # use on Windows) or the plugin cache (which doesn't exist on bare CI runners).
+  export FOUND_ISSUES_BIN="${TEST_REPO_ROOT}/bin/found-issues"
+  # Also prepend repo bin/ for POSIX (command -v path, harmless elsewhere).
+  PATH="${TEST_REPO_ROOT}/bin:$PATH"
+
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — synthetic test entry
+EOF
+  mkdir -p tmp
+  cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+const fs = require('fs');
+const data = JSON.parse(fs.readFileSync(0, 'utf8'));
+const dir = data.workspace.current_dir;
+if (data.session_id) {
+  console.log(`branch-A | ${dir}`);
+} else {
+  console.log(`branch-B | ${dir}`);
+}
+EOF
+
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+
+  local out_a
+  out_a="$(fi_synthetic_stdin "$(pwd)" | node tmp/sl.js 2>/dev/null)"
+  echo "$out_a" | grep -q "branch-A"
+  echo "$out_a" | grep -qE ' \| .*issue'
+
+  local out_b
+  out_b="$(printf '{"workspace":{"current_dir":"%s"}}' "$(pwd)/tmp" | node tmp/sl.js 2>/dev/null)"
+  echo "$out_b" | grep -q "branch-B"
+  echo "$out_b" | grep -qE ' \| .*issue'
+}
+
+@test "runtime e2e (python): single-branch statusline emits segment" {
+  if ! command -v python3 >/dev/null 2>&1; then skip "python3 not available"; fi
+
+  # FOUND_ISSUES_BIN: cross-platform override so the shim's binary discovery
+  # resolves on ALL platforms without relying on PATH (which python shims don't
+  # use on Windows) or the plugin cache (which doesn't exist on bare CI runners).
+  export FOUND_ISSUES_BIN="${TEST_REPO_ROOT}/bin/found-issues"
+  # Force Python UTF-8 I/O on Windows. Without this, Windows Python uses the
+  # system console code page for pipes; when that is UTF-16, each byte of ANSI
+  # escape sequences is followed by a null byte, which bash command substitution
+  # strips (with a warning), leaving a garbled string that fails the grep.
+  # PYTHONUTF8 (Python 3.7+) + PYTHONIOENCODING (older fallback) + -X utf8 flag.
+  export PYTHONUTF8=1
+  export PYTHONIOENCODING=utf-8
+  # Also prepend repo bin/ for POSIX (shutil.which path, harmless elsewhere).
+  PATH="${TEST_REPO_ROOT}/bin:$PATH"
+
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — synthetic test entry
+EOF
+  mkdir -p tmp
+  cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+import json, sys
+data = json.loads(sys.stdin.read() or '{}')
+dir = data.get('workspace', {}).get('current_dir', '/tmp')
+print(f"repo | {dir}")
+EOF
+
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+
+  local sl_output
+  # Pipe through tr -d '\000' to strip any null bytes that Windows Python may
+  # output when the console code page uses a wide encoding (e.g. UTF-16).
+  sl_output="$(fi_synthetic_stdin "$(pwd)" | python3 -X utf8 tmp/sl.py 2>/dev/null | tr -d '\000')"
+  echo "$sl_output" | grep -qE ' \| .*issue'
+}
+
+@test "runtime e2e (python): multi-branch statusline emits segment in both branches" {
+  if ! command -v python3 >/dev/null 2>&1; then skip "python3 not available"; fi
+
+  # FOUND_ISSUES_BIN: cross-platform override so the shim's binary discovery
+  # resolves on ALL platforms without relying on PATH (which python shims don't
+  # use on Windows) or the plugin cache (which doesn't exist on bare CI runners).
+  export FOUND_ISSUES_BIN="${TEST_REPO_ROOT}/bin/found-issues"
+  # Force Python UTF-8 I/O on Windows (see single-branch test for full rationale).
+  export PYTHONUTF8=1
+  export PYTHONIOENCODING=utf-8
+  # Also prepend repo bin/ for POSIX (shutil.which path, harmless elsewhere).
+  PATH="${TEST_REPO_ROOT}/bin:$PATH"
+
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — synthetic test entry
+EOF
+  mkdir -p tmp
+  cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+import json, sys
+data = json.loads(sys.stdin.read() or '{}')
+dir = data.get('workspace', {}).get('current_dir', '/tmp')
+if data.get('session_id'):
+    print(f"branch-A | {dir}")
+else:
+    print(f"branch-B | {dir}")
+EOF
+
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+
+  local out_a
+  # Pipe through tr -d '\000' to strip any null bytes from Windows Python output.
+  out_a="$(fi_synthetic_stdin "$(pwd)" | python3 -X utf8 tmp/sl.py 2>/dev/null | tr -d '\000')"
+  echo "$out_a" | grep -q "branch-A"
+  echo "$out_a" | grep -qE ' \| .*issue'
+
+  local out_b
+  out_b="$(printf '{"workspace":{"current_dir":"%s"}}' "$(pwd)/tmp" | python3 -X utf8 tmp/sl.py 2>/dev/null | tr -d '\000')"
+  echo "$out_b" | grep -q "branch-B"
+  echo "$out_b" | grep -qE ' \| .*issue'
+}
+
+@test "runtime e2e (bash): multi-branch statusline emits segment in both branches" {
+  # FOUND_ISSUES_BIN: cross-platform override (consistent with node/python tests above).
+  export FOUND_ISSUES_BIN="${TEST_REPO_ROOT}/bin/found-issues"
+  # Also prepend repo bin/ so the bash shim's `command -v found-issues` resolves on POSIX CI.
+  PATH="${TEST_REPO_ROOT}/bin:$PATH"
+
+  mkdir -p tmp
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — synthetic test entry
+EOF
+  cat > tmp/sl.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+dir="$(echo "$input" | jq -r '.workspace.current_dir // ""')"
+if [[ -n "$dir" ]]; then
+  echo "branch-A | $dir"
+else
+  echo "branch-B | none"
+fi
+EOF
+  chmod +x tmp/sl.sh
+
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+
+  local out_a
+  out_a="$(fi_synthetic_stdin "$(pwd)" | bash tmp/sl.sh 2>/dev/null)"
+  echo "$out_a" | grep -q "branch-A"
+  echo "$out_a" | grep -qE ' \| .*issue'
+
+  local out_b
+  out_b="$(printf '{}' | bash tmp/sl.sh 2>/dev/null)"
+  echo "$out_b" | grep -q "branch-B"
+  echo "$out_b" | grep -qE ' \| .*issue'
+}
+

@@ -101,3 +101,11 @@ fi_init_github_repo() {
   git symbolic-ref "refs/remotes/origin/HEAD" "refs/remotes/origin/${branch}" 2>/dev/null || true
   export FOUND_ISSUES_MODE=github-pr
 }
+
+# Emit a synthetic Claude Code statusline stdin JSON payload.
+# Used by Layer 2 end-to-end tests and Layer 3 doctor runtime probe.
+# Args: $1 = workspace.current_dir
+fi_synthetic_stdin() {
+  local dir="$1"
+  printf '{"model":{"display_name":"Test"},"workspace":{"current_dir":"%s"},"session_id":"t","context_window":{"remaining_percentage":50}}' "$dir"
+}

@@ -4,6 +4,31 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-05-13
+
+### Added
+- `doctor` runtime probe pipeline: pipes synthetic Claude Code stdin into the real statusline, captures stdout, asserts the segment string is present. Reports OK / INCONCLUSIVE (during conflict) / FAIL with sub-probes narrowing the cause.
+- `doctor-statusline-runtime` subcommand: standalone runtime probe for iterative debugging (AI agents and humans).
+- Doctor now reads `~/.claude/settings.json` for custom statusline targets (`statusLine.command`) and extends static state detection to Node + Python marker formats.
+- `fi_has_conflict_markers` parser helper exposing merge-conflict source-file state.
+- `FOUND_ISSUES_REMINDER_VERBOSITY` env var (`full`/`terse`/`auto`) controls stop-hook message verbosity. Default `auto` shrinks the 8-line educational message to a single line once `~/.claude/found-issues/.onboarded` exists.
+- SessionStart auto-migration for v1.4.x marker blocks: existing custom Node/Python statusline integrations are rewritten in place on next session start, with timestamped backup. Opt-out: `FOUND_ISSUES_AUTO_MIGRATE=off`. Symlinks are skipped.
+
+### Fixed
+- **Bug 1** (Windows breakage): The generated Node and Python shim blocks no longer use POSIX-only commands (`command -v`, `ls | sort -V | tail -1`, `process.env.HOME` / `os.environ['HOME']`). They now use `os.homedir()` / `pathlib.Path.home()`, enumerate the plugin cache via filesystem APIs, and invoke `bin/found-issues` via `bash -c` on Windows (Git Bash mediation).
+- **Bug 2** (cwd-from-stdin): The shim's segment invocation is now deferred via a function (`__fiSeg(dir)` in Node, `_fi_seg(_dir)` in Python). The splice form opportunistically captures the host statusline's in-scope workspace variable (`dir` or `cwd`) before falling through to env vars. Statuslines that parse stdin (claude-hud, GSD, dotfiles-managed scripts) now get accurate counts.
+- **Bug 3** (multi-branch splice): `fi_find_<lang>_splice_point` now returns all line numbers matching the highest-priority pattern. Every output branch in a conditional statusline gets the segment, not just the first.
+- **Bug 4** (parser conflict-blind): `fi_entries` skips lines inside `<<<<<<< / >>>>>>>` merge-conflict regions. Statusline counts no longer inflate during a merge.
+
+### Changed
+- Marker-block internal contract: `__fiSeg` is now a function, not a value (Node). `_fi_seg` is callable with optional `_dir` (Python). Bash unchanged. Existing v1.4.0/v1.4.1 installs are auto-detected on the next `install-statusline --target`, `doctor`, or session start and offered/applied a migration with timestamped backup.
+- Splice form: `${__fiSeg}` → `${__fiSeg(typeof dir!=='undefined'?dir:(typeof cwd!=='undefined'?cwd:undefined))}`. The locked `--format=segment` output bytes are **not** changed; only the internal injection point.
+
+### Internal
+- New end-to-end CI test group runs the generated shim against synthetic Claude Code stdin on Linux, macOS, and Windows. Previously CI only verified syntax (`node --check`), which let the v1.4.x Windows regression through.
+- Multi-branch statusline fixtures added for all three target languages.
+- ~620 new lines of code + tests across `bin/found-issues`, `lib/parse-entries.sh`, `tests/cli-doctor.bats`, `tests/cli-install-statusline-custom-target.bats`, `tests/cli-status.bats`, `tests/session-start.bats`, `tests/stop-reminder.bats`, `tests/helpers.bash`.
+
 ## [1.4.1] - 2026-05-12
 
 ### Fixed

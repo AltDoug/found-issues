@@ -189,3 +189,93 @@ EOF
   [[ "$output" == *'"issues":'* ]]
   [[ "$output" != *'"other":'* ]]
 }
+
+@test "fi_has_conflict_markers: returns 0 when file contains <<<<<<< markers" {
+  mkdir -p tmp
+  cat > tmp/conflict.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+<<<<<<< HEAD
+- [open] 2026-05-02 b.ts:1 — branch HEAD
+=======
+- [fixed] 2026-05-02 b.ts:1 — branch OTHER
+>>>>>>> other
+- [open] 2026-05-03 c.ts:1 — entry two
+EOF
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_has_conflict_markers tmp/conflict.md
+  [ "$status" -eq 0 ]
+}
+
+@test "fi_has_conflict_markers: returns 1 when file has no markers" {
+  mkdir -p tmp
+  cat > tmp/clean.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+- [open] 2026-05-03 c.ts:1 — entry two
+EOF
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_has_conflict_markers tmp/clean.md
+  [ "$status" -eq 1 ]
+}
+
+@test "fi_has_conflict_markers: returns 1 when file does not exist" {
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_has_conflict_markers tmp/nonexistent.md
+  [ "$status" -eq 1 ]
+}
+
+@test "fi_entries: skips lines inside <<<<<<< / >>>>>>> conflict regions" {
+  mkdir -p tmp
+  cat > tmp/conflict.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+<<<<<<< HEAD
+- [open] 2026-05-02 b.ts:1 — branch HEAD version
+=======
+- [open] 2026-05-02 b.ts:1 — branch OTHER version
+>>>>>>> other
+- [open] 2026-05-03 c.ts:1 — entry two
+EOF
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_entries tmp/conflict.md open
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | wc -l | tr -d ' ')" = "2" ]
+  echo "$output" | grep -q 'a.ts:1'
+  echo "$output" | grep -q 'c.ts:1'
+  ! echo "$output" | grep -q 'b.ts:1'
+}
+
+@test "fi_count open: returns conflict-skipped count" {
+  mkdir -p tmp
+  cat > tmp/conflict.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+<<<<<<< HEAD
+- [open] 2026-05-02 b.ts:1 — branch HEAD
+=======
+- [open] 2026-05-02 b.ts:1 — branch OTHER
+>>>>>>> other
+- [open] 2026-05-03 c.ts:1 — entry two
+EOF
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_count tmp/conflict.md open
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+}
+
+@test "fi_entries: 'all' ignores non-canonical statuses (e.g. [TODO], [in-progress])" {
+  mkdir -p tmp
+  cat > tmp/mixed.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — canonical open
+- [deferred] 2026-05-02 b.ts:1 — canonical deferred
+- [fixed] 2026-05-03 c.ts:1 — canonical fixed
+- [TODO] 2026-05-04 d.ts:1 — non-canonical status
+- [in-progress] 2026-05-05 e.ts:1 — non-canonical status
+EOF
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_entries tmp/mixed.md all
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | wc -l | tr -d ' ')" = "3" ]
+  echo "$output" | grep -q 'a.ts:1'
+  echo "$output" | grep -q 'b.ts:1'
+  echo "$output" | grep -q 'c.ts:1'
+  ! echo "$output" | grep -q 'd.ts:1'
+  ! echo "$output" | grep -q 'e.ts:1'
+}

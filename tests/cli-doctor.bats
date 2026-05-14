@@ -161,3 +161,140 @@ EOF
   fi_run doctor
   [[ "$output" == *"origin/HEAD"* ]] || [[ "$output" == *"default branch"* ]]
 }
+
+@test "doctor: reports FAIL when issues file has merge conflict markers" {
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+<<<<<<< HEAD
+- [open] 2026-05-02 b.ts:1 — branch HEAD
+=======
+- [open] 2026-05-02 b.ts:1 — branch OTHER
+>>>>>>> other
+EOF
+  fi_run doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Source file health"
+  echo "$output" | grep -qE "(FAIL|✗).*conflict marker"
+}
+
+@test "doctor: reports OK when issues file is clean" {
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+- [open] 2026-05-02 b.ts:1 — entry two
+EOF
+  fi_run doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Source file health"
+  echo "$output" | grep -qE "(OK|✓).*Source file"
+}
+
+@test "doctor: detects custom statusline path from ~/.claude/settings.json" {
+  mkdir -p tmp/.claude
+  cat > tmp/.claude/settings.json <<'EOF'
+{"statusLine": {"command": "node ${HOME}/custom-statusline.js"}}
+EOF
+  HOME="$(pwd)/tmp" fi_run doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "statusLine.command"
+  echo "$output" | grep -q "custom-statusline.js"
+}
+
+@test "doctor: detects v1.4.x broken-posix marker in custom Node target" {
+  mkdir -p tmp/.claude
+  cat > tmp/custom.js <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+let __fiSeg = '';
+try {
+  const path = process.env.HOME + '/.claude';
+  const { execSync } = require('child_process');
+  execSync('command -v found-issues');
+} catch (e) {}
+// === end found-issues plugin segment ===
+console.log(`repo${__fiSeg}`);  // found-issues:seg
+EOF
+  cat > tmp/.claude/settings.json <<EOF
+{"statusLine": {"command": "node $(pwd)/tmp/custom.js"}}
+EOF
+  HOME="$(pwd)/tmp" fi_run doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE "(broken-posix|v1.4.x)"
+  echo "$output" | grep -qi "migrat"
+}
+
+@test "doctor: runtime probe emits OK when integration is healthy" {
+  mkdir -p tmp/.claude
+  cat > tmp/.found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — entry
+EOF
+  cat > tmp/custom.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+dir="$(echo "$input" | jq -r '.workspace.current_dir // ""')"
+echo "repo | $dir"
+EOF
+  chmod +x tmp/custom.sh
+  fi_run install-statusline --target tmp/custom.sh --apply
+  [ "$status" -eq 0 ]
+
+  cat > tmp/.claude/settings.json <<EOF
+{"statusLine": {"command": "bash $(pwd)/tmp/custom.sh"}}
+EOF
+  HOME="$(pwd)/tmp" fi_run doctor
+  echo "$output" | grep -q "Runtime probe"
+  echo "$output" | grep -qE "(OK|✓).*[Ss]egment"
+}
+
+@test "doctor: runtime probe reports FAIL with splice-gap diagnostic when output branch unpatched" {
+  mkdir -p tmp/.claude
+  cat > tmp/.found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — entry
+EOF
+  cat > tmp/custom.js <<'EOF'
+#!/usr/bin/env node
+const fs = require('fs');
+const data = JSON.parse(fs.readFileSync(0, 'utf8'));
+const dir = data.workspace.current_dir;
+if (dir) {
+  console.log(`A | ${dir}`);
+} else {
+  console.log(`B | none`);
+}
+EOF
+  fi_run install-statusline --target tmp/custom.js --apply
+  [ "$status" -eq 0 ]
+  # Remove ONE splice trailer to simulate a gap. Use portable awk (BSD/GNU safe).
+  LC_ALL=C awk 'BEGIN{done=0} /\/\/ found-issues:seg/ && !done {sub(/[[:space:]]*\/\/.*found-issues:seg.*/,""); done=1} {print}' \
+    tmp/custom.js > tmp/custom.js.tmp && mv tmp/custom.js.tmp tmp/custom.js
+
+  cat > tmp/.claude/settings.json <<EOF
+{"statusLine": {"command": "node $(pwd)/tmp/custom.js"}}
+EOF
+  HOME="$(pwd)/tmp" fi_run doctor
+  echo "$output" | grep -qE "splice gap|output statements"
+}
+
+@test "doctor-statusline-runtime: standalone subcommand emits only the runtime probe section" {
+  mkdir -p tmp/.claude
+  cat > tmp/.found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — entry
+EOF
+  cat > tmp/custom.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+dir="$(echo "$input" | jq -r '.workspace.current_dir // ""')"
+echo "repo | $dir"
+EOF
+  chmod +x tmp/custom.sh
+  fi_run install-statusline --target tmp/custom.sh --apply
+  [ "$status" -eq 0 ]
+  cat > tmp/.claude/settings.json <<EOF
+{"statusLine": {"command": "bash $(pwd)/tmp/custom.sh"}}
+EOF
+
+  HOME="$(pwd)/tmp" fi_run doctor-statusline-runtime
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Runtime probe"
+  ! echo "$output" | grep -q "Plugin runtime"
+  ! echo "$output" | grep -q "Mode detection"
+}

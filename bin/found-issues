@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.4.1"
+readonly FI_VERSION="1.5.0"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -236,6 +236,7 @@ COMMANDS
   uninstall-statusline                  Remove the counter segment block
   doctor                                General health check (CLI, statusline, gh, mode, hooks, issues file)
   doctor-statusline                     Diagnose the current statusline integration (no changes)
+  doctor-statusline-runtime             Runtime probe only (synthetic stdin → segment assert)
   install-fi-alias                      Create the /fi shortcut at ~/.claude/commands/fi.md
   uninstall-fi-alias                    Remove the /fi shortcut (only if it's ours)
   uninstall                             Wipe plugin-private state (run before /plugin uninstall)
@@ -1795,9 +1796,25 @@ fi_save_statusline_backup() {
 #                          (would render the count twice — needs cleanup)
 #   none                 — no found-issues integration at all (fresh install path)
 fi_statusline_state() {
-  local file="$FI_STATUSLINE_FILE"
+  local file="${1:-$FI_STATUSLINE_FILE}"
+  local language="${2:-bash}"
   if [[ ! -f "$file" ]]; then
     printf 'no-file'
+    return 0
+  fi
+
+  # Node/Python: simpler detection (no legacy migration history).
+  if [[ "$language" != "bash" ]]; then
+    if fi_target_is_v14x_broken "$file" "$language"; then
+      printf 'installed-broken-posix'
+      return 0
+    fi
+    if grep -Fq "// === found-issues plugin segment ===" "$file" 2>/dev/null \
+       || grep -Fq "# === found-issues plugin segment ===" "$file" 2>/dev/null; then
+      printf 'installed-fixed'
+      return 0
+    fi
+    printf 'none'
     return 0
   fi
 
@@ -1904,6 +1921,85 @@ fi_strip_legacy_handwritten() {
     || chmod +x "$file"
 }
 
+# Detect whether a custom statusline target contains the v1.4.0/v1.4.1
+# POSIX-only marker block. Used by install-statusline --target to trigger
+# in-place migration. Signature differs per language:
+#   Node:   marker block contains `process.env.HOME` AND NOT `os.homedir` /
+#           `function __fiSeg` (the new v1.5.0 discriminators)
+#   Python: marker block contains `_fi_os.environ.get('HOME'` AND not `pathlib`
+#   Bash:   N/A (bash shim was always correct)
+fi_target_is_v14x_broken() {
+  local path="$1"
+  local language="$2"
+  [[ -f "$path" ]] || return 1
+  case "$language" in
+    node)
+      LC_ALL=C awk '
+        /^\/\/ === found-issues plugin segment ===/ { in_block = 1; next }
+        /^\/\/ === end found-issues plugin segment ===/ { in_block = 0; next }
+        in_block && /process\.env\.HOME/ { has_old = 1 }
+        in_block && /os\.homedir/ { has_new = 1 }
+        in_block && /function __fiSeg/ { has_new = 1 }
+        END { exit (has_old && !has_new ? 0 : 1) }
+      ' "$path"
+      ;;
+    python)
+      LC_ALL=C awk '
+        /^# === found-issues plugin segment ===/ { in_block = 1; next }
+        /^# === end found-issues plugin segment ===/ { in_block = 0; next }
+        in_block && /environ\.get\(.HOME./ { has_old = 1 }
+        in_block && /pathlib/ { has_new = 1 }
+        END { exit (has_old && !has_new ? 0 : 1) }
+      ' "$path"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# Surgically remove marker block + splice trailer comments from a target file.
+# Used by the v1.4.x migration path. Mirrors the canonical bash strip in
+# fi_strip_legacy_lines but operates on language-specific marker syntax.
+fi_strip_target_markers() {
+  local path="$1"
+  local language="$2"
+  local start_marker end_marker trailer_pattern
+  case "$language" in
+    node)
+      start_marker="// === found-issues plugin segment ==="
+      end_marker="// === end found-issues plugin segment ==="
+      trailer_pattern='[[:space:]]*//[[:space:]]*found-issues:seg[[:space:]]*$'
+      ;;
+    python)
+      start_marker="# === found-issues plugin segment ==="
+      end_marker="# === end found-issues plugin segment ==="
+      trailer_pattern='[[:space:]]*#[[:space:]]*found-issues:seg[[:space:]]*$'
+      ;;
+    *) return 1 ;;
+  esac
+
+  local tmp
+  tmp="$(mktemp -t fi-strip.XXXXXX)"
+  LC_ALL=C awk -v start="$start_marker" -v endm="$end_marker" -v trailer="$trailer_pattern" '
+    $0 == start { in_block = 1; next }
+    $0 == endm { in_block = 0; next }
+    in_block { next }
+    {
+      line = $0
+      # Strip the splice injection from the line.
+      sub(/\$\{__fiSeg\([^)]*\)\)\}/, "", line)
+      sub(/\$\{__fiSeg\}/, "", line)
+      sub(/\{_fi_seg\([^)]*\)\)\}/, "", line)
+      sub(/\{_fi_seg\}/, "", line)
+      sub(/[[:space:]]*\+[[:space:]]*__fiSeg\([^)]*\)\)/, "", line)
+      sub(/[[:space:]]*\+[[:space:]]*_fi_seg\([^)]*\)\)/, "", line)
+      sub(trailer, "", line)
+      print line
+    }
+  ' "$path" > "$tmp"
+  cp "$tmp" "$path"
+  rm -f "$tmp"
+}
+
 # === Subcommand: install-statusline --target <path> ===
 #
 # Custom-statusline integration. Splices the found-issues segment into a
@@ -1993,16 +2089,16 @@ cmd_install_statusline_custom_target() {
 # Priority: LINE1= assignment, then first echo, then first printf.
 fi_find_bash_splice_point() {
   local path="$1"
-  local line
+  local lines
   # Priority 1: LINE1= assignment
-  line="$(awk '/^[[:space:]]*LINE1=/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
-  # Priority 2: first echo
-  line="$(awk '/^[[:space:]]*echo[[:space:]]/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
-  # Priority 3: first printf
-  line="$(awk '/^[[:space:]]*printf[[:space:]]/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/^[[:space:]]*LINE1=/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
+  # Priority 2: echo
+  lines="$(LC_ALL=C awk '/^[[:space:]]*echo[[:space:]]/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
+  # Priority 3: printf
+  lines="$(LC_ALL=C awk '/^[[:space:]]*printf[[:space:]]/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   return 1
 }
 
@@ -2073,35 +2169,36 @@ cmd_install_statusline_target_bash() {
   # Generate the modified content into a temp file.
   # Write the marker block to its own temp file so awk can read it via getline
   # rather than via -v (awk -v does not support multi-line values portably).
+  # BSD awk on macOS rejects literal newlines in -v values; convert to space.
+  local splice_lines_sp
+  splice_lines_sp="$(printf '%s' "$splice_line" | tr '\n' ' ')"
+
   local tmp_block tmp_modified
   tmp_block="$(mktemp -t fi-target-block.XXXXXX)"
   fi_generate_bash_marker_block > "$tmp_block"
   tmp_modified="$(mktemp -t fi-target-mod.XXXXXX)"
-  awk -v insert_after="$insert_after" \
-      -v splice_line="$splice_line" \
+  LC_ALL=C awk -v insert_after="$insert_after" \
+      -v splice_lines="$splice_lines_sp" \
       -v block_file="$tmp_block" '
+    BEGIN {
+      n = split(splice_lines, arr, " ")
+      for (i = 1; i <= n; i++) if (arr[i] != "") splice_set[arr[i]] = 1
+    }
     function print_block(    line) {
       while ((getline line < block_file) > 0) print line
       close(block_file)
     }
     NR == insert_after && insert_after > 0 { print; print_block(); next }
-    NR == splice_line {
-      # Append ${__FI_SEG} to the line; preserve trailing whitespace.
-      # Strategy: insert before the closing quote of the last string arg, or
-      # at end of line if no clear quote boundary.
+    (NR in splice_set) {
       line = $0
-      # Simple heuristic: append before any trailing " or end-of-line.
       if (match(line, /"[^"]*"$/)) {
-        # Has trailing quoted string: append inside the quotes
         sub(/"$/, "${__FI_SEG}\"  # found-issues:seg", line)
       } else {
-        # Append at end of line with trailing comment
         line = line "${__FI_SEG}  # found-issues:seg"
       }
       print line
       next
     }
-    # Special case: insert_after == 0 (no shebang/set) → insert block at very start
     NR == 1 && insert_after == 0 { print_block(); print; next }
     { print }
   ' "$path" > "$tmp_modified"
@@ -2155,44 +2252,81 @@ cmd_install_statusline_target_bash() {
 }
 fi_find_node_splice_point() {
   local path="$1"
-  local line
+  local lines
   # Priority 1: console.log with template literal (backticks)
-  line="$(awk '/console\.log[[:space:]]*\(`/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/console\.log[[:space:]]*\(`/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   # Priority 2: console.log with plain string (single or double quote)
-  line="$(awk '/console\.log[[:space:]]*\(("|'"'"')/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/console\.log[[:space:]]*\(("|'"'"')/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   # Priority 3: process.stdout.write
-  line="$(awk '/process\.stdout\.write[[:space:]]*\(/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/process\.stdout\.write[[:space:]]*\(/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   return 1
 }
 
 fi_generate_node_marker_block() {
   cat <<'BLOCK'
 // === found-issues plugin segment ===
-// PATH-resilience: try `found-issues` on PATH, fall back to plugin cache glob.
-// Cwd resolution: prefer CLAUDE_PROJECT_DIR; fall back to $HOME.
-let __fiSeg = '';
+// Cross-platform: POSIX uses PATH; Windows enumerates the plugin cache via fs.
+// Invocation is deferred via __fiSeg(dir) so the splice point can pass the
+// real workspace dir (parsed from stdin by the host statusline). When dir is
+// unavailable, falls back through env (CLAUDE_PROJECT_DIR, PWD) then home.
+let __fiCli = null;
+function __fiSeg(dir) {
+  if (!__fiCli) return '';
+  try {
+    const { execFileSync } = require('child_process');
+    const cwd = dir
+      || process.env.CLAUDE_PROJECT_DIR
+      || process.env.PWD
+      || require('os').homedir();
+    if (process.platform === 'win32') {
+      const posixPath = __fiCli.replace(/\\/g, '/');
+      // On Windows, Node's cwd option passes to the Windows API which cannot
+      // resolve POSIX Git Bash paths (e.g. /d/a/...). Instead, cd inside bash
+      // so bash handles the POSIX path resolution natively.
+      const safeCwd = cwd.replace(/\\/g, '/').replace(/'/g, "'\\''");
+      return execFileSync('bash', ['-c', `cd '${safeCwd}' && "${posixPath}" status --format=segment`],
+        { encoding: 'utf8', timeout: 5000 }).trim();
+    }
+    return execFileSync(__fiCli, ['status', '--format=segment'],
+      { cwd, encoding: 'utf8', timeout: 5000 }).trim();
+  } catch (e) { return ''; }
+}
 try {
-  const { execSync } = require('child_process');
-  const path = require('path');
-  const fs = require('fs');
-  let __fiCli = 'found-issues';
-  try { execSync('command -v found-issues', { stdio: 'ignore' }); }
-  catch (e) {
-    const cacheGlob = path.join(process.env.HOME, '.claude/plugins/cache');
-    try {
-      const candidates = require('child_process')
-        .execSync(`ls -d ${cacheGlob}/*/found-issues/*/bin/found-issues 2>/dev/null | sort -V | tail -1`, { encoding: 'utf8' })
-        .trim();
-      if (candidates && fs.existsSync(candidates)) __fiCli = candidates;
-      else throw new Error('no found-issues binary');
-    } catch (e2) { throw e2; }
+  const _path = require('path');
+  const _fs = require('fs');
+  const _os = require('os');
+  // FOUND_ISSUES_BIN: explicit override — used by tests and advanced installs.
+  // No existsSync check: on Windows, Node.js cannot resolve POSIX Git Bash
+  // paths (/d/a/...) via the Windows filesystem API. Trust the caller.
+  if (process.env.FOUND_ISSUES_BIN) {
+    __fiCli = process.env.FOUND_ISSUES_BIN;
   }
-  const cwd = process.env.CLAUDE_PROJECT_DIR || process.env.HOME;
-  __fiSeg = execSync(`"${__fiCli}" status --format=segment`, { cwd, encoding: 'utf8', timeout: 5000 }).trim();
-} catch (e) {}
+  if (!__fiCli && process.platform !== 'win32') {
+    try {
+      require('child_process').execSync('command -v found-issues', { stdio: 'ignore' });
+      __fiCli = 'found-issues';
+    } catch (e) { /* fall through to cache lookup */ }
+  }
+  if (!__fiCli) {
+    const cacheRoot = _path.join(_os.homedir(), '.claude', 'plugins', 'cache');
+    if (_fs.existsSync(cacheRoot)) {
+      const candidates = [];
+      for (const mkt of _fs.readdirSync(cacheRoot)) {
+        const fiDir = _path.join(cacheRoot, mkt, 'found-issues');
+        if (!_fs.existsSync(fiDir)) continue;
+        for (const ver of _fs.readdirSync(fiDir)) {
+          const bin = _path.join(fiDir, ver, 'bin', 'found-issues');
+          if (_fs.existsSync(bin)) candidates.push({ ver, bin });
+        }
+      }
+      candidates.sort((a, b) => a.ver.localeCompare(b.ver, undefined, { numeric: true }));
+      if (candidates.length) __fiCli = candidates[candidates.length - 1].bin;
+    }
+  }
+} catch (e) { /* silent: never break the statusline */ }
 // === end found-issues plugin segment ===
 BLOCK
 }
@@ -2201,10 +2335,20 @@ cmd_install_statusline_target_node() {
   local path="$1"
   local mode="$2"
 
-  # Idempotency
+  # Idempotency: if v1.5.0+ marker block already present, no-op.
+  # If v1.4.x POSIX-only marker present, strip + reinstall (migration path).
   if grep -Fq "// === found-issues plugin segment ===" "$path"; then
-    printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
-    return 0
+    if fi_target_is_v14x_broken "$path" node; then
+      printf 'install-statusline --target: migrating v1.4.x POSIX-only marker block in %s\n' "$path"
+      # Strip old marker block + splice trailers, then fall through to install.
+      fi_strip_target_markers "$path" node || {
+        fi_err "install-statusline --target: failed to strip v1.4.x marker block"
+        return 14
+      }
+    else
+      printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
+      return 0
+    fi
   fi
 
   local splice_line
@@ -2230,34 +2374,37 @@ cmd_install_statusline_target_node() {
   tmp_block="$(mktemp -t fi-target-node-block.XXXXXX)"
   fi_generate_node_marker_block > "$tmp_block"
 
+  # splice_line is now a newline-separated list of line numbers; convert to space-separated
+  # for awk -v (BSD awk rejects literal newlines in -v values)
+  local splice_lines_sp
+  splice_lines_sp="$(printf '%s' "$splice_line" | tr '\n' ' ')"
   tmp_modified="$(mktemp -t fi-target-node-mod.XXXXXX)"
-  awk -v insert_after="$insert_after" \
-      -v splice_line="$splice_line" \
+  LC_ALL=C awk -v insert_after="$insert_after" \
+      -v splice_lines="$splice_lines_sp" \
       -v block_file="$tmp_block" '
+    BEGIN {
+      n = split(splice_lines, arr, " ")
+      for (i = 1; i <= n; i++) if (arr[i] != "") splice_set[arr[i]] = 1
+    }
     function print_block(   line) {
       while ((getline line < block_file) > 0) print line
       close(block_file)
     }
     NR == insert_after && insert_after > 0 { print; print_block(); next }
-    NR == splice_line {
+    (NR in splice_set) {
       line = $0
-      # Template literal: inject ${__fiSeg} before the last backtick.
-      # awk sub() does not support backreferences (\1), so we manually find
-      # the last backtick position and splice there.
       if (match(line, /`/)) {
         last_bt = 0
         for (i = length(line); i >= 1; i--) {
           if (substr(line, i, 1) == "`") { last_bt = i; break }
         }
         if (last_bt > 0) {
-          line = substr(line, 1, last_bt - 1) "${__fiSeg}" substr(line, last_bt)
+          line = substr(line, 1, last_bt - 1) "${__fiSeg(typeof dir!=='\''undefined'\''?dir:(typeof cwd!=='\''undefined'\''?cwd:undefined))}" substr(line, last_bt)
         }
-        # Add trailing comment marker (after the closing paren+semicolon)
         sub(/;[[:space:]]*$/, ";  // found-issues:seg", line)
         if (line !~ /found-issues:seg/) line = line "  // found-issues:seg"
       } else if (match(line, /console\.log\(/) || match(line, /process\.stdout\.write\(/)) {
-        # Plain string or stdout.write: insert + __fiSeg before first closing paren
-        sub(/\)/, " + __fiSeg)", line)
+        sub(/\)/, " + __fiSeg(typeof dir!=='\''undefined'\''?dir:(typeof cwd!=='\''undefined'\''?cwd:undefined)))", line)
         sub(/;[[:space:]]*$/, ";  // found-issues:seg", line)
         if (line !~ /found-issues:seg/) line = line "  // found-issues:seg"
       }
@@ -2298,44 +2445,99 @@ cmd_install_statusline_target_node() {
 }
 fi_find_python_splice_point() {
   local path="$1"
-  local line
+  local lines
   # Priority 1: print(f"...") or print(f'...')
-  line="$(awk '/^[[:space:]]*print[[:space:]]*\(f["'"'"'][^)]*\)/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/^[[:space:]]*print[[:space:]]*\(f["'"'"'][^)]*\)/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   # Priority 2: print("...") or print('...')
-  line="$(awk '/^[[:space:]]*print[[:space:]]*\(["'"'"'][^)]*\)/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/^[[:space:]]*print[[:space:]]*\(["'"'"'][^)]*\)/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   # Priority 3: sys.stdout.write(...)
-  line="$(awk '/^[[:space:]]*sys\.stdout\.write[[:space:]]*\(/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/^[[:space:]]*sys\.stdout\.write[[:space:]]*\(/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   return 1
 }
 
 fi_generate_python_marker_block() {
   cat <<'BLOCK'
 # === found-issues plugin segment ===
-# PATH-resilience: prefer `found-issues` on PATH; fall back to plugin cache glob.
-# Cwd resolution: prefer CLAUDE_PROJECT_DIR; fall back to $HOME.
+# Cross-platform: POSIX uses PATH; Windows invokes via Git Bash (bin/found-issues
+# is a bash script). Invocation is deferred via _fi_seg(_dir) so the splice
+# point can pass the real workspace dir (parsed from stdin by the host
+# statusline). When _dir is unavailable, falls back through env then home.
 import subprocess as _fi_subprocess
 import shutil as _fi_shutil
-import glob as _fi_glob
+import platform as _fi_platform
 import os as _fi_os
-_fi_seg = ''
+import pathlib as _fi_pathlib
+
+_fi_cli = None
 try:
-    _fi_cli = _fi_shutil.which('found-issues')
+    # FOUND_ISSUES_BIN: explicit override — used by tests and advanced installs.
+    # No is_file() check: on Windows, Python cannot resolve POSIX Git Bash
+    # paths (/d/a/...) via the Windows filesystem API. Trust the caller.
+    _fi_env_bin = _fi_os.environ.get('FOUND_ISSUES_BIN', '')
+    if _fi_env_bin:
+        _fi_cli = _fi_env_bin
+    if not _fi_cli and _fi_platform.system() != 'Windows':
+        _fi_cli = _fi_shutil.which('found-issues')
     if not _fi_cli:
-        _fi_candidates = sorted(_fi_glob.glob(
-            _fi_os.path.expanduser('~/.claude/plugins/cache/*/found-issues/*/bin/found-issues')
-        ))
-        _fi_cli = _fi_candidates[-1] if _fi_candidates else None
-    if _fi_cli and _fi_os.access(_fi_cli, _fi_os.X_OK):
-        _fi_cwd = _fi_os.environ.get('CLAUDE_PROJECT_DIR') or _fi_os.environ.get('HOME', '.')
-        _fi_seg = _fi_subprocess.run(
+        _fi_cache_root = _fi_pathlib.Path.home() / '.claude' / 'plugins' / 'cache'
+        if _fi_cache_root.is_dir():
+            _fi_candidates = []
+            for _fi_mkt in _fi_cache_root.iterdir():
+                _fi_fi_dir = _fi_mkt / 'found-issues'
+                if not _fi_fi_dir.is_dir():
+                    continue
+                for _fi_ver in _fi_fi_dir.iterdir():
+                    _fi_bin = _fi_ver / 'bin' / 'found-issues'
+                    if _fi_bin.is_file():
+                        _fi_candidates.append((_fi_ver.name, str(_fi_bin)))
+            _fi_candidates.sort(key=lambda v: [int(x) if x.isdigit() else x for x in v[0].replace('-', '.').split('.')])
+            if _fi_candidates:
+                _fi_cli = _fi_candidates[-1][1]
+except Exception:
+    _fi_cli = None
+
+def _fi_seg(_dir=None):
+    if not _fi_cli:
+        return ''
+    try:
+        _fi_cwd = (
+            _dir
+            or _fi_os.environ.get('CLAUDE_PROJECT_DIR')
+            or _fi_os.environ.get('PWD')
+            or str(_fi_pathlib.Path.home())
+        )
+        if _fi_platform.system() == 'Windows':
+            _fi_posix = _fi_cli.replace('\\', '/')
+            # On Windows, Python's cwd arg passes to the Windows API which cannot
+            # resolve POSIX Git Bash paths (e.g. /d/a/...). cd inside bash instead.
+            # Use FOUND_ISSUES_BASH if set (avoids Windows PATH resolving to WSL
+            # bash.exe instead of Git Bash when wsl.exe is earlier in PATH).
+            # Fall back to known Git for Windows install paths, then plain 'bash'.
+            _fi_bash_env = _fi_os.environ.get('FOUND_ISSUES_BASH', '')
+            _fi_bash_bin = _fi_bash_env or 'bash'
+            if not _fi_bash_env:
+                for _fi_candidate in [
+                    r'C:\Program Files\Git\bin\bash.exe',
+                    r'C:\Program Files\Git\usr\bin\bash.exe',
+                ]:
+                    if _fi_pathlib.Path(_fi_candidate).is_file():
+                        _fi_bash_bin = _fi_candidate
+                        break
+            _fi_safe_cwd = _fi_cwd.replace('\\', '/').replace("'", "'\\''")
+            _fi_result = _fi_subprocess.run(
+                [_fi_bash_bin, '-c', f"cd '{_fi_safe_cwd}' && \"{_fi_posix}\" status --format=segment"],
+                capture_output=True, timeout=5
+            )
+            return _fi_result.stdout.decode('utf-8', errors='replace').strip()
+        return _fi_subprocess.run(
             [_fi_cli, 'status', '--format=segment'],
             cwd=_fi_cwd, capture_output=True, text=True, timeout=5
         ).stdout.strip()
-except Exception:
-    _fi_seg = ''
+    except Exception:
+        return ''
 # === end found-issues plugin segment ===
 BLOCK
 }
@@ -2344,10 +2546,19 @@ cmd_install_statusline_target_python() {
   local path="$1"
   local mode="$2"
 
-  # Idempotency
+  # Idempotency: if v1.5.0+ marker block already present, no-op.
+  # If v1.4.x POSIX-only marker present, strip + reinstall (migration path).
   if grep -Fq "# === found-issues plugin segment ===" "$path"; then
-    printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
-    return 0
+    if fi_target_is_v14x_broken "$path" python; then
+      printf 'install-statusline --target: migrating v1.4.x POSIX-only marker block in %s\n' "$path"
+      fi_strip_target_markers "$path" python || {
+        fi_err "install-statusline --target: failed to strip v1.4.x marker block"
+        return 14
+      }
+    else
+      printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
+      return 0
+    fi
   fi
 
   local splice_line
@@ -2373,35 +2584,39 @@ cmd_install_statusline_target_python() {
   tmp_block="$(mktemp -t fi-target-python-block.XXXXXX)"
   fi_generate_python_marker_block > "$tmp_block"
 
+  # BSD awk on macOS rejects literal newlines in -v values; convert to space.
+  local splice_lines_sp
+  splice_lines_sp="$(printf '%s' "$splice_line" | tr '\n' ' ')"
+
   tmp_modified="$(mktemp -t fi-target-python-mod.XXXXXX)"
-  awk -v insert_after="$insert_after" \
-      -v splice_line="$splice_line" \
+  LC_ALL=C awk -v insert_after="$insert_after" \
+      -v splice_lines="$splice_lines_sp" \
       -v block_file="$tmp_block" '
+    BEGIN {
+      n = split(splice_lines, arr, " ")
+      for (i = 1; i <= n; i++) if (arr[i] != "") splice_set[arr[i]] = 1
+    }
     function print_block(   line) {
       while ((getline line < block_file) > 0) print line
       close(block_file)
     }
     NR == insert_after && insert_after > 0 { print; print_block(); next }
-    NR == splice_line {
+    (NR in splice_set) {
       line = $0
-      # f-string with double quote: inject {_fi_seg} before closing "
-      # NOTE: macOS awk does not support \1 backreferences in sub() — manual splice.
       if (match(line, /print[[:space:]]*\(f"/)) {
         idx = index(line, "\")")
         if (idx > 0) {
-          line = substr(line, 1, idx-1) "{_fi_seg}" substr(line, idx) "  # found-issues:seg"
+          line = substr(line, 1, idx-1) "{_fi_seg(locals().get(\"dir\") or locals().get(\"cwd\"))}" substr(line, idx) "  # found-issues:seg"
         }
       } else if (match(line, /print[[:space:]]*\(f'"'"'/)) {
-        # f-string with single quote
         idx = index(line, "'"'"')")
         if (idx > 0) {
-          line = substr(line, 1, idx-1) "{_fi_seg}" substr(line, idx) "  # found-issues:seg"
+          line = substr(line, 1, idx-1) "{_fi_seg(locals().get(\"dir\") or locals().get(\"cwd\"))}" substr(line, idx) "  # found-issues:seg"
         }
       } else if (match(line, /print[[:space:]]*\(["'"'"']/)) {
-        # Plain string: append + _fi_seg before closing paren
-        sub(/\)[[:space:]]*$/, " + _fi_seg)  # found-issues:seg", line)
+        sub(/\)[[:space:]]*$/, " + _fi_seg(locals().get(\"dir\") or locals().get(\"cwd\")))  # found-issues:seg", line)
       } else if (match(line, /sys\.stdout\.write[[:space:]]*\(/)) {
-        sub(/\)[[:space:]]*$/, " + _fi_seg)  # found-issues:seg", line)
+        sub(/\)[[:space:]]*$/, " + _fi_seg(locals().get(\"dir\") or locals().get(\"cwd\")))  # found-issues:seg", line)
       }
       print line
       next
@@ -2617,6 +2832,106 @@ cmd_install_statusline() {
 
 # Diagnostic dry-run: print the current state of the statusline integration
 # and the recommended action. No file modifications.
+# fi_run_statusline_runtime_probe: reusable runtime probe body.
+# Called by cmd_doctor and cmd_doctor_statusline_runtime.
+# $1=section_pass  $2=section_warn  $3=section_fail
+fi_run_statusline_runtime_probe() {
+  local section_pass="$1" section_warn="$2" section_fail="$3"
+
+  # Re-resolve statusline target (same logic as cmd_doctor's Statusline section).
+  local settings_file="$HOME/.claude/settings.json"
+  local custom_target="" custom_language=""
+  if [[ -f "$settings_file" ]] && command -v jq >/dev/null 2>&1; then
+    local cmd
+    cmd="$(jq -r '.statusLine.command // ""' "$settings_file" 2>/dev/null || true)"
+    if [[ -n "$cmd" ]]; then
+      custom_target="$(printf '%s' "$cmd" | LC_ALL=C awk '{print $NF}' | sed "s|\${HOME}|$HOME|g; s|^~|$HOME|")"
+      case "$custom_target" in
+        *.js|*.mjs|*.cjs) custom_language=node ;;
+        *.py)             custom_language=python ;;
+        *.sh|*.bash)      custom_language=bash ;;
+      esac
+    fi
+  fi
+
+  local statusline_target statusline_language
+  if [[ -n "$custom_target" && -f "$custom_target" ]]; then
+    statusline_target="$custom_target"
+    statusline_language="$custom_language"
+  else
+    statusline_target="$FI_STATUSLINE_FILE"
+    statusline_language="bash"
+  fi
+
+  printf '== Runtime probe ==\n'
+  if [[ -z "$statusline_target" || ! -f "$statusline_target" ]]; then
+    printf '%s Skipped — no statusline target file to probe.\n' "$section_warn"
+  elif [[ -n "${custom_target}" && -z "$custom_language" ]]; then
+    printf '%s Skipped — unrecognized statusline language for %s.\n' "$section_warn" "$custom_target"
+  else
+    local probe_cwd probe_stdin probe_output
+    probe_cwd="$(pwd)"
+    probe_stdin="$(printf '{"model":{"display_name":"Test"},"workspace":{"current_dir":"%s"},"session_id":"t","context_window":{"remaining_percentage":50}}' "$probe_cwd")"
+
+    local executor
+    case "$statusline_language" in
+      bash)   executor=(bash "$statusline_target") ;;
+      node)   executor=(node "$statusline_target") ;;
+      python) executor=(python3 "$statusline_target") ;;
+    esac
+
+    # Use perl alarm-based timeout when available; plain exec otherwise.
+    if command -v perl >/dev/null 2>&1; then
+      probe_output="$(printf '%s' "$probe_stdin" | perl -e 'alarm(5); exec @ARGV' -- "${executor[@]}" 2>&1 || true)"
+    elif command -v timeout >/dev/null 2>&1; then
+      probe_output="$(printf '%s' "$probe_stdin" | timeout 5 "${executor[@]}" 2>&1 || true)"
+    else
+      probe_output="$(printf '%s' "$probe_stdin" | "${executor[@]}" 2>&1 || true)"
+    fi
+
+    # Probe success: script ran and produced non-empty output without runtime errors.
+    local probe_has_error=0
+    echo "$probe_output" | LC_ALL=C grep -qiE '(error|exception|traceback|undefined|cannot|not found)' && probe_has_error=1 || true
+
+    if [[ -n "$probe_output" && "$probe_has_error" -eq 0 ]]; then
+      if fi_has_conflict_markers "${issues_file_health:-}" 2>/dev/null; then
+        printf '%s INCONCLUSIVE — segment rendered, but source file has conflict markers.\n' "$section_warn"
+      else
+        printf '%s Segment rendered: %s\n' "$section_pass" "$(echo "$probe_output" | head -1)"
+      fi
+    else
+      printf '%s FAIL — segment did NOT render in probe output.\n' "$section_fail"
+      printf '   Probe output: %s\n' "$(echo "$probe_output" | head -1)"
+
+      # Sub-probe (a): binary cwd resolution
+      if "${FI_BIN_DIR}/found-issues" status --format=segment 2>/dev/null | LC_ALL=C grep -qE ' \| '; then
+        :
+      else
+        printf '   - cause: binary resolution / cwd — `found-issues status --format=segment` is empty from %s\n' "$probe_cwd"
+      fi
+
+      # Sub-probe (c): runtime exception
+      if [[ "$probe_has_error" -eq 1 ]]; then
+        printf '   - cause: runtime error in statusline script (see probe output above).\n'
+      fi
+    fi
+
+    # Sub-probe (b): splice gap detection — always run as a static analysis.
+    local output_count seg_count
+    case "$statusline_language" in
+      node)   output_count="$(LC_ALL=C grep -cE 'console\.log|process\.stdout\.write' "$statusline_target" 2>/dev/null || echo 0)" ;;
+      python) output_count="$(LC_ALL=C grep -cE '^[[:space:]]*print[[:space:]]*\(|sys\.stdout\.write' "$statusline_target" 2>/dev/null || echo 0)" ;;
+      bash)   output_count="$(LC_ALL=C grep -cE '^[[:space:]]*echo[[:space:]]|^[[:space:]]*printf[[:space:]]' "$statusline_target" 2>/dev/null || echo 0)" ;;
+    esac
+    seg_count="$(LC_ALL=C grep -c 'found-issues:seg' "$statusline_target" 2>/dev/null || echo 0)"
+    if (( seg_count < output_count )); then
+      printf '   - cause: splice gap — %s output statements, only %s patched with `found-issues:seg`.\n' "$output_count" "$seg_count"
+      printf '     Re-run: found-issues install-statusline --target %s --apply\n' "$statusline_target"
+    fi
+  fi
+  printf '\n'
+}
+
 cmd_doctor_statusline() {
   if [[ ! -f "$FI_STATUSLINE_FILE" ]]; then
     printf 'doctor-statusline: %s does not exist.\n' "$FI_STATUSLINE_FILE"
@@ -2660,6 +2975,17 @@ cmd_doctor_statusline() {
   esac
 }
 
+cmd_doctor_statusline_runtime() {
+  # Standalone runtime probe. Reuses fi_run_statusline_runtime_probe.
+  # Useful for AI agents and iterative debugging — emits only the probe
+  # section, not the full doctor report.
+  local section_pass="✓" section_warn="!" section_fail="✗"
+  if ! locale 2>/dev/null | grep -qi 'utf-8\|utf8'; then
+    section_pass="OK"; section_warn="!!"; section_fail="FAIL"
+  fi
+  fi_run_statusline_runtime_probe "$section_pass" "$section_warn" "$section_fail"
+}
+
 # === Subcommand: doctor ===
 #
 # General-purpose health diagnostic — aggregates statusline state, gh auth,
@@ -2684,6 +3010,27 @@ cmd_doctor() {
 
   printf 'found-issues doctor — v%s\n\n' "$FI_VERSION"
 
+  # --- Source file health (NEW) ---
+  printf '== Source file health ==\n'
+  local issues_file_health
+  issues_file_health="$(fi_find_issues_file 2>/dev/null || true)"
+  if [[ -n "$issues_file_health" && -f "$issues_file_health" ]]; then
+    if fi_has_conflict_markers "$issues_file_health"; then
+      printf '%s Source file has merge conflict markers: %s\n' "$section_fail" "$issues_file_health"
+      local conflict_lines
+      conflict_lines="$(LC_ALL=C grep -nE '^(<<<<<<< |=======$|>>>>>>> )' "$issues_file_health" | head -10 | sed 's/^/   /')"
+      printf '%s\n' "$conflict_lines"
+      printf '   Resolve the conflict (git status, then manual edit) before trusting any counts.\n'
+      printf '   Counts in the statusline below skip lines inside conflict regions, so they\n'
+      printf '   may differ from what you expect during a merge.\n'
+    else
+      printf '%s Source file: %s (no conflict markers)\n' "$section_pass" "$issues_file_health"
+    fi
+  else
+    printf '%s No issues file found in current dir or its parents.\n' "$section_warn"
+  fi
+  printf '\n'
+
   # --- Plugin runtime ---
   printf '== Plugin runtime ==\n'
   printf '%s CLI: %s\n' "$section_pass" "${FI_BIN_DIR}/found-issues"
@@ -2699,32 +3046,69 @@ cmd_doctor() {
   fi
   printf '\n'
 
-  # --- Statusline ---
+  # --- Statusline (extended for custom targets) ---
   printf '== Statusline ==\n'
-  if [[ -f "$FI_STATUSLINE_FILE" ]]; then
+  local settings_file="$HOME/.claude/settings.json"
+  local custom_target="" custom_language=""
+  if [[ -f "$settings_file" ]] && command -v jq >/dev/null 2>&1; then
+    local cmd
+    cmd="$(jq -r '.statusLine.command // ""' "$settings_file" 2>/dev/null || true)"
+    if [[ -n "$cmd" ]]; then
+      printf '%s settings.json statusLine.command: %s\n' "$section_pass" "$cmd"
+      custom_target="$(printf '%s' "$cmd" | LC_ALL=C awk '{print $NF}' | sed "s|\${HOME}|$HOME|g; s|^~|$HOME|")"
+      case "$custom_target" in
+        *.js|*.mjs|*.cjs) custom_language=node ;;
+        *.py)             custom_language=python ;;
+        *.sh|*.bash)      custom_language=bash ;;
+      esac
+    fi
+  fi
+
+  local statusline_target statusline_language
+  if [[ -n "$custom_target" && -f "$custom_target" ]]; then
+    statusline_target="$custom_target"
+    statusline_language="$custom_language"
+    printf '   Resolved target: %s (language: %s)\n' "$statusline_target" "$statusline_language"
+  else
+    statusline_target="$FI_STATUSLINE_FILE"
+    statusline_language="bash"
+  fi
+
+  if [[ -f "$statusline_target" ]]; then
     local statusline_state
-    statusline_state="$(fi_statusline_state)"
+    statusline_state="$(fi_statusline_state "$statusline_target" "$statusline_language")"
     case "$statusline_state" in
       installed-fixed)
-        printf '%s State: installed-fixed (canonical block, cwd handling present).\n' "$section_pass"
+        printf '%s State: installed-fixed (canonical block).\n' "$section_pass"
+        ;;
+      installed-broken-posix)
+        printf '%s State: installed-broken-posix — v1.4.x POSIX-only shim.\n' "$section_fail"
+        printf '   Symptom: empty segment on Windows OR on multi-branch statuslines.\n'
+        printf '   Fix: found-issues install-statusline --target %s --apply   (auto-migrates)\n' "$statusline_target"
         ;;
       installed-broken|legacy-handwritten|legacy-and-installed)
         printf '%s State: %s — counter renders empty silently.\n' "$section_fail" "$statusline_state"
         printf '   Fix: found-issues install-statusline   (auto-migrates with timestamped backup)\n'
         ;;
       none)
-        printf '%s State: none — statusline.sh exists but no found-issues segment.\n' "$section_warn"
-        printf '   Install: found-issues install-statusline\n'
+        printf '%s State: none — statusline exists but no found-issues segment.\n' "$section_warn"
+        if [[ -n "$custom_target" ]]; then
+          printf '   Install: found-issues install-statusline --target %s --apply\n' "$statusline_target"
+        else
+          printf '   Install: found-issues install-statusline\n'
+        fi
         ;;
       no-file)
-        printf '%s State: no-file (unreachable — guarded above).\n' "$section_warn"
+        printf '%s State: no-file.\n' "$section_warn"
         ;;
     esac
   else
-    printf '%s No %s — Claude Code uses the default statusline.\n' "$section_warn" "$FI_STATUSLINE_FILE"
-    printf '   To enable the counter segment, create the file and run `found-issues install-statusline`.\n'
+    printf '%s Statusline target file not found: %s\n' "$section_warn" "$statusline_target"
   fi
   printf '\n'
+
+  # --- Statusline runtime probe ---
+  fi_run_statusline_runtime_probe "$section_pass" "$section_warn" "$section_fail"
 
   # --- gh CLI auth (only relevant in github-* modes) ---
   printf '== gh CLI ==\n'
@@ -3074,18 +3458,22 @@ cmd_uninstall_statusline_custom_target() {
       # Bash: ${__FI_SEG}"  # found-issues:seg  → remove the trailing portion
       sub(/\$\{__FI_SEG\}"[[:space:]]*#[[:space:]]*found-issues:seg.*$/, "\"")
       sub(/\$\{__FI_SEG\}[[:space:]]*#[[:space:]]*found-issues:seg.*$/, "")
-      # Node: ${__fiSeg}`); // found-issues:seg
-      sub(/\$\{__fiSeg\}[^`]*`[[:space:]]*\)?;[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, "`);")
+      # Node template literal: ${__fiSeg} or ${__fiSeg(...)}  before closing backtick
+      sub(/\$\{__fiSeg[^}]*\}[^`]*`[[:space:]]*\)?;[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, "`);")
+      sub(/\+[[:space:]]*__fiSeg[^)]*\)[[:space:]]*\);[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, ");")
       sub(/\+[[:space:]]*__fiSeg[[:space:]]*\);[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, ");")
-      # Python f-string with double quote: print(f"...{_fi_seg}")  # found-issues:seg
-      sub(/\{_fi_seg\}"\)[[:space:]]*#[[:space:]]*found-issues:seg.*$/, "\")")
-      # Python f-string with single quote: print(f'"'"'...{_fi_seg}'"'"')  # found-issues:seg
-      sub(/\{_fi_seg\}['"'"'][)][[:space:]]*#[[:space:]]*found-issues:seg.*$/, "'"'"')")
-      # Python plain-string concat: print("..." + _fi_seg)  # found-issues:seg
+      # Python f-string with double quote: print(f"...{_fi_seg}") or {_fi_seg(...)}  # found-issues:seg
+      sub(/\{_fi_seg[^}]*\}"\)[[:space:]]*#[[:space:]]*found-issues:seg.*$/, "\")")
+      # Python f-string with single quote: print(f'...{_fi_seg}') or {_fi_seg(...)}  # found-issues:seg
+      sub(/\{_fi_seg[^}]*\}['"'"'][)][[:space:]]*#[[:space:]]*found-issues:seg.*$/, "'"'"')")
+      # Python plain-string concat: print("..." + _fi_seg) or + _fi_seg(...))  # found-issues:seg
+      sub(/\+[[:space:]]*_fi_seg[^)]*\)[[:space:]]*\)[[:space:]]*#[[:space:]]*found-issues:seg.*$/, ")")
       sub(/\+[[:space:]]*_fi_seg[[:space:]]*\)[[:space:]]*#[[:space:]]*found-issues:seg.*$/, ")")
     }
     /\/\/ found-issues:seg/ {
-      sub(/\$\{__fiSeg\}[^`]*`[[:space:]]*\)?;[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, "`);")
+      # Node template literal: ${__fiSeg} or ${__fiSeg(...)}  before closing backtick
+      sub(/\$\{__fiSeg[^}]*\}[^`]*`[[:space:]]*\)?;[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, "`);")
+      sub(/\+[[:space:]]*__fiSeg[^)]*\)[[:space:]]*\);[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, ");")
       sub(/\+[[:space:]]*__fiSeg[[:space:]]*\);[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, ");")
     }
     { print }
@@ -3204,7 +3592,8 @@ main() {
     promote)          cmd_promote "$@" ;;
     install-statusline)   cmd_install_statusline "$@" ;;
     uninstall-statusline) cmd_uninstall_statusline "$@" ;;
-    doctor-statusline)    cmd_doctor_statusline "$@" ;;
+    doctor-statusline)            cmd_doctor_statusline "$@" ;;
+    doctor-statusline-runtime)    cmd_doctor_statusline_runtime "$@" ;;
     doctor)               cmd_doctor "$@" ;;
     install-fi-alias)     cmd_install_fi_alias "$@" ;;
     uninstall-fi-alias)   cmd_uninstall_fi_alias "$@" ;;

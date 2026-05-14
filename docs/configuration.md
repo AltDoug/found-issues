@@ -16,6 +16,7 @@ The plugin registers 8 hooks. Each one has an `=off` switch.
 | Variable | Default | What it controls |
 |---|---|---|
 | `FOUND_ISSUES_STOP_REMINDER` | `on` | The Stop hook that requires `<!-- found-issues-checked: ... -->` in any assistant turn that did substantive tool use (Edit / Write / MultiEdit / Bash). Set to `off` if the marker friction outweighs the discipline-enforcement value. |
+| `FOUND_ISSUES_REMINDER_VERBOSITY` | `auto` | Stop-hook message verbosity. `full` (8-line educational form), `terse` (1-line form), or `auto` (terse iff `~/.claude/found-issues/.onboarded` exists). |
 | `FOUND_ISSUES_PROMOTE_GUARD` | `on` | The `pre-branch-delete` hook that hard-blocks `git branch -d` / `--delete` / `gh api ... DELETE` when the branch has `[open]` entries whose dedup key isn't on `main`. Set to `off` for a one-shot bypass (`FOUND_ISSUES_PROMOTE_GUARD=off git branch -D ...`). |
 | `FOUND_ISSUES_FORMAT_ENFORCER` | `on` | The `PreToolUse` format-enforcer that validates entries written via `Write` / `Edit` / `MultiEdit`. In `local` mode it's already off; in `git` mode it warns-only; in `github-*` modes it hard-blocks. Set to `off` to disable globally. |
 | `FOUND_ISSUES_PRE_COMMIT` | `on` | The optional per-repo `pre-commit.sh` (installed via `found-issues install-precommit`). Same validation rules as the in-Claude-Code enforcer but at git commit time. Set to `off` to disable. |

@@ -38,6 +38,18 @@ fi_find_issues_file() {
   return 1
 }
 
+# Return 0 iff $1 is a regular file containing merge-conflict markers.
+# A conflict marker is any line beginning with `<<<<<<< `, `=======`, or
+# `>>>>>>> ` — git's canonical merge conflict syntax. Used by the parser
+# (skip counting inside conflict regions) and by doctor (FAIL-level finding
+# when source file is degraded). Cheap: single grep pass, exits on first
+# match.
+fi_has_conflict_markers() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  LC_ALL=C grep -qE '^(<<<<<<< |=======$|>>>>>>> )' "$file"
+}
+
 # Parse a single entry line into KEY=VALUE pairs (one per line).
 # Returns 1 if the line is not a valid entry.
 fi_parse_entry() {
@@ -171,6 +183,10 @@ fi_parse_entry() {
 
 # Output entries matching status_filter (open|deferred|fixed|all).
 # Returns 1 if file doesn't exist.
+# Conflict-aware: lines inside <<<<<<< ... >>>>>>> blocks are excluded.
+# Both branches of a conflict are dropped — we never inflate counts during
+# a merge conflict. fi_has_conflict_markers exposes this state to doctor
+# for prominent surfacing.
 fi_entries() {
   local file="$1"
   local status_filter="${2:-all}"
@@ -180,16 +196,32 @@ fi_entries() {
   fi
 
   case "$status_filter" in
-    all)
-      grep -E '^- \[(open|deferred|fixed)\]' "$file" || true
-      ;;
-    open|deferred|fixed)
-      grep -E "^- \[$status_filter\]" "$file" || true
-      ;;
-    *)
-      return 2
-      ;;
+    all|open|deferred|fixed) : ;;
+    *) return 2 ;;
   esac
+
+  # Conflict-aware: lines inside <<<<<<< ... >>>>>>> blocks are excluded.
+  # Both branches of a conflict are dropped — we never inflate counts during
+  # a merge conflict. fi_has_conflict_markers exposes this state to doctor
+  # for prominent surfacing.
+  #
+  # Note: the status_filter is passed as a plain string (-v sf=) and matched
+  # with index() rather than a regex variable — bracket characters in awk -v
+  # strings are not reliably escaped across all awk implementations.
+  LC_ALL=C awk -v sf="$status_filter" '
+    /^<<<<<<< / { in_conflict = 1; next }
+    /^>>>>>>> / { in_conflict = 0; next }
+    /^=======$/ && in_conflict { next }
+    !in_conflict && /^- \[/ {
+      if (sf == "all") {
+        if (index($0, "- [open]")     == 1 ||
+            index($0, "- [deferred]") == 1 ||
+            index($0, "- [fixed]")    == 1) { print; next }
+      } else {
+        if (index($0, "- [" sf "]") == 1) print
+      }
+    }
+  ' "$file"
 }
 
 # Count entries by status. Always prints a number (0 if no file or no matches).
