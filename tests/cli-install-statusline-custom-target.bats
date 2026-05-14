@@ -561,3 +561,58 @@ EOF
   echo "$out_b" | grep -qE ' \| .*issue'
 }
 
+@test "runtime e2e (python): single-branch statusline emits segment" {
+  if ! command -v python3 >/dev/null 2>&1; then skip "python3 not available"; fi
+
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — synthetic test entry
+EOF
+  mkdir -p tmp
+  cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+import json, sys
+data = json.loads(sys.stdin.read() or '{}')
+dir = data.get('workspace', {}).get('current_dir', '/tmp')
+print(f"repo | {dir}")
+EOF
+
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+
+  local sl_output
+  sl_output="$(fi_synthetic_stdin "$(pwd)" | python3 tmp/sl.py 2>/dev/null)"
+  echo "$sl_output" | grep -qE ' \| .*issue'
+}
+
+@test "runtime e2e (python): multi-branch statusline emits segment in both branches" {
+  if ! command -v python3 >/dev/null 2>&1; then skip "python3 not available"; fi
+
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — synthetic test entry
+EOF
+  mkdir -p tmp
+  cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+import json, sys
+data = json.loads(sys.stdin.read() or '{}')
+dir = data.get('workspace', {}).get('current_dir', '/tmp')
+if data.get('session_id'):
+    print(f"branch-A | {dir}")
+else:
+    print(f"branch-B | {dir}")
+EOF
+
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+
+  local out_a
+  out_a="$(fi_synthetic_stdin "$(pwd)" | python3 tmp/sl.py 2>/dev/null)"
+  echo "$out_a" | grep -q "branch-A"
+  echo "$out_a" | grep -qE ' \| .*issue'
+
+  local out_b
+  out_b="$(printf '{"workspace":{"current_dir":"%s"}}' "$(pwd)/tmp" | python3 tmp/sl.py 2>/dev/null)"
+  echo "$out_b" | grep -q "branch-B"
+  echo "$out_b" | grep -qE ' \| .*issue'
+}
+
