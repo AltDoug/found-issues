@@ -166,6 +166,24 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "install-statusline --target bash --apply: patches every echo in multi-branch statusline" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+dir="$(echo "$input" | jq -r '.workspace.current_dir // ""')"
+if [[ -n "$dir" ]]; then
+  echo "A | $dir"
+else
+  echo "B | none"
+fi
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  local seg_count
+  seg_count="$(grep -c 'found-issues:seg' tmp/sl.sh)"
+  [ "$seg_count" = "2" ]
+}
+
 @test "install-statusline --target: detects node from .js extension" {
   mkdir -p tmp && cat > tmp/sl.js <<'EOF'
 #!/usr/bin/env node

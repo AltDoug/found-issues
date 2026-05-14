@@ -1993,16 +1993,16 @@ cmd_install_statusline_custom_target() {
 # Priority: LINE1= assignment, then first echo, then first printf.
 fi_find_bash_splice_point() {
   local path="$1"
-  local line
+  local lines
   # Priority 1: LINE1= assignment
-  line="$(awk '/^[[:space:]]*LINE1=/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
-  # Priority 2: first echo
-  line="$(awk '/^[[:space:]]*echo[[:space:]]/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
-  # Priority 3: first printf
-  line="$(awk '/^[[:space:]]*printf[[:space:]]/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/^[[:space:]]*LINE1=/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
+  # Priority 2: echo
+  lines="$(LC_ALL=C awk '/^[[:space:]]*echo[[:space:]]/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
+  # Priority 3: printf
+  lines="$(LC_ALL=C awk '/^[[:space:]]*printf[[:space:]]/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   return 1
 }
 
@@ -2073,35 +2073,36 @@ cmd_install_statusline_target_bash() {
   # Generate the modified content into a temp file.
   # Write the marker block to its own temp file so awk can read it via getline
   # rather than via -v (awk -v does not support multi-line values portably).
+  # BSD awk on macOS rejects literal newlines in -v values; convert to space.
+  local splice_lines_sp
+  splice_lines_sp="$(printf '%s' "$splice_line" | tr '\n' ' ')"
+
   local tmp_block tmp_modified
   tmp_block="$(mktemp -t fi-target-block.XXXXXX)"
   fi_generate_bash_marker_block > "$tmp_block"
   tmp_modified="$(mktemp -t fi-target-mod.XXXXXX)"
-  awk -v insert_after="$insert_after" \
-      -v splice_line="$splice_line" \
+  LC_ALL=C awk -v insert_after="$insert_after" \
+      -v splice_lines="$splice_lines_sp" \
       -v block_file="$tmp_block" '
+    BEGIN {
+      n = split(splice_lines, arr, " ")
+      for (i = 1; i <= n; i++) if (arr[i] != "") splice_set[arr[i]] = 1
+    }
     function print_block(    line) {
       while ((getline line < block_file) > 0) print line
       close(block_file)
     }
     NR == insert_after && insert_after > 0 { print; print_block(); next }
-    NR == splice_line {
-      # Append ${__FI_SEG} to the line; preserve trailing whitespace.
-      # Strategy: insert before the closing quote of the last string arg, or
-      # at end of line if no clear quote boundary.
+    (NR in splice_set) {
       line = $0
-      # Simple heuristic: append before any trailing " or end-of-line.
       if (match(line, /"[^"]*"$/)) {
-        # Has trailing quoted string: append inside the quotes
         sub(/"$/, "${__FI_SEG}\"  # found-issues:seg", line)
       } else {
-        # Append at end of line with trailing comment
         line = line "${__FI_SEG}  # found-issues:seg"
       }
       print line
       next
     }
-    # Special case: insert_after == 0 (no shebang/set) → insert block at very start
     NR == 1 && insert_after == 0 { print_block(); print; next }
     { print }
   ' "$path" > "$tmp_modified"
