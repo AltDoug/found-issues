@@ -2155,44 +2155,71 @@ cmd_install_statusline_target_bash() {
 }
 fi_find_node_splice_point() {
   local path="$1"
-  local line
+  local lines
   # Priority 1: console.log with template literal (backticks)
-  line="$(awk '/console\.log[[:space:]]*\(`/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/console\.log[[:space:]]*\(`/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   # Priority 2: console.log with plain string (single or double quote)
-  line="$(awk '/console\.log[[:space:]]*\(("|'"'"')/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/console\.log[[:space:]]*\(("|'"'"')/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   # Priority 3: process.stdout.write
-  line="$(awk '/process\.stdout\.write[[:space:]]*\(/ { print NR; exit }' "$path")"
-  [[ -n "$line" ]] && { echo "$line"; return 0; }
+  lines="$(LC_ALL=C awk '/process\.stdout\.write[[:space:]]*\(/ { print NR }' "$path")"
+  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   return 1
 }
 
 fi_generate_node_marker_block() {
   cat <<'BLOCK'
 // === found-issues plugin segment ===
-// PATH-resilience: try `found-issues` on PATH, fall back to plugin cache glob.
-// Cwd resolution: prefer CLAUDE_PROJECT_DIR; fall back to $HOME.
-let __fiSeg = '';
+// Cross-platform: POSIX uses PATH; Windows enumerates the plugin cache via fs.
+// Invocation is deferred via __fiSeg(dir) so the splice point can pass the
+// real workspace dir (parsed from stdin by the host statusline). When dir is
+// unavailable, falls back through env (CLAUDE_PROJECT_DIR, PWD) then home.
+let __fiCli = null;
+function __fiSeg(dir) {
+  if (!__fiCli) return '';
+  try {
+    const { execFileSync } = require('child_process');
+    const cwd = dir
+      || process.env.CLAUDE_PROJECT_DIR
+      || process.env.PWD
+      || require('os').homedir();
+    if (process.platform === 'win32') {
+      const posixPath = __fiCli.replace(/\\/g, '/');
+      return execFileSync('bash', ['-c', `"${posixPath}" status --format=segment`],
+        { cwd, encoding: 'utf8', timeout: 5000 }).trim();
+    }
+    return execFileSync(__fiCli, ['status', '--format=segment'],
+      { cwd, encoding: 'utf8', timeout: 5000 }).trim();
+  } catch (e) { return ''; }
+}
 try {
-  const { execSync } = require('child_process');
-  const path = require('path');
-  const fs = require('fs');
-  let __fiCli = 'found-issues';
-  try { execSync('command -v found-issues', { stdio: 'ignore' }); }
-  catch (e) {
-    const cacheGlob = path.join(process.env.HOME, '.claude/plugins/cache');
+  const _path = require('path');
+  const _fs = require('fs');
+  const _os = require('os');
+  if (process.platform !== 'win32') {
     try {
-      const candidates = require('child_process')
-        .execSync(`ls -d ${cacheGlob}/*/found-issues/*/bin/found-issues 2>/dev/null | sort -V | tail -1`, { encoding: 'utf8' })
-        .trim();
-      if (candidates && fs.existsSync(candidates)) __fiCli = candidates;
-      else throw new Error('no found-issues binary');
-    } catch (e2) { throw e2; }
+      require('child_process').execSync('command -v found-issues', { stdio: 'ignore' });
+      __fiCli = 'found-issues';
+    } catch (e) { /* fall through to cache lookup */ }
   }
-  const cwd = process.env.CLAUDE_PROJECT_DIR || process.env.HOME;
-  __fiSeg = execSync(`"${__fiCli}" status --format=segment`, { cwd, encoding: 'utf8', timeout: 5000 }).trim();
-} catch (e) {}
+  if (!__fiCli) {
+    const cacheRoot = _path.join(_os.homedir(), '.claude', 'plugins', 'cache');
+    if (_fs.existsSync(cacheRoot)) {
+      const candidates = [];
+      for (const mkt of _fs.readdirSync(cacheRoot)) {
+        const fiDir = _path.join(cacheRoot, mkt, 'found-issues');
+        if (!_fs.existsSync(fiDir)) continue;
+        for (const ver of _fs.readdirSync(fiDir)) {
+          const bin = _path.join(fiDir, ver, 'bin', 'found-issues');
+          if (_fs.existsSync(bin)) candidates.push({ ver, bin });
+        }
+      }
+      candidates.sort((a, b) => a.ver.localeCompare(b.ver, undefined, { numeric: true }));
+      if (candidates.length) __fiCli = candidates[candidates.length - 1].bin;
+    }
+  }
+} catch (e) { /* silent: never break the statusline */ }
 // === end found-issues plugin segment ===
 BLOCK
 }
@@ -2230,34 +2257,37 @@ cmd_install_statusline_target_node() {
   tmp_block="$(mktemp -t fi-target-node-block.XXXXXX)"
   fi_generate_node_marker_block > "$tmp_block"
 
+  # splice_line is now a newline-separated list of line numbers; convert to space-separated
+  # for awk -v (BSD awk rejects literal newlines in -v values)
+  local splice_lines_sp
+  splice_lines_sp="$(printf '%s' "$splice_line" | tr '\n' ' ')"
   tmp_modified="$(mktemp -t fi-target-node-mod.XXXXXX)"
-  awk -v insert_after="$insert_after" \
-      -v splice_line="$splice_line" \
+  LC_ALL=C awk -v insert_after="$insert_after" \
+      -v splice_lines="$splice_lines_sp" \
       -v block_file="$tmp_block" '
+    BEGIN {
+      n = split(splice_lines, arr, " ")
+      for (i = 1; i <= n; i++) if (arr[i] != "") splice_set[arr[i]] = 1
+    }
     function print_block(   line) {
       while ((getline line < block_file) > 0) print line
       close(block_file)
     }
     NR == insert_after && insert_after > 0 { print; print_block(); next }
-    NR == splice_line {
+    (NR in splice_set) {
       line = $0
-      # Template literal: inject ${__fiSeg} before the last backtick.
-      # awk sub() does not support backreferences (\1), so we manually find
-      # the last backtick position and splice there.
       if (match(line, /`/)) {
         last_bt = 0
         for (i = length(line); i >= 1; i--) {
           if (substr(line, i, 1) == "`") { last_bt = i; break }
         }
         if (last_bt > 0) {
-          line = substr(line, 1, last_bt - 1) "${__fiSeg}" substr(line, last_bt)
+          line = substr(line, 1, last_bt - 1) "${__fiSeg(typeof dir!=='\''undefined'\''?dir:(typeof cwd!=='\''undefined'\''?cwd:undefined))}" substr(line, last_bt)
         }
-        # Add trailing comment marker (after the closing paren+semicolon)
         sub(/;[[:space:]]*$/, ";  // found-issues:seg", line)
         if (line !~ /found-issues:seg/) line = line "  // found-issues:seg"
       } else if (match(line, /console\.log\(/) || match(line, /process\.stdout\.write\(/)) {
-        # Plain string or stdout.write: insert + __fiSeg before first closing paren
-        sub(/\)/, " + __fiSeg)", line)
+        sub(/\)/, " + __fiSeg(typeof dir!=='\''undefined'\''?dir:(typeof cwd!=='\''undefined'\''?cwd:undefined)))", line)
         sub(/;[[:space:]]*$/, ";  // found-issues:seg", line)
         if (line !~ /found-issues:seg/) line = line "  // found-issues:seg"
       }
@@ -3074,8 +3104,9 @@ cmd_uninstall_statusline_custom_target() {
       # Bash: ${__FI_SEG}"  # found-issues:seg  → remove the trailing portion
       sub(/\$\{__FI_SEG\}"[[:space:]]*#[[:space:]]*found-issues:seg.*$/, "\"")
       sub(/\$\{__FI_SEG\}[[:space:]]*#[[:space:]]*found-issues:seg.*$/, "")
-      # Node: ${__fiSeg}`); // found-issues:seg
-      sub(/\$\{__fiSeg\}[^`]*`[[:space:]]*\)?;[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, "`);")
+      # Node template literal: ${__fiSeg} or ${__fiSeg(...)}  before closing backtick
+      sub(/\$\{__fiSeg[^}]*\}[^`]*`[[:space:]]*\)?;[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, "`);")
+      sub(/\+[[:space:]]*__fiSeg[^)]*\)[[:space:]]*\);[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, ");")
       sub(/\+[[:space:]]*__fiSeg[[:space:]]*\);[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, ");")
       # Python f-string with double quote: print(f"...{_fi_seg}")  # found-issues:seg
       sub(/\{_fi_seg\}"\)[[:space:]]*#[[:space:]]*found-issues:seg.*$/, "\")")
@@ -3085,7 +3116,9 @@ cmd_uninstall_statusline_custom_target() {
       sub(/\+[[:space:]]*_fi_seg[[:space:]]*\)[[:space:]]*#[[:space:]]*found-issues:seg.*$/, ")")
     }
     /\/\/ found-issues:seg/ {
-      sub(/\$\{__fiSeg\}[^`]*`[[:space:]]*\)?;[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, "`);")
+      # Node template literal: ${__fiSeg} or ${__fiSeg(...)}  before closing backtick
+      sub(/\$\{__fiSeg[^}]*\}[^`]*`[[:space:]]*\)?;[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, "`);")
+      sub(/\+[[:space:]]*__fiSeg[^)]*\)[[:space:]]*\);[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, ");")
       sub(/\+[[:space:]]*__fiSeg[[:space:]]*\);[[:space:]]*\/\/[[:space:]]*found-issues:seg.*$/, ");")
     }
     { print }

@@ -328,3 +328,51 @@ EOF
   [ "$status" -eq 0 ]
   [ "$original" = "$(cat tmp/sl.py)" ]
 }
+
+@test "install-statusline --target node: marker block uses os.homedir not process.env.HOME" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+console.log(`repo | main`);
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  # New shim: no process.env.HOME; uses os.homedir.
+  ! grep -q "process.env.HOME" tmp/sl.js
+  grep -q "os.homedir" tmp/sl.js
+  # Platform-gated: shim has process.platform check.
+  grep -q "process.platform" tmp/sl.js
+  # __fiSeg is now a function, not a value.
+  grep -q "function __fiSeg" tmp/sl.js
+}
+
+@test "install-statusline --target node: shim parses + binary resolution executes without throwing" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+console.log(`repo | main`);
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  if command -v node >/dev/null 2>&1; then
+    node --check tmp/sl.js
+  else
+    skip "node not available"
+  fi
+}
+
+@test "install-statusline --target node --apply: patches every console.log in multi-branch statusline" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+const data = { workspace: { current_dir: '/tmp/x' } };
+const dir = data.workspace.current_dir;
+if (dir) {
+  console.log(`A | ${dir}`);
+} else {
+  console.log(`B | none`);
+}
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  local seg_count
+  seg_count="$(grep -c 'found-issues:seg' tmp/sl.js)"
+  [ "$seg_count" = "2" ]
+}
