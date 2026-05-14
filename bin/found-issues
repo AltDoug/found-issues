@@ -2513,11 +2513,13 @@ def _fi_seg(_dir=None):
             _fi_posix = _fi_cli.replace('\\', '/')
             # On Windows, Python's cwd arg passes to the Windows API which cannot
             # resolve POSIX Git Bash paths (e.g. /d/a/...). cd inside bash instead.
+            # Use explicit UTF-8 encoding to avoid Windows console code page issues.
             _fi_safe_cwd = _fi_cwd.replace('\\', '/').replace("'", "'\\''")
-            return _fi_subprocess.run(
+            _fi_result = _fi_subprocess.run(
                 ['bash', '-c', f"cd '{_fi_safe_cwd}' && \"{_fi_posix}\" status --format=segment"],
-                capture_output=True, text=True, timeout=5
-            ).stdout.strip()
+                capture_output=True, timeout=5
+            )
+            return _fi_result.stdout.decode('utf-8', errors='replace').strip()
         return _fi_subprocess.run(
             [_fi_cli, 'status', '--format=segment'],
             cwd=_fi_cwd, capture_output=True, text=True, timeout=5
