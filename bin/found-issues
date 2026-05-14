@@ -2962,6 +2962,75 @@ cmd_doctor() {
   fi
   printf '\n'
 
+  # --- Statusline runtime probe ---
+  printf '== Runtime probe ==\n'
+  if [[ -z "$statusline_target" || ! -f "$statusline_target" ]]; then
+    printf '%s Skipped — no statusline target file to probe.\n' "$section_warn"
+  elif [[ -n "${custom_target}" && -z "$custom_language" ]]; then
+    printf '%s Skipped — unrecognized statusline language for %s.\n' "$section_warn" "$custom_target"
+  else
+    local probe_cwd probe_stdin probe_output
+    probe_cwd="$(pwd)"
+    probe_stdin="$(printf '{"model":{"display_name":"Test"},"workspace":{"current_dir":"%s"},"session_id":"t","context_window":{"remaining_percentage":50}}' "$probe_cwd")"
+
+    local executor
+    case "$statusline_language" in
+      bash)   executor=(bash "$statusline_target") ;;
+      node)   executor=(node "$statusline_target") ;;
+      python) executor=(python3 "$statusline_target") ;;
+    esac
+
+    # Use perl alarm-based timeout when available; plain exec otherwise.
+    if command -v perl >/dev/null 2>&1; then
+      probe_output="$(printf '%s' "$probe_stdin" | perl -e 'alarm(5); exec @ARGV' -- "${executor[@]}" 2>&1 || true)"
+    elif command -v timeout >/dev/null 2>&1; then
+      probe_output="$(printf '%s' "$probe_stdin" | timeout 5 "${executor[@]}" 2>&1 || true)"
+    else
+      probe_output="$(printf '%s' "$probe_stdin" | "${executor[@]}" 2>&1 || true)"
+    fi
+
+    # Probe success: script ran and produced non-empty output without runtime errors.
+    local probe_has_error=0
+    echo "$probe_output" | LC_ALL=C grep -qiE '(error|exception|traceback|undefined|cannot|not found)' && probe_has_error=1 || true
+
+    if [[ -n "$probe_output" && "$probe_has_error" -eq 0 ]]; then
+      if fi_has_conflict_markers "${issues_file_health:-}" 2>/dev/null; then
+        printf '%s INCONCLUSIVE — segment rendered, but source file has conflict markers.\n' "$section_warn"
+      else
+        printf '%s Segment rendered: %s\n' "$section_pass" "$(echo "$probe_output" | head -1)"
+      fi
+    else
+      printf '%s FAIL — segment did NOT render in probe output.\n' "$section_fail"
+      printf '   Probe output: %s\n' "$(echo "$probe_output" | head -1)"
+
+      # Sub-probe (a): binary cwd resolution
+      if "${FI_BIN_DIR}/found-issues" status --format=segment 2>/dev/null | LC_ALL=C grep -qE ' \| '; then
+        :
+      else
+        printf '   - cause: binary resolution / cwd — `found-issues status --format=segment` is empty from %s\n' "$probe_cwd"
+      fi
+
+      # Sub-probe (c): runtime exception
+      if [[ "$probe_has_error" -eq 1 ]]; then
+        printf '   - cause: runtime error in statusline script (see probe output above).\n'
+      fi
+    fi
+
+    # Sub-probe (b): splice gap detection — always run as a static analysis.
+    local output_count seg_count
+    case "$statusline_language" in
+      node)   output_count="$(LC_ALL=C grep -cE 'console\.log|process\.stdout\.write' "$statusline_target" 2>/dev/null || echo 0)" ;;
+      python) output_count="$(LC_ALL=C grep -cE '^[[:space:]]*print[[:space:]]*\(|sys\.stdout\.write' "$statusline_target" 2>/dev/null || echo 0)" ;;
+      bash)   output_count="$(LC_ALL=C grep -cE '^[[:space:]]*echo[[:space:]]|^[[:space:]]*printf[[:space:]]' "$statusline_target" 2>/dev/null || echo 0)" ;;
+    esac
+    seg_count="$(LC_ALL=C grep -c 'found-issues:seg' "$statusline_target" 2>/dev/null || echo 0)"
+    if (( seg_count < output_count )); then
+      printf '   - cause: splice gap — %s output statements, only %s patched with `found-issues:seg`.\n' "$output_count" "$seg_count"
+      printf '     Re-run: found-issues install-statusline --target %s --apply\n' "$statusline_target"
+    fi
+  fi
+  printf '\n'
+
   # --- gh CLI auth (only relevant in github-* modes) ---
   printf '== gh CLI ==\n'
   if command -v gh >/dev/null 2>&1; then

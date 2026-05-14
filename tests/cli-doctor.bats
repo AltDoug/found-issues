@@ -221,3 +221,55 @@ EOF
   echo "$output" | grep -qE "(broken-posix|v1.4.x)"
   echo "$output" | grep -qi "migrat"
 }
+
+@test "doctor: runtime probe emits OK when integration is healthy" {
+  mkdir -p tmp/.claude
+  cat > tmp/.found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — entry
+EOF
+  cat > tmp/custom.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+dir="$(echo "$input" | jq -r '.workspace.current_dir // ""')"
+echo "repo | $dir"
+EOF
+  chmod +x tmp/custom.sh
+  fi_run install-statusline --target tmp/custom.sh --apply
+  [ "$status" -eq 0 ]
+
+  cat > tmp/.claude/settings.json <<EOF
+{"statusLine": {"command": "bash $(pwd)/tmp/custom.sh"}}
+EOF
+  HOME="$(pwd)/tmp" fi_run doctor
+  echo "$output" | grep -q "Runtime probe"
+  echo "$output" | grep -qE "(OK|✓).*[Ss]egment"
+}
+
+@test "doctor: runtime probe reports FAIL with splice-gap diagnostic when output branch unpatched" {
+  mkdir -p tmp/.claude
+  cat > tmp/.found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — entry
+EOF
+  cat > tmp/custom.js <<'EOF'
+#!/usr/bin/env node
+const fs = require('fs');
+const data = JSON.parse(fs.readFileSync(0, 'utf8'));
+const dir = data.workspace.current_dir;
+if (dir) {
+  console.log(`A | ${dir}`);
+} else {
+  console.log(`B | none`);
+}
+EOF
+  fi_run install-statusline --target tmp/custom.js --apply
+  [ "$status" -eq 0 ]
+  # Remove ONE splice trailer to simulate a gap. Use portable awk (BSD/GNU safe).
+  LC_ALL=C awk 'BEGIN{done=0} /\/\/ found-issues:seg/ && !done {sub(/[[:space:]]*\/\/.*found-issues:seg.*/,""); done=1} {print}' \
+    tmp/custom.js > tmp/custom.js.tmp && mv tmp/custom.js.tmp tmp/custom.js
+
+  cat > tmp/.claude/settings.json <<EOF
+{"statusLine": {"command": "node $(pwd)/tmp/custom.js"}}
+EOF
+  HOME="$(pwd)/tmp" fi_run doctor
+  echo "$output" | grep -qE "splice gap|output statements"
+}
