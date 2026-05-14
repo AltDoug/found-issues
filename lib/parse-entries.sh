@@ -183,6 +183,10 @@ fi_parse_entry() {
 
 # Output entries matching status_filter (open|deferred|fixed|all).
 # Returns 1 if file doesn't exist.
+# Conflict-aware: lines inside <<<<<<< ... >>>>>>> blocks are excluded.
+# Both branches of a conflict are dropped — we never inflate counts during
+# a merge conflict. fi_has_conflict_markers exposes this state to doctor
+# for prominent surfacing.
 fi_entries() {
   local file="$1"
   local status_filter="${2:-all}"
@@ -192,16 +196,27 @@ fi_entries() {
   fi
 
   case "$status_filter" in
-    all)
-      grep -E '^- \[(open|deferred|fixed)\]' "$file" || true
-      ;;
-    open|deferred|fixed)
-      grep -E "^- \[$status_filter\]" "$file" || true
-      ;;
-    *)
-      return 2
-      ;;
+    all|open|deferred|fixed) : ;;
+    *) return 2 ;;
   esac
+
+  # Conflict-aware: lines inside <<<<<<< ... >>>>>>> blocks are excluded.
+  # Both branches of a conflict are dropped — we never inflate counts during
+  # a merge conflict. fi_has_conflict_markers exposes this state to doctor
+  # for prominent surfacing.
+  #
+  # Note: the status_filter is passed as a plain string (-v sf=) and matched
+  # with index() rather than a regex variable — bracket characters in awk -v
+  # strings are not reliably escaped across all awk implementations.
+  LC_ALL=C awk -v sf="$status_filter" '
+    /^<<<<<<< / { in_conflict = 1; next }
+    /^>>>>>>> / { in_conflict = 0; next }
+    /^=======$/ && in_conflict { next }
+    !in_conflict && /^- \[/ {
+      if (sf == "all") { print; next }
+      if (index($0, "- [" sf "]") == 1) print
+    }
+  ' "$file"
 }
 
 # Count entries by status. Always prints a number (0 if no file or no matches).

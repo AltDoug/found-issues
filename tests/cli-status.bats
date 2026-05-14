@@ -222,3 +222,40 @@ EOF
   run fi_has_conflict_markers tmp/nonexistent.md
   [ "$status" -eq 1 ]
 }
+
+@test "fi_entries: skips lines inside <<<<<<< / >>>>>>> conflict regions" {
+  mkdir -p tmp
+  cat > tmp/conflict.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+<<<<<<< HEAD
+- [open] 2026-05-02 b.ts:1 — branch HEAD version
+=======
+- [open] 2026-05-02 b.ts:1 — branch OTHER version
+>>>>>>> other
+- [open] 2026-05-03 c.ts:1 — entry two
+EOF
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_entries tmp/conflict.md open
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | wc -l | tr -d ' ')" = "2" ]
+  echo "$output" | grep -q 'a.ts:1'
+  echo "$output" | grep -q 'c.ts:1'
+  ! echo "$output" | grep -q 'b.ts:1'
+}
+
+@test "fi_count open: returns conflict-skipped count" {
+  mkdir -p tmp
+  cat > tmp/conflict.md <<'EOF'
+- [open] 2026-05-01 a.ts:1 — entry one
+<<<<<<< HEAD
+- [open] 2026-05-02 b.ts:1 — branch HEAD
+=======
+- [open] 2026-05-02 b.ts:1 — branch OTHER
+>>>>>>> other
+- [open] 2026-05-03 c.ts:1 — entry two
+EOF
+  source "${BATS_TEST_DIRNAME}/../lib/parse-entries.sh"
+  run fi_count tmp/conflict.md open
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+}
