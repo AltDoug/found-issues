@@ -273,3 +273,28 @@ EOF
   HOME="$(pwd)/tmp" fi_run doctor
   echo "$output" | grep -qE "splice gap|output statements"
 }
+
+@test "doctor-statusline-runtime: standalone subcommand emits only the runtime probe section" {
+  mkdir -p tmp/.claude
+  cat > tmp/.found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — entry
+EOF
+  cat > tmp/custom.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+dir="$(echo "$input" | jq -r '.workspace.current_dir // ""')"
+echo "repo | $dir"
+EOF
+  chmod +x tmp/custom.sh
+  fi_run install-statusline --target tmp/custom.sh --apply
+  [ "$status" -eq 0 ]
+  cat > tmp/.claude/settings.json <<EOF
+{"statusLine": {"command": "bash $(pwd)/tmp/custom.sh"}}
+EOF
+
+  HOME="$(pwd)/tmp" fi_run doctor-statusline-runtime
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Runtime probe"
+  ! echo "$output" | grep -q "Plugin runtime"
+  ! echo "$output" | grep -q "Mode detection"
+}
