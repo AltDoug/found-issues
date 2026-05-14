@@ -1904,6 +1904,85 @@ fi_strip_legacy_handwritten() {
     || chmod +x "$file"
 }
 
+# Detect whether a custom statusline target contains the v1.4.0/v1.4.1
+# POSIX-only marker block. Used by install-statusline --target to trigger
+# in-place migration. Signature differs per language:
+#   Node:   marker block contains `process.env.HOME` AND NOT `os.homedir` /
+#           `function __fiSeg` (the new v1.5.0 discriminators)
+#   Python: marker block contains `_fi_os.environ.get('HOME'` AND not `pathlib`
+#   Bash:   N/A (bash shim was always correct)
+fi_target_is_v14x_broken() {
+  local path="$1"
+  local language="$2"
+  [[ -f "$path" ]] || return 1
+  case "$language" in
+    node)
+      LC_ALL=C awk '
+        /^\/\/ === found-issues plugin segment ===/ { in_block = 1; next }
+        /^\/\/ === end found-issues plugin segment ===/ { in_block = 0; next }
+        in_block && /process\.env\.HOME/ { has_old = 1 }
+        in_block && /os\.homedir/ { has_new = 1 }
+        in_block && /function __fiSeg/ { has_new = 1 }
+        END { exit (has_old && !has_new ? 0 : 1) }
+      ' "$path"
+      ;;
+    python)
+      LC_ALL=C awk '
+        /^# === found-issues plugin segment ===/ { in_block = 1; next }
+        /^# === end found-issues plugin segment ===/ { in_block = 0; next }
+        in_block && /environ\.get\(.HOME./ { has_old = 1 }
+        in_block && /pathlib/ { has_new = 1 }
+        END { exit (has_old && !has_new ? 0 : 1) }
+      ' "$path"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# Surgically remove marker block + splice trailer comments from a target file.
+# Used by the v1.4.x migration path. Mirrors the canonical bash strip in
+# fi_strip_legacy_lines but operates on language-specific marker syntax.
+fi_strip_target_markers() {
+  local path="$1"
+  local language="$2"
+  local start_marker end_marker trailer_pattern
+  case "$language" in
+    node)
+      start_marker="// === found-issues plugin segment ==="
+      end_marker="// === end found-issues plugin segment ==="
+      trailer_pattern='[[:space:]]*//[[:space:]]*found-issues:seg[[:space:]]*$'
+      ;;
+    python)
+      start_marker="# === found-issues plugin segment ==="
+      end_marker="# === end found-issues plugin segment ==="
+      trailer_pattern='[[:space:]]*#[[:space:]]*found-issues:seg[[:space:]]*$'
+      ;;
+    *) return 1 ;;
+  esac
+
+  local tmp
+  tmp="$(mktemp -t fi-strip.XXXXXX)"
+  LC_ALL=C awk -v start="$start_marker" -v endm="$end_marker" -v trailer="$trailer_pattern" '
+    $0 == start { in_block = 1; next }
+    $0 == endm { in_block = 0; next }
+    in_block { next }
+    {
+      line = $0
+      # Strip the splice injection from the line.
+      sub(/\$\{__fiSeg\([^)]*\)\)\}/, "", line)
+      sub(/\$\{__fiSeg\}/, "", line)
+      sub(/\{_fi_seg\([^)]*\)\)\}/, "", line)
+      sub(/\{_fi_seg\}/, "", line)
+      sub(/[[:space:]]*\+[[:space:]]*__fiSeg\([^)]*\)\)/, "", line)
+      sub(/[[:space:]]*\+[[:space:]]*_fi_seg\([^)]*\)\)/, "", line)
+      sub(trailer, "", line)
+      print line
+    }
+  ' "$path" > "$tmp"
+  cp "$tmp" "$path"
+  rm -f "$tmp"
+}
+
 # === Subcommand: install-statusline --target <path> ===
 #
 # Custom-statusline integration. Splices the found-issues segment into a
@@ -2229,10 +2308,20 @@ cmd_install_statusline_target_node() {
   local path="$1"
   local mode="$2"
 
-  # Idempotency
+  # Idempotency: if v1.5.0+ marker block already present, no-op.
+  # If v1.4.x POSIX-only marker present, strip + reinstall (migration path).
   if grep -Fq "// === found-issues plugin segment ===" "$path"; then
-    printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
-    return 0
+    if fi_target_is_v14x_broken "$path" node; then
+      printf 'install-statusline --target: migrating v1.4.x POSIX-only marker block in %s\n' "$path"
+      # Strip old marker block + splice trailers, then fall through to install.
+      fi_strip_target_markers "$path" node || {
+        fi_err "install-statusline --target: failed to strip v1.4.x marker block"
+        return 14
+      }
+    else
+      printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
+      return 0
+    fi
   fi
 
   local splice_line
@@ -2407,10 +2496,19 @@ cmd_install_statusline_target_python() {
   local path="$1"
   local mode="$2"
 
-  # Idempotency
+  # Idempotency: if v1.5.0+ marker block already present, no-op.
+  # If v1.4.x POSIX-only marker present, strip + reinstall (migration path).
   if grep -Fq "# === found-issues plugin segment ===" "$path"; then
-    printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
-    return 0
+    if fi_target_is_v14x_broken "$path" python; then
+      printf 'install-statusline --target: migrating v1.4.x POSIX-only marker block in %s\n' "$path"
+      fi_strip_target_markers "$path" python || {
+        fi_err "install-statusline --target: failed to strip v1.4.x marker block"
+        return 14
+      }
+    else
+      printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
+      return 0
+    fi
   fi
 
   local splice_line

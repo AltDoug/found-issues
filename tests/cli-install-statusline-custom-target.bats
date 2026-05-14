@@ -439,3 +439,54 @@ EOF
     skip "python3 not available"
   fi
 }
+
+@test "install-statusline --target node: detects v1.4.x POSIX-only marker block as broken" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+// PATH-resilience: try `found-issues` on PATH, fall back to plugin cache glob.
+let __fiSeg = '';
+try {
+  const { execSync } = require('child_process');
+  let __fiCli = 'found-issues';
+  try { execSync('command -v found-issues', { stdio: 'ignore' }); }
+  catch (e) {
+    const cacheGlob = process.env.HOME + '/.claude/plugins/cache';
+    // ... rest of v1.4.x form
+  }
+} catch (e) {}
+// === end found-issues plugin segment ===
+console.log(`repo | main${__fiSeg}`);  // found-issues:seg
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.4.x"
+  ! grep -q "process.env.HOME" tmp/sl.js
+  grep -q "os.homedir" tmp/sl.js
+  ls tmp/sl.js.fi-bak-* >/dev/null 2>&1
+}
+
+@test "install-statusline --target python: detects v1.4.x POSIX-only marker block as broken" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+# === found-issues plugin segment ===
+import subprocess as _fi_subprocess
+import shutil as _fi_shutil
+import os as _fi_os
+_fi_seg = ''
+try:
+    _fi_cli = _fi_shutil.which('found-issues')
+    if _fi_cli:
+        _fi_cwd = _fi_os.environ.get('CLAUDE_PROJECT_DIR') or _fi_os.environ.get('HOME', '.')
+        _fi_seg = _fi_subprocess.run([_fi_cli, 'status', '--format=segment'], cwd=_fi_cwd, capture_output=True, text=True, timeout=5).stdout.strip()
+except Exception:
+    _fi_seg = ''
+# === end found-issues plugin segment ===
+print(f"repo | main{_fi_seg}")  # found-issues:seg
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.4.x"
+  ! grep -q "environ.get('HOME'" tmp/sl.py
+  grep -q "pathlib" tmp/sl.py
+}
