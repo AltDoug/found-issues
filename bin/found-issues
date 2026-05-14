@@ -1795,9 +1795,25 @@ fi_save_statusline_backup() {
 #                          (would render the count twice — needs cleanup)
 #   none                 — no found-issues integration at all (fresh install path)
 fi_statusline_state() {
-  local file="$FI_STATUSLINE_FILE"
+  local file="${1:-$FI_STATUSLINE_FILE}"
+  local language="${2:-bash}"
   if [[ ! -f "$file" ]]; then
     printf 'no-file'
+    return 0
+  fi
+
+  # Node/Python: simpler detection (no legacy migration history).
+  if [[ "$language" != "bash" ]]; then
+    if fi_target_is_v14x_broken "$file" "$language"; then
+      printf 'installed-broken-posix'
+      return 0
+    fi
+    if grep -Fq "// === found-issues plugin segment ===" "$file" 2>/dev/null \
+       || grep -Fq "# === found-issues plugin segment ===" "$file" 2>/dev/null; then
+      printf 'installed-fixed'
+      return 0
+    fi
+    printf 'none'
     return 0
   fi
 
@@ -2885,30 +2901,64 @@ cmd_doctor() {
   fi
   printf '\n'
 
-  # --- Statusline ---
+  # --- Statusline (extended for custom targets) ---
   printf '== Statusline ==\n'
-  if [[ -f "$FI_STATUSLINE_FILE" ]]; then
+  local settings_file="$HOME/.claude/settings.json"
+  local custom_target="" custom_language=""
+  if [[ -f "$settings_file" ]] && command -v jq >/dev/null 2>&1; then
+    local cmd
+    cmd="$(jq -r '.statusLine.command // ""' "$settings_file" 2>/dev/null || true)"
+    if [[ -n "$cmd" ]]; then
+      printf '%s settings.json statusLine.command: %s\n' "$section_pass" "$cmd"
+      custom_target="$(printf '%s' "$cmd" | LC_ALL=C awk '{print $NF}' | sed "s|\${HOME}|$HOME|g; s|^~|$HOME|")"
+      case "$custom_target" in
+        *.js|*.mjs|*.cjs) custom_language=node ;;
+        *.py)             custom_language=python ;;
+        *.sh|*.bash)      custom_language=bash ;;
+      esac
+    fi
+  fi
+
+  local statusline_target statusline_language
+  if [[ -n "$custom_target" && -f "$custom_target" ]]; then
+    statusline_target="$custom_target"
+    statusline_language="$custom_language"
+    printf '   Resolved target: %s (language: %s)\n' "$statusline_target" "$statusline_language"
+  else
+    statusline_target="$FI_STATUSLINE_FILE"
+    statusline_language="bash"
+  fi
+
+  if [[ -f "$statusline_target" ]]; then
     local statusline_state
-    statusline_state="$(fi_statusline_state)"
+    statusline_state="$(fi_statusline_state "$statusline_target" "$statusline_language")"
     case "$statusline_state" in
       installed-fixed)
-        printf '%s State: installed-fixed (canonical block, cwd handling present).\n' "$section_pass"
+        printf '%s State: installed-fixed (canonical block).\n' "$section_pass"
+        ;;
+      installed-broken-posix)
+        printf '%s State: installed-broken-posix — v1.4.x POSIX-only shim.\n' "$section_fail"
+        printf '   Symptom: empty segment on Windows OR on multi-branch statuslines.\n'
+        printf '   Fix: found-issues install-statusline --target %s --apply   (auto-migrates)\n' "$statusline_target"
         ;;
       installed-broken|legacy-handwritten|legacy-and-installed)
         printf '%s State: %s — counter renders empty silently.\n' "$section_fail" "$statusline_state"
         printf '   Fix: found-issues install-statusline   (auto-migrates with timestamped backup)\n'
         ;;
       none)
-        printf '%s State: none — statusline.sh exists but no found-issues segment.\n' "$section_warn"
-        printf '   Install: found-issues install-statusline\n'
+        printf '%s State: none — statusline exists but no found-issues segment.\n' "$section_warn"
+        if [[ -n "$custom_target" ]]; then
+          printf '   Install: found-issues install-statusline --target %s --apply\n' "$statusline_target"
+        else
+          printf '   Install: found-issues install-statusline\n'
+        fi
         ;;
       no-file)
-        printf '%s State: no-file (unreachable — guarded above).\n' "$section_warn"
+        printf '%s State: no-file.\n' "$section_warn"
         ;;
     esac
   else
-    printf '%s No %s — Claude Code uses the default statusline.\n' "$section_warn" "$FI_STATUSLINE_FILE"
-    printf '   To enable the counter segment, create the file and run `found-issues install-statusline`.\n'
+    printf '%s Statusline target file not found: %s\n' "$section_warn" "$statusline_target"
   fi
   printf '\n'
 

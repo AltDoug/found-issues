@@ -187,3 +187,37 @@ EOF
   echo "$output" | grep -q "Source file health"
   echo "$output" | grep -qE "(OK|✓).*Source file"
 }
+
+@test "doctor: detects custom statusline path from ~/.claude/settings.json" {
+  mkdir -p tmp/.claude
+  cat > tmp/.claude/settings.json <<'EOF'
+{"statusLine": {"command": "node ${HOME}/custom-statusline.js"}}
+EOF
+  HOME="$(pwd)/tmp" fi_run doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "statusLine.command"
+  echo "$output" | grep -q "custom-statusline.js"
+}
+
+@test "doctor: detects v1.4.x broken-posix marker in custom Node target" {
+  mkdir -p tmp/.claude
+  cat > tmp/custom.js <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+let __fiSeg = '';
+try {
+  const path = process.env.HOME + '/.claude';
+  const { execSync } = require('child_process');
+  execSync('command -v found-issues');
+} catch (e) {}
+// === end found-issues plugin segment ===
+console.log(`repo${__fiSeg}`);  // found-issues:seg
+EOF
+  cat > tmp/.claude/settings.json <<EOF
+{"statusLine": {"command": "node $(pwd)/tmp/custom.js"}}
+EOF
+  HOME="$(pwd)/tmp" fi_run doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE "(broken-posix|v1.4.x)"
+  echo "$output" | grep -qi "migrat"
+}
