@@ -78,6 +78,19 @@ EOF
 }
 
 @test "session-start: skips migration when target file is a symlink" {
+  # Probe symlink capability before the test: on Windows Git Bash without
+  # SeCreateSymbolicLinkPrivilege, `ln -s` silently creates a copy and
+  # [[ -L ... ]] is false — the hook's symlink branch is never taken.
+  local _probe_target _probe_link
+  _probe_target="$(mktemp)"
+  _probe_link="${_probe_target}.link"
+  ln -s "$_probe_target" "$_probe_link" 2>/dev/null
+  if [[ ! -L "$_probe_link" ]]; then
+    rm -f "$_probe_target" "$_probe_link"
+    skip "filesystem does not support symlinks (typical on Windows without SeCreateSymbolicLinkPrivilege)"
+  fi
+  rm -f "$_probe_target" "$_probe_link"
+
   FAKE_HOME="$(mktemp -d)"
   mkdir -p "$FAKE_HOME/.claude" "$FAKE_HOME/dotfiles"
   cat > "$FAKE_HOME/dotfiles/custom.js" <<'EOF'

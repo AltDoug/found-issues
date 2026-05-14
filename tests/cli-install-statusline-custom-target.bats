@@ -507,8 +507,18 @@ EOF
 @test "runtime e2e (node): single-branch statusline emits segment" {
   if ! command -v node >/dev/null 2>&1; then skip "node not available"; fi
 
-  # Prepend repo bin/ so the shim's `command -v found-issues` resolves on CI
-  # (no global install, no plugin cache on bare checkout).
+  # Per-test HOME: seed a synthetic plugin cache so the shim's cache-walk
+  # resolves on ALL platforms (including Windows, where `command -v` is
+  # unavailable in Node's execSync and the PATH-prepend fix doesn't apply).
+  local _fi_test_home
+  _fi_test_home="$(mktemp -d)"
+  mkdir -p "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin"
+  cp "${TEST_REPO_ROOT}/bin/found-issues" \
+     "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin/found-issues"
+  chmod +x "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin/found-issues"
+  export HOME="$_fi_test_home"
+
+  # Also prepend repo bin/ for POSIX (command -v path, harmless elsewhere).
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
   cat > .found-issues.md <<'EOF'
@@ -530,13 +540,24 @@ EOF
   sl_output="$(fi_synthetic_stdin "$(pwd)" | node tmp/sl.js 2>/dev/null)"
 
   echo "$sl_output" | grep -qE ' \| .*issue'
+  rm -rf "$_fi_test_home"
 }
 
 @test "runtime e2e (node): multi-branch statusline emits segment in both branches" {
   if ! command -v node >/dev/null 2>&1; then skip "node not available"; fi
 
-  # Prepend repo bin/ so the shim's `command -v found-issues` resolves on CI
-  # (no global install, no plugin cache on bare checkout).
+  # Per-test HOME: seed a synthetic plugin cache so the shim's cache-walk
+  # resolves on ALL platforms (including Windows, where `command -v` is
+  # unavailable in Node's execSync and the PATH-prepend fix doesn't apply).
+  local _fi_test_home
+  _fi_test_home="$(mktemp -d)"
+  mkdir -p "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin"
+  cp "${TEST_REPO_ROOT}/bin/found-issues" \
+     "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin/found-issues"
+  chmod +x "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin/found-issues"
+  export HOME="$_fi_test_home"
+
+  # Also prepend repo bin/ for POSIX (command -v path, harmless elsewhere).
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
   cat > .found-issues.md <<'EOF'
@@ -567,13 +588,24 @@ EOF
   out_b="$(printf '{"workspace":{"current_dir":"%s"}}' "$(pwd)/tmp" | node tmp/sl.js 2>/dev/null)"
   echo "$out_b" | grep -q "branch-B"
   echo "$out_b" | grep -qE ' \| .*issue'
+  rm -rf "$_fi_test_home"
 }
 
 @test "runtime e2e (python): single-branch statusline emits segment" {
   if ! command -v python3 >/dev/null 2>&1; then skip "python3 not available"; fi
 
-  # Prepend repo bin/ so the shim's binary resolution resolves on CI
-  # (no global install, no plugin cache on bare checkout).
+  # Per-test HOME: seed a synthetic plugin cache so the shim's cache-walk
+  # resolves on ALL platforms (including Windows, where shutil.which skips
+  # and the PATH-prepend fix doesn't apply to the Python shim).
+  local _fi_test_home
+  _fi_test_home="$(mktemp -d)"
+  mkdir -p "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin"
+  cp "${TEST_REPO_ROOT}/bin/found-issues" \
+     "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin/found-issues"
+  chmod +x "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin/found-issues"
+  export HOME="$_fi_test_home"
+
+  # Also prepend repo bin/ for POSIX (shutil.which path, harmless elsewhere).
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
   cat > .found-issues.md <<'EOF'
@@ -594,13 +626,24 @@ EOF
   local sl_output
   sl_output="$(fi_synthetic_stdin "$(pwd)" | python3 tmp/sl.py 2>/dev/null)"
   echo "$sl_output" | grep -qE ' \| .*issue'
+  rm -rf "$_fi_test_home"
 }
 
 @test "runtime e2e (python): multi-branch statusline emits segment in both branches" {
   if ! command -v python3 >/dev/null 2>&1; then skip "python3 not available"; fi
 
-  # Prepend repo bin/ so the shim's binary resolution resolves on CI
-  # (no global install, no plugin cache on bare checkout).
+  # Per-test HOME: seed a synthetic plugin cache so the shim's cache-walk
+  # resolves on ALL platforms (including Windows, where shutil.which skips
+  # and the PATH-prepend fix doesn't apply to the Python shim).
+  local _fi_test_home
+  _fi_test_home="$(mktemp -d)"
+  mkdir -p "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin"
+  cp "${TEST_REPO_ROOT}/bin/found-issues" \
+     "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin/found-issues"
+  chmod +x "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin/found-issues"
+  export HOME="$_fi_test_home"
+
+  # Also prepend repo bin/ for POSIX (shutil.which path, harmless elsewhere).
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
   cat > .found-issues.md <<'EOF'
@@ -630,11 +673,21 @@ EOF
   out_b="$(printf '{"workspace":{"current_dir":"%s"}}' "$(pwd)/tmp" | python3 tmp/sl.py 2>/dev/null)"
   echo "$out_b" | grep -q "branch-B"
   echo "$out_b" | grep -qE ' \| .*issue'
+  rm -rf "$_fi_test_home"
 }
 
 @test "runtime e2e (bash): multi-branch statusline emits segment in both branches" {
-  # Prepend repo bin/ so the shim's `command -v found-issues` resolves on CI
-  # (no global install, no plugin cache on bare checkout).
+  # Per-test HOME: seed a synthetic plugin cache so the shim's cache-walk
+  # resolves on ALL platforms (consistent with node/python tests above).
+  local _fi_test_home
+  _fi_test_home="$(mktemp -d)"
+  mkdir -p "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin"
+  cp "${TEST_REPO_ROOT}/bin/found-issues" \
+     "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin/found-issues"
+  chmod +x "$_fi_test_home/.claude/plugins/cache/test-mkt/found-issues/0.0.0/bin/found-issues"
+  export HOME="$_fi_test_home"
+
+  # Also prepend repo bin/ so the bash shim's `command -v found-issues` resolves on POSIX CI.
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
   mkdir -p tmp
@@ -665,5 +718,6 @@ EOF
   out_b="$(printf '{}' | bash tmp/sl.sh 2>/dev/null)"
   echo "$out_b" | grep -q "branch-B"
   echo "$out_b" | grep -qE ' \| .*issue'
+  rm -rf "$_fi_test_home"
 }
 
