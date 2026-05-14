@@ -115,8 +115,27 @@ for attempt in 1 2; do
   [[ $attempt -eq 1 ]] && sleep 0.3
 done
 
-# Block with the canonical message
-cat >&2 <<'EOF'
+# Block with an adaptive message. Verbosity:
+#   FOUND_ISSUES_REMINDER_VERBOSITY=full  → 8-line educational form (default for new installs)
+#   FOUND_ISSUES_REMINDER_VERBOSITY=terse → 1-line form (post-onboarding default)
+#   FOUND_ISSUES_REMINDER_VERBOSITY=auto  → terse iff ~/.claude/found-issues/.onboarded exists
+# Default is auto, which gracefully degrades verbosity once the user has seen
+# the message enough times to internalize the marker options. Claude Code
+# always displays the stderr text to the user — there is no API for hiding
+# the reason while still passing it to Claude (verified 2026-05-13).
+__fi_verbosity="${FOUND_ISSUES_REMINDER_VERBOSITY:-auto}"
+if [[ "$__fi_verbosity" == "auto" ]]; then
+  if [[ -f "$HOME/.claude/found-issues/.onboarded" ]]; then
+    __fi_verbosity="terse"
+  else
+    __fi_verbosity="full"
+  fi
+fi
+
+if [[ "$__fi_verbosity" == "terse" ]]; then
+  printf 'Stop blocked: missing <!-- found-issues-checked: ... --> marker. (Options: none-noticed | logged | deferred)\n' >&2
+else
+  cat >&2 <<'EOF'
 Stop blocked: include a found-issues acknowledgment in your final message.
 
 Add ONE of these as an HTML comment anywhere in your response:
@@ -127,4 +146,5 @@ Add ONE of these as an HTML comment anywhere in your response:
 The marker forces conscious consideration; it does not auto-detect issues.
 Use /found-issues:log to log items frictionlessly.
 EOF
+fi
 exit 2

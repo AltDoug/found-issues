@@ -23,7 +23,7 @@ teardown() {
 {"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
 TRANSCRIPT
   input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
-  run bash -c "echo '$input' | '$HOOK'"
+  run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=full echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
   [ "$status" -eq 2 ]
   [[ "$output" == *"acknowledgment"* ]]
   rm -f "$TR"
@@ -119,7 +119,7 @@ TRANSCRIPT
 {"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"You are on main."}]},"uuid":"asst-2","timestamp":"2026-05-12T00:00:03Z","sessionId":"s-1"}
 TRANSCRIPT
   input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
-  run bash -c "echo '$input' | '$HOOK'"
+  run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=full echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
   [ "$status" -eq 2 ]
   [[ "$output" == *"acknowledgment"* ]]
   rm -f "$TR"
@@ -151,7 +151,7 @@ TRANSCRIPT
 no marker
 TRANSCRIPT
   input="{\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"transcript_path\":\"$TR\"}"
-  run bash -c "echo '$input' | '$HOOK'"
+  run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=full echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
   [ "$status" -eq 2 ]
   [[ "$output" == *"acknowledgment"* ]]
   rm -f "$TR"
@@ -171,6 +171,67 @@ TRANSCRIPT
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
   rm -f "$TR"
+}
+
+@test "stop-reminder: terse message when FOUND_ISSUES_REMINDER_VERBOSITY=terse" {
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=terse echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=terse '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Stop blocked"* ]]
+  [[ "$output" == *"missing"* ]]
+  [[ "$output" != *"Add ONE of these"* ]]
+  line_count="$(printf '%s' "$output" | grep -c '' || true)"
+  [ "$line_count" -le 2 ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: full message when FOUND_ISSUES_REMINDER_VERBOSITY=full" {
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=full echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"acknowledgment"* ]]
+  [[ "$output" == *"Add ONE of these"* ]]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: auto-detects terse mode when .onboarded marker exists" {
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude/found-issues"
+  touch "$FAKE_HOME/.claude/found-issues/.onboarded"
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "HOME='$FAKE_HOME' echo '$input' | HOME='$FAKE_HOME' '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Add ONE of these"* ]]
+  rm -rf "$FAKE_HOME" "$TR"
+}
+
+@test "stop-reminder: auto-detects full mode when .onboarded marker absent" {
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  FAKE_HOME="$(mktemp -d)"
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "HOME='$FAKE_HOME' echo '$input' | HOME='$FAKE_HOME' '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Add ONE of these"* ]]
+  rm -rf "$FAKE_HOME" "$TR"
 }
 
 @test "stop-reminder: handles multibyte UTF-8 in transcript without awk towc errors" {
