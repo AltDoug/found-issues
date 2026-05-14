@@ -376,3 +376,48 @@ EOF
   seg_count="$(grep -c 'found-issues:seg' tmp/sl.js)"
   [ "$seg_count" = "2" ]
 }
+
+@test "install-statusline --target python --apply: patches every print in multi-branch statusline" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+import json, sys
+data = json.loads(sys.stdin.read() or '{}')
+dir = data.get('workspace', {}).get('current_dir', '/tmp/x')
+if dir:
+    print(f"A | {dir}")
+else:
+    print(f"B | none")
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  local seg_count
+  seg_count="$(grep -c 'found-issues:seg' tmp/sl.py)"
+  [ "$seg_count" = "2" ]
+}
+
+@test "install-statusline --target python: marker block uses pathlib.Path.home not HOME env" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+print(f"repo | main")
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  ! grep -q "environ.get('HOME'" tmp/sl.py
+  grep -q "pathlib" tmp/sl.py
+  grep -q "platform.system" tmp/sl.py
+  grep -q "def _fi_seg" tmp/sl.py
+}
+
+@test "install-statusline --target python: shim parses without error" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+print(f"repo | main")
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import ast; ast.parse(open('tmp/sl.py').read())"
+  else
+    skip "python3 not available"
+  fi
+}
