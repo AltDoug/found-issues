@@ -122,6 +122,73 @@ if ! command -v "$FI_BIN" >/dev/null 2>&1; then
   fi
 fi
 
+# --- v1.4.x → v1.5.0 marker migration (auto-trigger) ---
+# Detect v1.4.0/v1.4.1 POSIX-only marker blocks in custom Node/Python
+# statusline targets and auto-migrate them in place. Mirrors the v1.0.0
+# bash migration pattern. Opt-out: FOUND_ISSUES_AUTO_MIGRATE=off.
+#
+# Canonical bash statusline (~/.claude/statusline.sh) was always correct on
+# Windows (runs in Git Bash) so this migration only applies to custom Node
+# and Python targets reachable via ~/.claude/settings.json statusLine.command.
+if [[ "${FOUND_ISSUES_AUTO_MIGRATE:-on}" != "off" ]]; then
+  __fi_settings="$HOME/.claude/settings.json"
+  if [[ -f "$__fi_settings" ]] && command -v jq >/dev/null 2>&1; then
+    __fi_cmd="$(jq -r '.statusLine.command // ""' "$__fi_settings" 2>/dev/null || true)"
+    if [[ -n "$__fi_cmd" ]]; then
+      # Last whitespace-separated token is the file path.
+      __fi_target="$(printf '%s' "$__fi_cmd" | LC_ALL=C awk '{print $NF}' | sed "s|\${HOME}|$HOME|g; s|^~|$HOME|")"
+      case "$__fi_target" in
+        *.js|*.mjs|*.cjs) __fi_lang=node ;;
+        *.py)             __fi_lang=python ;;
+        *)                __fi_lang="" ;;
+      esac
+      if [[ -n "$__fi_lang" && -f "$__fi_target" ]]; then
+        if [[ -L "$__fi_target" ]]; then
+          printf 'found-issues: skipping v1.4.x migration — %s is a symlink; rerun install-statusline manually after dotfile sync.\n' "$__fi_target"
+        else
+          __fi_needs_migrate=0
+          if [[ "$__fi_lang" == "node" ]]; then
+            if LC_ALL=C awk '
+                /^\/\/ === found-issues plugin segment ===/ { in_block = 1; next }
+                /^\/\/ === end found-issues plugin segment ===/ { in_block = 0; next }
+                in_block && /process\.env\.HOME/ { has_old = 1 }
+                in_block && /os\.homedir/ { has_new = 1 }
+                in_block && /function __fiSeg/ { has_new = 1 }
+                END { exit (has_old && !has_new ? 0 : 1) }
+              ' "$__fi_target" 2>/dev/null; then
+              __fi_needs_migrate=1
+            fi
+          elif [[ "$__fi_lang" == "python" ]]; then
+            if LC_ALL=C awk '
+                /^# === found-issues plugin segment ===/ { in_block = 1; next }
+                /^# === end found-issues plugin segment ===/ { in_block = 0; next }
+                in_block && /environ\.get\(.HOME./ { has_old = 1 }
+                in_block && /pathlib/ { has_new = 1 }
+                END { exit (has_old && !has_new ? 0 : 1) }
+              ' "$__fi_target" 2>/dev/null; then
+              __fi_needs_migrate=1
+            fi
+          fi
+          if [[ "$__fi_needs_migrate" == "1" ]]; then
+            # Use the hook's co-located binary (plugin runtime sets FI_BIN_DIR;
+            # fall back to dirname-relative path for tests / manual invocations).
+            __fi_migrate_bin="${FI_BIN_DIR:-$(dirname "$0")/../bin}/found-issues"
+            if [[ ! -x "$__fi_migrate_bin" ]]; then
+              __fi_migrate_bin="$FI_BIN"
+            fi
+            if "$__fi_migrate_bin" install-statusline --target "$__fi_target" --apply >/dev/null 2>&1; then
+              printf 'found-issues: auto-migrated v1.4.x statusline shim in %s (timestamped backup written; opt-out: FOUND_ISSUES_AUTO_MIGRATE=off)\n' "$__fi_target"
+            else
+              printf 'found-issues: v1.4.x migration FAILED for %s — run `found-issues install-statusline --target %s --apply` manually.\n' "$__fi_target" "$__fi_target"
+            fi
+          fi
+        fi
+      fi
+    fi
+  fi
+fi
+# --- end v1.4.x → v1.5.0 marker migration ---
+
 # Read input (cwd, session_id) — we mostly care about the cwd context
 input="$(cat 2>/dev/null || echo '{}')"
 
