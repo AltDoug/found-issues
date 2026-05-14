@@ -2294,7 +2294,11 @@ try {
   const _path = require('path');
   const _fs = require('fs');
   const _os = require('os');
-  if (process.platform !== 'win32') {
+  // FOUND_ISSUES_BIN: explicit override — used by tests and advanced installs.
+  if (process.env.FOUND_ISSUES_BIN && _fs.existsSync(process.env.FOUND_ISSUES_BIN)) {
+    __fiCli = process.env.FOUND_ISSUES_BIN;
+  }
+  if (!__fiCli && process.platform !== 'win32') {
     try {
       require('child_process').execSync('command -v found-issues', { stdio: 'ignore' });
       __fiCli = 'found-issues';
@@ -2463,7 +2467,11 @@ import pathlib as _fi_pathlib
 
 _fi_cli = None
 try:
-    if _fi_platform.system() != 'Windows':
+    # FOUND_ISSUES_BIN: explicit override — used by tests and advanced installs.
+    _fi_env_bin = _fi_os.environ.get('FOUND_ISSUES_BIN', '')
+    if _fi_env_bin and _fi_pathlib.Path(_fi_env_bin).is_file():
+        _fi_cli = _fi_env_bin
+    if not _fi_cli and _fi_platform.system() != 'Windows':
         _fi_cli = _fi_shutil.which('found-issues')
     if not _fi_cli:
         _fi_cache_root = _fi_pathlib.Path.home() / '.claude' / 'plugins' / 'cache'
