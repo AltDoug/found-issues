@@ -616,3 +616,34 @@ EOF
   echo "$out_b" | grep -qE ' \| .*issue'
 }
 
+@test "runtime e2e (bash): multi-branch statusline emits segment in both branches" {
+  mkdir -p tmp
+  cat > .found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — synthetic test entry
+EOF
+  cat > tmp/sl.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+dir="$(echo "$input" | jq -r '.workspace.current_dir // ""')"
+if [[ -n "$dir" ]]; then
+  echo "branch-A | $dir"
+else
+  echo "branch-B | none"
+fi
+EOF
+  chmod +x tmp/sl.sh
+
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+
+  local out_a
+  out_a="$(fi_synthetic_stdin "$(pwd)" | bash tmp/sl.sh 2>/dev/null)"
+  echo "$out_a" | grep -q "branch-A"
+  echo "$out_a" | grep -qE ' \| .*issue'
+
+  local out_b
+  out_b="$(printf '{}' | bash tmp/sl.sh 2>/dev/null)"
+  echo "$out_b" | grep -q "branch-B"
+  echo "$out_b" | grep -qE ' \| .*issue'
+}
+
