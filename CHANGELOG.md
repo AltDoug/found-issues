@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-05-15
+
+### Fixed
+- `fi_parse_entry` now extracts the path from entry-location forms that include a symbol name and/or approximate line range after the path token — e.g. `bin/found-issues fi_strip_target_markers ~1982-1989 — …`. Pre-fix, the location regex required the path token to stand alone before ` — `, silently breaking `annotate-pr` / `annotate-commit` matching for affected entries (they never got auto-flipped to `[fixed]` on PR merge). Discovered 2026-05-15 while annotating PR #92 against five 2026-05-13 entries; all five required manual `sed` annotation. Fix takes the first whitespace-delimited token as the path candidate. Regression coverage added in `tests/parse-entries.bats`.
+
 ## [1.5.1] - 2026-05-15
 
 ### Fixed

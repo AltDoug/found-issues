@@ -108,6 +108,32 @@ teardown() {
   [[ "$out" == *"date=2026-05-12"* ]]
 }
 
+@test "parse_entry: extracts path from 'path symbol ~range' location form (regression)" {
+  # Pre-fix, fi_parse_entry's location regex required the path token to stand
+  # alone before ' — '. Entries that included a function/symbol name and a
+  # tilde-prefixed approximate line range (a common form for AI-logged
+  # findings inside large files) got an empty path= result, silently breaking
+  # annotate-pr / annotate-commit matching. Repros the bug observed
+  # 2026-05-15 while annotating PR #92 against five 2026-05-13 entries; all
+  # five required manual sed annotation.
+  out="$(fi_parse_entry '- [open] 2026-05-13 bin/found-issues fi_strip_target_markers ~1982-1989 — dead-code sub() regexes (suggested: delete the dead patterns)')"
+  [[ "$out" == *"path=bin/found-issues"* ]]
+  [[ "$out" == *"date=2026-05-13"* ]]
+}
+
+@test "parse_entry: extracts path from 'path symbol ~range' with .sh extension" {
+  out="$(fi_parse_entry '- [open] 2026-05-13 hooks/session-start.sh ~145-177 — awk programs duplicated verbatim')"
+  [[ "$out" == *"path=hooks/session-start.sh"* ]]
+}
+
+@test "parse_entry: extracts path from 'path:line symbol' form" {
+  # First token has path:line shape with trailing symbol — line number must
+  # still be extracted from the first whitespace-delimited token.
+  out="$(fi_parse_entry '- [open] 2026-05-13 lib/foo.sh:42 my_func — leak detected')"
+  [[ "$out" == *"path=lib/foo.sh"* ]]
+  [[ "$out" == *"line=42"* ]]
+}
+
 @test "parse_entry: extracts symptom (without parentheticals)" {
   out="$(fi_parse_entry '- [open] 2026-05-08 src/foo.py:42 — null check (suggested: add guard)')"
   [[ "$out" == *"symptom=null check"* ]]
