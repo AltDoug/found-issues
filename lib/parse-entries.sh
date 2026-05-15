@@ -94,10 +94,16 @@ fi_parse_entry() {
 
   local re_path_line='^([A-Za-z0-9_./-]+):([0-9]+)$'
   local re_path_only='^([A-Za-z0-9_./-]+)$'
-  if [[ "$location_part" =~ $re_path_line ]]; then
+  # Entries sometimes follow the path with a symbol name and/or approximate
+  # line range (e.g. `bin/found-issues fi_strip_target_markers ~1982-1989`),
+  # which the standalone regexes can't match. Take the first whitespace-
+  # delimited token as the path candidate and treat the remainder as
+  # supplementary location info. Regression coverage in tests/parse-entries.bats.
+  local first_token="${location_part%%[[:space:]]*}"
+  if [[ "$first_token" =~ $re_path_line ]]; then
     path="${BASH_REMATCH[1]}"
     line_num="${BASH_REMATCH[2]}"
-  elif [[ "$location_part" =~ $re_path_only ]]; then
+  elif [[ "$first_token" =~ $re_path_only ]]; then
     path="${BASH_REMATCH[1]}"
   fi
 
