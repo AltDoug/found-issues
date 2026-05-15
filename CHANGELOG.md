@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-05-15
+
+### Fixed
+- `cmd_doctor` runtime probe now JSON-escapes the synthetic-stdin `current_dir` value. Paths containing `"` or `\` no longer produce malformed stdin and false-FAIL a working integration.
+- `cmd_doctor` runtime-error detection now scans **stderr only** (previously combined stderr+stdout). Legitimate statusline stdout containing keywords like `undefined` (detached HEAD with `branch=undefined`) or path tokens like `cannot-wait` no longer trigger a false FAIL.
+- Node + Python statusline shims pass cwd and CLI path to `bash -c` as positional argv (`$1`, `$2`) on Windows instead of interpolating them into the command string. Paths containing `"` or `'` can no longer break the invocation. The locked `--format=segment` output bytes are unchanged.
+
+### Internal
+- `fi_strip_target_markers` no longer carries dead-code `sub()` patterns (`${__fiSeg(...)}` / `{_fi_seg(...)}` with greedy `[^)]*`) that could never match the v1.5.x splice forms. Migration path is unchanged; cleanup only.
+- Added `KEEP IN SYNC` comments above the duplicated v1.4.x discriminator `awk` programs in `bin/found-issues` (`fi_target_is_v14x_broken`) and `hooks/session-start.sh`. The hook cannot source the binary without re-triggering SessionStart, so the duplication is structural — comments flag the drift risk for future maintainers.
+
 ## [1.5.0] - 2026-05-13
 
 ### Added

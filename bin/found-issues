@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.5.0"
+readonly FI_VERSION="1.5.1"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1928,6 +1928,10 @@ fi_strip_legacy_handwritten() {
 #           `function __fiSeg` (the new v1.5.0 discriminators)
 #   Python: marker block contains `_fi_os.environ.get('HOME'` AND not `pathlib`
 #   Bash:   N/A (bash shim was always correct)
+# KEEP IN SYNC with the inline awk discriminators in hooks/session-start.sh
+# (~line 158 node, ~line 169 python). The hook cannot source this file
+# without re-triggering SessionStart, so the awk programs are duplicated by
+# necessity. Any change to v1.4.x detection logic must update both sites.
 fi_target_is_v14x_broken() {
   local path="$1"
   local language="$2"
@@ -1985,10 +1989,10 @@ fi_strip_target_markers() {
     in_block { next }
     {
       line = $0
-      # Strip the splice injection from the line.
-      sub(/\$\{__fiSeg\([^)]*\)\)\}/, "", line)
+      # Strip the splice injection from the line. v1.4.x migration only ever
+      # sees the bare value forms (${__fiSeg} / {_fi_seg}); the call-form
+      # variants below handle the v1.5.x concatenation splice.
       sub(/\$\{__fiSeg\}/, "", line)
-      sub(/\{_fi_seg\([^)]*\)\)\}/, "", line)
       sub(/\{_fi_seg\}/, "", line)
       sub(/[[:space:]]*\+[[:space:]]*__fiSeg\([^)]*\)\)/, "", line)
       sub(/[[:space:]]*\+[[:space:]]*_fi_seg\([^)]*\)\)/, "", line)
@@ -2283,11 +2287,13 @@ function __fiSeg(dir) {
       || require('os').homedir();
     if (process.platform === 'win32') {
       const posixPath = __fiCli.replace(/\\/g, '/');
+      const posixCwd = cwd.replace(/\\/g, '/');
       // On Windows, Node's cwd option passes to the Windows API which cannot
       // resolve POSIX Git Bash paths (e.g. /d/a/...). Instead, cd inside bash
-      // so bash handles the POSIX path resolution natively.
-      const safeCwd = cwd.replace(/\\/g, '/').replace(/'/g, "'\\''");
-      return execFileSync('bash', ['-c', `cd '${safeCwd}' && "${posixPath}" status --format=segment`],
+      // so bash handles the POSIX path resolution natively. Pass cwd + cli
+      // as argv positionals so bash doesn't re-parse them — eliminates the
+      // need to escape ' or " in either path.
+      return execFileSync('bash', ['-c', 'cd "$1" && "$2" status --format=segment', '_', posixCwd, posixPath],
         { encoding: 'utf8', timeout: 5000 }).trim();
     }
     return execFileSync(__fiCli, ['status', '--format=segment'],
@@ -2526,9 +2532,11 @@ def _fi_seg(_dir=None):
                     if _fi_pathlib.Path(_fi_candidate).is_file():
                         _fi_bash_bin = _fi_candidate
                         break
-            _fi_safe_cwd = _fi_cwd.replace('\\', '/').replace("'", "'\\''")
+            _fi_posix_cwd = _fi_cwd.replace('\\', '/')
+            # Pass cwd + cli as argv positionals so bash doesn't re-parse them
+            # — eliminates the need to escape ' or " in either path.
             _fi_result = _fi_subprocess.run(
-                [_fi_bash_bin, '-c', f"cd '{_fi_safe_cwd}' && \"{_fi_posix}\" status --format=segment"],
+                [_fi_bash_bin, '-c', 'cd "$1" && "$2" status --format=segment', '_', _fi_posix_cwd, _fi_posix],
                 capture_output=True, timeout=5
             )
             return _fi_result.stdout.decode('utf-8', errors='replace').strip()
@@ -2869,9 +2877,13 @@ fi_run_statusline_runtime_probe() {
   elif [[ -n "${custom_target}" && -z "$custom_language" ]]; then
     printf '%s Skipped — unrecognized statusline language for %s.\n' "$section_warn" "$custom_target"
   else
-    local probe_cwd probe_stdin probe_output
+    local probe_cwd probe_cwd_json probe_stdin probe_output probe_stderr
     probe_cwd="$(pwd)"
-    probe_stdin="$(printf '{"model":{"display_name":"Test"},"workspace":{"current_dir":"%s"},"session_id":"t","context_window":{"remaining_percentage":50}}' "$probe_cwd")"
+    # JSON-escape backslash + double-quote so paths with either character
+    # don't produce malformed stdin and false-FAIL a working integration.
+    probe_cwd_json="${probe_cwd//\\/\\\\}"
+    probe_cwd_json="${probe_cwd_json//\"/\\\"}"
+    probe_stdin="$(printf '{"model":{"display_name":"Test"},"workspace":{"current_dir":"%s"},"session_id":"t","context_window":{"remaining_percentage":50}}' "$probe_cwd_json")"
 
     local executor
     case "$statusline_language" in
@@ -2880,18 +2892,26 @@ fi_run_statusline_runtime_probe() {
       python) executor=(python3 "$statusline_target") ;;
     esac
 
-    # Use perl alarm-based timeout when available; plain exec otherwise.
+    # Capture stderr separately so runtime-error detection scans stderr only
+    # — stdout is the segment and may legitimately contain keywords like
+    # "undefined" (e.g. detached HEAD) or path tokens like "cannot-wait".
+    local probe_stderr_tmp
+    probe_stderr_tmp="$(mktemp -t fi-probe-stderr.XXXXXX)"
     if command -v perl >/dev/null 2>&1; then
-      probe_output="$(printf '%s' "$probe_stdin" | perl -e 'alarm(5); exec @ARGV' -- "${executor[@]}" 2>&1 || true)"
+      probe_output="$(printf '%s' "$probe_stdin" | perl -e 'alarm(5); exec @ARGV' -- "${executor[@]}" 2>"$probe_stderr_tmp" || true)"
     elif command -v timeout >/dev/null 2>&1; then
-      probe_output="$(printf '%s' "$probe_stdin" | timeout 5 "${executor[@]}" 2>&1 || true)"
+      probe_output="$(printf '%s' "$probe_stdin" | timeout 5 "${executor[@]}" 2>"$probe_stderr_tmp" || true)"
     else
-      probe_output="$(printf '%s' "$probe_stdin" | "${executor[@]}" 2>&1 || true)"
+      probe_output="$(printf '%s' "$probe_stdin" | "${executor[@]}" 2>"$probe_stderr_tmp" || true)"
     fi
+    probe_stderr="$(cat "$probe_stderr_tmp" 2>/dev/null || true)"
+    rm -f "$probe_stderr_tmp"
 
     # Probe success: script ran and produced non-empty output without runtime errors.
     local probe_has_error=0
-    echo "$probe_output" | LC_ALL=C grep -qiE '(error|exception|traceback|undefined|cannot|not found)' && probe_has_error=1 || true
+    if [[ -n "$probe_stderr" ]]; then
+      printf '%s' "$probe_stderr" | LC_ALL=C grep -qiE '(error|exception|traceback|undefined|cannot|not found)' && probe_has_error=1 || true
+    fi
 
     if [[ -n "$probe_output" && "$probe_has_error" -eq 0 ]]; then
       if fi_has_conflict_markers "${issues_file_health:-}" 2>/dev/null; then

@@ -154,6 +154,10 @@ if [[ "${FOUND_ISSUES_AUTO_MIGRATE:-on}" != "off" ]]; then
           printf 'found-issues: skipping v1.4.x migration — %s is a symlink; rerun install-statusline manually after dotfile sync.\n' "$__fi_target"
         else
           __fi_needs_migrate=0
+          # KEEP IN SYNC with fi_target_is_v14x_broken in bin/found-issues.
+          # The hook cannot source the binary (would re-trigger SessionStart),
+          # so the awk discriminators below are duplicated by necessity. Any
+          # change to v1.4.x detection logic must update both sites.
           if [[ "$__fi_lang" == "node" ]]; then
             if LC_ALL=C awk '
                 /^\/\/ === found-issues plugin segment ===/ { in_block = 1; next }
