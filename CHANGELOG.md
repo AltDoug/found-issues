@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-05-20
+
+### Fixed
+- `pre-branch-delete` hook now short-circuits when the default branch does not track the issues file at all (tested via `git cat-file -e`). The guard's "promote entries to the default branch before deleting" contract is incoherent in that regime — there is no canonical file on main to promote into. Surfaces when a repo transitions `docs/found-issues.md` from tracked to per-developer-local (gitignored): old feature branches still carry the tracked file, and prior to this fix the hook compared the branch-tracked content to an empty main keyset and false-positive-blocked every `git branch -d / -D` against those branches. Hook now emits a one-line "promote-guard skipped" note on stderr and exits 0.
+- `pre-branch-delete` hook now parses a leading `FOUND_ISSUES_PROMOTE_GUARD=off ` prefix from the command string itself. `docs/configuration.md` advertised this prefix as a one-shot bypass, but inside Claude Code the hook subprocess never inherits per-command env from the command string — the prefix only takes effect when bash runs the inner git command. The documented escape hatch now works as advertised in the Claude Code Bash-tool context.
+
+### Internal
+- Two new regression tests in `tests/pre-branch-delete.bats` cover both fixes.
+
 ## [1.5.2] - 2026-05-15
 
 ### Fixed

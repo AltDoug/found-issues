@@ -163,3 +163,49 @@ EOF
   [ "$status" -eq 2 ]
   [[ "$output" == *"branch_only.py"* ]]
 }
+
+@test "pre-branch-delete: allows delete when default branch does not track the issues file (untracked-on-main)" {
+  # Scenario: repo transitioned docs/found-issues.md from tracked → gitignored.
+  # Old feature branches still carry the tracked file with [open] entries.
+  # Main has the file present in working tree (gitignored) but NOT in its
+  # committed tree, so the guard's "promote to main" prescription is
+  # incoherent. Expect: exit 0 with a "promote-guard skipped" note on stderr.
+  git commit -q --allow-empty -m "init (main: no committed issues file)"
+
+  git checkout -q -b feat/work
+  fi_run log "src/branch_only.py:1 — branch-only entry"
+  git add -A; git commit -q -m "branch entry"
+
+  git checkout -q main
+  # Recreate the file locally without committing — mimics gitignored-present
+  # state on main. Ensures the hook picks docs/found-issues.md as rel_path
+  # rather than falling through to .found-issues.md.
+  mkdir -p docs
+  : > docs/found-issues.md
+
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/work"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"promote-guard skipped"* ]] || [[ "$output" == *"does not track"* ]]
+}
+
+@test "pre-branch-delete: respects inline FOUND_ISSUES_PROMOTE_GUARD=off prefix in the command string" {
+  # Regression for the 2026-05-20 footgun: docs/configuration.md advertises
+  # `FOUND_ISSUES_PROMOTE_GUARD=off git branch -D foo` as a one-shot bypass,
+  # but Claude Code's PreToolUse hook subprocess doesn't inherit per-command
+  # env from the command string — the prefix only takes effect when bash
+  # executes the inner git command. The hook should parse a leading
+  # `FOUND_ISSUES_PROMOTE_GUARD=off ` from the command itself.
+  fi_run log "src/main.py:1 — main entry"
+  git add -A; git commit -q -m "init"
+
+  git checkout -q -b feat/work
+  fi_run log "src/branch_only.py:1 — branch-only entry"
+  git add -A; git commit -q -m "branch entry"
+
+  git checkout -q main
+
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"FOUND_ISSUES_PROMOTE_GUARD=off git branch -D feat/work"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}

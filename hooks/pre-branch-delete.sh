@@ -48,6 +48,16 @@ tool_name="$(get_field '.tool_name')"
 command="$(get_field '.tool_input.command')"
 [[ -z "$command" ]] && exit 0
 
+# Allow inline env-prefix opt-out. Documented escape hatch in
+# docs/configuration.md advertises `FOUND_ISSUES_PROMOTE_GUARD=off git
+# branch -D foo`, but inside Claude Code the hook subprocess never inherits
+# per-command env from the command string — the prefix only takes effect
+# when bash runs the inner git command. Parse the prefix here so the
+# documented bypass works as advertised.
+if [[ "$command" =~ ^[[:space:]]*FOUND_ISSUES_PROMOTE_GUARD=off[[:space:]] ]]; then
+  exit 0
+fi
+
 # === Extract candidate branch names from the command ===
 
 branches=()
@@ -90,6 +100,23 @@ default_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
 rel_path="docs/found-issues.md"
 [[ ! -f "$repo_root/$rel_path" ]] && rel_path=".found-issues.md"
+
+# Short-circuit when the default branch does not track the issues file at
+# all. The guard's contract — "promote entries to the default branch
+# before deleting" — is incoherent in that regime: there is no canonical
+# file on main to promote into. Surfaces today when a repo transitions
+# the issues file from tracked to per-developer-local (gitignored), and
+# old feature branches still carry the tracked file. Without this
+# short-circuit the hook compares branch-tracked content to an empty
+# main keyset and false-positive-blocks every delete.
+if ! git cat-file -e "origin/$default_branch:$rel_path" 2>/dev/null \
+    && ! git cat-file -e "$default_branch:$rel_path" 2>/dev/null; then
+  {
+    echo "found-issues: $default_branch does not track $rel_path; promote-guard skipped."
+    echo "Entries are local-only in this repo and are not lost by branch deletion."
+  } >&2
+  exit 0
+fi
 
 # Source dedup-key helpers. Both libs are needed: parse-entries.sh for
 # fi_parse_entry, canonicalize.sh for fi_dedup_key{,_abstract}.
