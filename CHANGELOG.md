@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-05-22
+
+### Fixed
+- `stop-reminder` hook now silently skips when `CLAUDE_CODE_ENTRYPOINT` is set to anything other than `cli` — the marker-discipline requirement only makes sense for interactive Claude Code sessions where a human operator reads each response and acks via `<!-- found-issues-checked: ... -->`. Headless `claude -p` invocations (`CLAUDE_CODE_ENTRYPOINT=sdk-cli`), direct SDK use, and orchestrator-dispatched sessions have no addressee for the discipline — the dispatched model receives the "Stop blocked" stderr without context, can't satisfy a requirement it doesn't know about, and burns turns trying to fix the wrong thing. `stop_hook_active` only breaks immediate same-turn retry loops; multi-turn confusion spirals slipped past it. Real-world incident 2026-05-22: an Orchard `proposals build` dispatch stalled 23 min with 0/23 tasks complete because the dispatched Claude couldn't satisfy the marker convention. The fix is conservative — only an explicit non-`cli` value triggers the skip, so empty/missing entrypoint (test invocations, manual hook runs) keeps the original enforcement.
+
+### Internal
+- 4 new regression tests in `tests/stop-reminder.bats` cover (1) skip on `sdk-cli`, (2) enforce on `cli`, (3) enforce when unset (backward compat for tests and direct runs), (4) skip on any other non-`cli` value (future-proofs against new SDK entrypoints).
+
 ## [1.5.4] - 2026-05-21
 
 ### Fixed
