@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.5.3"
+readonly FI_VERSION="1.5.4"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
