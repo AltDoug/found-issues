@@ -12,6 +12,7 @@ setup() {
 teardown() {
   fi_teardown_tmp
   unset FOUND_ISSUES_STOP_REMINDER
+  unset CLAUDE_CODE_ENTRYPOINT
 }
 
 @test "stop-reminder: blocks when marker missing AND substantive tool use occurred" {
@@ -94,6 +95,76 @@ TRANSCRIPT
   input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: skips silently when CLAUDE_CODE_ENTRYPOINT=sdk-cli (headless)" {
+  # Headless / dispatched Claude Code sessions (`claude -p`, SDK, orchard
+  # engine) have no interactive operator to interpret the "Stop blocked"
+  # stderr. Without this skip the dispatched model gets stuck in a
+  # multi-turn confusion spiral trying to "fix" a requirement it has no
+  # context for. Regression for the 2026-05-22 orchard proposal-build
+  # incident where a session stalled 23 min with 0/23 tasks done.
+  TR="$(mktemp)"
+  # Use a transcript shape that would otherwise block: substantive Bash
+  # tool use, no marker, smart-fire would normally fire.
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "CLAUDE_CODE_ENTRYPOINT=sdk-cli echo '$input' | CLAUDE_CODE_ENTRYPOINT=sdk-cli '$HOOK'"
+  [ "$status" -eq 0 ]
+  # Nothing written to stderr (silent skip — the model can't read it anyway)
+  [ -z "$output" ] || { echo "FAIL: expected silent skip but got output: $output"; false; }
+  rm -f "$TR"
+}
+
+@test "stop-reminder: still enforces marker when CLAUDE_CODE_ENTRYPOINT=cli (interactive)" {
+  # Sanity: the entrypoint escape hatch must only fire for non-`cli` values.
+  # An explicit "cli" value keeps the original interactive behavior.
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "CLAUDE_CODE_ENTRYPOINT=cli FOUND_ISSUES_REMINDER_VERBOSITY=full echo '$input' | CLAUDE_CODE_ENTRYPOINT=cli FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"acknowledgment"* ]]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: enforces marker when CLAUDE_CODE_ENTRYPOINT is unset (backward compat)" {
+  # Existing tests and direct hook runs (e.g. bats invocations, manual
+  # debugging) don't set CLAUDE_CODE_ENTRYPOINT. The skip must NOT fire on
+  # an empty/missing var — original behavior is preserved.
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  # Explicitly unset to defeat any inherited env from the developer's shell.
+  run bash -c "unset CLAUDE_CODE_ENTRYPOINT; FOUND_ISSUES_REMINDER_VERBOSITY=full echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"acknowledgment"* ]]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: skips for any non-cli entrypoint value (sdk, future modes)" {
+  # The check is "anything other than cli" so future entrypoints (direct
+  # SDK without -p, etc.) get the same treatment without code changes.
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  # Generic SDK entrypoint (not the -p mediated form).
+  run bash -c "CLAUDE_CODE_ENTRYPOINT=sdk echo '$input' | CLAUDE_CODE_ENTRYPOINT=sdk '$HOOK'"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
   rm -f "$TR"
 }
 

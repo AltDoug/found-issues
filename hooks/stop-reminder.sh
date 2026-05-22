@@ -18,6 +18,31 @@ if [[ "${FOUND_ISSUES_STOP_REMINDER:-on}" == "off" ]]; then
   exit 0
 fi
 
+# Skip when there is no interactive operator to read the block message.
+#
+# Claude Code sets CLAUDE_CODE_ENTRYPOINT for every hook invocation:
+#   - "cli"       — interactive terminal session (operator is watching)
+#   - "sdk-cli"   — headless `claude -p` (one-shot or driven by automation)
+#   - other       — direct SDK / future entrypoints (no human in the loop)
+#
+# The marker discipline is a human-operator habit: the operator reads each
+# response, decides whether anything out-of-scope deserves logging, and acks
+# via the marker. Dispatched / headless sessions have no addressee for that
+# discipline — the model can't satisfy a requirement it has no context for,
+# and stop_hook_active (above) only breaks immediate same-turn retry loops,
+# not multi-turn confusion spirals where Claude reads the stderr, tries to
+# "fix" it the wrong way, and burns turns without progress.
+#
+# Real-world incident 2026-05-22: orchard proposal-build sessions stalled
+# 23 min with 0/23 tasks done because the dispatched Claude couldn't satisfy
+# the marker convention. The hook here unconditionally skips when the
+# session is not in interactive `cli` mode. Empty / missing entrypoint
+# (e.g. local test invocations) is treated as `cli` so existing tests and
+# direct hook runs keep the original enforcement behavior.
+if [[ -n "${CLAUDE_CODE_ENTRYPOINT:-}" && "${CLAUDE_CODE_ENTRYPOINT}" != "cli" ]]; then
+  exit 0
+fi
+
 # Read JSON from stdin
 input="$(cat)"
 

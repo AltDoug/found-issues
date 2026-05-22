@@ -32,6 +32,29 @@ export FOUND_ISSUES_STOP_REMINDER=off
 export FOUND_ISSUES_AUTO_ARCHIVE=off
 ```
 
+### Stop hook auto-skip for non-interactive sessions (v1.5.5+)
+
+The Stop hook also auto-skips when Claude Code is running outside an
+interactive `cli` session. Claude Code sets `CLAUDE_CODE_ENTRYPOINT` to:
+
+- `cli` — interactive terminal session (the hook fires; operator is watching)
+- `sdk-cli` — headless `claude -p` invocations (the hook skips)
+- other values (`sdk`, future entrypoints) — direct SDK use (the hook skips)
+
+The marker discipline is a human-operator habit: read each response, decide
+whether anything out-of-scope deserves logging, ack via the marker.
+Dispatched / headless sessions have no addressee for that discipline — the
+model can't satisfy a requirement it has no context for, and `stop_hook_active`
+only breaks immediate same-turn retry loops, not multi-turn confusion spirals.
+
+You don't need to set anything to opt into this — the hook just notices when
+`CLAUDE_CODE_ENTRYPOINT != "cli"` and exits 0 silently. If you need the
+discipline-enforcement to fire in a headless context anyway, the existing
+`FOUND_ISSUES_STOP_REMINDER` knob still wins: when it's unset/`on`, the
+entrypoint check runs; if you ever wanted to *force* enforcement in headless
+mode, that would require unsetting `CLAUDE_CODE_ENTRYPOINT` upstream of the
+hook (not recommended — Claude Code uses it internally too).
+
 ## Defer-flow tunables
 
 The defer-recurrence flow (v1.0.5+) ships with conservative defaults.
