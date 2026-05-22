@@ -114,7 +114,7 @@ HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/hooks/format-enforcer.s
   [[ "$output" == *"verification token"* ]]
 }
 
-@test "format-enforcer: blocks Edit transition [open] → [fixed] without verification" {
+@test "format-enforcer: blocks Edit transition from open to fixed without verification" {
   # This is the exact incident shape from the 2026-05-21 orchard session.
   old='- [open] 2026-05-08 src/foo.py:42 — bug (suggested: add guard)'
   new='- [fixed] 2026-05-08 src/foo.py:42 — bug (suggested: add guard)'
