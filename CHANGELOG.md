@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-05-21
+
+### Fixed
+- `format-enforcer` hook now blocks `[fixed]` entries that lack a verification token. The hook validated format (em-dash, lowercase status, canonical PR/commit annotation shape) but did not validate workflow — so a direct `Edit` flipping `[open]` → `[fixed]` passed silently because the resulting line was well-formed. Bypassed `skills/rules/SKILL.md` hard rule #3 ("Never mark `[fixed]` without verification"). Real-world hit on 2026-05-21: an unrelated Claude Code session flipped an entry via raw `Edit` with no `(PR:…)` / `(commit:…)` / `(verified:…)` annotation, fix uncommitted-to-remote and unverified. The hook now rejects any `[fixed]` line missing at least one of `(PR: org/repo#N)`, `(commit: <sha>)`, `(verified: ai|review)`, or `(closure: tombstone)`. Demoted forms (`(PR-closed: …)`, `(commit-stale: …)`) do NOT count — they are weak evidence per the sync spec, not verification.
+
+### Internal
+- 11 new regression tests in `tests/format-enforcer.bats` cover the verification-token check (block-without-token, block-on-Edit-transition, allow each canonical token, block demoted-only forms, mode-tier silencing).
+- One existing test in `tests/format-enforcer-new-annotations.bats` updated: the `(PR-closed: ...)` "happy path" example now pairs the demoted annotation with `(verified: ai)` to reflect the canonical post-sync shape.
+
 ## [1.5.3] - 2026-05-20
 
 ### Fixed

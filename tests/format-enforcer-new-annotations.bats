@@ -50,7 +50,10 @@ HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/hooks/format-enforcer.s
 }
 
 @test "format-enforcer: (PR-closed: ...) with full org/repo format passes" {
-  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [fixed] 2026-05-11 src/auth.ts:88 — token leak (PR-closed: myorg/myrepo#123)"}}'
+  # [fixed] needs a verification token; (PR-closed: …) is demoted evidence,
+  # not verification. Pair with (verified: ai) — the canonical shape after sync flips a
+  # demoted-PR entry that AI verified by reading code.
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [fixed] 2026-05-11 src/auth.ts:88 — token leak (PR-closed: myorg/myrepo#123) (verified: ai) (fixed: 2026-05-11)"}}'
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
 }

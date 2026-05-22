@@ -105,6 +105,9 @@ Maintained automatically by Claude. See <https://github.com/AltDoug/found-issues
 
 ❌ - [open!] 2026-05-06 src/foo.py:42 — null check missing
    ↳ Critical flag is a separate token `[!]`, not bundled into status.
+
+❌ - [fixed] 2026-05-06 src/foo.py:42 — null check missing
+   ↳ `[fixed]` requires a verification token. The legitimate flip path adds one of: `(PR: org/repo#N)`, `(commit: <sha>)`, `(verified: ai|review)`, or `(closure: tombstone)`. Demoted forms (`(PR-closed: …)`, `(commit-stale: …)`) do NOT count — they are weak evidence per the sync spec, not verification. Use `/found-issues:sync` (preceded by `/found-issues:annotate-commit` or `:annotate-pr` if needed) instead of editing the status word by hand.
 ```
 
 ## Regex patterns

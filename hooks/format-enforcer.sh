@@ -116,6 +116,25 @@ while IFS= read -r line; do
     reason="PR annotation needs full 'org/repo#N' format, missing org prefix"
   fi
 
+  # 6. Workflow: [fixed] lines must carry a verification token.
+  # Catches direct [open]→[fixed] flips that bypass /found-issues:sync.
+  # Valid tokens (any one is enough):
+  #   (PR: org/repo#N)      — canonical PR
+  #   (commit: <sha>)       — canonical commit
+  #   (verified: ai)        — sync phase-2 AI verification
+  #   (verified: review)    — code-review verification
+  #   (closure: tombstone)  — auto-closure (file/line gone)
+  # Demoted forms ((PR-closed: …), (commit-stale: …)) do NOT count — they are
+  # weak evidence per the sync spec, not verification.
+  if [[ -z "$reason" ]] && [[ "$line" =~ ^-[[:space:]]+\[fixed\] ]]; then
+    if ! { [[ "$line" =~ \(PR:[[:space:]]+[^/[:space:]]+/[^#[:space:]]+#[0-9]+\) ]] \
+        || [[ "$line" =~ \(commit:[[:space:]]+[0-9a-f]{7,40}\) ]] \
+        || [[ "$line" =~ \(verified:[[:space:]]+(ai|review)\) ]] \
+        || [[ "$line" =~ \(closure:[[:space:]]+tombstone\) ]]; }; then
+      reason="[fixed] requires a verification token: (PR: org/repo#N), (commit: <sha>), (verified: ai|review), or (closure: tombstone). Direct [open]→[fixed] edits bypass the workflow — use /found-issues:sync (after /found-issues:annotate-commit or :annotate-pr) instead."
+    fi
+  fi
+
   if [[ -n "$reason" ]]; then
     violations+="$line"$'\t'"$reason"$'\n'
   fi
