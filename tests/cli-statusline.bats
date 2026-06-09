@@ -328,6 +328,27 @@ EOF
   [[ "$output" == *"1 issue"* ]]
 }
 
+@test "status: --cwd beats CLAUDE_PROJECT_DIR (v1.5.6 statusline cwd fix)" {
+  # The statusline subprocess inherits CLAUDE_PROJECT_DIR = where the SESSION
+  # started (often $HOME), while the workspace dir tracks where work happens.
+  # --cwd must win or the segment scopes to the wrong root.
+  local session_start="$TMP/session-start"
+  local workspace="$TMP/workspace"
+  mkdir -p "$session_start" "$workspace/docs"
+  local today; today=$(date +%Y-%m-%d)
+  cat > "$workspace/docs/found-issues.md" <<EOF
+# found-issues
+- [open] $today src/a.py:1 — bug one
+- [open] $today src/b.py:2 — bug two
+EOF
+
+  cd "$TMP"
+  # Env points at a dir with NO issues file; --cwd points at the workspace.
+  CLAUDE_PROJECT_DIR="$session_start" fi_run status --format=plain --cwd "$workspace"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 issues"* ]]
+}
+
 @test "doctor-statusline: reports NOT INSTALLED when statusline lacks integration" {
   cat > "$HOME/.claude/statusline.sh" <<'SL'
 #!/usr/bin/env bash
@@ -397,6 +418,72 @@ SL
   [ "$status" -eq 0 ]
   [[ "$output" == *"State: installed-broken"* ]]
   [[ "$output" == *"BROKEN"* ]]
+}
+
+@test "doctor-statusline: detects v1.0.2-v1.5.5 cd-only block without --cwd (installed-broken)" {
+  # Synthesize the v1.0.2–v1.5.5 block: has __FI_DIR + cd, but no --cwd.
+  # An inherited CLAUDE_PROJECT_DIR silently overrides the cd in cmd_status's
+  # search-root priority → empty segment. v1.5.6 classifies this as broken.
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+input=$(cat)
+LINE1="repo"
+# === found-issues plugin segment ===
+__FI_CLI=found-issues
+__FI_DIR=""
+if [[ -n "${input:-}" ]] && command -v jq >/dev/null 2>&1; then
+  __FI_DIR=$(echo "$input" | jq -r '.workspace.current_dir // ""' 2>/dev/null || true)
+fi
+__FI_SEG=""
+if [[ -n "$__FI_CLI" ]]; then
+  if [[ -n "$__FI_DIR" ]]; then
+    __FI_SEG=$( cd "$__FI_DIR" 2>/dev/null && "$__FI_CLI" status --format=segment 2>/dev/null || true )
+  else
+    __FI_SEG=$("$__FI_CLI" status --format=segment 2>/dev/null || true)
+  fi
+fi
+[[ -n "$__FI_SEG" ]] && LINE1="$LINE1$__FI_SEG"
+# === end found-issues plugin segment ===
+echo "$LINE1"
+SL
+  fi_run doctor-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"State: installed-broken"* ]]
+}
+
+@test "install-statusline: auto-rewrites v1.0.2-v1.5.5 cd-only block to include --cwd" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+input=$(cat)
+LINE1="repo"
+LINE1="$LINE1 | branch"
+# === found-issues plugin segment ===
+__FI_CLI=found-issues
+__FI_DIR=""
+if [[ -n "${input:-}" ]] && command -v jq >/dev/null 2>&1; then
+  __FI_DIR=$(echo "$input" | jq -r '.workspace.current_dir // ""' 2>/dev/null || true)
+fi
+__FI_SEG=""
+if [[ -n "$__FI_CLI" && -n "$__FI_DIR" ]]; then
+  __FI_SEG=$( cd "$__FI_DIR" 2>/dev/null && "$__FI_CLI" status --format=segment 2>/dev/null || true )
+fi
+[[ -n "$__FI_SEG" ]] && LINE1="$LINE1$__FI_SEG"
+# === end found-issues plugin segment ===
+echo "$LINE1"
+SL
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rewriting in place"* ]]
+  # Rewritten block carries the explicit --cwd flag
+  grep -Fq -- '--cwd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
+  # Single marker block (no duplicates)
+  local count
+  count=$(grep -cF "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh")
+  [ "$count" -eq 1 ]
+  # Second run is a no-op — the rewritten block must classify installed-fixed
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already installed"* ]]
 }
 
 @test "install-statusline: auto-migrates legacy-handwritten by default (v1.0.4)" {

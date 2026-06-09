@@ -491,6 +491,82 @@ EOF
   grep -q "pathlib" tmp/sl.py
 }
 
+@test "install-statusline --target node: migrates v1.5.x block without --cwd (v1.5.6)" {
+  # Faithful v1.5.0–v1.5.5 install: modern deferred __fiSeg(dir) block and
+  # the REAL template-literal splice the installer emits — but the
+  # invocation lacks --cwd, so inherited CLAUDE_PROJECT_DIR overrides the
+  # cwd → wrong search root. Must migrate (strip + re-splice), not no-op.
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+let __fiCli = null;
+function __fiSeg(dir) {
+  if (!__fiCli) return '';
+  try {
+    const { execFileSync } = require('child_process');
+    const cwd = dir || process.env.CLAUDE_PROJECT_DIR || require('os').homedir();
+    return execFileSync(__fiCli, ['status', '--format=segment'],
+      { cwd, encoding: 'utf8', timeout: 5000 }).trim();
+  } catch (e) { return ''; }
+}
+// === end found-issues plugin segment ===
+console.log(`repo | main${__fiSeg(typeof dir!=='undefined'?dir:(typeof cwd!=='undefined'?cwd:undefined))}`);  // found-issues:seg
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.5.x"
+  grep -q -- "--cwd" tmp/sl.js
+  # Exactly one splice survives the strip + re-splice round-trip
+  [ "$(grep -c 'found-issues:seg' tmp/sl.js)" -eq 1 ]
+  # Result must still be valid JS
+  if command -v node >/dev/null 2>&1; then
+    node --check tmp/sl.js
+  fi
+  # Second run is a no-op — rewritten block classifies as integrated
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "already integrated"
+}
+
+@test "install-statusline --target python: migrates v1.5.x block without --cwd (v1.5.6)" {
+  # Faithful v1.5.0–v1.5.5 install with the REAL f-string splice the
+  # installer emits. See node twin above for the bug being prevented.
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+# === found-issues plugin segment ===
+import subprocess as _fi_subprocess
+import os as _fi_os
+import pathlib as _fi_pathlib
+_fi_cli = 'found-issues'
+def _fi_seg(_dir=None):
+    if not _fi_cli:
+        return ''
+    try:
+        _fi_cwd = _dir or _fi_os.environ.get('CLAUDE_PROJECT_DIR') or str(_fi_pathlib.Path.home())
+        return _fi_subprocess.run(
+            [_fi_cli, 'status', '--format=segment'],
+            cwd=_fi_cwd, capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+    except Exception:
+        return ''
+# === end found-issues plugin segment ===
+print(f"repo | main{_fi_seg(locals().get("dir") or locals().get("cwd"))}")  # found-issues:seg
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.5.x"
+  grep -q -- "--cwd" tmp/sl.py
+  # Exactly one splice survives the strip + re-splice round-trip
+  [ "$(grep -c 'found-issues:seg' tmp/sl.py)" -eq 1 ]
+  # Result must still be valid Python
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import ast; ast.parse(open('tmp/sl.py').read())"
+  fi
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "already integrated"
+}
+
 # =====================================================================
 # Group 5 — Runtime end-to-end
 # Verifies that the generated shim, after install-statusline --apply,

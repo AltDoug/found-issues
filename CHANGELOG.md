@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-06-09
+
+### Fixed
+- Statusline segment templates now pass an explicit `--cwd` to `status --format=segment`. The blocks `cd` into the workspace dir, but `cmd_status`'s search-root priority is `--cwd` > `$CLAUDE_PROJECT_DIR` > `$PWD` — so a `CLAUDE_PROJECT_DIR` inherited from the statusline subprocess (= where the *session* started, often `$HOME`) silently overrode the `cd`, scoped the file walk to the wrong root, and rendered an empty segment for any session launched outside a project dir even while working inside one. Real-world hit 2026-06-09: a session launched from `$HOME` working in `agent-config` (2 open entries) showed no counter; the debug log proved `CLAUDE_PROJECT_DIR=$HOME` reached the subprocess while `workspace.current_dir` pointed at the repo. Applies to all four templates: canonical inline (LINE1 splice), canonical append, Node, and Python. The `cd` is kept deliberately — the segment-autosync background `$0 sync` inherits `$PWD`, not `--cwd`.
+- Custom-target bash template (`fi_generate_bash_marker_block`) now resolves the workspace from `$input` JSON `workspace.current_dir` FIRST and falls back to `$CLAUDE_PROJECT_DIR` — the previous env-first order pinned the segment to the session's start dir instead of tracking the live workspace.
+- Existing installs migrate automatically: `fi_statusline_state` now requires `--cwd` in the marker block for `installed-fixed`, so v1.0.2–v1.5.5 cd-only blocks classify as `installed-broken` and `install-statusline` (re-run by SessionStart self-heal / agent-sync post-hooks) rewrites them in place. Node/Python custom targets get the same treatment via the new `fi_target_is_v15x_broken` detector wired into both target handlers and the posix state branch.
+
+### Known gaps
+- Bash *custom-target* installs (`--target foo.sh`) with a v1.5.x block are still a no-op on re-run — `fi_strip_target_markers` has no bash strip support, so there is no safe rewrite path. Tracked in `docs/found-issues.md`; canonical `~/.claude/statusline.sh` installs are unaffected (they migrate via the uninstall/reinstall path above).
+
+### Internal
+- `fi_target_is_v15x_broken <path> <language>` — marker block present, invokes `status --format=segment`, lacks `--cwd`. Supports node/python/bash detection (bash used by the canonical state machine only, per the gap above).
+
 ## [1.5.5] - 2026-05-22
 
 ### Fixed

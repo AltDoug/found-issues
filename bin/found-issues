@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.5.5"
+readonly FI_VERSION="1.5.6"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1809,6 +1809,10 @@ fi_statusline_state() {
       printf 'installed-broken-posix'
       return 0
     fi
+    if fi_target_is_v15x_broken "$file" "$language"; then
+      printf 'installed-broken-posix'
+      return 0
+    fi
     if grep -Fq "// === found-issues plugin segment ===" "$file" 2>/dev/null \
        || grep -Fq "# === found-issues plugin segment ===" "$file" 2>/dev/null; then
       printf 'installed-fixed'
@@ -1821,13 +1825,19 @@ fi_statusline_state() {
   local has_marker=0 marker_block_fixed=0 has_legacy=0
   if grep -Fq "$FI_STATUSLINE_START_MARKER" "$file" 2>/dev/null; then
     has_marker=1
-    # Inspect block contents — `__FI_DIR` only appears in v1.0.2+ snippets.
+    # Inspect block contents — `__FI_DIR` only appears in v1.0.2+ snippets,
+    # and `--cwd` only in v1.5.6+ snippets. Both are required for "fixed":
+    # v1.0.2–v1.5.5 blocks cd into the workspace but the CLI's search-root
+    # priority (--cwd > CLAUDE_PROJECT_DIR > PWD) lets an inherited
+    # CLAUDE_PROJECT_DIR (= where the session started, often $HOME) silently
+    # override the cd → empty segment. Classifying those as installed-broken
+    # routes them through the existing rewrite-in-place migration.
     if awk -v start="$FI_STATUSLINE_START_MARKER" \
            -v endm="$FI_STATUSLINE_END_MARKER" '
         $0 == start { in_block = 1; next }
         $0 == endm { in_block = 0; next }
         in_block { print }
-      ' "$file" | grep -Fq '__FI_DIR'; then
+      ' "$file" | grep -F '__FI_DIR' | grep -Fq -- '--cwd'; then
       marker_block_fixed=1
     fi
   fi
@@ -1960,6 +1970,37 @@ fi_target_is_v14x_broken() {
   esac
 }
 
+# Marker block present but its segment invocation lacks the explicit --cwd
+# flag (v1.5.0–v1.5.5 templates). Without --cwd, an inherited
+# CLAUDE_PROJECT_DIR (= where the session STARTED, often $HOME) overrides
+# the block's cd/cwd in the CLI's search-root priority → wrong search root
+# → empty or wrong-repo segment. Returns 0 (broken) when the block invokes
+# `status --format=segment` without `--cwd`.
+fi_target_is_v15x_broken() {
+  local path="$1"
+  local language="$2"
+  [[ -f "$path" ]] || return 1
+  local start end
+  case "$language" in
+    node)
+      start='^\/\/ === found-issues plugin segment ==='
+      end='^\/\/ === end found-issues plugin segment ==='
+      ;;
+    python|bash)
+      start='^# === found-issues plugin segment ==='
+      end='^# === end found-issues plugin segment ==='
+      ;;
+    *) return 1 ;;
+  esac
+  LC_ALL=C awk -v s="$start" -v e="$end" '
+    $0 ~ s { in_block = 1; next }
+    $0 ~ e { in_block = 0; next }
+    in_block && /--format=segment/ { has_seg = 1 }
+    in_block && /--cwd/ { has_cwd = 1 }
+    END { exit (has_seg && !has_cwd ? 0 : 1) }
+  ' "$path"
+}
+
 # Surgically remove marker block + splice trailer comments from a target file.
 # Used by the v1.4.x migration path. Mirrors the canonical bash strip in
 # fi_strip_legacy_lines but operates on language-specific marker syntax.
@@ -1983,15 +2024,36 @@ fi_strip_target_markers() {
 
   local tmp
   tmp="$(mktemp -t fi-strip.XXXXXX)"
-  LC_ALL=C awk -v start="$start_marker" -v endm="$end_marker" -v trailer="$trailer_pattern" '
+  # v1.5.x call-form splice fragments are CONSTANT strings emitted by the
+  # installers (deferred __fiSeg(dir)/_fi_seg(_dir) with a fixed fallback
+  # expression). Their nested parens defeat the ERE `[^)]*` patterns below
+  # — sub() either misses or eats the host call's closing paren, corrupting
+  # the line so re-splice doubles the injection (found 2026-06-09 while
+  # adding the v1.5.x migration). Literal index()/substr surgery is exact.
+  # The regex subs are kept as fallback for the older bare-value forms.
+  local node_tpl="\${__fiSeg(typeof dir!=='undefined'?dir:(typeof cwd!=='undefined'?cwd:undefined))}"
+  local node_cat=" + __fiSeg(typeof dir!=='undefined'?dir:(typeof cwd!=='undefined'?cwd:undefined))"
+  local py_fstr="{_fi_seg(locals().get(\"dir\") or locals().get(\"cwd\"))}"
+  LC_ALL=C awk -v start="$start_marker" -v endm="$end_marker" -v trailer="$trailer_pattern" \
+      -v seg_tpl="$node_tpl" -v seg_cat="$node_cat" -v seg_fstr="$py_fstr" '
+    function strip_lit(line, lit,    idx) {
+      while (lit != "" && (idx = index(line, lit)) > 0) {
+        line = substr(line, 1, idx - 1) substr(line, idx + length(lit))
+      }
+      return line
+    }
     $0 == start { in_block = 1; next }
     $0 == endm { in_block = 0; next }
     in_block { next }
     {
       line = $0
+      # Exact v1.5.x call-form splices (template-literal, concat, f-string).
+      line = strip_lit(line, seg_tpl)
+      line = strip_lit(line, seg_cat)
+      line = strip_lit(line, seg_fstr)
       # Strip the splice injection from the line. v1.4.x migration only ever
       # sees the bare value forms (${__fiSeg} / {_fi_seg}); the call-form
-      # variants below handle the v1.5.x concatenation splice.
+      # variants below handle simple-argument concatenation splices.
       sub(/\$\{__fiSeg\}/, "", line)
       sub(/\{_fi_seg\}/, "", line)
       sub(/[[:space:]]*\+[[:space:]]*__fiSeg\([^)]*\)\)/, "", line)
@@ -2107,8 +2169,19 @@ fi_find_bash_splice_point() {
 }
 
 # Emit the bash marker block (multi-line). Includes PATH-resilience and
-# two-tier cwd resolution (CLAUDE_PROJECT_DIR → $input JSON via jq → empty).
+# two-tier cwd resolution ($input JSON via jq → CLAUDE_PROJECT_DIR → empty).
 # Mirrors the canonical install's robustness; see bin/found-issues:2360+.
+#
+# v1.5.6 cwd fix (two related bugs, same symptom — empty segment):
+#   1. JSON-first, not env-first. CLAUDE_PROJECT_DIR is where the SESSION
+#      started (often $HOME), while workspace.current_dir tracks where work
+#      is actually happening. A session launched from $HOME that cd's into
+#      a repo got the segment scoped to $HOME → no issues file → empty.
+#   2. Explicit --cwd on the status call. cmd_status's search-root priority
+#      is --cwd > CLAUDE_PROJECT_DIR > PWD, so the block's `cd` alone is
+#      silently overridden by the inherited CLAUDE_PROJECT_DIR env var.
+#   The `cd` is kept deliberately: the segment-autosync background `$0 sync`
+#   dispatched by cmd_status inherits PWD, not --cwd.
 fi_generate_bash_marker_block() {
   cat <<'BLOCK'
 # === found-issues plugin segment ===
@@ -2122,15 +2195,19 @@ else
   __FI_CLI=$(ls -d "$HOME"/.claude/plugins/cache/*/found-issues/*/bin/found-issues 2>/dev/null | sort -V | tail -1 || true)
   [[ -x "$__FI_CLI" ]] || __FI_CLI=""
 fi
-# Cwd resolution: prefer CLAUDE_PROJECT_DIR; fall back to $input JSON.
-__FI_DIR="${CLAUDE_PROJECT_DIR:-}"
-if [[ -z "$__FI_DIR" && -n "${input:-}" ]] && command -v jq >/dev/null 2>&1; then
+# Cwd resolution: prefer $input JSON workspace.current_dir (tracks the live
+# workspace); fall back to CLAUDE_PROJECT_DIR (where the session started).
+__FI_DIR=""
+if [[ -n "${input:-}" ]] && command -v jq >/dev/null 2>&1; then
   __FI_DIR=$(echo "$input" | jq -r '.workspace.current_dir // ""' 2>/dev/null || true)
 fi
+[[ -z "$__FI_DIR" ]] && __FI_DIR="${CLAUDE_PROJECT_DIR:-}"
 __FI_SEG=""
 if [[ -n "$__FI_CLI" ]]; then
   if [[ -n "$__FI_DIR" ]]; then
-    __FI_SEG=$( cd "$__FI_DIR" 2>/dev/null && "$__FI_CLI" status --format=segment 2>/dev/null || true )
+    # --cwd is load-bearing: cmd_status prefers inherited CLAUDE_PROJECT_DIR
+    # over PWD, so `cd` alone is not enough. cd kept for autosync's PWD.
+    __FI_SEG=$( cd "$__FI_DIR" 2>/dev/null && "$__FI_CLI" status --format=segment --cwd "$__FI_DIR" 2>/dev/null || true )
   else
     __FI_SEG=$("$__FI_CLI" status --format=segment 2>/dev/null || true)
   fi
@@ -2293,10 +2370,12 @@ function __fiSeg(dir) {
       // so bash handles the POSIX path resolution natively. Pass cwd + cli
       // as argv positionals so bash doesn't re-parse them — eliminates the
       // need to escape ' or " in either path.
-      return execFileSync('bash', ['-c', 'cd "$1" && "$2" status --format=segment', '_', posixCwd, posixPath],
+      // --cwd is load-bearing: the CLI prefers inherited CLAUDE_PROJECT_DIR
+      // (where the session STARTED) over PWD, so cd/cwd alone is overridden.
+      return execFileSync('bash', ['-c', 'cd "$1" && "$2" status --format=segment --cwd "$1"', '_', posixCwd, posixPath],
         { encoding: 'utf8', timeout: 5000 }).trim();
     }
-    return execFileSync(__fiCli, ['status', '--format=segment'],
+    return execFileSync(__fiCli, ['status', '--format=segment', '--cwd', cwd],
       { cwd, encoding: 'utf8', timeout: 5000 }).trim();
   } catch (e) { return ''; }
 }
@@ -2341,14 +2420,21 @@ cmd_install_statusline_target_node() {
   local path="$1"
   local mode="$2"
 
-  # Idempotency: if v1.5.0+ marker block already present, no-op.
-  # If v1.4.x POSIX-only marker present, strip + reinstall (migration path).
+  # Idempotency: if v1.5.6+ marker block already present, no-op.
+  # If v1.4.x POSIX-only or v1.5.0–v1.5.5 --cwd-less marker present,
+  # strip + reinstall (migration path).
   if grep -Fq "// === found-issues plugin segment ===" "$path"; then
     if fi_target_is_v14x_broken "$path" node; then
       printf 'install-statusline --target: migrating v1.4.x POSIX-only marker block in %s\n' "$path"
       # Strip old marker block + splice trailers, then fall through to install.
       fi_strip_target_markers "$path" node || {
         fi_err "install-statusline --target: failed to strip v1.4.x marker block"
+        return 14
+      }
+    elif fi_target_is_v15x_broken "$path" node; then
+      printf 'install-statusline --target: migrating v1.5.x marker block without --cwd in %s\n' "$path"
+      fi_strip_target_markers "$path" node || {
+        fi_err "install-statusline --target: failed to strip v1.5.x marker block"
         return 14
       }
     else
@@ -2535,13 +2621,15 @@ def _fi_seg(_dir=None):
             _fi_posix_cwd = _fi_cwd.replace('\\', '/')
             # Pass cwd + cli as argv positionals so bash doesn't re-parse them
             # — eliminates the need to escape ' or " in either path.
+            # --cwd is load-bearing: the CLI prefers inherited CLAUDE_PROJECT_DIR
+            # (where the session STARTED) over PWD, so cd/cwd alone is overridden.
             _fi_result = _fi_subprocess.run(
-                [_fi_bash_bin, '-c', 'cd "$1" && "$2" status --format=segment', '_', _fi_posix_cwd, _fi_posix],
+                [_fi_bash_bin, '-c', 'cd "$1" && "$2" status --format=segment --cwd "$1"', '_', _fi_posix_cwd, _fi_posix],
                 capture_output=True, timeout=5
             )
             return _fi_result.stdout.decode('utf-8', errors='replace').strip()
         return _fi_subprocess.run(
-            [_fi_cli, 'status', '--format=segment'],
+            [_fi_cli, 'status', '--format=segment', '--cwd', _fi_cwd],
             cwd=_fi_cwd, capture_output=True, text=True, timeout=5
         ).stdout.strip()
     except Exception:
@@ -2554,13 +2642,20 @@ cmd_install_statusline_target_python() {
   local path="$1"
   local mode="$2"
 
-  # Idempotency: if v1.5.0+ marker block already present, no-op.
-  # If v1.4.x POSIX-only marker present, strip + reinstall (migration path).
+  # Idempotency: if v1.5.6+ marker block already present, no-op.
+  # If v1.4.x POSIX-only or v1.5.0–v1.5.5 --cwd-less marker present,
+  # strip + reinstall (migration path).
   if grep -Fq "# === found-issues plugin segment ===" "$path"; then
     if fi_target_is_v14x_broken "$path" python; then
       printf 'install-statusline --target: migrating v1.4.x POSIX-only marker block in %s\n' "$path"
       fi_strip_target_markers "$path" python || {
         fi_err "install-statusline --target: failed to strip v1.4.x marker block"
+        return 14
+      }
+    elif fi_target_is_v15x_broken "$path" python; then
+      printf 'install-statusline --target: migrating v1.5.x marker block without --cwd in %s\n' "$path"
+      fi_strip_target_markers "$path" python || {
+        fi_err "install-statusline --target: failed to strip v1.5.x marker block"
         return 14
       }
     else
@@ -2758,10 +2853,12 @@ cmd_install_statusline() {
       return 0
       ;;
     installed-broken)
-      # v1.0.0/1.0.1 marker-bracketed segment without cwd handling — silent
-      # breakage for every public user pre-v1.0.2. Auto-migrate: the markers
-      # give us safe block boundaries, and the rewrite is a strict upgrade.
-      printf 'install-statusline: detected v1.0.0/1.0.1 marker-bracketed segment without cwd handling — rewriting in place.\n'
+      # Outdated marker-bracketed segment: either v1.0.0/1.0.1 (no cwd
+      # handling at all) or v1.0.2–v1.5.5 (cd-only, defeated by inherited
+      # CLAUDE_PROJECT_DIR — no explicit --cwd). Both are silent breakage.
+      # Auto-migrate: the markers give us safe block boundaries, and the
+      # rewrite is a strict upgrade.
+      printf 'install-statusline: detected outdated marker-bracketed segment (missing cwd/--cwd handling) — rewriting in place.\n'
       cmd_uninstall_statusline >/dev/null
       ;;
     legacy-handwritten)
@@ -3320,7 +3417,10 @@ cmd_install_statusline_inline() {
         print "__FI_SEG=\"\""
         print "if [[ -n \"$__FI_CLI\" ]]; then"
         print "  if [[ -n \"$__FI_DIR\" ]]; then"
-        print "    __FI_SEG=$( cd \"$__FI_DIR\" 2>/dev/null && \"$__FI_CLI\" status --format=segment 2>/dev/null || true )"
+        print "    # --cwd is load-bearing: the CLI prefers inherited CLAUDE_PROJECT_DIR"
+        print "    # (where the session STARTED) over PWD, so `cd` alone is silently"
+        print "    # overridden. cd kept so background autosync inherits the workspace."
+        print "    __FI_SEG=$( cd \"$__FI_DIR\" 2>/dev/null && \"$__FI_CLI\" status --format=segment --cwd \"$__FI_DIR\" 2>/dev/null || true )"
         print "  else"
         print "    __FI_SEG=$(\"$__FI_CLI\" status --format=segment 2>/dev/null || true)"
         print "  fi"
@@ -3375,7 +3475,10 @@ fi
 __FI_SEG=""
 if [[ -n "\$__FI_CLI" ]]; then
   if [[ -n "\$__FI_DIR" ]]; then
-    __FI_SEG=\$( cd "\$__FI_DIR" 2>/dev/null && "\$__FI_CLI" status --format=segment 2>/dev/null || true )
+    # --cwd is load-bearing: the CLI prefers inherited CLAUDE_PROJECT_DIR
+    # (where the session STARTED) over PWD, so \`cd\` alone is silently
+    # overridden. cd kept so background autosync inherits the workspace.
+    __FI_SEG=\$( cd "\$__FI_DIR" 2>/dev/null && "\$__FI_CLI" status --format=segment --cwd "\$__FI_DIR" 2>/dev/null || true )
   else
     __FI_SEG=\$("\$__FI_CLI" status --format=segment 2>/dev/null || true)
   fi
