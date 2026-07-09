@@ -120,9 +120,11 @@ EOF
   # natural language: "1 issue" / "3 issues" — no rename when nothing else
   # is on display.
   mkdir -p docs
-  cat > docs/found-issues.md <<'EOF'
+  # Dynamic date: a hardcoded one goes stale after 30 days, adding a stale
+  # counter that relabels the solo residual from "issue" to "other".
+  cat > docs/found-issues.md <<EOF
 # found-issues
-- [open] 2026-05-10 src/foo.py:42 — null check
+- [open] $(date +%Y-%m-%d) src/foo.py:42 — null check
 EOF
   fi_run status --format=plain
   [ "$status" -eq 0 ]

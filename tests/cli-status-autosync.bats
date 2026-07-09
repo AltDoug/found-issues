@@ -11,9 +11,11 @@ setup() {
   fi_setup_tmp
   fi_init_git
   # Seed a minimal found-issues.md so cmd_status has something to render
-  # (the autosync branch is gated on file existence).
+  # (the autosync branch is gated on file existence). Dynamic date: a
+  # hardcoded one goes stale after 30 days and flips the "1 issue" label
+  # asserted below to "1 other · 1 stale".
   mkdir -p docs
-  printf '# found-issues\n\n- [open] 2026-05-12 src/foo.py — bug\n' > docs/found-issues.md
+  printf '# found-issues\n\n- [open] %s src/foo.py — bug\n' "$(date +%Y-%m-%d)" > docs/found-issues.md
 
   # helpers.bash defaults FOUND_ISSUES_SEGMENT_AUTOSYNC=off for test
   # isolation; unset here so THIS test file actually exercises the

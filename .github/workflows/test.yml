@@ -5,12 +5,32 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Weekly canary on main. Some test fixtures are time-sensitive (e.g. entry
+  # freshness vs the 30-day stale threshold) and the suite can rot on a repo
+  # where no PR lands for weeks — 2026-07-09: 12 tests silently red since
+  # ~June 12 because fixture dates crossed the stale threshold, discovered
+  # only when the next PR was being prepared. This surfaces such breakage
+  # within a week instead.
+  #
+  # Known limit: GitHub auto-disables scheduled workflows in public repos
+  # after 60 days without repository activity (cron runs don't count) — it
+  # emails a notice and the canary stops until manually re-enabled. So this
+  # covers idle windows up to ~2 months; past that, re-enable from the
+  # Actions tab or push any commit. workflow_dispatch does not prevent the
+  # auto-disable.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 
 # Cancel in-progress runs when a new commit lands on the same PR / branch.
 # Saves CI minutes (especially on Windows, ~7 min) and stops stale results
 # from clobbering fresh ones when fix-up commits arrive in quick succession.
+# event_name is part of the group so the Monday canary (schedule) and manual
+# dispatch runs never share a group with push-to-main — without it, a push
+# landing during the ~15-min canary window cancels the canary (or vice versa,
+# leaving the merged commit's checks 'cancelled').
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,10 +43,16 @@ jobs:
     name: detect changes
     runs-on: ubuntu-latest
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      # Scheduled/manual runs have no diff to filter — force the full matrix.
+      code: ${{ steps.filter.outputs.code || steps.force.outputs.code }}
     steps:
+      - id: force
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: echo "code=true" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v6
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
       - id: filter
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         uses: dorny/paths-filter@v4
         with:
           # `every`: a file matches `code` only when it satisfies ALL patterns

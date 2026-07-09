@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.7] - 2026-07-09
+
+### Fixed
+- `install-statusline --target foo.sh` now migrates bash custom targets carrying a v1.5.0–v1.5.5 `--cwd`-less marker block (strip + re-splice) instead of no-op'ing on the existing markers — closes the v1.5.6 Known gap. `fi_strip_target_markers` gained a bash case (same `#` markers and `# found-issues:seg` trailer as python; splice form is the constant `${__FI_SEG}`), and the bash handler now runs `fi_target_is_v15x_broken` like the node/python handlers. No v1.4.x branch for bash — that shim was always POSIX-correct.
+- Custom-target migration no longer mutates the target before backup/dry-run handling. Previously the node/python handlers stripped the old marker block from the target file *in place* before the mode check, so (1) a default dry-run on a v1.4.x/v1.5.x target silently destroyed the existing integration with no backup, and (2) in apply mode the timestamped backup captured the already-stripped file, not the user's original — and a re-splice failure after the strip left the target with no integration and no true backup. The strip now operates on a scratch copy (`fi_strip_to_scratch`); the target is untouched until the apply-mode atomic rename, and dry-run diffs original → migrated as one change.
+- Custom-target splice awk (all three handlers): a splice point on line 1 of a file with no shebang/preamble got the segment splice but never the marker block that defines it — the `(NR in splice_set)` rule fired before the block-at-top rule, so a one-line statusline referenced an undefined `__FI_SEG`/`__fiSeg`/`_fi_seg` and every re-run appended another splice instead of no-op'ing. The block-at-top rule now falls through to the splice handling.
+- `fi_strip_target_markers` only touches installer-emitted splice lines (tagged with the `found-issues:seg` trailer) — previously the v1.5.x literal strips ran on every non-block line, silently deleting user-authored segment references (extra placements, emitted snippets) during migration. All three languages also strip hand-edited splice variants the exact-literal match misses (bash: unbraced `$__FI_SEG`, `${__FI_SEG:-}`; node: `${__fiSeg(<any args>)}`; python: `{_fi_seg(<any args>)}`) — a leftover python variant was worst: the re-splice inserts at the first `")` on the line, corrupting a hand-edited splice into a SyntaxError (found by the v1.5.7 verify pass).
+- Node/python apply paths now guard the final atomic rename like the bash handler does — an unwritable target directory previously aborted via `set -e` with no message, leaking three temp files next to the user's statusline.
+
+### Changed
+- Bash custom targets that contain a v1.5.x marker block but no recognizable splice point (AI-fallback installs with non-standard output patterns) now exit 11 with a "file is unchanged, use the AI fallback" message instead of the previous silent exit-0 no-op. The no-op left the broken `--cwd`-less block rendering an empty segment forever; the error is actionable and the file is never modified.
+
+### Internal
+- Test suite de-time-bombed: 12 tests (5 segment-contract byte-snapshots, the solo-residual label test, the autosync label test, and 5 custom-target runtime e2e tests) hardcoded fixture entry dates that crossed the 30-day stale threshold around 2026-06-12 — the stale counter appeared, the residual label flipped from "N issue(s)" to "N other", and the whole suite went silently red on main for almost a month (no bats CI ran between PRs). Date-sensitive fixtures now use `$(date +%Y-%m-%d)`. Deliberately-old dates in stale-specific tests are untouched.
+- CI: weekly scheduled run (Mondays 06:00 UTC) + `workflow_dispatch` on the test workflow, so time-dependent breakage on an idle main surfaces within a week instead of ambushing the next PR. Scheduled/manual runs bypass the paths-filter and always run the full matrix. The concurrency group includes `github.event_name` so the canary and push-to-main runs can't cancel each other; GitHub's 60-day-inactivity auto-disable of schedules is documented next to the cron.
+- 11 new regression tests: bash v1.5.x migration (happy path, shebang-less line-1 splice for fresh install + migration, unbraced `$__FI_SEG`, user-authored `${__FI_SEG}` preservation, dry-run-untouched, backup-is-original) and dry-run-untouched pins for the node/python v1.4.x AND v1.5.x migration branches.
+
 ## [1.5.6] - 2026-06-09
 
 ### Fixed
