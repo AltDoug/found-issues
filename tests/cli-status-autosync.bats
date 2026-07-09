@@ -130,3 +130,21 @@ _wait_for_marker() {
   sleep 0.4
   [ ! -e "$MARKER" ]
 }
+
+@test "segment-autosync: default dispatch survives a CLI path containing a space" {
+  # The default autosync command is the CLI itself ($0 sync). An install path
+  # with a space used to word-split inside bash -c and exit 127 silently.
+  unset FOUND_ISSUES_AUTOSYNC_CMD
+  mkdir -p "$TMP/spaced dir"
+  cp "$FI_BIN" "$TMP/spaced dir/found-issues"
+  chmod +x "$TMP/spaced dir/found-issues"
+  # The seeded entry cites src/foo.py which does not exist, so a real sync
+  # tombstones it — observable evidence the background dispatch ran.
+  run "$TMP/spaced dir/found-issues" status --format=segment --cwd "$TMP"
+  [ "$status" -eq 0 ]
+  for _ in $(seq 1 40); do
+    grep -q '\[fixed\]' docs/found-issues.md 2>/dev/null && break
+    sleep 0.25
+  done
+  grep -q 'closure: tombstone' docs/found-issues.md
+}

@@ -281,3 +281,26 @@ EOF
   ! echo "$output" | grep -q 'd.ts:1'
   ! echo "$output" | grep -q 'e.ts:1'
 }
+
+@test "status: critical entry in PR does not hide plain open entries (overlap)" {
+  local today
+  today="$(date +%Y-%m-%d)"
+  mkdir -p docs
+  cat > docs/found-issues.md <<EOF
+# found-issues
+
+- [open] [!] $today src/a.py:1 — critical bug already in PR (PR: org/repo#7)
+- [open] $today src/b.py:1 — plain open entry
+EOF
+  fi_run status --format=json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"critical":1'* ]]
+  [[ "$output" == *'"issues":1'* ]]
+  [[ "$output" == *'"in_pr":1'* ]]
+  [[ "$output" == *'"total_open":2'* ]]
+
+  fi_run status --format=plain
+  [[ "$output" == *"1 critical"* ]]
+  [[ "$output" == *"1 other"* ]]
+  [[ "$output" == *"1 in PR"* ]]
+}

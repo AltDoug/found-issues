@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.5.8"
+readonly FI_VERSION="1.6.0"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -135,8 +135,12 @@ fi_repo_id() {
   if [[ "$remote_url" != *"github.com"* ]]; then
     return 1
   fi
+  # Strip a literal .git suffix first, then capture the last two path
+  # segments verbatim. The earlier single-pass form used [^/.]+ for the
+  # repo segment, truncating dotted repo names (vercel/next.js -> vercel/next)
+  # in (PR: ...) annotations, which then made sync query the wrong repo.
   printf '%s' "$remote_url" \
-    | sed -E 's|.*github\.com[:/]([^/]+/[^/.]+)(\.git)?.*|\1|'
+    | sed -E 's|\.git$||; s|.*github\.com[:/]([^/]+/[^/]+).*|\1|'
 }
 
 # Resolve the default branch with a layered fallback chain:
@@ -216,7 +220,11 @@ COMMANDS
                                         Print counts (for statusline integration).
                                         --cwd overrides where to look for the issues file
                                         (defaults to \$CLAUDE_PROJECT_DIR or \$PWD).
-  annotate-pr <N>                       Annotate matching [open] entries with PR
+  annotate-pr <N> [--pick <loc>,...] [--all]
+                                        Annotate matching [open] entries with PR.
+                                        Files cited by several entries need an explicit
+                                        --pick (path:line list) or --all — file-level
+                                        auto-match alone would over-annotate.
   annotate-commit [<sha>]               Annotate matching [open] entries with commit
   promote                               List entries that need promotion to main
   archive [--dry-run] [--days=N] [--count=N]
@@ -877,8 +885,11 @@ cmd_status() {
     critical="$(fi_count_critical "$file")"
     total_open="$(fi_count "$file" open)"
     in_pr="$(fi_count_in_pr "$file")"
-    issues=$((total_open - in_pr - critical))
-    [[ "$issues" -lt 0 ]] && issues=0
+    # Residual computed by exclusion (entries neither critical nor in-PR),
+    # NOT by subtraction: total_open - in_pr - critical double-subtracts
+    # entries that are BOTH critical and in-PR, making plain open entries
+    # vanish from every rendered counter.
+    issues="$(fi_count_residual "$file")"
     stale="$(fi_count_stale "$file" "${FOUND_ISSUES_STALE_DAYS:-30}")"
   fi
 
@@ -923,8 +934,15 @@ cmd_status() {
     _autosync_age=$(( _autosync_now - _autosync_last ))
     if (( _autosync_age >= _autosync_interval )); then
       : >"$_autosync_ts" 2>/dev/null || true
-      local _autosync_cmd="${FOUND_ISSUES_AUTOSYNC_CMD:-$0 sync}"
-      ( bash -c "$_autosync_cmd" >/dev/null 2>&1 & ) >/dev/null 2>&1
+      if [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
+        # Testing knob: a self-contained command STRING, dispatched via bash -c.
+        ( bash -c "$FOUND_ISSUES_AUTOSYNC_CMD" >/dev/null 2>&1 & ) >/dev/null 2>&1
+      else
+        # Default: invoke ourselves as argv, never through a bash -c string —
+        # an install path containing a space (e.g. C:/Users/John Doe/...)
+        # word-splits inside the string and exits 127 silently.
+        ( "$0" sync >/dev/null 2>&1 & ) >/dev/null 2>&1
+      fi
     fi
   fi
 
@@ -935,8 +953,8 @@ cmd_status() {
       ;;
     plain)
       # Label policy (2026-05-10 UX audit, surfaces 2.1 + 9.1):
-      # The "issues" bucket is the residual: total_open minus in_pr minus
-      # critical. When it's the ONLY counter on display (no critical / no
+      # The "issues" bucket is the residual: open entries that are neither
+      # critical nor in-PR. When it's the ONLY counter on display (no critical / no
       # in_pr / no stale), "issue/issues" reads naturally. When other
       # counters are present, "other" disambiguates the residual so users
       # don't try to mentally add "2 critical + 5 issues = 7 open" (which
@@ -1009,18 +1027,65 @@ cmd_status() {
 
 # === Subcommand: annotate-pr ===
 #
-# Usage: found-issues annotate-pr <PR-number>
+# Usage: found-issues annotate-pr <PR-number> [--pick <loc>[,<loc>...]] [--all]
 #
-# Scans the PR's diff for files referenced by [open] entries,
-# appends (PR: org/repo#N) to each matching entry.
+# Scans the PR's diff for files referenced by [open] entries and appends
+# (PR: org/repo#N) to matching entries. File-level matching alone
+# over-annotates — a PR touching a hot file (one with many open entries)
+# would tag every entry on that file, and sync would false-flip them all to
+# [fixed] on merge (hit in production 2026-07-09: 12 tagged, 3 actually
+# fixed). So:
+#   - a touched file cited by exactly ONE entry auto-annotates (unambiguous)
+#   - a touched file cited by SEVERAL entries annotates none of them; the
+#     candidates are listed for symptom-level selection via --pick
+#   - --pick <path:line>[,...] annotates exactly the selected entries
+#     (locations as printed in the candidate list; bare path for line-less
+#     entries). Picked entries need not cite a touched file — a fix can land
+#     in a different file than the symptom.
+#   - --all restores annotate-everything-matching for PRs that genuinely
+#     address every listed entry.
 
 cmd_annotate_pr() {
-  if [[ $# -eq 0 ]]; then
-    fi_err "Usage: found-issues annotate-pr <PR-number>"
+  local pr_num=""
+  local annotate_all="no"
+  local picks_csv=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all)
+        annotate_all="yes"
+        ;;
+      --pick)
+        shift
+        if [[ -z "${1:-}" ]]; then
+          fi_err "annotate-pr: --pick requires a comma-separated list of entry locations"
+          return 2
+        fi
+        picks_csv="${picks_csv:+$picks_csv,}$1"
+        ;;
+      --pick=*)
+        picks_csv="${picks_csv:+$picks_csv,}${1#--pick=}"
+        ;;
+      -*)
+        fi_err "annotate-pr: unknown flag: $1"
+        fi_err "Usage: found-issues annotate-pr <PR-number> [--pick <path:line>[,<path:line>...]] [--all]"
+        return 2
+        ;;
+      *)
+        if [[ -n "$pr_num" ]]; then
+          fi_err "Usage: found-issues annotate-pr <PR-number> [--pick <path:line>[,<path:line>...]] [--all]"
+          return 2
+        fi
+        pr_num="$1"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$pr_num" ]]; then
+    fi_err "Usage: found-issues annotate-pr <PR-number> [--pick <path:line>[,<path:line>...]] [--all]"
     return 2
   fi
-
-  local pr_num="$1"
   if ! [[ "$pr_num" =~ ^[0-9]+$ ]]; then
     fi_err "annotate-pr: PR number must be numeric, got: $pr_num"
     return 2
@@ -1059,58 +1124,176 @@ cmd_annotate_pr() {
   fi
 
   local annotation="(PR: $repo_id#$pr_num)"
-  local matched=0
-  local tmp
-  tmp="$(mktemp -t found-issues.XXXXXX)"
-  trap "rm -f '$tmp'" EXIT
 
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^-\ \[open\] ]]; then
-      # Skip if annotation already present
-      if [[ "$line" == *"$annotation"* ]]; then
-        printf '%s\n' "$line" >>"$tmp"
-        continue
-      fi
+  # --pick mode: annotate exactly the selected entries by location token
+  # (path:line, or bare path for line-less entries — the same form the
+  # candidate list prints). No file-level matching: selection is
+  # judgment-driven, and a fix can land in a different file than the symptom.
+  if [[ -n "$picks_csv" ]]; then
+    local tmp matched=0 already=0
+    local matched_picks=""
+    tmp="$(mktemp -t found-issues.XXXXXX)"
+    trap "rm -f '$tmp'" EXIT
 
-      # Extract path from entry
-      local e_data e_path
-      e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
-      e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
-
-      if [[ -n "$e_path" ]]; then
-        # Match if any touched file matches the entry path
-        local hit=0
-        while IFS= read -r tf; do
-          [[ -z "$tf" ]] && continue
-          if [[ "$tf" == "$e_path" || "$tf" == */"$e_path" || "$e_path" == */"$tf" ]]; then
-            hit=1
-            break
+    while IFS= read -r line; do
+      local out_line="$line"
+      if [[ "$line" =~ ^-\ \[open\] ]]; then
+        local e_data e_path e_line loc
+        if e_data="$(fi_parse_entry "$line")"; then
+          e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+          e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+          loc="$e_path"
+          [[ -n "$e_line" ]] && loc="$e_path:$e_line"
+          local pick hit=0
+          local IFS_old="$IFS"
+          IFS=','
+          for pick in $picks_csv; do
+            IFS="$IFS_old"
+            [[ -z "$pick" ]] && continue
+            if [[ "$pick" == "$loc" ]]; then
+              hit=1
+              matched_picks+="${pick}"$'\n'
+            fi
+          done
+          IFS="$IFS_old"
+          if (( hit == 1 )); then
+            if [[ "$line" == *"$annotation"* ]]; then
+              already=$((already + 1))
+            else
+              out_line="$line $annotation"
+              matched=$((matched + 1))
+            fi
           fi
-        done <<<"$touched_files"
-
-        if [[ "$hit" -eq 1 ]]; then
-          printf '%s %s\n' "$line" "$annotation" >>"$tmp"
-          matched=$((matched + 1))
-          continue
         fi
       fi
-      printf '%s\n' "$line" >>"$tmp"
+      printf '%s\n' "$out_line" >>"$tmp"
+    done <"$file"
+
+    # Surface picks that matched no [open] entry (typo, or entry already
+    # flipped/deferred) so a bad selection never fails silently.
+    local unmatched_picks="" pick
+    local IFS_old="$IFS"
+    IFS=','
+    for pick in $picks_csv; do
+      IFS="$IFS_old"
+      [[ -z "$pick" ]] && continue
+      if ! printf '%s' "$matched_picks" | grep -Fxq -- "$pick"; then
+        unmatched_picks+="  $pick"$'\n'
+      fi
+    done
+    IFS="$IFS_old"
+
+    if (( matched == 0 )); then
+      rm -f "$tmp"
+      trap - EXIT
+      if (( already > 0 )); then
+        printf 'annotate-pr: selected entr%s already annotated with %s. No changes.\n' \
+          "$([[ $already -eq 1 ]] && echo y || echo ies)" "$annotation"
+        [[ -n "$unmatched_picks" ]] && printf 'annotate-pr: no [open] entry matches pick:\n%s' "$unmatched_picks"
+        return 0
+      fi
+      printf 'annotate-pr: no [open] entry matches pick:\n%s' "$unmatched_picks"
+      return 1
+    fi
+
+    mv "$tmp" "$file"
+    trap - EXIT
+    printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
+    [[ -n "$unmatched_picks" ]] && printf 'annotate-pr: no [open] entry matches pick:\n%s' "$unmatched_picks"
+    cmd_status plain
+    return 0
+  fi
+
+  # Default / --all mode. Pass 1: collect candidate entries (un-annotated
+  # [open] entries whose path matches a touched file) with the touched file
+  # each one matched, so per-file group sizes are known before annotating.
+  local -a cand_lines=() cand_locs=() cand_tfs=() cand_syms=()
+  local line
+  while IFS= read -r line; do
+    [[ "$line" =~ ^-\ \[open\] ]] || continue
+    [[ "$line" == *"$annotation"* ]] && continue
+    local e_data e_path e_line e_symptom
+    e_data="$(fi_parse_entry "$line")" || continue
+    e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+    e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+    e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
+    [[ -z "$e_path" ]] && continue
+    local hit_tf="" tf
+    while IFS= read -r tf; do
+      [[ -z "$tf" ]] && continue
+      if [[ "$tf" == "$e_path" || "$tf" == */"$e_path" || "$e_path" == */"$tf" ]]; then
+        hit_tf="$tf"
+        break
+      fi
+    done <<<"$touched_files"
+    [[ -z "$hit_tf" ]] && continue
+    cand_lines+=("$line")
+    local loc="$e_path"
+    [[ -n "$e_line" ]] && loc="$e_path:$e_line"
+    cand_locs+=("$loc")
+    cand_tfs+=("$hit_tf")
+    cand_syms+=("$e_symptom")
+  done <"$file"
+
+  if (( ${#cand_lines[@]} == 0 )); then
+    printf 'annotate-pr: no [open] entries match files touched by PR #%s. No changes.\n' "$pr_num"
+    return 0
+  fi
+
+  # Partition candidates: unambiguous (sole entry on its touched file, or
+  # --all) auto-annotate; the rest are listed for --pick selection.
+  local auto_set=""
+  local -a ambig_indices=()
+  local i j
+  for (( i = 0; i < ${#cand_lines[@]}; i++ )); do
+    local group_size=0
+    for (( j = 0; j < ${#cand_tfs[@]}; j++ )); do
+      [[ "${cand_tfs[$j]}" == "${cand_tfs[$i]}" ]] && group_size=$((group_size + 1))
+    done
+    if [[ "$annotate_all" == "yes" ]] || (( group_size == 1 )); then
+      auto_set+="${cand_lines[$i]}"$'\n'
+    else
+      ambig_indices+=("$i")
+    fi
+  done
+
+  local tmp matched=0
+  tmp="$(mktemp -t found-issues.XXXXXX)"
+  trap "rm -f '$tmp'" EXIT
+  while IFS= read -r line; do
+    if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
+      printf '%s %s\n' "$line" "$annotation" >>"$tmp"
+      matched=$((matched + 1))
     else
       printf '%s\n' "$line" >>"$tmp"
     fi
   done <"$file"
 
-  if [[ "$matched" -eq 0 ]]; then
-    printf 'annotate-pr: no [open] entries match files touched by PR #%s. No changes.\n' "$pr_num"
+  if (( matched > 0 )); then
+    mv "$tmp" "$file"
+    trap - EXIT
+    printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
+  else
     rm -f "$tmp"
-    return 0
+    trap - EXIT
   fi
 
-  mv "$tmp" "$file"
-  trap - EXIT
+  if (( ${#ambig_indices[@]} > 0 )); then
+    printf 'annotate-pr: %d [open] entries share touched files with other entries — skipped (file-level match is ambiguous):\n' "${#ambig_indices[@]}"
+    for i in "${ambig_indices[@]}"; do
+      local sym="${cand_syms[$i]}"
+      (( ${#sym} > 70 )) && sym="${sym:0:70}..."
+      printf '  %s — %s\n' "${cand_locs[$i]}" "$sym"
+    done
+    printf 'Review which of these the PR actually addresses, then annotate them explicitly:\n'
+    printf '  found-issues annotate-pr %s --pick <path:line>[,<path:line>...]\n' "$pr_num"
+    printf 'or, if the PR addresses every listed entry:\n'
+    printf '  found-issues annotate-pr %s --all\n' "$pr_num"
+  fi
 
-  printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
-  cmd_status plain
+  if (( matched > 0 )); then
+    cmd_status plain
+  fi
 }
 
 # === Subcommand: annotate-commit ===
@@ -1335,7 +1518,11 @@ cmd_sync() {
             fi
           elif [[ -n "$e_line" ]]; then
             local file_lines
-            file_lines="$(wc -l <"$full_path" 2>/dev/null | tr -d ' ' || echo 0)"
+            # awk END{NR}, not wc -l: wc counts newline characters, so a file
+            # lacking a trailing newline undercounts by one and an entry on
+            # its LAST line was falsely tombstoned.
+            file_lines="$(LC_ALL=C awk 'END { print NR }' <"$full_path" 2>/dev/null || echo 0)"
+            [[ "$file_lines" =~ ^[0-9]+$ ]] || file_lines=0
             if [[ "$file_lines" -lt "$e_line" ]]; then
               closure_kind="tombstone"
               closure_label="(closure: tombstone) (fixed: $today)"
@@ -2211,17 +2398,20 @@ cmd_install_statusline_custom_target() {
 
 # Returns line number of the splice point in a bash statusline, or empty.
 # Priority: LINE1= assignment, then first echo, then first printf.
+# Lines that already reference __FI_SEG are never splice points — they are
+# user placements of the segment, and appending a second ${__FI_SEG} would
+# render the counter twice on that line (found during v1.5.7 verify).
 fi_find_bash_splice_point() {
   local path="$1"
   local lines
   # Priority 1: LINE1= assignment
-  lines="$(LC_ALL=C awk '/^[[:space:]]*LINE1=/ { print NR }' "$path")"
+  lines="$(LC_ALL=C awk '/^[[:space:]]*LINE1=/ && !/__FI_SEG/ { print NR }' "$path")"
   [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   # Priority 2: echo
-  lines="$(LC_ALL=C awk '/^[[:space:]]*echo[[:space:]]/ { print NR }' "$path")"
+  lines="$(LC_ALL=C awk '/^[[:space:]]*echo[[:space:]]/ && !/__FI_SEG/ { print NR }' "$path")"
   [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   # Priority 3: printf
-  lines="$(LC_ALL=C awk '/^[[:space:]]*printf[[:space:]]/ { print NR }' "$path")"
+  lines="$(LC_ALL=C awk '/^[[:space:]]*printf[[:space:]]/ && !/__FI_SEG/ { print NR }' "$path")"
   [[ -n "$lines" ]] && { echo "$lines"; return 0; }
   return 1
 }

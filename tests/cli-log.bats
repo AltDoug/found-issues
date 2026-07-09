@@ -442,3 +442,12 @@ EOF
   fi_run log "src/auth.py:88 — leaks session token"
   [[ "$output" == *"now 6x"* ]] || [[ "$output" == *"6x, threshold 6"* ]]
 }
+
+@test "log: path with plus sign dedups on second log (charset parity with parser)" {
+  fi_run log "src/UIView+Ext.swift:42 — category method leaks observers"
+  [ "$status" -eq 0 ]
+  fi_run log "src/UIView+Ext.swift:42 — category method leaks observers"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipped — already logged"* ]]
+  [ "$(grep -c 'UIView+Ext' docs/found-issues.md)" -eq 1 ]
+}

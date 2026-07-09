@@ -155,3 +155,22 @@ EOF
   grep -q '^- \[open\] 2020-01-01 /etc/hosts:999999' docs/found-issues.md
   ! grep -q 'closure: tombstone' docs/found-issues.md
 }
+
+@test "sync: entry on last line of file without trailing newline is NOT tombstoned" {
+  mkdir -p src
+  printf 'line1\nline2\nline3' > src/nonewline.py  # 3 lines, no trailing \n
+  fi_run log "src/nonewline.py:3 — bug on the unterminated last line"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*src/nonewline.py:3' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: line-past-end tombstone still fires on file without trailing newline" {
+  mkdir -p src
+  printf 'line1\nline2' > src/nonewline2.py  # 2 lines, no trailing \n
+  fi_run log "src/nonewline2.py:3 — cites a line past EOF"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '\[fixed\].*closure: tombstone' docs/found-issues.md
+}
