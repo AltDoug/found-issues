@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.5.7"
+readonly FI_VERSION="1.5.8"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1309,7 +1309,15 @@ cmd_sync() {
 
       # Tombstone check (only if no annotations resolved AND path looks like a file)
       if [[ -z "$closure_kind" && -n "$e_path" ]]; then
-        if [[ "$e_path" == */* || "$e_path" == *.* ]]; then
+        # Entry paths come from a committed file in a possibly-cloned repo —
+        # treat as untrusted. Absolute paths and any ../ component would let
+        # the probes below (stat, wc -l, rename detection) reach outside the
+        # repo: an existence/line-count oracle plus false tombstone flips.
+        # SessionStart auto-runs sync, so this fires with no user action.
+        if [[ "$e_path" == /* || "$e_path" == ".." || "$e_path" == ../* \
+              || "$e_path" == */../* || "$e_path" == */.. ]]; then
+          : # not a repo-relative path — never probe the filesystem for it
+        elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
           local repo_root
           repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           local full_path="$repo_root/$e_path"
@@ -1720,11 +1728,15 @@ HEADER
   # Rewrite active file with archived lines removed
   local tmp
   tmp="$(mktemp -t found-issues-archive.XXXXXX)"
-  # Use grep -F -v -f with the archived lines as patterns
+  # Use grep -F -x -v -f with the archived lines as patterns. -x (whole-line
+  # match) is load-bearing: without it an archived line that is a strict
+  # prefix of a newer entry (sync builds these — it appends "(fixed: date)"
+  # to the original line) substring-matched that entry too, deleting it from
+  # the active file without ever writing it to the archive.
   local patterns_file
   patterns_file="$(mktemp -t found-issues-archive-patterns.XXXXXX)"
   printf '%s' "$to_archive_lines" >"$patterns_file"
-  grep -F -v -f "$patterns_file" "$file" >"$tmp" || true
+  grep -F -x -v -f "$patterns_file" "$file" >"$tmp" || true
   rm -f "$patterns_file"
   mv "$tmp" "$file"
 

@@ -116,3 +116,42 @@ EOF
   [[ "$output" != *"moved"* ]]
   [[ "$output" != *"Hint"* ]]
 }
+
+@test "sync: tombstone never probes paths with .. components (path traversal)" {
+  # Regression (2026-07-09 audit, critical): entry paths are attacker-
+  # controlled (committed found-issues.md in any cloned repo) and were
+  # joined to repo_root verbatim — a ../-laden path made sync stat and
+  # wc -l files OUTSIDE the repo (existence/line-count oracle), and
+  # SessionStart auto-runs sync with no user action.
+  # Layout: the git repo is a SUBDIR of $TMP so ../outside.txt escapes it.
+  mkdir -p repo && cd repo && git init -q -b main
+  printf 'one line\n' > ../outside.txt   # exists, 1 line — outside the repo
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+
+- [open] 2020-01-01 ../outside.txt:999999 — traversal probe
+- [open] 2020-01-01 ../../../../../../../../etc/hosts:999999 — deep traversal probe
+EOF
+  fi_run sync
+  [ "$status" -eq 0 ]
+  # Old behavior: both flipped to [fixed] (closure: tombstone) because the
+  # out-of-repo probe found a file shorter than the entry line. New
+  # behavior: traversal paths are skipped — entries stay [open], untouched.
+  [ "$(grep -c '^- \[open\]' docs/found-issues.md)" -eq 2 ]
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: tombstone never probes absolute entry paths" {
+  mkdir -p docs src
+  printf 'one line\n' > src/real.py
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+
+- [open] 2020-01-01 /etc/hosts:999999 — absolute-path probe
+EOF
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] 2020-01-01 /etc/hosts:999999' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}

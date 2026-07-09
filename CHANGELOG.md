@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.8] - 2026-07-09
+
+### Fixed
+- `archive` no longer destroys entries that are superstrings of an archived line. The active-file rewrite used `grep -F -v` without `-x`, so an archived line that was a strict prefix of a newer entry substring-matched that entry too — deleting it from the active file without writing it to the archive (unrecoverable). Prefix pairs are structurally producible: `sync` appends `(fixed: <date>)` to the original line, so an entry fixed twice (e.g. re-verified after a revert) forms exactly this shape. Whole-line matching (`-x`) scopes the removal to the archived lines themselves.
+- `sync`'s tombstone check no longer probes filesystem paths outside the repo. Entry paths come from the committed `docs/found-issues.md` of whatever repo is open — attacker-controlled in any cloned repo — and were joined to the repo root verbatim, so a `../`-laden or absolute path made sync `stat` and `wc -l` arbitrary files (existence/line-count oracle) and false-tombstone the entry, with no user action needed (SessionStart auto-runs sync). Absolute paths and paths with `..` components now skip the tombstone probes entirely and the entry is left untouched.
+
 ## [1.5.7] - 2026-07-09
 
 ### Fixed
