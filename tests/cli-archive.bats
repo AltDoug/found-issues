@@ -163,3 +163,27 @@ PRIOR
   [ "$status" -eq 0 ]
   [[ "$output" == *"nothing to archive"* ]]
 }
+
+@test "archive: prefix-pair entries — archiving one never deletes a superstring sibling" {
+  # Regression (2026-07-09 audit, critical): the active-file rewrite used
+  # substring matching (grep -F -v without -x), so an archived line that is
+  # a strict PREFIX of a newer entry deleted that newer entry from the
+  # active file without writing it to the archive — silent data loss.
+  # Prefix pairs are structurally producible: sync appends "(fixed: date)"
+  # to the end of the original line.
+  local today
+  today="$(date +%Y-%m-%d)"
+  cat > docs/found-issues.md <<EOF
+# found-issues
+
+- [fixed] 2026-01-01 a.py:1 — x (verified: ai)
+- [fixed] 2026-01-01 a.py:1 — x (verified: ai) (fixed: $today)
+EOF
+  fi_run archive --days=30
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"moved 1 entries"* ]]
+  # The old entry landed in the archive...
+  grep -Fq -- "- [fixed] 2026-01-01 a.py:1 — x (verified: ai)" docs/found-issues-archive.md
+  # ...and the recent superstring entry SURVIVES in the active file.
+  grep -Fq -- "(fixed: $today)" docs/found-issues.md
+}
