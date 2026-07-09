@@ -87,3 +87,55 @@ teardown() {
   run "$HOOK"
   [ "$status" -eq 0 ]
 }
+
+# === v1.6.0: rule parity with format-enforcer.sh ===
+
+@test "pre-commit: blocks bare PR coexisting with a canonical annotation" {
+  mkdir -p docs
+  echo "- [open] 2026-05-08 src/foo.py:42 — bug, see PR #7 (PR: org/repo#5)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bare 'PR #N'"* ]]
+}
+
+@test "pre-commit: blocks [fixed] without a verification token (rule 6)" {
+  mkdir -p docs
+  echo "- [fixed] 2026-05-08 src/foo.py:42 — bug (fixed: 2026-05-09)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"verification token"* ]]
+}
+
+@test "pre-commit: allows [fixed] with (verified: ai)" {
+  mkdir -p docs
+  echo "- [fixed] 2026-05-08 src/foo.py:42 — bug (verified: ai) (fixed: 2026-05-09)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit: allows [fixed] with canonical PR annotation" {
+  mkdir -p docs
+  echo "- [fixed] 2026-05-08 src/foo.py:42 — bug (PR: org/repo#5) (fixed: 2026-05-09)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit: allows [fixed] with (closure: tombstone)" {
+  mkdir -p docs
+  echo "- [fixed] 2026-05-08 src/gone.py:42 — bug (closure: tombstone) (fixed: 2026-05-09)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit: blocks [fixed] with only demoted (PR-closed: ...)" {
+  mkdir -p docs
+  echo "- [fixed] 2026-05-08 src/foo.py:42 — bug (PR-closed: org/repo#5) (fixed: 2026-05-09)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 1 ]
+}

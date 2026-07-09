@@ -62,14 +62,59 @@ fi
 
 branches=()
 
-# Pattern 1: git branch -d / -D <name>
-if [[ "$command" =~ git[[:space:]]+branch[[:space:]]+-[dD][[:space:]]+([A-Za-z0-9._/-]+) ]]; then
-  branches+=("${BASH_REMATCH[1]}")
+# Patterns 1+2 tokenize the argument stream instead of position-matching:
+# git accepts the delete flag anywhere relative to the other args
+# (git branch --delete NAME, git push --delete REMOTE NAME,
+# git push REMOTE -d NAME, ...), and the earlier fixed-order regexes let
+# all three of those forms through unguarded. Glob expansion is disabled
+# around the unquoted word-splits so a `*` in the command can't expand
+# against the cwd.
+
+# Pattern 1: git branch with -d/-D/--delete anywhere; first non-flag
+# argument after "branch" is the branch name.
+if [[ "$command" =~ git[[:space:]]+branch[[:space:]]+([^\|\;\&]*) ]]; then
+  branch_args="${BASH_REMATCH[1]}"
+  has_delete_flag=0
+  target=""
+  set -f
+  for tok in $branch_args; do
+    case "$tok" in
+      -d|-D|--delete) has_delete_flag=1 ;;
+      -*) : ;;
+      *) [[ -z "$target" ]] && target="$tok" ;;
+    esac
+  done
+  set +f
+  if (( has_delete_flag == 1 )) && [[ -n "$target" ]]; then
+    branches+=("$target")
+  fi
 fi
 
-# Pattern 2: git push <remote> --delete <name>
-if [[ "$command" =~ git[[:space:]]+push[[:space:]]+[A-Za-z0-9._/-]+[[:space:]]+--delete[[:space:]]+([A-Za-z0-9._/-]+) ]]; then
-  branches+=("${BASH_REMATCH[1]}")
+# Pattern 2: git push with -d/--delete anywhere; the branch is the second
+# non-flag argument after "push" (the first is the remote).
+if [[ "$command" =~ git[[:space:]]+push[[:space:]]+([^\|\;\&]*) ]]; then
+  push_args="${BASH_REMATCH[1]}"
+  has_delete_flag=0
+  remote_tok=""
+  branch_tok=""
+  set -f
+  for tok in $push_args; do
+    case "$tok" in
+      -d|--delete) has_delete_flag=1 ;;
+      -*) : ;;
+      *)
+        if [[ -z "$remote_tok" ]]; then
+          remote_tok="$tok"
+        elif [[ -z "$branch_tok" ]]; then
+          branch_tok="$tok"
+        fi
+        ;;
+    esac
+  done
+  set +f
+  if (( has_delete_flag == 1 )) && [[ -n "$branch_tok" ]]; then
+    branches+=("$branch_tok")
+  fi
 fi
 
 # Pattern 3: git push <remote> :<name>  (old-style delete)

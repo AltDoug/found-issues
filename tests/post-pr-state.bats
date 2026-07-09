@@ -102,3 +102,18 @@ _run_hook() {
   [ "$status" -eq 0 ]
   [ ! -e "$MARKER" ]
 }
+
+@test "post-pr-state: default dispatch survives a CLI path containing a space" {
+  unset FOUND_ISSUES_AUTOSYNC_CMD
+  mkdir -p "$TMP/spaced dir"
+  cat > "$TMP/spaced dir/fi-mock" <<MOCK
+#!/usr/bin/env bash
+[[ "\$1" == "sync" ]] && touch "$MARKER"
+MOCK
+  chmod +x "$TMP/spaced dir/fi-mock"
+  export FOUND_ISSUES_BIN="$TMP/spaced dir/fi-mock"
+  run _run_hook "gh pr merge 12 --squash"
+  [ "$status" -eq 0 ]
+  [ -e "$MARKER" ]
+  unset FOUND_ISSUES_BIN
+}
