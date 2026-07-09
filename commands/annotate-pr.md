@@ -18,12 +18,32 @@ The CLI:
 1. Verifies the PR exists via `gh pr view`
 2. Fetches the list of files touched by the PR
 3. Scans `docs/found-issues.md` for `[open]` entries whose paths match those files
-4. Appends `(PR: org/repo#N)` to each match (skipping entries already annotated for this PR)
+4. Auto-annotates only UNAMBIGUOUS matches — entries that are the sole `[open]`
+   entry citing their touched file. When several entries share one touched
+   file, the CLI annotates none of them and prints the candidate list instead
+   (file-level matching alone would tag every entry on a hot file, and sync
+   would false-flip them all to `[fixed]` on merge).
 
-Pass the result through to the user. The CLI prints either:
+Possible outputs:
 
 - `Annotated N entries with (PR: org/repo#N)` — happy path
 - `annotate-pr: no [open] entries match files touched by PR #N. No changes.` — edge case (PR addresses code with no logged entries)
+- A candidate list ending in a `--pick` instruction — ambiguous matches that
+  need YOUR judgment. **Do not skip this step.** Compare each candidate's
+  symptom against what the PR actually changes, then re-run with only the
+  entries the PR genuinely addresses:
+
+  ```bash
+  found-issues annotate-pr <N> --pick path/file.py:42,path/other.py:7
+  ```
+
+  Locations are exactly as printed in the candidate list (`path:line`, or a
+  bare path for line-less entries). If the PR really does address every
+  listed candidate (e.g. a release PR sweeping all open issues), use
+  `found-issues annotate-pr <N> --all` instead. Never use `--all` to save
+  yourself the symptom comparison.
+
+Pass the result through to the user.
 
 ## When to invoke
 
