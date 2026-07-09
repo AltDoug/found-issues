@@ -633,6 +633,70 @@ EOF
   diff -q "$backup" tmp/sl.sh.orig
 }
 
+@test "install-statusline --target bash: line-1 splice point still gets the marker block (shebang-less file)" {
+  # Regression: the splice awk's (NR in splice_set) rule preceded the
+  # block-at-top rule, so a shebang-less one-liner got the ${__FI_SEG}
+  # splice but never the block defining it — and every re-run appended
+  # another splice instead of no-op'ing.
+  mkdir -p tmp && printf 'echo "repo | main"\n' > tmp/sl.sh
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  grep -Fq "# === found-issues plugin segment ===" tmp/sl.sh
+  [ "$(grep -c 'found-issues:seg' tmp/sl.sh)" -eq 1 ]
+  bash -n tmp/sl.sh
+  # Re-run converges to a no-op
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "already integrated"
+  [ "$(grep -c 'found-issues:seg' tmp/sl.sh)" -eq 1 ]
+}
+
+@test "install-statusline --target bash: v1.5.x migration of a shebang-less target keeps the marker block" {
+  # Migration flavor of the line-1 regression: after the strip, the user's
+  # output line IS line 1, so the re-splice must still insert the block.
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+# === found-issues plugin segment ===
+__FI_CLI=found-issues
+__FI_SEG=$("$__FI_CLI" status --format=segment 2>/dev/null || true)
+# === end found-issues plugin segment ===
+echo "repo | main${__FI_SEG}"  # found-issues:seg
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.5.x"
+  grep -Fq "# === found-issues plugin segment ===" tmp/sl.sh
+  grep -q -- "--cwd" tmp/sl.sh
+  [ "$(grep -c 'found-issues:seg' tmp/sl.sh)" -eq 1 ]
+  bash -n tmp/sl.sh
+  fi_run install-statusline --target tmp/sl.sh --apply
+  echo "$output" | grep -q "already integrated"
+}
+
+@test "install-statusline --target bash: v1.5.x migration strips unbraced \$__FI_SEG splice (no double segment)" {
+  # Regression: the strip only removed the exact literal ${__FI_SEG}, so a
+  # hand-edited unbraced reference survived and the re-splice doubled the
+  # rendered counter.
+  fi_write_v15x_bash_target
+  # Hand-edited splice line: unbraced reference, trailer intact.
+  sed -e 's/${__FI_SEG}/$__FI_SEG/' tmp/sl.sh > tmp/sl.sh.new && mv tmp/sl.sh.new tmp/sl.sh
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.5.x"
+  # The single splice line references the segment exactly once.
+  [ "$(grep 'found-issues:seg' tmp/sl.sh | grep -o '__FI_SEG' | wc -l | tr -d ' ')" -eq 1 ]
+  bash -n tmp/sl.sh
+}
+
+@test "install-statusline --target bash: v1.5.x migration preserves user-authored \${__FI_SEG} lines" {
+  # Regression: the strip ran on every non-block line, deleting segment
+  # references the user hand-added outside the trailer-tagged splice line.
+  fi_write_v15x_bash_target
+  printf 'echo "custom prefix ${__FI_SEG}"\n' >> tmp/sl.sh
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  grep -Fq 'echo "custom prefix ${__FI_SEG}"' tmp/sl.sh
+}
+
 @test "install-statusline --target node: v1.5.x migration dry-run leaves target untouched" {
   # Regression: the strip used to run in place BEFORE the mode check, so a
   # dry-run destroyed the existing marker block with no backup.
@@ -681,6 +745,49 @@ def _fi_seg(_dir=None):
         return ''
 # === end found-issues plugin segment ===
 print(f"repo | main{_fi_seg(locals().get("dir") or locals().get("cwd"))}")  # found-issues:seg
+EOF
+  cp tmp/sl.py tmp/sl.py.orig
+  fi_run install-statusline --target tmp/sl.py --dry-run
+  [ "$status" -eq 0 ]
+  diff -q tmp/sl.py tmp/sl.py.orig
+  ! ls tmp/sl.py.fi-bak-* 2>/dev/null
+}
+
+@test "install-statusline --target node: v1.4.x migration dry-run leaves target untouched" {
+  # The v1.4.x branch is a separate copy of the scratch-copy migration flow;
+  # pin it independently of the v1.5.x twin so future edits can't diverge it
+  # back to an in-place strip.
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+let __fiSeg = '';
+try {
+  const { execSync } = require('child_process');
+  const cacheGlob = process.env.HOME + '/.claude/plugins/cache';
+} catch (e) {}
+// === end found-issues plugin segment ===
+console.log(`repo | main${__fiSeg}`);  // found-issues:seg
+EOF
+  cp tmp/sl.js tmp/sl.js.orig
+  fi_run install-statusline --target tmp/sl.js --dry-run
+  [ "$status" -eq 0 ]
+  diff -q tmp/sl.js tmp/sl.js.orig
+  ! ls tmp/sl.js.fi-bak-* 2>/dev/null
+}
+
+@test "install-statusline --target python: v1.4.x migration dry-run leaves target untouched" {
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+# === found-issues plugin segment ===
+import subprocess as _fi_subprocess
+import os as _fi_os
+_fi_seg = ''
+try:
+    _fi_cwd = _fi_os.environ.get('CLAUDE_PROJECT_DIR') or _fi_os.environ.get('HOME', '.')
+except Exception:
+    _fi_seg = ''
+# === end found-issues plugin segment ===
+print(f"repo | main{_fi_seg}")  # found-issues:seg
 EOF
   cp tmp/sl.py tmp/sl.py.orig
   fi_run install-statusline --target tmp/sl.py --dry-run
