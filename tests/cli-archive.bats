@@ -164,7 +164,7 @@ PRIOR
   [[ "$output" == *"nothing to archive"* ]]
 }
 
-@test "archive: prefix-pair entries — archiving one never deletes a superstring sibling" {
+@test "archive: prefix-pair entries - archiving one never deletes a superstring sibling" {
   # Regression (2026-07-09 audit, critical): the active-file rewrite used
   # substring matching (grep -F -v without -x), so an archived line that is
   # a strict PREFIX of a newer entry deleted that newer entry from the
