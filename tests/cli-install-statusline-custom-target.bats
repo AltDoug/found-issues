@@ -567,6 +567,128 @@ EOF
   echo "$output" | grep -q "already integrated"
 }
 
+# Faithful v1.5.0–v1.5.5 bash custom-target install: the REAL marker block
+# and LINE1 splice the installer emitted — the block cd's into the workspace
+# but the status call lacks --cwd, so inherited CLAUDE_PROJECT_DIR overrides
+# the cd → wrong search root. Shared by the migration tests below.
+fi_write_v15x_bash_target() {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/bin/bash
+# === found-issues plugin segment ===
+__FI_CLI=""
+if command -v found-issues >/dev/null 2>&1; then
+  __FI_CLI=found-issues
+else
+  __FI_CLI=$(ls -d "$HOME"/.claude/plugins/cache/*/found-issues/*/bin/found-issues 2>/dev/null | sort -V | tail -1 || true)
+  [[ -x "$__FI_CLI" ]] || __FI_CLI=""
+fi
+__FI_DIR="${CLAUDE_PROJECT_DIR:-}"
+__FI_SEG=""
+if [[ -n "$__FI_CLI" ]]; then
+  if [[ -n "$__FI_DIR" ]]; then
+    __FI_SEG=$( cd "$__FI_DIR" 2>/dev/null && "$__FI_CLI" status --format=segment 2>/dev/null || true )
+  else
+    __FI_SEG=$("$__FI_CLI" status --format=segment 2>/dev/null || true)
+  fi
+fi
+# === end found-issues plugin segment ===
+LINE1="repo | main${__FI_SEG}"  # found-issues:seg
+echo "$LINE1"
+EOF
+}
+
+@test "install-statusline --target bash: migrates v1.5.x block without --cwd (v1.5.7)" {
+  # v1.5.6 shipped this migration for node/python only (Known gap: no bash
+  # strip support). Must migrate (strip + re-splice), not no-op.
+  fi_write_v15x_bash_target
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.5.x"
+  grep -q -- "--cwd" tmp/sl.sh
+  # Exactly one splice survives the strip + re-splice round-trip
+  [ "$(grep -c 'found-issues:seg' tmp/sl.sh)" -eq 1 ]
+  # Result must still be valid bash
+  bash -n tmp/sl.sh
+  # Second run is a no-op — rewritten block classifies as integrated
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "already integrated"
+}
+
+@test "install-statusline --target bash: v1.5.x migration dry-run leaves target untouched" {
+  fi_write_v15x_bash_target
+  cp tmp/sl.sh tmp/sl.sh.orig
+  fi_run install-statusline --target tmp/sl.sh --dry-run
+  [ "$status" -eq 0 ]
+  diff -q tmp/sl.sh tmp/sl.sh.orig
+  ! ls tmp/sl.sh.fi-bak-* 2>/dev/null
+}
+
+@test "install-statusline --target bash: v1.5.x migration backup is the pre-migration original" {
+  fi_write_v15x_bash_target
+  cp tmp/sl.sh tmp/sl.sh.orig
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  backup="$(ls tmp/sl.sh.fi-bak-*)"
+  diff -q "$backup" tmp/sl.sh.orig
+}
+
+@test "install-statusline --target node: v1.5.x migration dry-run leaves target untouched" {
+  # Regression: the strip used to run in place BEFORE the mode check, so a
+  # dry-run destroyed the existing marker block with no backup.
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+let __fiCli = null;
+function __fiSeg(dir) {
+  if (!__fiCli) return '';
+  try {
+    const { execFileSync } = require('child_process');
+    const cwd = dir || process.env.CLAUDE_PROJECT_DIR || require('os').homedir();
+    return execFileSync(__fiCli, ['status', '--format=segment'],
+      { cwd, encoding: 'utf8', timeout: 5000 }).trim();
+  } catch (e) { return ''; }
+}
+// === end found-issues plugin segment ===
+console.log(`repo | main${__fiSeg(typeof dir!=='undefined'?dir:(typeof cwd!=='undefined'?cwd:undefined))}`);  // found-issues:seg
+EOF
+  cp tmp/sl.js tmp/sl.js.orig
+  fi_run install-statusline --target tmp/sl.js --dry-run
+  [ "$status" -eq 0 ]
+  diff -q tmp/sl.js tmp/sl.js.orig
+  ! ls tmp/sl.js.fi-bak-* 2>/dev/null
+}
+
+@test "install-statusline --target python: v1.5.x migration dry-run leaves target untouched" {
+  # Same regression as the node twin above, python handler.
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+# === found-issues plugin segment ===
+import subprocess as _fi_subprocess
+import os as _fi_os
+import pathlib as _fi_pathlib
+_fi_cli = 'found-issues'
+def _fi_seg(_dir=None):
+    if not _fi_cli:
+        return ''
+    try:
+        _fi_cwd = _dir or _fi_os.environ.get('CLAUDE_PROJECT_DIR') or str(_fi_pathlib.Path.home())
+        return _fi_subprocess.run(
+            [_fi_cli, 'status', '--format=segment'],
+            cwd=_fi_cwd, capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+    except Exception:
+        return ''
+# === end found-issues plugin segment ===
+print(f"repo | main{_fi_seg(locals().get("dir") or locals().get("cwd"))}")  # found-issues:seg
+EOF
+  cp tmp/sl.py tmp/sl.py.orig
+  fi_run install-statusline --target tmp/sl.py --dry-run
+  [ "$status" -eq 0 ]
+  diff -q tmp/sl.py tmp/sl.py.orig
+  ! ls tmp/sl.py.fi-bak-* 2>/dev/null
+}
+
 # =====================================================================
 # Group 5 — Runtime end-to-end
 # Verifies that the generated shim, after install-statusline --apply,
@@ -590,8 +712,10 @@ EOF
   # Also prepend repo bin/ for POSIX (command -v path, harmless elsewhere).
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
-  cat > .found-issues.md <<'EOF'
-- [open] 2026-05-13 a.ts:1 — synthetic test entry
+  # Dynamic date: a hardcoded one goes stale after 30 days, relabeling the
+  # segment from "1 issue" to "1 other · 1 stale" and breaking the greps.
+  cat > .found-issues.md <<EOF
+- [open] $(date +%Y-%m-%d) a.ts:1 — synthetic test entry
 EOF
   mkdir -p tmp
   cat > tmp/sl.js <<'EOF'
@@ -621,8 +745,10 @@ EOF
   # Also prepend repo bin/ for POSIX (command -v path, harmless elsewhere).
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
-  cat > .found-issues.md <<'EOF'
-- [open] 2026-05-13 a.ts:1 — synthetic test entry
+  # Dynamic date: a hardcoded one goes stale after 30 days, relabeling the
+  # segment from "1 issue" to "1 other · 1 stale" and breaking the greps.
+  cat > .found-issues.md <<EOF
+- [open] $(date +%Y-%m-%d) a.ts:1 — synthetic test entry
 EOF
   mkdir -p tmp
   cat > tmp/sl.js <<'EOF'
@@ -668,8 +794,10 @@ EOF
   # Also prepend repo bin/ for POSIX (shutil.which path, harmless elsewhere).
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
-  cat > .found-issues.md <<'EOF'
-- [open] 2026-05-13 a.ts:1 — synthetic test entry
+  # Dynamic date: a hardcoded one goes stale after 30 days, relabeling the
+  # segment from "1 issue" to "1 other · 1 stale" and breaking the greps.
+  cat > .found-issues.md <<EOF
+- [open] $(date +%Y-%m-%d) a.ts:1 — synthetic test entry
 EOF
   mkdir -p tmp
   cat > tmp/sl.py <<'EOF'
@@ -703,8 +831,10 @@ EOF
   # Also prepend repo bin/ for POSIX (shutil.which path, harmless elsewhere).
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
-  cat > .found-issues.md <<'EOF'
-- [open] 2026-05-13 a.ts:1 — synthetic test entry
+  # Dynamic date: a hardcoded one goes stale after 30 days, relabeling the
+  # segment from "1 issue" to "1 other · 1 stale" and breaking the greps.
+  cat > .found-issues.md <<EOF
+- [open] $(date +%Y-%m-%d) a.ts:1 — synthetic test entry
 EOF
   mkdir -p tmp
   cat > tmp/sl.py <<'EOF'
@@ -740,8 +870,10 @@ EOF
   PATH="${TEST_REPO_ROOT}/bin:$PATH"
 
   mkdir -p tmp
-  cat > .found-issues.md <<'EOF'
-- [open] 2026-05-13 a.ts:1 — synthetic test entry
+  # Dynamic date: a hardcoded one goes stale after 30 days, relabeling the
+  # segment from "1 issue" to "1 other · 1 stale" and breaking the greps.
+  cat > .found-issues.md <<EOF
+- [open] $(date +%Y-%m-%d) a.ts:1 — synthetic test entry
 EOF
   cat > tmp/sl.sh <<'EOF'
 #!/usr/bin/env bash

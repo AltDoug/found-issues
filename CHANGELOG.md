@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.7] - 2026-07-09
+
+### Fixed
+- `install-statusline --target foo.sh` now migrates bash custom targets carrying a v1.5.0–v1.5.5 `--cwd`-less marker block (strip + re-splice) instead of no-op'ing on the existing markers — closes the v1.5.6 Known gap. `fi_strip_target_markers` gained a bash case (same `#` markers and `# found-issues:seg` trailer as python; splice form is the constant `${__FI_SEG}`), and the bash handler now runs `fi_target_is_v15x_broken` like the node/python handlers. No v1.4.x branch for bash — that shim was always POSIX-correct.
+- Custom-target migration no longer mutates the target before backup/dry-run handling. Previously the node/python handlers stripped the old marker block from the target file *in place* before the mode check, so (1) a default dry-run on a v1.4.x/v1.5.x target silently destroyed the existing integration with no backup, and (2) in apply mode the timestamped backup captured the already-stripped file, not the user's original — and a re-splice failure after the strip left the target with no integration and no true backup. The strip now operates on a scratch copy; the target is untouched until the apply-mode atomic rename, and dry-run diffs original → migrated as one change.
+
+### Internal
+- Test suite de-time-bombed: 12 tests (5 segment-contract byte-snapshots, the solo-residual label test, the autosync label test, and 5 custom-target runtime e2e tests) hardcoded fixture entry dates that crossed the 30-day stale threshold around 2026-06-12 — the stale counter appeared, the residual label flipped from "N issue(s)" to "N other", and the whole suite went silently red on main for almost a month (no bats CI ran between PRs). Date-sensitive fixtures now use `$(date +%Y-%m-%d)`. Deliberately-old dates in stale-specific tests are untouched.
+- CI: weekly scheduled run (Mondays 06:00 UTC) + `workflow_dispatch` on the test workflow, so time-dependent breakage on an idle main surfaces within a week instead of ambushing the next PR. Scheduled/manual runs bypass the paths-filter and always run the full matrix.
+
 ## [1.5.6] - 2026-06-09
 
 ### Fixed

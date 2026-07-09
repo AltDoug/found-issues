@@ -99,9 +99,12 @@ EOF
 
 @test "contract(segment): single [open] entry -> ' | <red>1 issue<reset>'" {
   mkdir -p docs
-  cat > docs/found-issues.md <<'EOF'
+  # Dynamic date: a hardcoded date silently crosses the 30-day stale
+  # threshold, which adds a stale counter and relabels the residual to
+  # "other" — the exact-output assertions here require a FRESH entry.
+  cat > docs/found-issues.md <<EOF
 # found-issues
-- [open] 2026-05-10 src/foo.py:42 — null check
+- [open] $(date +%Y-%m-%d) src/foo.py:42 — null check
 EOF
   fi_run status --format=segment
   [ "$status" -eq 0 ] || { echo "$CONTRACT_NOTE"; echo "Got exit code: $status"; false; }
@@ -116,11 +119,11 @@ EOF
 
 @test "contract(segment): three [open] entries -> ' | <red>3 issues<reset>' (plural)" {
   mkdir -p docs
-  cat > docs/found-issues.md <<'EOF'
+  cat > docs/found-issues.md <<EOF
 # found-issues
-- [open] 2026-05-10 src/a.py:1 — x
-- [open] 2026-05-10 src/b.py:1 — y
-- [open] 2026-05-10 src/c.py:1 — z
+- [open] $(date +%Y-%m-%d) src/a.py:1 — x
+- [open] $(date +%Y-%m-%d) src/b.py:1 — y
+- [open] $(date +%Y-%m-%d) src/c.py:1 — z
 EOF
   fi_run status --format=segment
   [ "$status" -eq 0 ] || { echo "$CONTRACT_NOTE"; echo "Got exit code: $status"; false; }
@@ -135,9 +138,9 @@ EOF
 
 @test "contract(segment): single critical -> ' | <bold-red>1 critical<reset>'" {
   mkdir -p docs
-  cat > docs/found-issues.md <<'EOF'
+  cat > docs/found-issues.md <<EOF
 # found-issues
-- [open] [!] 2026-05-10 src/auth.ts:88 — leaks token
+- [open] [!] $(date +%Y-%m-%d) src/auth.ts:88 — leaks token
 EOF
   fi_run status --format=segment
   [ "$status" -eq 0 ] || { echo "$CONTRACT_NOTE"; echo "Got exit code: $status"; false; }
@@ -152,10 +155,10 @@ EOF
 
 @test "contract(segment): mixed critical + open -> relabels residual to other, joined by space-middot-space" {
   mkdir -p docs
-  cat > docs/found-issues.md <<'EOF'
+  cat > docs/found-issues.md <<EOF
 # found-issues
-- [open] [!] 2026-05-10 src/auth.ts:88 — leaks token
-- [open] 2026-05-10 src/foo.py:42 — null check
+- [open] [!] $(date +%Y-%m-%d) src/auth.ts:88 — leaks token
+- [open] $(date +%Y-%m-%d) src/foo.py:42 — null check
 EOF
   fi_run status --format=segment
   [ "$status" -eq 0 ] || { echo "$CONTRACT_NOTE"; echo "Got exit code: $status"; false; }
@@ -170,9 +173,9 @@ EOF
 
 @test "contract(segment): in-PR entry uses yellow (\\\\033[33m)" {
   mkdir -p docs
-  cat > docs/found-issues.md <<'EOF'
+  cat > docs/found-issues.md <<EOF
 # found-issues
-- [open] 2026-05-10 src/foo.py:42 — null check (PR: org/repo#5)
+- [open] $(date +%Y-%m-%d) src/foo.py:42 — null check (PR: org/repo#5)
 EOF
   fi_run status --format=segment
   [ "$status" -eq 0 ] || { echo "$CONTRACT_NOTE"; echo "Got exit code: $status"; false; }

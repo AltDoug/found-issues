@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.5.6"
+readonly FI_VERSION="1.5.7"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -2002,8 +2002,10 @@ fi_target_is_v15x_broken() {
 }
 
 # Surgically remove marker block + splice trailer comments from a target file.
-# Used by the v1.4.x migration path. Mirrors the canonical bash strip in
-# fi_strip_legacy_lines but operates on language-specific marker syntax.
+# Used by the v1.4.x/v1.5.x migration paths. Mirrors the canonical bash strip
+# in fi_strip_legacy_lines but operates on language-specific marker syntax.
+# Callers pass a scratch COPY of the target, never the target itself — the
+# strip must not touch the user's file before backup/dry-run handling.
 fi_strip_target_markers() {
   local path="$1"
   local language="$2"
@@ -2014,7 +2016,7 @@ fi_strip_target_markers() {
       end_marker="// === end found-issues plugin segment ==="
       trailer_pattern='[[:space:]]*//[[:space:]]*found-issues:seg[[:space:]]*$'
       ;;
-    python)
+    python|bash)
       start_marker="# === found-issues plugin segment ==="
       end_marker="# === end found-issues plugin segment ==="
       trailer_pattern='[[:space:]]*#[[:space:]]*found-issues:seg[[:space:]]*$'
@@ -2034,8 +2036,9 @@ fi_strip_target_markers() {
   local node_tpl="\${__fiSeg(typeof dir!=='undefined'?dir:(typeof cwd!=='undefined'?cwd:undefined))}"
   local node_cat=" + __fiSeg(typeof dir!=='undefined'?dir:(typeof cwd!=='undefined'?cwd:undefined))"
   local py_fstr="{_fi_seg(locals().get(\"dir\") or locals().get(\"cwd\"))}"
+  local bash_seg="\${__FI_SEG}"
   LC_ALL=C awk -v start="$start_marker" -v endm="$end_marker" -v trailer="$trailer_pattern" \
-      -v seg_tpl="$node_tpl" -v seg_cat="$node_cat" -v seg_fstr="$py_fstr" '
+      -v seg_tpl="$node_tpl" -v seg_cat="$node_cat" -v seg_fstr="$py_fstr" -v seg_bash="$bash_seg" '
     function strip_lit(line, lit,    idx) {
       while (lit != "" && (idx = index(line, lit)) > 0) {
         line = substr(line, 1, idx - 1) substr(line, idx + length(lit))
@@ -2047,10 +2050,12 @@ fi_strip_target_markers() {
     in_block { next }
     {
       line = $0
-      # Exact v1.5.x call-form splices (template-literal, concat, f-string).
+      # Exact v1.5.x call-form splices (template-literal, concat, f-string,
+      # and the constant bash ${__FI_SEG} form).
       line = strip_lit(line, seg_tpl)
       line = strip_lit(line, seg_cat)
       line = strip_lit(line, seg_fstr)
+      line = strip_lit(line, seg_bash)
       # Strip the splice injection from the line. v1.4.x migration only ever
       # sees the bare value forms (${__fiSeg} / {_fi_seg}); the call-form
       # variants below handle simple-argument concatenation splices.
@@ -2220,18 +2225,38 @@ cmd_install_statusline_target_bash() {
   local path="$1"
   local mode="$2"
 
+  # Idempotency: if v1.5.6+ marker block already present, no-op. If a
+  # v1.5.0–v1.5.5 --cwd-less marker block is present, migrate (strip +
+  # re-splice). No v1.4.x branch: the bash shim was always POSIX-correct
+  # (see fi_target_is_v14x_broken). Migration strips a scratch COPY —
+  # $path stays untouched until the apply-mode atomic rename, so dry-run
+  # never mutates and the backup captures the user's original.
+  local work="$path" work_tmp=""
   if grep -Fq "# === found-issues plugin segment ===" "$path"; then
-    printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
-    return 0
+    if fi_target_is_v15x_broken "$path" bash; then
+      printf 'install-statusline --target: migrating v1.5.x marker block without --cwd in %s\n' "$path"
+      work_tmp="$(mktemp -t fi-target-migrate.XXXXXX)"
+      cp "$path" "$work_tmp"
+      fi_strip_target_markers "$work_tmp" bash || {
+        fi_err "install-statusline --target: failed to strip v1.5.x marker block"
+        rm -f "$work_tmp"
+        return 14
+      }
+      work="$work_tmp"
+    else
+      printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
+      return 0
+    fi
   fi
 
   local splice_line
-  splice_line="$(fi_find_bash_splice_point "$path")" || {
+  splice_line="$(fi_find_bash_splice_point "$work")" || {
     fi_err "install-statusline --target: no splice point found in $path"
     fi_err "  Tried: LINE1= assignment, first 'echo', first 'printf'"
     fi_err "  If your statusline uses a different output pattern, an AI-assisted"
     fi_err "  edit can still install the segment manually — re-run /found-issues:setup"
     fi_err "  to be offered the AI fallback."
+    [[ -z "$work_tmp" ]] || rm -f "$work_tmp"
     return 11
   }
 
@@ -2244,7 +2269,7 @@ cmd_install_statusline_target_bash() {
     /^[[:space:]]*set[[:space:]]/ { last = NR; next }
     { exit }
     END { print last + 0 }
-  ' "$path")"
+  ' "$work")"
   [[ -z "$insert_after" || "$insert_after" -eq 0 ]] && insert_after=0
 
   # Generate the modified content into a temp file.
@@ -2282,11 +2307,13 @@ cmd_install_statusline_target_bash() {
     }
     NR == 1 && insert_after == 0 { print_block(); print; next }
     { print }
-  ' "$path" > "$tmp_modified"
+  ' "$work" > "$tmp_modified"
   rm -f "$tmp_block"
+  [[ -z "$work_tmp" ]] || rm -f "$work_tmp"
 
   if [[ "$mode" == "dry-run" || -z "$mode" ]]; then
-    # Print unified diff
+    # Print unified diff (against the untouched original — for migrations
+    # this shows strip + re-splice as one change).
     diff -u "$path" "$tmp_modified" || true
     rm -f "$tmp_modified"
     return 0
@@ -2422,21 +2449,32 @@ cmd_install_statusline_target_node() {
 
   # Idempotency: if v1.5.6+ marker block already present, no-op.
   # If v1.4.x POSIX-only or v1.5.0–v1.5.5 --cwd-less marker present,
-  # strip + reinstall (migration path).
+  # strip + reinstall (migration path). Migration strips a scratch COPY —
+  # $path stays untouched until the apply-mode atomic rename, so dry-run
+  # never mutates and the backup captures the user's original.
+  local work="$path" work_tmp=""
   if grep -Fq "// === found-issues plugin segment ===" "$path"; then
     if fi_target_is_v14x_broken "$path" node; then
       printf 'install-statusline --target: migrating v1.4.x POSIX-only marker block in %s\n' "$path"
       # Strip old marker block + splice trailers, then fall through to install.
-      fi_strip_target_markers "$path" node || {
+      work_tmp="$(mktemp -t fi-target-migrate.XXXXXX)"
+      cp "$path" "$work_tmp"
+      fi_strip_target_markers "$work_tmp" node || {
         fi_err "install-statusline --target: failed to strip v1.4.x marker block"
+        rm -f "$work_tmp"
         return 14
       }
+      work="$work_tmp"
     elif fi_target_is_v15x_broken "$path" node; then
       printf 'install-statusline --target: migrating v1.5.x marker block without --cwd in %s\n' "$path"
-      fi_strip_target_markers "$path" node || {
+      work_tmp="$(mktemp -t fi-target-migrate.XXXXXX)"
+      cp "$path" "$work_tmp"
+      fi_strip_target_markers "$work_tmp" node || {
         fi_err "install-statusline --target: failed to strip v1.5.x marker block"
+        rm -f "$work_tmp"
         return 14
       }
+      work="$work_tmp"
     else
       printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
       return 0
@@ -2444,9 +2482,10 @@ cmd_install_statusline_target_node() {
   fi
 
   local splice_line
-  splice_line="$(fi_find_node_splice_point "$path")" || {
+  splice_line="$(fi_find_node_splice_point "$work")" || {
     fi_err "install-statusline --target node: no splice point found in $path"
     fi_err "  Tried: console.log(\`...\`), console.log(\"...\"), process.stdout.write(...)"
+    [[ -z "$work_tmp" ]] || rm -f "$work_tmp"
     return 11
   }
 
@@ -2458,7 +2497,7 @@ cmd_install_statusline_target_node() {
     /^[[:space:]]*import[[:space:]]+/ { last = NR; next }
     { exit }
     END { print last + 0 }
-  ' "$path")"
+  ' "$work")"
   [[ -z "$insert_after" || "$insert_after" -eq 0 ]] && insert_after=0
 
   # Write marker block to tmp file (multi-line awk -v workaround, same as Task 1.4)
@@ -2505,7 +2544,8 @@ cmd_install_statusline_target_node() {
     }
     NR == 1 && insert_after == 0 { print_block(); print; next }
     { print }
-  ' "$path" > "$tmp_modified"
+  ' "$work" > "$tmp_modified"
+  [[ -z "$work_tmp" ]] || rm -f "$work_tmp"
 
   if [[ "$mode" == "dry-run" || -z "$mode" ]]; then
     diff -u "$path" "$tmp_modified" || true
@@ -2644,20 +2684,31 @@ cmd_install_statusline_target_python() {
 
   # Idempotency: if v1.5.6+ marker block already present, no-op.
   # If v1.4.x POSIX-only or v1.5.0–v1.5.5 --cwd-less marker present,
-  # strip + reinstall (migration path).
+  # strip + reinstall (migration path). Migration strips a scratch COPY —
+  # $path stays untouched until the apply-mode atomic rename, so dry-run
+  # never mutates and the backup captures the user's original.
+  local work="$path" work_tmp=""
   if grep -Fq "# === found-issues plugin segment ===" "$path"; then
     if fi_target_is_v14x_broken "$path" python; then
       printf 'install-statusline --target: migrating v1.4.x POSIX-only marker block in %s\n' "$path"
-      fi_strip_target_markers "$path" python || {
+      work_tmp="$(mktemp -t fi-target-migrate.XXXXXX)"
+      cp "$path" "$work_tmp"
+      fi_strip_target_markers "$work_tmp" python || {
         fi_err "install-statusline --target: failed to strip v1.4.x marker block"
+        rm -f "$work_tmp"
         return 14
       }
+      work="$work_tmp"
     elif fi_target_is_v15x_broken "$path" python; then
       printf 'install-statusline --target: migrating v1.5.x marker block without --cwd in %s\n' "$path"
-      fi_strip_target_markers "$path" python || {
+      work_tmp="$(mktemp -t fi-target-migrate.XXXXXX)"
+      cp "$path" "$work_tmp"
+      fi_strip_target_markers "$work_tmp" python || {
         fi_err "install-statusline --target: failed to strip v1.5.x marker block"
+        rm -f "$work_tmp"
         return 14
       }
+      work="$work_tmp"
     else
       printf 'install-statusline --target: %s already integrated (no-op)\n' "$path"
       return 0
@@ -2665,9 +2716,10 @@ cmd_install_statusline_target_python() {
   fi
 
   local splice_line
-  splice_line="$(fi_find_python_splice_point "$path")" || {
+  splice_line="$(fi_find_python_splice_point "$work")" || {
     fi_err "install-statusline --target python: no splice point found in $path"
     fi_err "  Tried: print(f\"...\"), print(\"...\"), sys.stdout.write(...)"
+    [[ -z "$work_tmp" ]] || rm -f "$work_tmp"
     return 11
   }
 
@@ -2679,7 +2731,7 @@ cmd_install_statusline_target_python() {
     /^[[:space:]]*from[[:space:]]+.*import/ { last = NR; next }
     { exit }
     END { print last + 0 }
-  ' "$path")"
+  ' "$work")"
   [[ -z "$insert_after" || "$insert_after" -eq 0 ]] && insert_after=0
 
   # Write marker block to tmp file (multi-line awk -v workaround)
@@ -2726,7 +2778,8 @@ cmd_install_statusline_target_python() {
     }
     NR == 1 && insert_after == 0 { print_block(); print; next }
     { print }
-  ' "$path" > "$tmp_modified"
+  ' "$work" > "$tmp_modified"
+  [[ -z "$work_tmp" ]] || rm -f "$work_tmp"
 
   if [[ "$mode" == "dry-run" || -z "$mode" ]]; then
     diff -u "$path" "$tmp_modified" || true
