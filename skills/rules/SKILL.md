@@ -70,8 +70,11 @@ For abstract issues without a single file:line (e.g., a workflow problem):
 
 **Do not write directly to `docs/found-issues.md` via Write or Edit tools.**
 The slash command handles deduplication, format validation, file creation,
-git tracking, and date stamping. Direct writes will be blocked by the
-format-enforcer hook.
+git tracking, and date stamping. The format-enforcer hook validates the
+FORMAT of direct writes (and blocks malformed lines in github-* modes),
+but it cannot catch a well-formed write that is semantically wrong —
+deleting entries wholesale or hand-typing a `(verified: ai)` token passes
+the hook. The no-direct-writes rule is on you, not the enforcer.
 
 The full canonical format is documented in the project's `docs/format-spec.md`.
 
@@ -86,6 +89,13 @@ Immediately after `gh pr create` for a PR that addresses a `[open]` entry:
 This adds `(PR: org/repo#N)` to matching entries. Without the annotation,
 sync cannot link the PR's merge to the entry, and the entry stays `[open]`
 forever even after the PR merges.
+
+When several `[open]` entries cite the same touched file, the CLI lists
+them and asks for an explicit selection instead of annotating them all —
+compare each candidate's symptom against what the PR changes and re-run
+with `--pick <path:line>,...` (or `--all` only when the PR genuinely
+addresses every candidate). Annotating entries the PR does not fix causes
+false `[fixed]` flips when it merges.
 
 A PostToolUse hook surfaces matching entries automatically after
 `gh pr create` runs. **Read the hook's output and act on it.** If it lists
@@ -120,9 +130,12 @@ are responsible for:
 are worse than leaving an entry open. The user can always run sync again
 later. When in doubt, leave open.
 
-If a referenced file/line no longer exists (file deleted, file shorter
-than the line number, function removed), the sync hook auto-closes via
-tombstone detection — you don't handle this case.
+If a referenced FILE no longer exists (deleted, or shorter than the cited
+line number), the sync hook auto-closes via tombstone detection — you
+don't handle this case. Function-level changes (the cited function was
+removed or rewritten but the file still exists) are NOT tombstone-detected
+— the CLI only checks file existence and line count; judging those is part
+of YOUR verification pass above.
 
 ## Branch deletion
 

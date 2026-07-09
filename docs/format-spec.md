@@ -8,7 +8,7 @@ Canonical entry format for `docs/found-issues.md` (or `<cwd>/.found-issues.md` i
 - [STATUS] [!] YYYY-MM-DD [LOCATION] — SYMPTOM [(suggested: FIX)] [ANNOTATION]* [(fixed: YYYY-MM-DD)] [(verified: ai|review)]
 ```
 
-Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract topic without slashes (e.g., `dispatch/shutdown`, `workflow`). `ANNOTATION` is `(PR: ORG/REPO#N)` or `(commit: SHA)`. Multiple annotations are allowed (entry addressed by both a PR and a follow-up commit).
+Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract topic without slashes (e.g., `dispatch/shutdown`, `workflow`). `ANNOTATION` is one of the parenthesized forms in the Optional-parts table below — the active link forms `(PR: ORG/REPO#N)` / `(commit: SHA)`, their sync-demoted twins `(PR-closed: ...)` / `(commit-stale: ...)`, the closure trail forms `(closure: tombstone)` / `(renamed-from: PATH)`, and the defer-flow forms `(touched: ...)` / `(defer-cycle: N)` / `(reason: ...)` / `(mute-until: YYYY-MM-DD)`. Multiple annotations are allowed (entry addressed by both a PR and a follow-up commit).
 
 ## Required parts
 
@@ -35,13 +35,18 @@ Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract
 | Renamed-from annotation | `(renamed-from: PATH)` | `(renamed-from: lib/old-name.py)` | Added by `/found-issues:sync` when entry path was git-mv'd |
 | Fixed date | `(fixed: YYYY-MM-DD)` | `(fixed: 2026-05-08)` | Added by `/found-issues:sync` on closure |
 | Verification | `(verified: ai)` or `(verified: review)` | `(verified: ai)` | Added when sync verifies via AI |
+| Closure annotation | `(closure: tombstone)` | `(closure: tombstone)` | Added by `found-issues sync` when the cited file is gone or the cited line is past end-of-file |
+| Touched annotation | `(touched: DATE[, DATE...][; ...])` | `(touched: 2026-05-08, 2026-05-12)` | Appended by `found-issues log` when a new log matches a `[deferred]` entry; `;` separates defer cycles |
+| Defer-cycle annotation | `(defer-cycle: N)` | `(defer-cycle: 2)` | Added by `found-issues defer` on re-defer (absent = cycle 1) |
+| Reason annotation | `(reason: ...)` | `(reason: wait for second user report)` | Added by `found-issues defer --reason` |
+| Mute-until annotation | `(mute-until: YYYY-MM-DD)` | `(mute-until: 2026-08-01)` | Added by `found-issues defer --mute-until`; silences deferred-touch nudges until the date |
 
 ## Status semantics
 
 | Status | Meaning | Set by |
 |---|---|---|
 | `open` | Active issue, not yet addressed | `/found-issues:log` (only path) |
-| `deferred` | Intentionally postponed | User edit; system never auto-flips to deferred |
+| `deferred` | Intentionally postponed | `found-issues defer` (canonical since v1.0.5 — records reason/cycle bookkeeping); manual user edit also possible. The system never auto-flips to deferred |
 | `fixed` | Addressed and verified | `/found-issues:sync` (annotation match, tombstone, or AI verification); user edit |
 
 Once `[fixed]`, an entry is historical. Don't auto-revert; if a bug regresses, log a fresh `[open]` entry.
@@ -139,11 +144,28 @@ For programmatic validation in hooks and CLI:
 # Extract verification source
 '\(verified: (ai|review)\)'
 
+# Extract closure annotation (tombstone auto-close)
+'\(closure: tombstone\)'
+
+# Extract touched annotation (defer-flow recurrence trail)
+'\(touched: ([^)]+)\)'
+
+# Extract defer-cycle annotation (absent = cycle 1)
+'\(defer-cycle: ([0-9]+)\)'
+
+# Extract reason annotation (defer rationale)
+'\(reason: ([^)]+)\)'
+
+# Extract mute-until annotation (nudge silencer)
+'\(mute-until: ([0-9]{4}-[0-9]{2}-[0-9]{2})\)'
+
 # Detect bare PR (format violation — must be blocked by format-enforcer)
 'PR #[0-9]+([^)]|$)'
 
-# Match path:line location
-'([A-Za-z0-9_./-]+\.[a-zA-Z0-9]+):([0-9]+)'
+# Match path:line location (applied to the whitespace-delimited location
+# token; the charset mirrors what `found-issues log` accepts, so paths with
+# characters like + parse identically at log time and parse time)
+'^([^:[:space:]]+):([0-9]+)$'
 ```
 
 ## Statusline counter rules
@@ -153,9 +175,9 @@ The CLI command `found-issues status` (used by statusline integrations) computes
 | Counter | Definition |
 |---|---|
 | `critical` | Count of `[open] [!]` entries |
-| `issues` | Count of `[open]` entries without any `(PR: ...)` annotation, minus critical (so they're not double-counted) |
-| `in PR` | Count of `[open]` entries with `(PR: ...)` annotation |
-| `stale` | Count of `[open]` entries where date is older than `stale_days` (default 30) |
+| `issues` | Count of `[open]` entries that are neither critical (`[!]`) nor carrying an active `(PR: ...)` annotation — computed by exclusion, so an entry that is both critical and in-PR is excluded once, not twice |
+| `in PR` | Count of `[open]` entries with an active `(PR: ...)` annotation |
+| `stale` | Union of (a) `[open]` entries whose entry date is older than `stale_days` (default 30) and (b) `[open]` entries carrying a demoted annotation (`(PR-closed: ...)` or `(commit-stale: ...)`) regardless of age. An entry in both counts once |
 
 Each is rendered only when > 0. Order: `critical · issues · in PR · stale`.
 

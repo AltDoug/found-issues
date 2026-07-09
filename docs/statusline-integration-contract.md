@@ -15,7 +15,7 @@ This contract exists because `/found-issues:setup` splices the segment call into
 | Output when ≥1 bucket has count | Begins with `' | '` (space, pipe, space); no trailing newline |
 | Separator between buckets | `' · '` (space, U+00B7 middle-dot, space) |
 | Colors | `\033[1;31m` critical · `\033[31m` issues · `\033[33m` in-PR · `\033[2m` stale; each segment terminated by `\033[0m` |
-| Label policy | `N critical` / `N issue|issues` / `N in PR` / `N stale`. When ≥2 non-residual buckets are present, the residual bucket relabels from `issue/issues` to `other` (so users don't try to mentally sum overlapping counts) |
+| Label policy | `N critical` / `N issue|issues` / `N in PR` / `N stale`. When any non-residual bucket is present, the residual bucket relabels from `issue/issues` to `other` (so users don't try to mentally sum overlapping counts) |
 | Failure mode (file missing, parse error, etc.) | Empty stdout, exit 0 — silent-fail so the user's statusline never shows an error string |
 | Latency | Bounded: subsecond on cache hit. The 10-minute autosync (`FOUND_ISSUES_SEGMENT_AUTOSYNC`) runs in the background and never blocks the foreground render |
 

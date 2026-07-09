@@ -251,15 +251,18 @@ want to inspect without modifying anything.
 
 If the user works in a team where multiple people might edit `docs/found-issues.md`
 manually (outside Claude Code), they can install a per-repo git pre-commit
-hook that validates entries at commit time:
+hook that validates entries at commit time. There is no installer
+subcommand — copy the hook script out of the plugin:
 
 ```bash
 cd <their-repo>
-found-issues install-precommit
+cp "$CLAUDE_PLUGIN_ROOT/hooks/pre-commit.sh" .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
 ```
 
-(Available in a future release. For now, the in-Claude-Code format-enforcer
-hook handles this. Skip mentioning if it's not yet implemented.)
+(Outside a hook context where `$CLAUDE_PLUGIN_ROOT` isn't set, the plugin
+lives under `~/.claude/plugins/cache/*/found-issues/*/`.) Uninstall with
+`rm .git/hooks/pre-commit`; skip once with `git commit --no-verify`.
 
 ## Optional 3 — Short alias
 

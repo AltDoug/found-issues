@@ -30,6 +30,7 @@ How the pieces fit together.
                     │  • PostToolUse(Bash)             │
                     │      └► post-pr-create           │
                     │      └► post-git-commit          │
+                    │      └► post-pr-state            │
                     └────────────────┬─────────────────┘
                                      │
                                      │ shell out
@@ -93,17 +94,18 @@ itself read code and verify unannotated entries.
 ### Hooks (enforcement layer)
 
 Bash scripts in `hooks/` registered via `hooks/hooks.json`. They turn
-the CLAUDE.md rules into mechanical behavior. Six lifecycle hooks plus
+the CLAUDE.md rules into mechanical behavior. Seven lifecycle hooks plus
 one optional per-repo git hook:
 
 | Hook | Event | Job |
 |---|---|---|
-| `session-start.sh` | SessionStart | Run sync silently, inject `[open]` entries into context |
-| `stop-reminder.sh` | Stop | Force `<!-- found-issues-checked: ... -->` marker every turn |
+| `session-start.sh` | SessionStart | Run sync silently, inject `[open]` entries into context (fenced as untrusted data), auto-migrate broken custom statusline targets |
+| `stop-reminder.sh` | Stop | Require the `<!-- found-issues-checked: ... -->` marker on turns with substantive tool use (Edit/Write/MultiEdit/Bash); pure-conversation turns and non-interactive (`CLAUDE_CODE_ENTRYPOINT != cli`) sessions pass through |
 | `format-enforcer.sh` | PreToolUse Write/Edit | Block malformed entries before they land |
 | `pre-branch-delete.sh` | PreToolUse Bash | Block branch deletion if entries unpromoted |
 | `post-pr-create.sh` | PostToolUse Bash | Surface entries matching files in just-opened PR |
 | `post-git-commit.sh` | PostToolUse Bash | Surface entries matching files in just-made commit |
+| `post-pr-state.sh` | PostToolUse Bash | Background `sync` after `gh pr merge`/`close`/`reopen` so the statusline updates without a session restart |
 | `pre-commit.sh` | git pre-commit (per-repo, opt-in) | Format check at commit time |
 
 Hooks fail open — if anything goes wrong, they exit 0 silently rather
@@ -122,9 +124,15 @@ Subcommands:
 | `log` | Append a new `[open]` entry with dedup |
 | `sync` | Annotation-driven flips + tombstone close (no AI — that's the slash command's job) |
 | `status` | Print counters in segment / plain / json format |
-| `annotate-pr <N>` | Append `(PR: org/repo#N)` to matching entries |
+| `annotate-pr <N> [--pick <loc>,...] [--all]` | Append `(PR: org/repo#N)` to matching entries; ambiguous file-level matches require explicit selection |
 | `annotate-commit [<sha>]` | Append `(commit: <sha>)` to matching entries |
 | `promote` | List branch-only `[open]` entries needing consolidation |
+| `archive` | Move old `[fixed]` entries to `docs/found-issues-archive.md` |
+| `defer` / `promote-deferred` | Flip `[open]` ⇄ `[deferred]` with touch/cycle bookkeeping |
+| `install-statusline` / `uninstall-statusline` | Install or remove the statusline counter segment (canonical or `--target` custom shims) |
+| `doctor` / `doctor-statusline` / `doctor-statusline-runtime` | Health checks: general, statusline integration, runtime probe |
+| `install-fi-alias` / `uninstall-fi-alias` | Manage the personal `/fi` shortcut |
+| `uninstall` | Wipe plugin-private state before `/plugin uninstall` |
 
 ### lib (shared bash)
 
