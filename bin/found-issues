@@ -2069,6 +2069,18 @@ fi_strip_target_markers() {
           gsub(/\$\{__FI_SEG[^}]*\}/, "", line)
           gsub(/\$__FI_SEG/, "", line)
         }
+        if (lang == "node") {
+          # Hand-edited template-literal variants (arg tweaked away from the
+          # exact installer form). Leaving one behind corrupts the re-splice.
+          gsub(/\$\{__fiSeg\([^{}]*\)\}/, "", line)
+        }
+        if (lang == "python") {
+          # Hand-edited f-string variants — e.g. quotes switched to single,
+          # or a default added. The re-splice inserts at the first `")` on
+          # the line, so a leftover call corrupts the line into a
+          # SyntaxError.
+          gsub(/\{_fi_seg\([^{}]*\)\}/, "", line)
+        }
         # Strip the splice injection from the line. v1.4.x migration only ever
         # sees the bare value forms (${__fiSeg} / {_fi_seg}); the call-form
         # variants below handle simple-argument concatenation splices.

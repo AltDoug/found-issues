@@ -687,6 +687,61 @@ EOF
   bash -n tmp/sl.sh
 }
 
+@test "install-statusline --target python: v1.5.x migration strips hand-edited f-string seg variant (no corruption)" {
+  # Python sibling of the bash unbraced case: a hand-edited seg call (e.g.
+  # single quotes) escapes the exact-literal strip, and the re-splice then
+  # inserts at the first '")' on the line — mid-expression — producing a
+  # SyntaxError. The variant gsub must remove it first.
+  mkdir -p tmp && cat > tmp/sl.py <<'EOF'
+#!/usr/bin/env python3
+# === found-issues plugin segment ===
+import subprocess as _fi_subprocess
+import os as _fi_os
+_fi_cli = 'found-issues'
+def _fi_seg(_dir=None):
+    try:
+        return _fi_subprocess.run([_fi_cli, 'status', '--format=segment'], capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return ''
+# === end found-issues plugin segment ===
+print(f"repo | main{_fi_seg(locals().get('dir') or locals().get('cwd'))}")  # found-issues:seg
+EOF
+  fi_run install-statusline --target tmp/sl.py --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.5.x"
+  [ "$(grep -c 'found-issues:seg' tmp/sl.py)" -eq 1 ]
+  [ "$(grep 'found-issues:seg' tmp/sl.py | grep -o '_fi_seg' | wc -l | tr -d ' ')" -eq 1 ]
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import ast; ast.parse(open('tmp/sl.py').read())"
+  fi
+}
+
+@test "install-statusline --target node: v1.5.x migration strips hand-edited template seg variant (no double splice)" {
+  mkdir -p tmp && cat > tmp/sl.js <<'EOF'
+#!/usr/bin/env node
+// === found-issues plugin segment ===
+let __fiCli = null;
+function __fiSeg(dir) {
+  if (!__fiCli) return '';
+  try {
+    const { execFileSync } = require('child_process');
+    const cwd = dir || process.env.CLAUDE_PROJECT_DIR || require('os').homedir();
+    return execFileSync(__fiCli, ['status', '--format=segment'], { cwd, encoding: 'utf8', timeout: 5000 }).trim();
+  } catch (e) { return ''; }
+}
+// === end found-issues plugin segment ===
+console.log(`repo | main${__fiSeg(dir)}`);  // found-issues:seg
+EOF
+  fi_run install-statusline --target tmp/sl.js --apply
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "migrating v1.5.x"
+  [ "$(grep -c 'found-issues:seg' tmp/sl.js)" -eq 1 ]
+  [ "$(grep 'found-issues:seg' tmp/sl.js | grep -o '__fiSeg' | wc -l | tr -d ' ')" -eq 1 ]
+  if command -v node >/dev/null 2>&1; then
+    node --check tmp/sl.js
+  fi
+}
+
 @test "install-statusline --target bash: v1.5.x migration preserves user-authored \${__FI_SEG} lines" {
   # Regression: the strip ran on every non-block line, deleting segment
   # references the user hand-added outside the trailer-tagged splice line.
