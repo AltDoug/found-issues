@@ -1,6 +1,6 @@
 # /found-issues:fix — design
 
-**Date**: 2026-07-10 · **Status**: approved (operator, this date) · **Target**: found-issues plugin (public), v1.6.1
+**Date**: 2026-07-10 · **Status**: approved (operator, this date) · **Target**: found-issues plugin (public), v1.7.0
 
 ## Goal
 
@@ -88,6 +88,17 @@ user can approve all, or exclude by number. Default mode waits here; `--auto` pr
 - **Resume**: a re-run's Phase 1 skips entries already carrying `(PR:)`/`(commit:)` annotations —
   the ledger is its own checkpoint; a dead session loses nothing.
 
+## Final report — output contract (operator: "ADHD-proof")
+
+The fix run's last message is a scan target, not an essay. fix.md mandates:
+
+1. **Scoreboard first line**: `Fixed 9 · Closed already-fixed 3 · Skipped 1 · Suggested deferrals 2 · PR #<N>`.
+2. **One compact block per fixed entry**: one-line header (`path:line — symptom fragment`), then a
+   minimal **Before / After** snippet pair — only the load-bearing lines (≤ ~6 lines each, fenced),
+   then one evidence line (`test: <name> PASS · commit <sha>`).
+3. **Skipped/needs-decision entries**: one line each with the reason — no snippet.
+4. No prose paragraphs between blocks; anything narrative goes in the PR body, not the summary.
+
 ## CLI addition: `found-issues list`
 
 `bin/found-issues list [--status=open|deferred|fixed|all] [--json]`
@@ -114,7 +125,7 @@ user can approve all, or exclude by number. Default mode waits here; `--auto` pr
 - bats: fix.md ↔ docs consistency row in `tests/docs-consistency.bats` (command inventory).
 - Dogfood: first real run on this repo's next open pile; agent-config and sayciao as second targets.
 - Docs to update in the same PR: README command table, `docs/architecture.md` subcommand inventory,
-  `docs/configuration.md` if any env knob is added (none planned), CHANGELOG (v1.6.1, per operator).
+  `docs/configuration.md` if any env knob is added (none planned), CHANGELOG (v1.7.0 — minor bump for a new command + subcommand, operator-confirmed).
 
 ## Shipping
 
