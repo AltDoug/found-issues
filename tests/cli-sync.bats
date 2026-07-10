@@ -174,3 +174,15 @@ EOF
   [ "$status" -eq 0 ]
   grep -q '\[fixed\].*closure: tombstone' docs/found-issues.md
 }
+
+@test "sync: glob-style location tokens are never tombstone-probed" {
+  # The widened location charset lets glob/brace tokens parse as paths;
+  # probing them as literal filenames false-flipped the entries at every
+  # SessionStart sync.
+  fi_run log "tests/*.bats — every bats file hardcodes the fixture date"
+  fi_run log "config/{dev,prod}.yml — duplicated keys drift"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+  [ "$(grep -c '^- \[open\]' docs/found-issues.md)" -eq 2 ]
+}

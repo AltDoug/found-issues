@@ -98,7 +98,7 @@ fi_detect_mode() {
 
   local repo_id
   repo_id="$(printf '%s' "$remote_url" \
-    | sed -E 's|\.git$||; s|.*github\.com[:/]([^/]+/[^/]+).*|\1|' \
+    | sed -E 's|/+$||; s|\.git$||; s|.*github\.com[:/]([^/]+/[^/]+).*|\1|' \
     | tr '/' '_')"
   local cache_file="$cache_dir/mode_${repo_id}"
 
@@ -154,7 +154,7 @@ fi_invalidate_mode_cache() {
 
   local repo_id
   repo_id="$(printf '%s' "$remote_url" \
-    | sed -E 's|\.git$||; s|.*github\.com[:/]([^/]+/[^/]+).*|\1|' \
+    | sed -E 's|/+$||; s|\.git$||; s|.*github\.com[:/]([^/]+/[^/]+).*|\1|' \
     | tr '/' '_')"
   local cache_file="${HOME}/.cache/found-issues/mode_${repo_id}"
   rm -f "$cache_file" 2>/dev/null || true

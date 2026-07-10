@@ -135,12 +135,15 @@ fi_repo_id() {
   if [[ "$remote_url" != *"github.com"* ]]; then
     return 1
   fi
-  # Strip a literal .git suffix first, then capture the last two path
-  # segments verbatim. The earlier single-pass form used [^/.]+ for the
-  # repo segment, truncating dotted repo names (vercel/next.js -> vercel/next)
-  # in (PR: ...) annotations, which then made sync query the wrong repo.
+  # Strip trailing slashes, then a literal .git suffix, then capture the
+  # last two path segments verbatim. The earlier single-pass form used
+  # [^/.]+ for the repo segment, truncating dotted repo names
+  # (vercel/next.js -> vercel/next) in (PR: ...) annotations, which then
+  # made sync query the wrong repo. The slash strip comes first so
+  # pasted-URL remotes like https://github.com/org/repo.git/ still lose
+  # the .git suffix.
   printf '%s' "$remote_url" \
-    | sed -E 's|\.git$||; s|.*github\.com[:/]([^/]+/[^/]+).*|\1|'
+    | sed -E 's|/+$||; s|\.git$||; s|.*github\.com[:/]([^/]+/[^/]+).*|\1|'
 }
 
 # Resolve the default branch with a layered fallback chain:
@@ -224,8 +227,12 @@ COMMANDS
                                         Annotate matching [open] entries with PR.
                                         Files cited by several entries need an explicit
                                         --pick (path:line list) or --all — file-level
-                                        auto-match alone would over-annotate.
-  annotate-commit [<sha>]               Annotate matching [open] entries with commit
+                                        auto-match alone would over-annotate. A pick can
+                                        carry a symptom fragment ("path:line — fragment")
+                                        to select between co-located entries.
+  annotate-commit [<sha>] [--pick <loc>,...] [--all]
+                                        Annotate matching [open] entries with commit.
+                                        Same selection rules as annotate-pr.
   promote                               List entries that need promotion to main
   archive [--dry-run] [--days=N] [--count=N]
                                         Move old [fixed] entries to docs/found-issues-archive.md
@@ -1025,6 +1032,291 @@ cmd_status() {
   esac
 }
 
+# === Shared annotate engine (annotate-pr / annotate-commit) ===
+#
+# Both annotate commands share the same matching machinery: file-level
+# auto-annotation with an ambiguity guard, plus explicit --pick / --all
+# selection. Keeping it in one place means the guard cannot drift between
+# the two commands (annotate-commit shipped guard-less at first).
+
+# Echo the entry's location token (path:line, or bare path for line-less
+# entries) — the same form the candidate list prints and --pick matches.
+# Returns 1 when the line does not parse as an entry with a path.
+fi_entry_loc() {
+  local line="$1"
+  local e_data e_path e_line
+  e_data="$(fi_parse_entry "$line")" || return 1
+  e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+  e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+  [[ -z "$e_path" ]] && return 1
+  if [[ -n "$e_line" ]]; then
+    printf '%s:%s' "$e_path" "$e_line"
+  else
+    printf '%s' "$e_path"
+  fi
+}
+
+# Split one --pick flag value into newline-separated selectors. A value
+# containing the extended-form separator ' — ' is ONE selector (symptom
+# fragments and comma-containing paths must not be comma-split); plain
+# values split on commas.
+fi_split_picks() {
+  local val="$1"
+  if [[ "$val" == *" — "* ]]; then
+    printf '%s\n' "$val"
+    return
+  fi
+  local IFS_old="$IFS" p out=""
+  IFS=','
+  for p in $val; do
+    IFS="$IFS_old"
+    [[ -n "$p" ]] && out+="$p"$'\n'
+  done
+  IFS="$IFS_old"
+  printf '%s' "$out"
+}
+
+# Apply explicit --pick selectors.
+#   $1 file, $2 annotation, $3 picks_nl (newline-separated selectors),
+#   $4 cmd_label (annotate-pr|annotate-commit), $5 rerun_cmd (hint text)
+# Selector forms:
+#   path:line                — entries whose location token equals the value
+#   path:line — fragment     — extended form: location AND symptom contains
+#                              the fragment (disambiguates co-located entries)
+# A selector matching SEVERAL entries is refused outright — location alone
+# cannot select between co-located entries, and annotating both false-flips
+# the unfixed one when the PR/commit lands.
+# Returns 0 when anything was annotated (or was already annotated); 1 when
+# no selector produced an annotation.
+fi_annotate_apply_picks() {
+  local file="$1" annotation="$2" picks_nl="$3" cmd_label="$4" rerun_cmd="$5"
+
+  local -a pick_arr=() pick_hits=() pick_lines=()
+  local pick
+  while IFS= read -r pick; do
+    [[ -z "$pick" ]] && continue
+    pick_arr+=("$pick")
+    pick_hits+=(0)
+    pick_lines+=("")
+  done <<<"$picks_nl"
+
+  # Pass A: per selector, count matching [open] entries and keep their lines.
+  local line loc sym i p_loc p_frag
+  while IFS= read -r line; do
+    [[ "$line" =~ ^-\ \[open\] ]] || continue
+    loc="$(fi_entry_loc "$line")" || continue
+    sym=""
+    for (( i = 0; i < ${#pick_arr[@]}; i++ )); do
+      pick="${pick_arr[$i]}"
+      if [[ "$pick" == *" — "* ]]; then
+        p_loc="${pick%% — *}"
+        p_frag="${pick#* — }"
+        [[ "$loc" == "$p_loc" ]] || continue
+        if [[ -z "$sym" ]]; then
+          sym="$(fi_parse_entry "$line" | grep '^symptom=' | head -1 | cut -d= -f2-)"
+        fi
+        [[ "$sym" == *"$p_frag"* ]] || continue
+      else
+        [[ "$loc" == "$pick" ]] || continue
+      fi
+      pick_hits[$i]=$(( ${pick_hits[$i]} + 1 ))
+      pick_lines[$i]+="$line"$'\n'
+    done
+  done <"$file"
+
+  # Partition selectors: single hit → annotate; several hits → refuse;
+  # zero hits → report (a bad selection must never fail silently).
+  local auto_set="" unmatched="" ambiguous=""
+  for (( i = 0; i < ${#pick_arr[@]}; i++ )); do
+    if (( ${pick_hits[$i]} == 0 )); then
+      unmatched+="  ${pick_arr[$i]}"$'\n'
+    elif (( ${pick_hits[$i]} == 1 )); then
+      auto_set+="${pick_lines[$i]}"
+    else
+      ambiguous+="  pick '${pick_arr[$i]}' matches ${pick_hits[$i]} entries:"$'\n'
+      while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        ambiguous+="    $line"$'\n'
+      done <<<"${pick_lines[$i]}"
+    fi
+  done
+
+  # Pass B: rewrite the file.
+  local tmp matched=0 already=0
+  tmp="$(mktemp -t found-issues.XXXXXX)"
+  trap "rm -f '$tmp'" EXIT
+  while IFS= read -r line; do
+    if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
+      if [[ "$line" == *"$annotation"* ]]; then
+        already=$((already + 1))
+        printf '%s\n' "$line" >>"$tmp"
+      else
+        printf '%s %s\n' "$line" "$annotation" >>"$tmp"
+        matched=$((matched + 1))
+      fi
+    else
+      printf '%s\n' "$line" >>"$tmp"
+    fi
+  done <"$file"
+
+  if (( matched > 0 )); then
+    mv "$tmp" "$file"
+    trap - EXIT
+    printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
+  else
+    rm -f "$tmp"
+    trap - EXIT
+    if (( already > 0 )); then
+      printf '%s: selected entr%s already annotated with %s. No changes.\n' \
+        "$cmd_label" "$([[ $already -eq 1 ]] && echo y || echo ies)" "$annotation"
+    fi
+  fi
+  if [[ -n "$ambiguous" ]]; then
+    printf '%s: refusing picks that match several co-located entries:\n%s' "$cmd_label" "$ambiguous"
+    printf 'Disambiguate with the extended pick form (location + symptom fragment):\n'
+    printf '  %s --pick "<path:line> — <symptom fragment>"\n' "$rerun_cmd"
+  fi
+  if [[ -n "$unmatched" ]]; then
+    printf '%s: no [open] entry matches pick:\n%s' "$cmd_label" "$unmatched"
+  fi
+
+  if (( matched > 0 )); then
+    cmd_status plain
+    return 0
+  fi
+  (( already > 0 )) && return 0
+  return 1
+}
+
+# Default / --all annotation over file-level matches.
+#   $1 file, $2 annotation, $3 touched_files (newline-separated paths),
+#   $4 annotate_all (yes|no), $5 cmd_label, $6 rerun_cmd, $7 ref_desc
+#     (human name of the artifact, e.g. "PR #7" / "commit ab12cd3")
+# A candidate auto-annotates only when NONE of the touched files it matches
+# is also matched by another [open] entry:
+#   - candidate↔candidate sharing on ANY common file is ambiguous — an
+#     entry matching several touched files must not split into its own
+#     group and sneak past the guard
+#   - entries already annotated with this annotation still count as
+#     competitors, so a plain re-run after an explicit --pick cannot
+#     auto-annotate the deliberately-excluded sibling
+# --all annotates every candidate.
+fi_annotate_auto() {
+  local file="$1" annotation="$2" touched_files="$3" annotate_all="$4"
+  local cmd_label="$5" rerun_cmd="$6" ref_desc="$7"
+
+  # Pass 1: collect candidates with the FULL set of touched files each one
+  # matches; already-annotated entries contribute their files to ann_tfs.
+  local -a cand_lines=() cand_locs=() cand_syms=() cand_tfs=()
+  local ann_tfs=""
+  local line tf
+  while IFS= read -r line; do
+    [[ "$line" =~ ^-\ \[open\] ]] || continue
+    local e_data e_path e_line e_symptom
+    e_data="$(fi_parse_entry "$line")" || continue
+    e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+    [[ -z "$e_path" ]] && continue
+    local matched_tfs=""
+    while IFS= read -r tf; do
+      [[ -z "$tf" ]] && continue
+      if [[ "$tf" == "$e_path" || "$tf" == */"$e_path" || "$e_path" == */"$tf" ]]; then
+        matched_tfs+="$tf"$'\n'
+      fi
+    done <<<"$touched_files"
+    [[ -z "$matched_tfs" ]] && continue
+    if [[ "$line" == *"$annotation"* ]]; then
+      ann_tfs+="$matched_tfs"
+      continue
+    fi
+    e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+    e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
+    cand_lines+=("$line")
+    local loc="$e_path"
+    [[ -n "$e_line" ]] && loc="$e_path:$e_line"
+    cand_locs+=("$loc")
+    cand_syms+=("$e_symptom")
+    cand_tfs+=("$matched_tfs")
+  done <"$file"
+
+  if (( ${#cand_lines[@]} == 0 )); then
+    printf '%s: no [open] entries match files touched by %s. No changes.\n' "$cmd_label" "$ref_desc"
+    return 0
+  fi
+
+  # Pass 2: partition — a candidate is ambiguous when any of its matched
+  # files is contested by another candidate or an already-annotated entry.
+  local auto_set=""
+  local -a ambig_indices=()
+  local i j shared
+  for (( i = 0; i < ${#cand_lines[@]}; i++ )); do
+    if [[ "$annotate_all" == "yes" ]]; then
+      auto_set+="${cand_lines[$i]}"$'\n'
+      continue
+    fi
+    shared=0
+    while IFS= read -r tf; do
+      [[ -z "$tf" ]] && continue
+      for (( j = 0; j < ${#cand_lines[@]}; j++ )); do
+        (( j == i )) && continue
+        if printf '%s' "${cand_tfs[$j]}" | grep -Fxq -- "$tf"; then
+          shared=1
+          break
+        fi
+      done
+      if (( shared == 0 )) && [[ -n "$ann_tfs" ]] \
+         && printf '%s' "$ann_tfs" | grep -Fxq -- "$tf"; then
+        shared=1
+      fi
+      (( shared == 1 )) && break
+    done <<<"${cand_tfs[$i]}"
+    if (( shared == 0 )); then
+      auto_set+="${cand_lines[$i]}"$'\n'
+    else
+      ambig_indices+=("$i")
+    fi
+  done
+
+  # Pass 3: rewrite the file with the unambiguous annotations.
+  local tmp matched=0
+  tmp="$(mktemp -t found-issues.XXXXXX)"
+  trap "rm -f '$tmp'" EXIT
+  while IFS= read -r line; do
+    if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
+      printf '%s %s\n' "$line" "$annotation" >>"$tmp"
+      matched=$((matched + 1))
+    else
+      printf '%s\n' "$line" >>"$tmp"
+    fi
+  done <"$file"
+
+  if (( matched > 0 )); then
+    mv "$tmp" "$file"
+    trap - EXIT
+    printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
+  else
+    rm -f "$tmp"
+    trap - EXIT
+  fi
+
+  if (( ${#ambig_indices[@]} > 0 )); then
+    printf '%s: %d [open] entries share touched files with other entries — skipped (file-level match is ambiguous):\n' "$cmd_label" "${#ambig_indices[@]}"
+    for i in "${ambig_indices[@]}"; do
+      local sym="${cand_syms[$i]}"
+      (( ${#sym} > 70 )) && sym="${sym:0:70}..."
+      printf '  %s — %s\n' "${cand_locs[$i]}" "$sym"
+    done
+    printf 'Review which of these %s actually addresses, then annotate them explicitly:\n' "$ref_desc"
+    printf '  %s --pick <path:line>[,<path:line>...]\n' "$rerun_cmd"
+    printf 'or, if %s addresses every listed entry:\n' "$ref_desc"
+    printf '  %s --all\n' "$rerun_cmd"
+  fi
+
+  if (( matched > 0 )); then
+    cmd_status plain
+  fi
+  return 0
+}
+
 # === Subcommand: annotate-pr ===
 #
 # Usage: found-issues annotate-pr <PR-number> [--pick <loc>[,<loc>...]] [--all]
@@ -1048,7 +1340,7 @@ cmd_status() {
 cmd_annotate_pr() {
   local pr_num=""
   local annotate_all="no"
-  local picks_csv=""
+  local picks_nl=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1061,10 +1353,10 @@ cmd_annotate_pr() {
           fi_err "annotate-pr: --pick requires a comma-separated list of entry locations"
           return 2
         fi
-        picks_csv="${picks_csv:+$picks_csv,}$1"
+        picks_nl+="$(fi_split_picks "$1")"$'\n'
         ;;
       --pick=*)
-        picks_csv="${picks_csv:+$picks_csv,}${1#--pick=}"
+        picks_nl+="$(fi_split_picks "${1#--pick=}")"$'\n'
         ;;
       -*)
         fi_err "annotate-pr: unknown flag: $1"
@@ -1114,6 +1406,18 @@ cmd_annotate_pr() {
     return 1
   }
 
+  local annotation="(PR: $repo_id#$pr_num)"
+
+  # --pick runs BEFORE (and without) the touched-files fetch: selection is
+  # judgment-driven and independent of file matching (a fix can land in a
+  # different file than the symptom), and a transient gh failure must not
+  # silently drop the requested annotations.
+  if [[ -n "$picks_nl" ]]; then
+    fi_annotate_apply_picks "$file" "$annotation" "$picks_nl" \
+      "annotate-pr" "found-issues annotate-pr $pr_num"
+    return $?
+  fi
+
   # Get list of files touched by the PR
   local touched_files
   touched_files="$(gh pr view "$pr_num" --json files --jq '.files[].path' 2>/dev/null || true)"
@@ -1123,177 +1427,8 @@ cmd_annotate_pr() {
     return 0
   fi
 
-  local annotation="(PR: $repo_id#$pr_num)"
-
-  # --pick mode: annotate exactly the selected entries by location token
-  # (path:line, or bare path for line-less entries — the same form the
-  # candidate list prints). No file-level matching: selection is
-  # judgment-driven, and a fix can land in a different file than the symptom.
-  if [[ -n "$picks_csv" ]]; then
-    local tmp matched=0 already=0
-    local matched_picks=""
-    tmp="$(mktemp -t found-issues.XXXXXX)"
-    trap "rm -f '$tmp'" EXIT
-
-    while IFS= read -r line; do
-      local out_line="$line"
-      if [[ "$line" =~ ^-\ \[open\] ]]; then
-        local e_data e_path e_line loc
-        if e_data="$(fi_parse_entry "$line")"; then
-          e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
-          e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
-          loc="$e_path"
-          [[ -n "$e_line" ]] && loc="$e_path:$e_line"
-          local pick hit=0
-          local IFS_old="$IFS"
-          IFS=','
-          for pick in $picks_csv; do
-            IFS="$IFS_old"
-            [[ -z "$pick" ]] && continue
-            if [[ "$pick" == "$loc" ]]; then
-              hit=1
-              matched_picks+="${pick}"$'\n'
-            fi
-          done
-          IFS="$IFS_old"
-          if (( hit == 1 )); then
-            if [[ "$line" == *"$annotation"* ]]; then
-              already=$((already + 1))
-            else
-              out_line="$line $annotation"
-              matched=$((matched + 1))
-            fi
-          fi
-        fi
-      fi
-      printf '%s\n' "$out_line" >>"$tmp"
-    done <"$file"
-
-    # Surface picks that matched no [open] entry (typo, or entry already
-    # flipped/deferred) so a bad selection never fails silently.
-    local unmatched_picks="" pick
-    local IFS_old="$IFS"
-    IFS=','
-    for pick in $picks_csv; do
-      IFS="$IFS_old"
-      [[ -z "$pick" ]] && continue
-      if ! printf '%s' "$matched_picks" | grep -Fxq -- "$pick"; then
-        unmatched_picks+="  $pick"$'\n'
-      fi
-    done
-    IFS="$IFS_old"
-
-    if (( matched == 0 )); then
-      rm -f "$tmp"
-      trap - EXIT
-      if (( already > 0 )); then
-        printf 'annotate-pr: selected entr%s already annotated with %s. No changes.\n' \
-          "$([[ $already -eq 1 ]] && echo y || echo ies)" "$annotation"
-        [[ -n "$unmatched_picks" ]] && printf 'annotate-pr: no [open] entry matches pick:\n%s' "$unmatched_picks"
-        return 0
-      fi
-      printf 'annotate-pr: no [open] entry matches pick:\n%s' "$unmatched_picks"
-      return 1
-    fi
-
-    mv "$tmp" "$file"
-    trap - EXIT
-    printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
-    [[ -n "$unmatched_picks" ]] && printf 'annotate-pr: no [open] entry matches pick:\n%s' "$unmatched_picks"
-    cmd_status plain
-    return 0
-  fi
-
-  # Default / --all mode. Pass 1: collect candidate entries (un-annotated
-  # [open] entries whose path matches a touched file) with the touched file
-  # each one matched, so per-file group sizes are known before annotating.
-  local -a cand_lines=() cand_locs=() cand_tfs=() cand_syms=()
-  local line
-  while IFS= read -r line; do
-    [[ "$line" =~ ^-\ \[open\] ]] || continue
-    [[ "$line" == *"$annotation"* ]] && continue
-    local e_data e_path e_line e_symptom
-    e_data="$(fi_parse_entry "$line")" || continue
-    e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
-    e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
-    e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
-    [[ -z "$e_path" ]] && continue
-    local hit_tf="" tf
-    while IFS= read -r tf; do
-      [[ -z "$tf" ]] && continue
-      if [[ "$tf" == "$e_path" || "$tf" == */"$e_path" || "$e_path" == */"$tf" ]]; then
-        hit_tf="$tf"
-        break
-      fi
-    done <<<"$touched_files"
-    [[ -z "$hit_tf" ]] && continue
-    cand_lines+=("$line")
-    local loc="$e_path"
-    [[ -n "$e_line" ]] && loc="$e_path:$e_line"
-    cand_locs+=("$loc")
-    cand_tfs+=("$hit_tf")
-    cand_syms+=("$e_symptom")
-  done <"$file"
-
-  if (( ${#cand_lines[@]} == 0 )); then
-    printf 'annotate-pr: no [open] entries match files touched by PR #%s. No changes.\n' "$pr_num"
-    return 0
-  fi
-
-  # Partition candidates: unambiguous (sole entry on its touched file, or
-  # --all) auto-annotate; the rest are listed for --pick selection.
-  local auto_set=""
-  local -a ambig_indices=()
-  local i j
-  for (( i = 0; i < ${#cand_lines[@]}; i++ )); do
-    local group_size=0
-    for (( j = 0; j < ${#cand_tfs[@]}; j++ )); do
-      [[ "${cand_tfs[$j]}" == "${cand_tfs[$i]}" ]] && group_size=$((group_size + 1))
-    done
-    if [[ "$annotate_all" == "yes" ]] || (( group_size == 1 )); then
-      auto_set+="${cand_lines[$i]}"$'\n'
-    else
-      ambig_indices+=("$i")
-    fi
-  done
-
-  local tmp matched=0
-  tmp="$(mktemp -t found-issues.XXXXXX)"
-  trap "rm -f '$tmp'" EXIT
-  while IFS= read -r line; do
-    if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
-      printf '%s %s\n' "$line" "$annotation" >>"$tmp"
-      matched=$((matched + 1))
-    else
-      printf '%s\n' "$line" >>"$tmp"
-    fi
-  done <"$file"
-
-  if (( matched > 0 )); then
-    mv "$tmp" "$file"
-    trap - EXIT
-    printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
-  else
-    rm -f "$tmp"
-    trap - EXIT
-  fi
-
-  if (( ${#ambig_indices[@]} > 0 )); then
-    printf 'annotate-pr: %d [open] entries share touched files with other entries — skipped (file-level match is ambiguous):\n' "${#ambig_indices[@]}"
-    for i in "${ambig_indices[@]}"; do
-      local sym="${cand_syms[$i]}"
-      (( ${#sym} > 70 )) && sym="${sym:0:70}..."
-      printf '  %s — %s\n' "${cand_locs[$i]}" "$sym"
-    done
-    printf 'Review which of these the PR actually addresses, then annotate them explicitly:\n'
-    printf '  found-issues annotate-pr %s --pick <path:line>[,<path:line>...]\n' "$pr_num"
-    printf 'or, if the PR addresses every listed entry:\n'
-    printf '  found-issues annotate-pr %s --all\n' "$pr_num"
-  fi
-
-  if (( matched > 0 )); then
-    cmd_status plain
-  fi
+  fi_annotate_auto "$file" "$annotation" "$touched_files" "$annotate_all" \
+    "annotate-pr" "found-issues annotate-pr $pr_num" "PR #$pr_num"
 }
 
 # === Subcommand: annotate-commit ===
@@ -1304,7 +1439,42 @@ cmd_annotate_pr() {
 # appends (commit: <short-sha>) to each matching entry.
 
 cmd_annotate_commit() {
-  local target="${1:-HEAD}"
+  local target=""
+  local annotate_all="no"
+  local picks_nl=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all)
+        annotate_all="yes"
+        ;;
+      --pick)
+        shift
+        if [[ -z "${1:-}" ]]; then
+          fi_err "annotate-commit: --pick requires a comma-separated list of entry locations"
+          return 2
+        fi
+        picks_nl+="$(fi_split_picks "$1")"$'\n'
+        ;;
+      --pick=*)
+        picks_nl+="$(fi_split_picks "${1#--pick=}")"$'\n'
+        ;;
+      -*)
+        fi_err "annotate-commit: unknown flag: $1"
+        fi_err "Usage: found-issues annotate-commit [<sha>] [--pick <path:line>[,<path:line>...]] [--all]"
+        return 2
+        ;;
+      *)
+        if [[ -n "$target" ]]; then
+          fi_err "Usage: found-issues annotate-commit [<sha>] [--pick <path:line>[,<path:line>...]] [--all]"
+          return 2
+        fi
+        target="$1"
+        ;;
+    esac
+    shift
+  done
+  [[ -z "$target" ]] && target="HEAD"
 
   local full_sha short_sha
   full_sha="$(git rev-parse --verify "$target" 2>/dev/null || true)"
@@ -1320,6 +1490,17 @@ cmd_annotate_commit() {
     return 1
   }
 
+  local annotation="(commit: $short_sha)"
+
+  # --pick is independent of the commit's file list — same rationale as
+  # annotate-pr (selection is judgment-driven; a fix can land in a
+  # different file than the symptom).
+  if [[ -n "$picks_nl" ]]; then
+    fi_annotate_apply_picks "$file" "$annotation" "$picks_nl" \
+      "annotate-commit" "found-issues annotate-commit $target"
+    return $?
+  fi
+
   # Files touched by the commit
   local touched_files
   touched_files="$(git show --name-only --format= "$full_sha" 2>/dev/null | grep -v '^$' || true)"
@@ -1329,56 +1510,8 @@ cmd_annotate_commit() {
     return 0
   fi
 
-  local annotation="(commit: $short_sha)"
-  local matched=0
-  local tmp
-  tmp="$(mktemp -t found-issues.XXXXXX)"
-  trap "rm -f '$tmp'" EXIT
-
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^-\ \[open\] ]]; then
-      if [[ "$line" == *"$annotation"* ]]; then
-        printf '%s\n' "$line" >>"$tmp"
-        continue
-      fi
-
-      local e_data e_path
-      e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
-      e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
-
-      if [[ -n "$e_path" ]]; then
-        local hit=0
-        while IFS= read -r tf; do
-          [[ -z "$tf" ]] && continue
-          if [[ "$tf" == "$e_path" || "$tf" == */"$e_path" || "$e_path" == */"$tf" ]]; then
-            hit=1
-            break
-          fi
-        done <<<"$touched_files"
-
-        if [[ "$hit" -eq 1 ]]; then
-          printf '%s %s\n' "$line" "$annotation" >>"$tmp"
-          matched=$((matched + 1))
-          continue
-        fi
-      fi
-      printf '%s\n' "$line" >>"$tmp"
-    else
-      printf '%s\n' "$line" >>"$tmp"
-    fi
-  done <"$file"
-
-  if [[ "$matched" -eq 0 ]]; then
-    printf 'annotate-commit: no [open] entries match files in commit %s. No changes.\n' "$short_sha"
-    rm -f "$tmp"
-    return 0
-  fi
-
-  mv "$tmp" "$file"
-  trap - EXIT
-
-  printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
-  cmd_status plain
+  fi_annotate_auto "$file" "$annotation" "$touched_files" "$annotate_all" \
+    "annotate-commit" "found-issues annotate-commit $target" "commit $short_sha"
 }
 
 # === Subcommand: sync ===
@@ -1500,6 +1633,12 @@ cmd_sync() {
         if [[ "$e_path" == /* || "$e_path" == ".." || "$e_path" == ../* \
               || "$e_path" == */../* || "$e_path" == */.. ]]; then
           : # not a repo-relative path — never probe the filesystem for it
+        elif [[ "$e_path" == *[\*\?]* || "$e_path" == *\{*\}* || "$e_path" == *\[*\]* ]]; then
+          # Glob/brace location tokens (tests/*.bats, config/{dev,prod}.yml)
+          # are pattern descriptors, not filenames — the parser accepts them
+          # for dedup, but probing them as literal paths always misses and
+          # would false-tombstone the entry at every SessionStart sync.
+          :
         elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
           local repo_root
           repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"

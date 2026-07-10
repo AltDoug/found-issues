@@ -208,3 +208,128 @@ _setup_pr_repo() {
   [ "$(grep -c '(PR: org/repo#9)' docs/found-issues.md)" -eq 1 ]
   unset GH_MOCK_PR_VIEW
 }
+
+@test "annotate-pr: repo id survives trailing slash after .git in remote URL" {
+  git commit --allow-empty -q -m init
+  git remote add origin "https://github.com/org/repo.git/"
+  fi_use_gh_shim
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  mkdir -p src && echo x > src/foo.py
+  fi_run log "src/foo.py:1 — bug"
+  fi_run annotate-pr 7
+  [ "$status" -eq 0 ]
+  grep -q '(PR: org/repo#7)' docs/found-issues.md
+  unset GH_MOCK_PR_VIEW
+}
+
+# === v1.6.0 review hardening: guard defeat paths ===
+
+@test "annotate-pr: entry matching several touched files shares groups correctly (no first-match split)" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tapp/util.py\\nsrc/util.py'
+  mkdir -p app src && echo x > app/util.py && echo x > src/util.py
+  fi_run log "util.py:5 — bare-filename entry matching both copies"
+  fi_run log "src/util.py:9 — entry on the src copy"
+  fi_run annotate-pr 9
+  [ "$status" -eq 0 ]
+  # Both entries suffix-share src/util.py — neither may auto-annotate
+  ! grep -q '(PR: org/repo#9)' docs/found-issues.md
+  [[ "$output" == *"util.py:5"* ]]
+  [[ "$output" == *"src/util.py:9"* ]]
+  unset GH_MOCK_PR_VIEW
+}
+
+@test "annotate-pr: plain re-run after --pick does not auto-annotate the excluded entry" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src && echo x > src/hot.py
+  fi_run log "src/hot.py:1 — first bug"
+  fi_run log "src/hot.py:2 — second bug"
+  fi_run annotate-pr 9 --pick src/hot.py:1
+  fi_run annotate-pr 9
+  [ "$status" -eq 0 ]
+  # The deliberately-unpicked entry must stay un-annotated (listed, not tagged)
+  ! grep -q 'second bug (PR:' docs/found-issues.md
+  [[ "$output" == *"src/hot.py:2"* ]]
+  unset GH_MOCK_PR_VIEW
+}
+
+@test "annotate-pr: pick matching several co-located entries is refused" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src && echo x > src/hot.py
+  fi_run log "src/hot.py:2 — null deref crash"
+  fi_run log "src/hot.py:2 — race condition on write"
+  fi_run annotate-pr 9 --pick src/hot.py:2
+  [ "$status" -ne 0 ]
+  ! grep -q '(PR: org/repo#9)' docs/found-issues.md
+  [[ "$output" == *"null deref crash"* ]]
+  [[ "$output" == *"race condition on write"* ]]
+  unset GH_MOCK_PR_VIEW
+}
+
+@test "annotate-pr: extended pick with symptom fragment selects one co-located entry" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src && echo x > src/hot.py
+  fi_run log "src/hot.py:2 — null deref crash"
+  fi_run log "src/hot.py:2 — race condition on write"
+  fi_run annotate-pr 9 --pick "src/hot.py:2 — null deref"
+  [ "$status" -eq 0 ]
+  grep -q 'null deref crash (PR: org/repo#9)' docs/found-issues.md
+  ! grep -q 'race condition on write (PR:' docs/found-issues.md
+  unset GH_MOCK_PR_VIEW
+}
+
+@test "annotate-pr: --pick applies even when the touched-files fetch is empty" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\t'
+  mkdir -p src && echo x > src/hot.py
+  fi_run log "src/hot.py:1 — first bug"
+  fi_run annotate-pr 9 --pick src/hot.py:1
+  [ "$status" -eq 0 ]
+  grep -q 'first bug (PR: org/repo#9)' docs/found-issues.md
+  unset GH_MOCK_PR_VIEW
+}
+
+# === v1.6.0 review hardening: annotate-commit gets the same guard ===
+
+@test "annotate-commit: multiple entries on one touched file are NOT auto-annotated" {
+  mkdir -p src
+  echo "x" > src/hot.py
+  fi_run log "src/hot.py:1 — first bug"
+  fi_run log "src/hot.py:2 — second bug"
+  git add src/hot.py
+  git commit -q -m "touch hot"
+  fi_run annotate-commit HEAD
+  [ "$status" -eq 0 ]
+  ! grep -q '(commit:' docs/found-issues.md
+  [[ "$output" == *"src/hot.py:1"* ]]
+  [[ "$output" == *"--pick"* ]]
+}
+
+@test "annotate-commit: --pick annotates only the selected entry" {
+  mkdir -p src
+  echo "x" > src/hot.py
+  fi_run log "src/hot.py:1 — first bug"
+  fi_run log "src/hot.py:2 — second bug"
+  git add src/hot.py
+  git commit -q -m "touch hot"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+  fi_run annotate-commit HEAD --pick src/hot.py:2
+  [ "$status" -eq 0 ]
+  grep -q "second bug (commit: $short_sha)" docs/found-issues.md
+  ! grep -q "first bug (commit:" docs/found-issues.md
+}
+
+@test "annotate-commit: --all annotates every matching entry" {
+  mkdir -p src
+  echo "x" > src/hot.py
+  fi_run log "src/hot.py:1 — first bug"
+  fi_run log "src/hot.py:2 — second bug"
+  git add src/hot.py
+  git commit -q -m "touch hot"
+  fi_run annotate-commit HEAD --all
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '(commit:' docs/found-issues.md)" -eq 2 ]
+}

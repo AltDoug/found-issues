@@ -206,7 +206,7 @@ three platforms.
 
 ## Status
 
-**v1.6.0** — 523 tests passing in CI on Linux + macOS + Windows (Git Bash), including end-to-end runtime probes of the generated shim against synthetic Claude Code stdin. 7 lifecycle hooks + 1 opt-in git pre-commit hook, 12 slash commands, 1 CLI binary, all wired through the Claude Code plugin spec.
+**v1.6.0** — 542 tests passing in CI on Linux + macOS + Windows (Git Bash), including end-to-end runtime probes of the generated shim against synthetic Claude Code stdin. 7 lifecycle hooks + 1 opt-in git pre-commit hook, 12 slash commands, 1 CLI binary, all wired through the Claude Code plugin spec.
 
 Have a use case the plugin doesn't cover? [Open an issue](https://github.com/AltDoug/found-issues/issues/new).
 

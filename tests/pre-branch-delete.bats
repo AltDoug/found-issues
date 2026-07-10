@@ -248,3 +248,38 @@ _seed_unpromoted_branch() {
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
 }
+
+@test "pre-branch-delete: catches second branch in multi-branch delete" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -D safe-name feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: catches multi-branch push delete" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin --delete safe-name feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: catches delete after earlier git push in compound command" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin main && git push origin --delete feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: catches delete after earlier git branch in compound command" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch --merged && git branch -D feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: value-taking flag before remote does not shield the branch" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push -o ci.skip origin --delete feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}

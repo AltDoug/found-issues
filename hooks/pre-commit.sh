@@ -36,8 +36,14 @@ if [[ -z "$target" ]]; then
   exit 0
 fi
 
-# Get the staged content (the version that would be committed)
-staged_content="$(git show ":0:$target" 2>/dev/null || true)"
+# Validate only the lines this commit ADDS (modified lines appear as
+# additions too). Validating the whole staged file made every historical
+# entry retroactively subject to rules it predates — one v1.5.x-era line
+# then blocks every future commit of the file even though the spec says
+# [fixed] history must not be edited. The added-lines scope also matches
+# the PreToolUse enforcer, which validates the edit, not the file.
+staged_content="$(git diff --cached -U0 -- "$target" 2>/dev/null \
+  | grep '^+' | grep -v '^+++' | cut -c2- || true)"
 if [[ -z "$staged_content" ]]; then
   exit 0
 fi
@@ -54,10 +60,14 @@ while IFS= read -r line; do
   reason=""
 
   # 1. Bare 'PR #N' — canonical annotations stripped first so a bare ref
-  # can't ride alongside one (mirrors format-enforcer.sh rule 1).
-  line_sans_canonical="$(printf '%s' "$line" | sed -E 's|\(PR(-closed)?: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)||g')"
-  if [[ "$line_sans_canonical" =~ PR[[:space:]]+#[0-9]+ ]]; then
-    reason="bare 'PR #N' — use canonical '(PR: org/repo#N)' form"
+  # can't ride alongside one (mirrors format-enforcer.sh rule 1). [fixed]
+  # lines are exempt: they are immutable history per the spec, and bare
+  # refs there are cosmetic — only active entries feed sync/statusline.
+  if [[ ! "$line" =~ ^-[[:space:]]+\[fixed\] ]]; then
+    line_sans_canonical="$(printf '%s' "$line" | sed -E 's|\(PR(-closed)?: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)||g')"
+    if [[ "$line_sans_canonical" =~ PR[[:space:]]+#[0-9]+ ]]; then
+      reason="bare 'PR #N' — use canonical '(PR: org/repo#N)' form"
+    fi
   fi
 
   # 2. Wrong-case status

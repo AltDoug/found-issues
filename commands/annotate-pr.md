@@ -43,6 +43,14 @@ Possible outputs:
   `found-issues annotate-pr <N> --all` instead. Never use `--all` to save
   yourself the symptom comparison.
 
+  When TWO entries share the same `path:line`, a bare location pick is
+  refused (it cannot select between them) — use the extended form with a
+  symptom fragment:
+
+  ```bash
+  found-issues annotate-pr <N> --pick "src/hot.py:2 — null deref"
+  ```
+
 Pass the result through to the user.
 
 ## When to invoke

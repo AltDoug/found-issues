@@ -196,3 +196,11 @@ HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/hooks/format-enforcer.s
   [ "$status" -eq 2 ]
   [[ "$output" == *"bare 'PR #N'"* ]]
 }
+
+@test "format-enforcer: [fixed] line with bare PR alongside canonical passes (historical exemption)" {
+  # [fixed] entries are historical per the spec; rule 1 polices active
+  # entries, not history a full-file Write happens to carry.
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [fixed] 2026-03-01 src/old.py:1 — legacy, see PR #100 (PR: org/repo#102) (fixed: 2026-03-02)"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
