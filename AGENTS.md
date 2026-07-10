@@ -55,9 +55,14 @@ discoverability) and offers the `/fi` shortcut + per-repo pre-commit
 hook. If the user ran the first two commands themselves before asking
 you, actively suggest they run setup now — don't wait to be asked.
 
-There is intentionally **no auto-firing onboarding** at session start.
-Hijacking the user's first prompt with a banner is sloppy UX. Setup is
-explicit, opt-in, and discoverable via `/found-issues:setup`.
+Session-start onboarding is intentionally minimal: the SessionStart hook
+prepends a **single italic hint line** pointing at `/found-issues:setup`
+on the very first session ever (then never again), plus an at-most-daily
+one-liner nudge if a broken statusline integration is detected. The full
+setup flow itself never auto-fires — it stays explicit and opt-in via
+`/found-issues:setup`. Rationale: a silent install was undiscoverable
+(v0.1.5 regression), but hijacking the user's first prompt with a banner
+is sloppy UX — one italic line is the compromise (v0.1.10).
 
 ## If the user is NOT using Claude Code
 

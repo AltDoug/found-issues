@@ -49,7 +49,10 @@ case "$cmd $sub" in
       while IFS=$'\t' read -r mock_num mock_json; do
         [[ -z "$mock_num" ]] && continue
         if [[ "$mock_num" == "$pr_num" ]]; then
-          printf '%s\n' "$mock_json"
+          # Expand literal \n sequences so one row can mock multi-line output
+          # (the pre-filtered .files[].path list for multi-file PRs). Row
+          # parsing above stays one-row-per-line.
+          printf '%s\n' "${mock_json//\\n/$'\n'}"
           exit 0
         fi
       done <<<"$GH_MOCK_PR_VIEW"

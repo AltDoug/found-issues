@@ -14,6 +14,7 @@
 #   fi_count <file> [<status_filter>]
 #   fi_count_in_pr <file>
 #   fi_count_critical <file>
+#   fi_count_residual <file>
 #   fi_count_stale <file> [<days=30>]
 
 # Walk up from start_dir looking for the issues file.
@@ -92,8 +93,13 @@ fi_parse_entry() {
   # after_date now starts with location followed by ' — symptom...'
   local location_part="${after_date%% — *}"
 
-  local re_path_line='^([A-Za-z0-9_./-]+):([0-9]+)$'
-  local re_path_only='^([A-Za-z0-9_./-]+)$'
+  # Charset parity with cmd_log's location acceptance ([^:[:space:]]+):
+  # the earlier [A-Za-z0-9_./-] set rejected legitimate path characters
+  # like + (src/UIView+Ext.swift), so accepted-at-log-time entries
+  # round-tripped with an empty path — dedup double-logged, annotate-pr /
+  # annotate-commit never matched, tombstone sync never fired.
+  local re_path_line='^([^:[:space:]]+):([0-9]+)$'
+  local re_path_only='^([^:[:space:]]+)$'
   # Entries sometimes follow the path with a symbol name and/or approximate
   # line range (e.g. `bin/found-issues fi_strip_target_markers ~1982-1989`),
   # which the standalone regexes can't match. Take the first whitespace-
@@ -249,6 +255,8 @@ fi_count() {
 # Excludes (PR-closed: ...) demoted forms: the literal colon-space in
 # '(PR: ' cannot match '(PR-closed:' (hyphen-c), so the regex naturally
 # distinguishes the two. Demoted forms flow into fi_count_stale instead.
+# Counts via fi_entries (not a raw-file grep) so both sides of a merge
+# conflict are excluded, preserving the invariant documented on fi_entries.
 fi_count_in_pr() {
   local file="$1"
 
@@ -258,11 +266,12 @@ fi_count_in_pr() {
   fi
 
   local count
-  count="$(grep -cE '^- \[open\].*\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' "$file" 2>/dev/null || true)"
+  count="$(fi_entries "$file" open 2>/dev/null \
+    | grep -cE '\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' || true)"
   printf '%s' "${count:-0}"
 }
 
-# Count [open] [!] entries (critical).
+# Count [open] [!] entries (critical). Conflict-aware via fi_entries.
 fi_count_critical() {
   local file="$1"
 
@@ -272,7 +281,29 @@ fi_count_critical() {
   fi
 
   local count
-  count="$(grep -cE '^- \[open\] \[!\]' "$file" 2>/dev/null || true)"
+  count="$(fi_entries "$file" open 2>/dev/null \
+    | grep -cE '^- \[open\] \[!\]' || true)"
+  printf '%s' "${count:-0}"
+}
+
+# Count [open] entries in the residual bucket: neither critical ([!]) nor
+# carrying an active (PR: ...) annotation. Computed by exclusion in one
+# conflict-aware pass so an entry that is BOTH critical and in-PR is
+# excluded once, not twice — the old total-minus-critical-minus-in_pr
+# arithmetic in cmd_status double-subtracted the overlap, making plain
+# open entries vanish from every rendered counter.
+fi_count_residual() {
+  local file="$1"
+
+  if [[ ! -f "$file" ]]; then
+    printf '0'
+    return
+  fi
+
+  local count
+  count="$(fi_entries "$file" open 2>/dev/null \
+    | grep -vE '^- \[open\] \[!\]' \
+    | grep -cvE '\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' || true)"
   printf '%s' "${count:-0}"
 }
 
@@ -303,13 +334,18 @@ fi_count_stale() {
   fi
 
   # |A| — date-based stale count (existing behavior).
-  local re_open_date='^- \[open\].*\ ([0-9]{4}-[0-9]{2}-[0-9]{2})\ '
+  # The capture is anchored to the status prefix (mirroring fi_parse_entry):
+  # the earlier `^- \[open\].*\ (date)\ ` form was greedy, so an ISO date
+  # inside the symptom text was captured instead of the entry date —
+  # corrupting the count in both directions (fresh entry with an old date
+  # in the symptom counted stale; stale entry with a fresh date was missed).
+  local re_open_date='^- \[open\]( \[!\])? ([0-9]{4}-[0-9]{2}-[0-9]{2}) '
   local re_demoted='\((PR-closed|commit-stale): '
   local date_stale=0
   local overlap=0
   while IFS= read -r line; do
     if [[ "$line" =~ $re_open_date ]]; then
-      local entry_date="${BASH_REMATCH[1]}"
+      local entry_date="${BASH_REMATCH[2]}"
       if [[ "$entry_date" < "$cutoff" ]]; then
         date_stale=$((date_stale + 1))
         # |A ∩ B| — entries that are BOTH date-stale AND demoted.
@@ -321,8 +357,10 @@ fi_count_stale() {
   done < <(fi_entries "$file" open 2>/dev/null)
 
   # |B| — entries with a demoted annotation, regardless of date.
+  # Conflict-aware via fi_entries, like the |A| loop above.
   local demoted
-  demoted="$(grep -cE '^- \[open\].*\((PR-closed|commit-stale): ' "$file" 2>/dev/null || true)"
+  demoted="$(fi_entries "$file" open 2>/dev/null \
+    | grep -cE '\((PR-closed|commit-stale): ' || true)"
   demoted="${demoted:-0}"
 
   printf '%d' "$((date_stale + demoted - overlap))"

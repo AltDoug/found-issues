@@ -58,25 +58,31 @@ fi
 # FI_BIN resolution entirely: the override is self-contained, and
 # requiring `found-issues` on PATH for tests to work makes test setup
 # brittle (CI doesn't have the plugin installed).
-sync_cmd="${FOUND_ISSUES_AUTOSYNC_CMD:-}"
-if [[ -z "$sync_cmd" ]]; then
-  # Production path — locate the CLI binary (same fallback chain as
-  # post-pr-create.sh).
-  FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
-  if ! command -v "$FI_BIN" >/dev/null 2>&1; then
-    if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/found-issues" ]]; then
-      FI_BIN="$CLAUDE_PLUGIN_ROOT/bin/found-issues"
-    else
-      # No CLI available — silent no-op, don't block.
-      exit 0
-    fi
-  fi
-  sync_cmd="$FI_BIN sync"
-fi
-
+#
 # Fire-and-forget background sync. Detached subshell so the parent
 # (PostToolUse hook) exits immediately and Claude is never blocked
 # waiting on gh network calls.
-( bash -c "$sync_cmd" >/dev/null 2>&1 & ) >/dev/null 2>&1
+if [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
+  # Self-contained command STRING — bash -c is the intended dispatch.
+  ( bash -c "$FOUND_ISSUES_AUTOSYNC_CMD" >/dev/null 2>&1 & ) >/dev/null 2>&1
+  exit 0
+fi
+
+# Production path — locate the CLI binary (same fallback chain as
+# post-pr-create.sh).
+FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
+if ! command -v "$FI_BIN" >/dev/null 2>&1; then
+  if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/found-issues" ]]; then
+    FI_BIN="$CLAUDE_PLUGIN_ROOT/bin/found-issues"
+  else
+    # No CLI available — silent no-op, don't block.
+    exit 0
+  fi
+fi
+
+# Argv invocation, never a bash -c string — an install path containing a
+# space (e.g. Windows C:/Users/John Doe/...) word-splits inside the string
+# and exits 127 silently, so autosync never fires.
+( "$FI_BIN" sync >/dev/null 2>&1 & ) >/dev/null 2>&1
 
 exit 0

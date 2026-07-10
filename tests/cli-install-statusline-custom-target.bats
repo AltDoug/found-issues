@@ -1063,3 +1063,25 @@ EOF
   echo "$out_b" | grep -qE ' \| .*issue'
 }
 
+
+@test "install-statusline --target bash: echo already referencing __FI_SEG is not re-spliced" {
+  # A hand-added echo that already renders the segment is a user placement,
+  # not an un-instrumented branch — splicing it again renders the counter
+  # twice on that line (found during v1.5.7 verify).
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+if true; then
+  echo "A ${__FI_SEG}"
+else
+  echo "B | none"
+fi
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  # User placement stays byte-identical (no second ${__FI_SEG}, no trailer)
+  grep -Fq 'echo "A ${__FI_SEG}"' tmp/sl.sh
+  # Only the un-instrumented branch gets the installer splice
+  [ "$(grep -c 'found-issues:seg' tmp/sl.sh)" = "1" ]
+  grep -Fq 'echo "B | none${__FI_SEG}"  # found-issues:seg' tmp/sl.sh
+}

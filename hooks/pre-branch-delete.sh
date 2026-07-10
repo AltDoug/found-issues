@@ -62,15 +62,70 @@ fi
 
 branches=()
 
-# Pattern 1: git branch -d / -D <name>
-if [[ "$command" =~ git[[:space:]]+branch[[:space:]]+-[dD][[:space:]]+([A-Za-z0-9._/-]+) ]]; then
-  branches+=("${BASH_REMATCH[1]}")
-fi
+# Patterns 1+2 tokenize each simple-command segment instead of position-
+# matching the whole string. Three reasons, all observed bypasses:
+#   - git accepts the delete flag anywhere relative to the other args
+#     (git branch --delete NAME, git push --delete REMOTE NAME, ...)
+#   - deletes may name SEVERAL branches (git branch -D b1 b2)
+#   - compound commands hide the delete in a later segment
+#     (git push origin main && git push origin --delete feature-x)
+# Glob expansion is disabled around the unquoted word-splits so a `*` in
+# the command can't expand against the cwd. Tokens are trimmed to the
+# branch-name charset so shell syntax fragments ("foo)") don't obscure the
+# real name.
+_fi_segments="$(printf '%s' "$command" | tr '|;&' '\n')"
+while IFS= read -r seg_cmd; do
+  [[ -z "${seg_cmd//[[:space:]]/}" ]] && continue
 
-# Pattern 2: git push <remote> --delete <name>
-if [[ "$command" =~ git[[:space:]]+push[[:space:]]+[A-Za-z0-9._/-]+[[:space:]]+--delete[[:space:]]+([A-Za-z0-9._/-]+) ]]; then
-  branches+=("${BASH_REMATCH[1]}")
-fi
+  # Pattern 1: git branch with -d/-D/--delete anywhere; EVERY non-flag
+  # argument after "branch" is a branch name.
+  if [[ "$seg_cmd" =~ git[[:space:]]+branch[[:space:]]+(.*) ]]; then
+    branch_args="${BASH_REMATCH[1]}"
+    has_delete_flag=0
+    targets=()
+    set -f
+    for tok in $branch_args; do
+      case "$tok" in
+        -d|-D|--delete) has_delete_flag=1 ;;
+        -*) : ;;
+        *)
+          tok="${tok%%[^A-Za-z0-9._/-]*}"
+          [[ -n "$tok" ]] && targets+=("$tok")
+          ;;
+      esac
+    done
+    set +f
+    if (( has_delete_flag == 1 && ${#targets[@]} > 0 )); then
+      branches+=("${targets[@]}")
+    fi
+  fi
+
+  # Pattern 2: git push with -d/--delete anywhere; every non-flag argument
+  # after the remote (the first positional) is a branch name. If an unknown
+  # value-taking flag swallows the remote slot, extra tokens are checked
+  # harmlessly (nothing tracks an issues file at that ref) and the real
+  # branch is still in the list.
+  if [[ "$seg_cmd" =~ git[[:space:]]+push[[:space:]]+(.*) ]]; then
+    push_args="${BASH_REMATCH[1]}"
+    has_delete_flag=0
+    positionals=()
+    set -f
+    for tok in $push_args; do
+      case "$tok" in
+        -d|--delete) has_delete_flag=1 ;;
+        -*) : ;;
+        *)
+          tok="${tok%%[^A-Za-z0-9._/-]*}"
+          [[ -n "$tok" ]] && positionals+=("$tok")
+          ;;
+      esac
+    done
+    set +f
+    if (( has_delete_flag == 1 && ${#positionals[@]} > 1 )); then
+      branches+=("${positionals[@]:1}")
+    fi
+  fi
+done <<<"$_fi_segments"
 
 # Pattern 3: git push <remote> :<name>  (old-style delete)
 if [[ "$command" =~ git[[:space:]]+push[[:space:]]+[A-Za-z0-9._/-]+[[:space:]]+:([A-Za-z0-9._/-]+) ]]; then

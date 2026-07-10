@@ -209,3 +209,77 @@ EOF
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
 }
+
+# === v1.6.0: delete forms the pattern-match missed ===
+
+_seed_unpromoted_branch() {
+  fi_run log "src/foo.py:1 — main"
+  git add -A; git commit -q -m "init"
+  git checkout -q -b feat/test
+  fi_run log "src/x.py:1 — branch-only"
+  git add -A; git commit -q -m "x"
+  git checkout -q main
+}
+
+@test "pre-branch-delete: catches 'git branch --delete <branch>' (long flag)" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch --delete feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: catches 'git push --delete origin <branch>' (flag before remote)" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --delete origin feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: catches 'git push origin -d <branch>' (short flag)" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin -d feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: 'git push origin main' without delete flag passes" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-branch-delete: catches second branch in multi-branch delete" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -D safe-name feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: catches multi-branch push delete" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin --delete safe-name feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: catches delete after earlier git push in compound command" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin main && git push origin --delete feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: catches delete after earlier git branch in compound command" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch --merged && git branch -D feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: value-taking flag before remote does not shield the branch" {
+  _seed_unpromoted_branch
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push -o ci.skip origin --delete feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}

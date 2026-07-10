@@ -186,3 +186,21 @@ HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/hooks/format-enforcer.s
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
 }
+
+@test "format-enforcer: blocks bare 'PR #N' coexisting with a canonical annotation" {
+  # format-spec: a bare ref must be blocked even when the line ALSO carries a
+  # canonical (PR: org/repo#N) — the whole-line whitelist let it ride along,
+  # invisible to sync and the statusline.
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [open] 2026-05-08 src/foo.py:42 — bug, see PR #7 (PR: org/repo#5)"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"bare 'PR #N'"* ]]
+}
+
+@test "format-enforcer: [fixed] line with bare PR alongside canonical passes (historical exemption)" {
+  # [fixed] entries are historical per the spec; rule 1 polices active
+  # entries, not history a full-file Write happens to carry.
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [fixed] 2026-03-01 src/old.py:1 — legacy, see PR #100 (PR: org/repo#102) (fixed: 2026-03-02)"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}

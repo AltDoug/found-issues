@@ -35,20 +35,29 @@ concurrency:
 
 jobs:
   # Detect whether this PR/push touches anything that affects test outcomes.
-  # Cosmetic-only changes (README, CHANGELOG, screenshots, LICENSE, .gitignore,
-  # docs/, hero.tape) skip the matrix — the `ci` aggregator below treats
+  # Cosmetic-only changes (screenshots, LICENSE, .gitignore, docs/, hero.tape,
+  # CONTRIBUTING, SECURITY) skip the matrix — the `ci` aggregator below treats
   # `skipped` as `success` so branch protection is satisfied without burning
-  # ~7 min on a PNG swap.
+  # ~7 min on a PNG swap. CHANGELOG-only changes run version-check (see the
+  # `meta` filter); README/AGENTS changes run the full matrix because
+  # tests/docs-consistency.bats asserts on them.
   changes:
     name: detect changes
     runs-on: ubuntu-latest
     outputs:
       # Scheduled/manual runs have no diff to filter — force the full matrix.
       code: ${{ steps.filter.outputs.code || steps.force.outputs.code }}
+      # `meta`: files with their own dedicated check but no bats coverage.
+      # CHANGELOG.md drives version-check (FI_VERSION match + SemVer rules) —
+      # excluding it from `code` alone made a CHANGELOG-only PR skip exactly
+      # the job built to validate it.
+      meta: ${{ steps.filter.outputs.meta || steps.force.outputs.meta }}
     steps:
       - id: force
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: echo "code=true" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "code=true" >> "$GITHUB_OUTPUT"
+          echo "meta=true" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v6
         if: github.event_name == 'push' || github.event_name == 'pull_request'
       - id: filter
@@ -69,14 +78,16 @@ jobs:
           # Claude Code), so changes deserve full CI even though no bats test
           # asserts on them. `.github/workflows/**` is also intentionally
           # included so workflow edits run their own new test suite.
+          # README.md and AGENTS.md are intentionally NOT excluded —
+          # tests/docs-consistency.bats exists specifically to catch their
+          # drift, and excluding them skipped the matrix on exactly the PRs
+          # it was built for.
           filters: |
             code:
               - '**'
-              - '!README.md'
               - '!CHANGELOG.md'
               - '!CONTRIBUTING.md'
               - '!SECURITY.md'
-              - '!AGENTS.md'
               - '!LICENSE'
               - '!**/*.png'
               - '!**/*.jpg'
@@ -84,6 +95,8 @@ jobs:
               - '!hero.tape'
               - '!.gitignore'
               - '!docs/**'
+            meta:
+              - 'CHANGELOG.md'
 
   bats:
     needs: changes
@@ -171,7 +184,9 @@ jobs:
 
   version-check:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    # Runs on code changes AND on CHANGELOG-only changes (`meta`) — the job
+    # exists to validate CHANGELOG, so a CHANGELOG-only PR must not skip it.
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.meta == 'true'
     name: version check (SemVer)
     runs-on: ubuntu-latest
     steps:

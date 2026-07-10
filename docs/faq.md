@@ -103,13 +103,24 @@ want this.
 
 ## How do I uninstall?
 
+Two steps, **in this order**:
+
 ```
+/found-issues:uninstall
 /plugin uninstall found-issues
 ```
 
-That removes hooks from your settings, removes the CLI from PATH, and
-deletes the plugin's data directory. Your `docs/found-issues.md` files
-are NOT touched — they're project files that belong to you.
+Order matters. Step 1 removes the integrations that live OUTSIDE the
+plugin directory — the statusline segment in `~/.claude/statusline.sh`,
+the `/fi` alias, and plugin-private state under `~/.claude/found-issues/`.
+Step 2 then removes the plugin itself: hooks from your settings, the CLI
+from PATH, and the plugin cache directory. Running step 2 first strands
+the statusline segment with no CLI behind it (the v1.0.3 leftover-counter
+bug this order exists to prevent) — the segment fails soft (empty), but
+you'd have to clean `~/.claude/statusline.sh` by hand.
+
+Your `docs/found-issues.md` files are NOT touched by either step —
+they're project files that belong to you.
 
 If you want to fully purge the format and history, just `git rm
 docs/found-issues.md` in each repo and commit.

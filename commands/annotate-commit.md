@@ -21,7 +21,15 @@ recent commit. This is the 90% case ("I just committed the fix, mark it").
 Pass through the CLI's output:
 
 - `Annotated N entries with (commit: <short>)` — happy path
-- `annotate-commit: no [open] entries match files in commit <sha>. No changes.` — commit didn't touch any logged paths
+- `annotate-commit: no [open] entries match files touched by commit <sha>. No changes.` — commit didn't touch any logged paths
+- A candidate list ending in a `--pick` instruction — several entries cite
+  one touched file, so the CLI annotates none of them (auto-tagging all
+  would false-flip the unfixed ones when the commit lands). Compare each
+  candidate's symptom against what the commit actually changes, then
+  re-run with `--pick <path:line>,...` for the entries it genuinely
+  addresses (or `--all` when it addresses every candidate). For two
+  entries at the SAME path:line, use the extended pick form
+  `--pick "<path:line> — <symptom fragment>"`.
 
 ## When to invoke
 

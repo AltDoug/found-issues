@@ -11,7 +11,12 @@ overrides.
 
 ## Hook opt-outs
 
-The plugin registers 8 hooks. Each one has an `=off` switch.
+The plugin registers 7 hooks (see [architecture](architecture.md) for the
+full table). Four of them have a whole-hook `=off` switch, listed below
+alongside two related switches: the opt-in git pre-commit hook's, and the
+SessionStart hook's auto-migration switch. `session-start`,
+`post-pr-create`, and `post-git-commit` have no whole-hook switch — they
+are informational and never block.
 
 | Variable | Default | What it controls |
 |---|---|---|
@@ -19,9 +24,10 @@ The plugin registers 8 hooks. Each one has an `=off` switch.
 | `FOUND_ISSUES_REMINDER_VERBOSITY` | `auto` | Stop-hook message verbosity. `full` (8-line educational form), `terse` (1-line form), or `auto` (terse iff `~/.claude/found-issues/.onboarded` exists). |
 | `FOUND_ISSUES_PROMOTE_GUARD` | `on` | The `pre-branch-delete` hook that hard-blocks `git branch -d` / `--delete` / `gh api ... DELETE` when the branch has `[open]` entries whose dedup key isn't on `main`. Set to `off` for a one-shot bypass (`FOUND_ISSUES_PROMOTE_GUARD=off git branch -D ...`). The inline prefix form is parsed from the command string itself, so it works inside Claude Code's Bash tool (where the hook subprocess otherwise would not inherit per-command env). The guard also auto-skips when the default branch does not track the issues file — repos using per-developer-local (gitignored) `docs/found-issues.md` get an exit-0 with a one-line note rather than a block. |
 | `FOUND_ISSUES_FORMAT_ENFORCER` | `on` | The `PreToolUse` format-enforcer that validates entries written via `Write` / `Edit` / `MultiEdit`. In `local` mode it's already off; in `git` mode it warns-only; in `github-*` modes it hard-blocks. Set to `off` to disable globally. |
-| `FOUND_ISSUES_PRE_COMMIT` | `on` | The optional per-repo `pre-commit.sh` (installed via `found-issues install-precommit`). Same validation rules as the in-Claude-Code enforcer but at git commit time. Set to `off` to disable. |
+| `FOUND_ISSUES_PRE_COMMIT` | `on` | The optional per-repo `pre-commit.sh` git hook (installed manually: `cp <plugin-root>/hooks/pre-commit.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit` — there is no installer subcommand). Same validation rules as the in-Claude-Code enforcer but at git commit time. Set to `off` to disable. |
 | `FOUND_ISSUES_AUTO_ARCHIVE` | `on` | The auto-archive that runs after every `/found-issues:sync`. Moves old `[fixed]` entries to `docs/found-issues-archive.md` per the count + days thresholds. Set to `off` if you'd rather control archiving manually via `/found-issues:archive`. |
 | `FOUND_ISSUES_POST_PR_STATE` | `on` | The PostToolUse Bash hook that fires `found-issues sync` in the background after `gh pr merge` / `gh pr close` / `gh pr reopen`. Lets the statusline reflect the new state immediately instead of waiting for the next session start. Set to `off` if you'd rather sync only at SessionStart. |
+| `FOUND_ISSUES_AUTO_MIGRATE` | `on` | The SessionStart auto-migration of broken statusline marker blocks (v1.4.x POSIX-only and v1.5.0–v1.5.5 `--cwd`-less custom targets). Set to `off` to keep session start fully hands-off and migrate manually via `found-issues install-statusline --target <path> --apply`. |
 | `FOUND_ISSUES_SEGMENT_AUTOSYNC` | `on` | Throttled in-segment background sync (default once per 10 min). Triggered from `found-issues status --format=segment` — runs detached, statusline returns immediately. Set to `off` to disable the auto-refresh entirely. |
 
 Example — silence the Stop reminder and disable auto-archive, but keep
@@ -123,6 +129,7 @@ These exist for testing and edge cases. Most users never touch them.
 | `CLAUDE_PLUGIN_ROOT` | (set by Claude Code) | Used by hooks to locate the plugin's `lib/` when `FOUND_ISSUES_LIB_DIR` isn't set. |
 | `FOUND_ISSUES_AUTOSYNC_CMD` | (none) | Overrides the command dispatched by the segment-autosync and `post-pr-state.sh` hooks. Tests set this to a marker-writer so they can verify dispatch without invoking real `gh pr view` traffic. Production users have no reason to set it. |
 | `FOUND_ISSUES_CACHE_DIR` | `$HOME/.cache/found-issues` | Override the cache root that holds segment-autosync's timestamp file (`segment-autosync-ts`) and other plugin caches. Tests use this for isolation. |
+| `FOUND_ISSUES_BASH` | (resolved via `PATH`) | Path to the `bash` binary used by the Python statusline shim on Windows, where PATH resolution can land on the WSL `bash` instead of Git Bash. Set it to Git Bash's `bash.exe` if the Python custom-target segment renders empty on Windows. |
 
 ## Discoverability
 

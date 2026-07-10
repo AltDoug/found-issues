@@ -87,9 +87,18 @@ while IFS= read -r line; do
 
   reason=""
 
-  # 1. Bare 'PR #N' — must be canonical (PR: org/repo#N)
-  if [[ "$line" =~ PR[[:space:]]+#[0-9]+ ]] && [[ "$line" != *"(PR: "* ]]; then
-    reason="bare 'PR #N' — use canonical '(PR: org/repo#N)' form (or run /found-issues:annotate-pr)"
+  # 1. Bare 'PR #N' — must be canonical (PR: org/repo#N). Canonical
+  # annotations are stripped BEFORE the check: the earlier whole-line
+  # "(PR: " whitelist let a bare ref ride alongside a canonical one —
+  # format-spec declares that pattern blocked, and the bare ref stays
+  # invisible to sync and the statusline. [fixed] lines are exempt: they
+  # are immutable history per the spec, and a full-file Write must not be
+  # blocked by grandfathered lines that were legal when written.
+  if [[ ! "$line" =~ ^-[[:space:]]+\[fixed\] ]]; then
+    line_sans_canonical="$(printf '%s' "$line" | sed -E 's|\(PR(-closed)?: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)||g')"
+    if [[ "$line_sans_canonical" =~ PR[[:space:]]+#[0-9]+ ]]; then
+      reason="bare 'PR #N' — use canonical '(PR: org/repo#N)' form (or run /found-issues:annotate-pr)"
+    fi
   fi
 
   # 2. Wrong-case status

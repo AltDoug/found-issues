@@ -413,3 +413,9 @@ EOF
   grep -F "(touched: 2026-05-21; )" test.md
   ! grep -F ";;" test.md
 }
+
+@test "fi_parse_entry: path with plus sign parses (charset parity with cmd_log)" {
+  result="$(fi_parse_entry '- [open] 2026-07-09 src/UIView+Ext.swift:42 — category method leaks')"
+  echo "$result" | grep -q '^path=src/UIView+Ext.swift$'
+  echo "$result" | grep -q '^line=42$'
+}
