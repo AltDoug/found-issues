@@ -419,3 +419,74 @@ EOF
   echo "$result" | grep -q '^path=src/UIView+Ext.swift$'
   echo "$result" | grep -q '^line=42$'
 }
+
+@test "fi_json_escape escapes backslash quote and tab, strips CR" {
+  run fi_json_escape "$(printf 'a\\b "c"\td\r')"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'a\\b \"c\"\td' ]
+}
+
+@test "fi_json_str emits null for empty and quoted string otherwise" {
+  run fi_json_str ""
+  [ "$output" = "null" ]
+  run fi_json_str 'say "hi"'
+  [ "$output" = '"say \"hi\""' ]
+}
+
+@test "fi_entry_to_json emits full object for a rich entry" {
+  TODAY="$(date +%Y-%m-%d)"
+  line="- [open] [!] $TODAY src/app.sh:42 — bad thing happens (suggested: do the fix) (PR: org/repo#7)"
+  run fi_entry_to_json 5 "$line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '{"line_no":5,"status":"open","critical":true,'* ]]
+  [[ "$output" == *'"path":"src/app.sh"'* ]]
+  [[ "$output" == *'"line":42'* ]]
+  [[ "$output" == *'"symptom":"bad thing happens"'* ]]
+  [[ "$output" == *'"suggested":"do the fix"'* ]]
+  [[ "$output" == *'"prs":"org/repo#7"'* ]]
+  [[ "$output" == *'"raw":"- [open] [!]'* ]]
+}
+
+@test "fi_entry_to_json emits nulls for absent fields and mute_until when present" {
+  TODAY="$(date +%Y-%m-%d)"
+  line="- [deferred] $TODAY topic:with:colons — parked thing (mute-until: 2099-01-01)"
+  run fi_entry_to_json 9 "$line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"critical":false'* ]]
+  [[ "$output" == *'"path":null'* ]]
+  [[ "$output" == *'"line":null'* ]]
+  [[ "$output" == *'"suggested":null'* ]]
+  [[ "$output" == *'"mute_until":"2099-01-01"'* ]]
+}
+
+@test "fi_entry_to_json returns 1 on a non-entry line" {
+  run fi_entry_to_json 1 "# found-issues"
+  [ "$status" -eq 1 ]
+}
+
+@test "fi_entries numbered mode prefixes file line numbers and stays conflict-aware" {
+  TODAY="$(date +%Y-%m-%d)"
+  cat > issues.md <<EOF
+# header
+
+- [open] $TODAY a.sh:1 — first
+<<<<<<< HEAD
+- [open] $TODAY b.sh:2 — conflicted ours
+=======
+- [open] $TODAY c.sh:3 — conflicted theirs
+>>>>>>> branch
+- [open] $TODAY d.sh:4 — last
+EOF
+  run fi_entries issues.md open numbered
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  [[ "${lines[0]}" == "3:- [open] $TODAY a.sh:1 — first" ]]
+  [[ "${lines[1]}" == "9:- [open] $TODAY d.sh:4 — last" ]]
+}
+
+@test "fi_entries two-arg form is unchanged by numbered mode addition" {
+  TODAY="$(date +%Y-%m-%d)"
+  printf -- '- [open] %s a.sh:1 — thing\n' "$TODAY" > issues.md
+  run fi_entries issues.md open
+  [ "$output" = "- [open] $TODAY a.sh:1 — thing" ]
+}
