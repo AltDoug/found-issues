@@ -5,6 +5,8 @@ disable-model-invocation: true
 
 # found-issues — agent rules
 
+<!-- loc-override: single auto-loaded ruleset consumed as ONE context unit by the plugin spec; splitting into multiple skills changes what gets injected per session -->
+
 These rules govern how AI agents maintain `docs/found-issues.md` in repos.
 Auto-loaded into Claude's context every session by the `found-issues`
 plugin (no @-import required).
