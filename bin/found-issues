@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="1.7.0"
+readonly FI_VERSION="1.7.1"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -217,7 +217,8 @@ USAGE
 
 COMMANDS
   log <location> — <symptom>            Append an [open] entry
-                                        (Use /fi log inside Claude Code)
+                                        (Claude runs /found-issues:log for you;
+                                        /fi is available via install-fi-alias)
   sync                                  Annotation-driven flip + tombstone close
   list [--status=open|deferred|fixed|all] [--json] [--cwd PATH]
                                         Print ledger entries (default: open).
@@ -2631,6 +2632,25 @@ fi_find_bash_splice_point() {
   return 1
 }
 
+# Find the host script's stdin-capture assignment (`var=$(cat)`, quoted or
+# not). Prints "<line_no> <var_name>" for the FIRST match, nothing if none.
+# The marker block reads the captured JSON from this variable — placing the
+# block above the capture line (or hardcoding the name `input`) silently
+# degrades cwd resolution to the CLAUDE_PROJECT_DIR fallback, the exact
+# env-first bug the v1.5.6 fix removed (found-issues.md 2026-07-10 entry).
+fi_find_bash_stdin_capture() {
+  local path="$1"
+  LC_ALL=C awk '
+    match($0, /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=["'\'']?\$\(cat[^)]*\)/) {
+      line = $0
+      sub(/^[[:space:]]*/, "", line)
+      sub(/=.*$/, "", line)
+      print NR " " line
+      exit
+    }
+  ' "$path"
+}
+
 # Emit the bash marker block (multi-line). Includes PATH-resilience and
 # two-tier cwd resolution ($input JSON via jq → CLAUDE_PROJECT_DIR → empty).
 # Mirrors the canonical install's robustness; see bin/found-issues:2360+.
@@ -2645,7 +2665,15 @@ fi_find_bash_splice_point() {
 #      silently overridden by the inherited CLAUDE_PROJECT_DIR env var.
 #   The `cd` is kept deliberately: the segment-autosync background `$0 sync`
 #   dispatched by cmd_status inherits PWD, not --cwd.
+# Optional $1: name of the host's stdin-capture variable (default: input).
 fi_generate_bash_marker_block() {
+  local stdin_var="${1:-input}"
+  if [[ "$stdin_var" != "input" ]]; then
+    fi_generate_bash_marker_block | LC_ALL=C sed \
+      -e "s/\${input:-}/\${${stdin_var}:-}/" \
+      -e "s/\"\$input\"/\"\$${stdin_var}\"/"
+    return
+  fi
   cat <<'BLOCK'
 # === found-issues plugin segment ===
 # Tries `found-issues` on PATH first; falls back to globbing the plugin cache
@@ -2731,6 +2759,24 @@ cmd_install_statusline_target_bash() {
   ' "$work")"
   [[ -z "$insert_after" || "$insert_after" -eq 0 ]] && insert_after=0
 
+  # If the host captures stdin (`var=$(cat)`), the block MUST land after
+  # that line and reference that variable — above it, `${input:-}` is empty
+  # at block-execution time and cwd resolution silently degrades to the
+  # CLAUDE_PROJECT_DIR fallback (the v1.5.6 env-first bug, reintroduced for
+  # custom targets). Only reposition when the capture precedes the first
+  # splice line; a script that emits output before reading stdin keeps the
+  # preamble placement.
+  local stdin_var="input" capture_info capture_ln first_splice
+  capture_info="$(fi_find_bash_stdin_capture "$work")"
+  if [[ -n "$capture_info" ]]; then
+    capture_ln="${capture_info%% *}"
+    first_splice="$(printf '%s\n' "$splice_line" | sort -n | head -1)"
+    if (( capture_ln > insert_after )) && (( capture_ln < first_splice )); then
+      insert_after="$capture_ln"
+      stdin_var="${capture_info#* }"
+    fi
+  fi
+
   # Generate the modified content into a temp file.
   # Write the marker block to its own temp file so awk can read it via getline
   # rather than via -v (awk -v does not support multi-line values portably).
@@ -2740,7 +2786,7 @@ cmd_install_statusline_target_bash() {
 
   local tmp_block tmp_modified
   tmp_block="$(mktemp -t fi-target-block.XXXXXX)"
-  fi_generate_bash_marker_block > "$tmp_block"
+  fi_generate_bash_marker_block "$stdin_var" > "$tmp_block"
   tmp_modified="$(mktemp -t fi-target-mod.XXXXXX)"
   LC_ALL=C awk -v insert_after="$insert_after" \
       -v splice_lines="$splice_lines_sp" \
@@ -3499,10 +3545,11 @@ fi_run_statusline_runtime_probe() {
   else
     local probe_cwd probe_cwd_json probe_stdin probe_output probe_stderr
     probe_cwd="$(pwd)"
-    # JSON-escape backslash + double-quote so paths with either character
-    # don't produce malformed stdin and false-FAIL a working integration.
-    probe_cwd_json="${probe_cwd//\\/\\\\}"
-    probe_cwd_json="${probe_cwd_json//\"/\\\"}"
+    # JSON-escape via the shared helper so paths with backslash, quote, or
+    # a tab (legal on macOS) don't produce malformed stdin and false-FAIL a
+    # working integration — the inline two-expansion copy this replaces
+    # silently diverged from fi_json_escape's coverage.
+    probe_cwd_json="$(fi_json_escape "$probe_cwd")"
     probe_stdin="$(printf '{"model":{"display_name":"Test"},"workspace":{"current_dir":"%s"},"session_id":"t","context_window":{"remaining_percentage":50}}' "$probe_cwd_json")"
 
     local executor

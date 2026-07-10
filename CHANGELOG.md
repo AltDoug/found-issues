@@ -4,6 +4,27 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-07-10
+
+### Fixed
+
+- `install-statusline --target` (bash): the segment block now lands AFTER
+  the host script's stdin-capture line (`var=$(cat)`) and references the
+  host's actual variable name — previously it was always inserted at the
+  preamble, so `${input:-}` was empty at execution time and cwd resolution
+  silently degraded to the `CLAUDE_PROJECT_DIR` fallback (the v1.5.6
+  env-first bug, reintroduced for custom bash targets). Scripts that emit
+  output before reading stdin keep the old placement.
+- `doctor` runtime probe: cwd JSON-escaping now uses the shared
+  `fi_json_escape` (tab/CR coverage) instead of a diverged inline copy.
+- `help`: the `log` entry no longer advertises the opt-in `/fi` alias
+  unconditionally.
+
+### Changed
+
+- `commands/fix.md`: commit granularity clarified (one commit per entry,
+  or per file-group when entries share files).
+
 ## [1.7.0] - 2026-07-10
 
 ### Added
