@@ -1,6 +1,6 @@
 # /found-issues:fix — design
 
-**Date**: 2026-07-10 · **Status**: approved (operator, this date) · **Target**: found-issues plugin (public), ~v1.7.0
+**Date**: 2026-07-10 · **Status**: approved (operator, this date) · **Target**: found-issues plugin (public), v1.6.1
 
 ## Goal
 
@@ -114,7 +114,7 @@ user can approve all, or exclude by number. Default mode waits here; `--auto` pr
 - bats: fix.md ↔ docs consistency row in `tests/docs-consistency.bats` (command inventory).
 - Dogfood: first real run on this repo's next open pile; agent-config and sayciao as second targets.
 - Docs to update in the same PR: README command table, `docs/architecture.md` subcommand inventory,
-  `docs/configuration.md` if any env knob is added (none planned), CHANGELOG (minor bump v1.7.0).
+  `docs/configuration.md` if any env knob is added (none planned), CHANGELOG (v1.6.1, per operator).
 
 ## Shipping
 
