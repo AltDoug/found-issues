@@ -1,18 +1,65 @@
 # found-issues
 
-> Your AI agent has a blind spot. This fixes it.
+> Your AI agent has a blind spot. **found-issues** is the Claude Code
+> plugin that makes it log, track, and auto-close the bugs it would
+> otherwise shrug at.
 
 [![tests](https://github.com/AltDoug/found-issues/actions/workflows/test.yml/badge.svg)](https://github.com/AltDoug/found-issues/actions/workflows/test.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
+**7 lifecycle hooks · 13 slash commands · 575 tests on Linux/macOS/Windows · zero manual bookkeeping**
+
 ![demo](hero.gif)
 
-When Claude notices a bug, error, or warning while working on something
-else, it usually shrugs and moves on — *"pre-existing, not the code we
-touched, let's continue."* found-issues makes it stop, log the
-observation, and surface it later. Automatically. Across sessions.
-**Without the user lifting a finger.**
+**Without found-issues:**
+
+> *"Note: `parseConfig` swallows JSON errors silently — pre-existing, not
+> related to our change. Continuing with the refactor."*
+
+The observation is gone the moment the session ends.
+
+**With found-issues:**
+
+> *"Out of scope for this task — logging it."*
+
+```
+- [open] 2026-07-10 src/config.ts:88 — parseConfig swallows JSON errors (suggested: rethrow with path context)
+```
+
+The statusline ticks to `1 issue`, the entry survives every future
+session, and it flips to `[fixed]` on its own the day a PR fixing that
+line merges.
+
+## Install
+
+Run these in Claude Code, then start a new session:
+
+```
+/plugin marketplace add AltDoug/claude-plugins
+/plugin install found-issues
+```
+
+Zero config — logging starts working immediately. One recommended step:
+
+```
+/found-issues:setup
+```
+
+That wires the statusline counter (so open issues stay visible at a
+glance), the optional `/fi` shortcut, and the optional git pre-commit
+hook. SSH install errors and update/uninstall details: [footnotes below](#install-notes).
+
+## Quick start
+
+Just work normally — Claude logs out-of-scope findings on its own. To
+poke the system:
+
+> *"What's open in found-issues?"* · *"Show me the critical ones"* ·
+> *"Run /found-issues:fix"*
+
+The ledger is auto-loaded into context every session, so plain-English
+queries work without any command.
 
 ## What it does
 
@@ -32,112 +79,37 @@ The closure loop runs **on its own**:
 | Claude notices an out-of-scope issue | Logs it via `/found-issues:log` per the auto-loaded [rules](skills/rules/SKILL.md) |
 | Claude opens a PR addressing an entry | Hook surfaces matching entries, prompts `/found-issues:annotate-pr <N>` |
 | Claude commits a fix directly to main | Hook prompts `/found-issues:annotate-commit` |
-| PR merges or commit lands on main | Background sync flips `[open]` → `[fixed]` automatically — instantly when merged from inside the session, within ~10min for external merges (web UI, teammate), and always at the next `SessionStart` as a fallback |
+| PR merges or commit lands on main | Background sync flips `[open]` → `[fixed]` automatically — instantly when merged from inside the session, within ~10min for external merges, always at the next `SessionStart` as a fallback |
 | Referenced file/line is deleted | Tombstone detection auto-closes the entry |
 | Branch with un-promoted entries about to be deleted | `pre-branch-delete` hook blocks until `/found-issues:promote` runs |
 
-You see a count at session start, and in your statusline if you have
-one wired up:
+You see a count at session start, and in your statusline:
 
 ![statusline showing 1 issue count](statusline.png)
 
 The file stays accurate. `[fixed]` history accumulates as a record.
-Nothing requires manual bookkeeping.
 
-## Why this exists
+## Why not just tell Claude to log issues?
 
-Most AI coding agents have a **proactive blindspot**: they notice
-defects in code they're reading, judge those defects as out-of-scope,
-and silently move on. Then the bug stays in the codebase forever —
-invisible to the user who'd never have spotted it themselves.
+A CLAUDE.md rule gets you the logging — for a while. It doesn't get you:
 
-found-issues changes the contract. The agent maintains a tiny markdown
-file as it works. Issues never disappear into the void. Eventually they
-either get fixed (and auto-closed) or stay visible until they do.
+- **Enforcement.** Hooks reject malformed entries, block branch deletion
+  while entries would be orphaned, and re-prompt the check every working
+  turn — the discipline survives long sessions and model drift, because
+  it's mechanical, not remembered.
+- **A closure loop.** Entries flip to `[fixed]` automatically when the
+  fixing PR merges, or when the cited code is deleted. Prompt-only
+  logging accumulates a stale file nobody trusts.
+- **Visibility.** The statusline counter (`3 critical · 12 other`) keeps
+  known debt in your face instead of in a file nobody opens.
+- **The ledger fixes itself.** `/found-issues:fix` re-verifies every open
+  entry against the *current* code, triages what's genuinely
+  auto-fixable, fixes on a branch with tests, and ships a precisely
+  annotated PR — with the guardrails (never re-fix ghosts, never guess
+  at externally-gated fixes, never over-annotate) a bare prompt can't
+  encode.
 
-## Install
-
-Run these in Claude Code:
-
-```
-/plugin marketplace add AltDoug/claude-plugins
-/plugin install found-issues
-```
-
-Then **start a new Claude Code session** so the plugin loads. The
-plugin is now active.
-
-<details>
-<summary>Install fails with <code>Permission denied (publickey)</code>?</summary>
-
-Claude Code's `/plugin install` currently shells out to git over SSH
-for some marketplaces. Users without an SSH key set up for GitHub
-will hit `Permission denied (publickey)` (even though
-`/plugin marketplace add` worked — that fetch uses HTTPS).
-
-Two paths forward:
-
-1. **Set up SSH for GitHub.** Run `gh auth setup-git` or follow
-   [GitHub's SSH key guide](https://docs.github.com/en/authentication/connecting-to-github-with-ssh).
-2. **Refresh the marketplace.** As of v1.2.0, the `altdoug-plugins`
-   marketplace metadata uses an explicit HTTPS clone URL. Re-run
-   `/plugin marketplace add AltDoug/claude-plugins` to pick up the
-   updated source, then retry `/plugin install found-issues`.
-
-</details>
-
-**Recommended next step** — run setup to wire up the statusline counter
-(so you actually see open issues at a glance), the `/fi` shortcut, and
-the optional per-repo git pre-commit hook:
-
-```
-/found-issues:setup
-```
-
-Without the statusline integration, the only visible signal is a count
-at session start — easy to miss. If you're asking Claude to install
-this for you, tell it to run `/found-issues:setup` after the install
-completes.
-
-<details>
-<summary>Updates and uninstall</summary>
-
-**Auto-update (recommended).** Run `/plugin`, open the **Marketplaces**
-tab, pick `altdoug-plugins`, choose **Enable auto-update**. New versions
-land silently at session start.
-
-**Manual update:**
-
-```
-/plugin marketplace update altdoug-plugins
-/plugin update found-issues
-```
-
-**Uninstall — order matters.** Run our cleanup *before* the platform
-uninstall, or plugin-private state (statusline segment, `/fi` alias,
-mode cache) will be orphaned in `~/.claude/`:
-
-```
-/found-issues:uninstall                            # 1. plugin's own cleanup
-/plugin uninstall found-issues                     # 2. platform uninstall
-/plugin marketplace remove altdoug-plugins         # 3. (only to remove the marketplace too)
-```
-
-Per-repo `docs/found-issues.md` files are intentionally preserved —
-they're your project data.
-
-</details>
-
-## Quick start
-
-After install, just work normally. To see the system in action:
-
-> *"What's open in found-issues?"*
-
-The file is auto-loaded into context every session, so plain-English
-queries work — no special command needed. Try also: *"Show me the
-critical ones"* or *"Read docs/found-issues.md, pick three entries you
-can fix in under 10 minutes, and do them."*
+How it differs from Linear / Jira / Backlog.md: [`docs/faq.md`](docs/faq.md).
 
 ## Slash commands
 
@@ -174,9 +146,8 @@ drop-everything items to the top.
 from the statusline counter, and flagged when it recurs. Touch a
 deferred entry enough times and the plugin nudges you to promote it
 back to `[open]`. Critical entries auto-promote. Re-defer escalates the
-nudge threshold geometrically (loop prevention).
-
-Full lifecycle, formulas, and tunables: [`docs/deferring.md`](docs/deferring.md).
+nudge threshold geometrically (loop prevention). Full lifecycle:
+[`docs/deferring.md`](docs/deferring.md).
 
 ## Format
 
@@ -207,7 +178,10 @@ three platforms.
 
 ## Status
 
-**v1.6.0** — 542 tests passing in CI on Linux + macOS + Windows (Git Bash), including end-to-end runtime probes of the generated shim against synthetic Claude Code stdin. 7 lifecycle hooks + 1 opt-in git pre-commit hook, 12 slash commands, 1 CLI binary, all wired through the Claude Code plugin spec.
+**v1.7.1** — actively developed and dogfooded (this repo's own ledger is
+maintained by the plugin, including a `/found-issues:fix` run that
+closed it to zero). End-to-end runtime probes exercise the generated
+statusline shims against synthetic Claude Code stdin on every CI run.
 
 Have a use case the plugin doesn't cover? [Open an issue](https://github.com/AltDoug/found-issues/issues/new).
 
@@ -223,6 +197,56 @@ Have a use case the plugin doesn't cover? [Open an issue](https://github.com/Alt
 - [`AGENTS.md`](AGENTS.md) — instructions for AI agents installing this
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to propose changes
 - [`CHANGELOG.md`](CHANGELOG.md) — version history
+
+## Install notes
+
+<details>
+<summary>Install fails with <code>Permission denied (publickey)</code>?</summary>
+
+Claude Code's `/plugin install` currently shells out to git over SSH
+for some marketplaces. Users without an SSH key set up for GitHub
+will hit `Permission denied (publickey)` (even though
+`/plugin marketplace add` worked — that fetch uses HTTPS).
+
+Two paths forward:
+
+1. **Set up SSH for GitHub.** Run `gh auth setup-git` or follow
+   [GitHub's SSH key guide](https://docs.github.com/en/authentication/connecting-to-github-with-ssh).
+2. **Refresh the marketplace.** As of v1.2.0, the `altdoug-plugins`
+   marketplace metadata uses an explicit HTTPS clone URL. Re-run
+   `/plugin marketplace add AltDoug/claude-plugins` to pick up the
+   updated source, then retry `/plugin install found-issues`.
+
+</details>
+
+<details>
+<summary>Updates and uninstall</summary>
+
+**Auto-update (recommended).** Run `/plugin`, open the **Marketplaces**
+tab, pick `altdoug-plugins`, choose **Enable auto-update**. New versions
+land silently at session start.
+
+**Manual update:**
+
+```
+/plugin marketplace update altdoug-plugins
+/plugin update found-issues
+```
+
+**Uninstall — order matters.** Run our cleanup *before* the platform
+uninstall, or plugin-private state (statusline segment, `/fi` alias,
+mode cache) will be orphaned in `~/.claude/`:
+
+```
+/found-issues:uninstall                            # 1. plugin's own cleanup
+/plugin uninstall found-issues                     # 2. platform uninstall
+/plugin marketplace remove altdoug-plugins         # 3. (only to remove the marketplace too)
+```
+
+Per-repo `docs/found-issues.md` files are intentionally preserved —
+they're your project data.
+
+</details>
 
 ## Contributing
 
