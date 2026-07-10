@@ -205,7 +205,13 @@ fi_entries() {
   # Optional 3rd arg "numbered": prefix each line with its file line number
   # ("<n>:<entry>"). The 2-arg form is a frozen contract (statusline
   # snapshots) — output must stay byte-identical when the arg is absent.
+  # Any other non-empty value is rejected: silently degrading to
+  # un-numbered output would make the caller's "<n>:" split eat into the
+  # entry text.
   local numbered="${3:-}"
+  if [[ -n "$numbered" && "$numbered" != "numbered" ]]; then
+    return 2
+  fi
 
   if [[ ! -f "$file" ]]; then
     return 1
@@ -449,12 +455,19 @@ fi_json_escape() {
 }
 
 # Emit a JSON string literal, or null for the empty string.
+# The escape expansions are inlined (not a nested $(fi_json_escape) call):
+# this runs 13x per entry in list --json, and the subshell per field
+# roughly doubled the fork count on Windows Git Bash for zero gain.
 fi_json_str() {
   local s="$1"
   if [[ -z "$s" ]]; then
     printf 'null'
   else
-    printf '"%s"' "$(fi_json_escape "$s")"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\t'/\\t}"
+    s="${s//$'\r'/}"
+    printf '"%s"' "$s"
   fi
 }
 
@@ -462,6 +475,11 @@ fi_json_str() {
 # $1 = file line number, $2 = raw entry line. Returns 1 if unparseable.
 fi_entry_to_json() {
   local line_no="$1" raw="$2"
+  # Strip C0 control characters up front (except TAB, which fi_json_escape
+  # encodes, and CR, which it strips): RFC 8259 forbids them raw inside
+  # string literals, and one pasted ANSI escape in a symptom would
+  # otherwise poison the whole emitted array. One tr per entry.
+  raw="$(printf '%s' "$raw" | LC_ALL=C tr -d '\000-\010\013\014\016-\037')"
   local parsed
   parsed="$(fi_parse_entry "$raw")" || return 1
 
@@ -493,7 +511,9 @@ fi_entry_to_json() {
   local crit_bool="false"
   [[ "$critical" == "yes" ]] && crit_bool="true"
   local line_json="null"
-  [[ -n "$line" ]] && line_json="$line"
+  # 10# base coercion: ":007" must emit as 7 — leading zeros are illegal
+  # JSON number syntax and would invalidate the whole array.
+  [[ -n "$line" ]] && line_json="$((10#$line))"
   local mute
   mute="$(fi_extract_mute_until "$raw")"
 

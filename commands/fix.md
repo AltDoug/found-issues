@@ -1,15 +1,14 @@
 ---
 description: Fix open found-issues entries — verify each against current code, triage into buckets, gate on approval, fix on a branch with tests, ship a PR with precise annotations. Runs when the user asks to "fix the found issues" or work through the open ledger.
 argument-hint: [--auto] [--only <path-or-glob>]
-allowed-tools: Bash(found-issues:*), Bash(git:*), Bash(gh:*), Bash(bats:*), Read, Edit, Write, Glob, Grep
+allowed-tools: Bash(found-issues:*), Bash(git:*), Bash(gh:*), Bash(bats:*), Read, Edit, Write, Glob, Grep, Agent
 ---
 
 Work through this repo's `[open]` found-issues entries: verify → triage →
 gate → fix → ship. You do the judgment; the CLI does the mechanics.
 
-Flags in `$ARGUMENTS`: `--auto` skips the approval gate (and then executes
-ONLY the auto-fixable bucket). `--only <path-or-glob>` restricts to entries
-whose path matches.
+Flags in `$ARGUMENTS`: `--auto` (see the Phase 2 gate) and
+`--only <path-or-glob>` (restrict to entries whose path matches).
 
 ## Phase 1 — Verify (read-only)
 
@@ -25,15 +24,22 @@ whose path matches.
    line and require a fresh `file:line` citation or counter-evidence back.
    Verdicts: `STILL-VALID` | `ALREADY-FIXED` (state what fixed it) |
    `CITATION-MOVED` (carry the corrected location) | `UNVERIFIABLE`.
+   Caveat: the JSON `symptom`/`suggested` fields are display fragments —
+   the parser truncates them at the first parenthesis. Always verify and
+   match against `raw`, never against `symptom` alone.
 
 ## Phase 2 — Triage + gate
 
 Bucket every verified entry:
 
-1. **already-fixed** — symptom gone. Do NOT re-fix. Closure edit (on the
-   fix branch, Phase 3): append `(verified: ai)` plus a one-line evidence
-   note to the entry, or `(commit: <sha>)` when the fixing commit is
-   identifiable.
+1. **already-fixed** — symptom gone. Do NOT re-fix, and do NOT edit the
+   ledger by hand (hard rule: only `log`/`annotate-*`/`sync` write it).
+   If the fixing commit is identifiable, run
+   `found-issues annotate-commit <sha> --pick <path:line>` and sync flips
+   it. Otherwise leave the entry untouched and run `/found-issues:sync`
+   at the end of the run — its AI-verify phase issues the
+   `(verified: ai)` flip itself. Evidence belongs in the PR body and
+   final report, never appended to the entry line.
 2. **auto-fixable** — code/doc change contained in this repo, verifiable
    by the repo's tests/build, no external dependency.
 3. **needs-decision** — the fix requires a design choice. Formulate the
@@ -75,8 +81,9 @@ number. With `--auto`: print the report and proceed with bucket 2 only.
    for exactly the entries this PR fixes — never `--all` (file-level
    auto-match over-annotates: the 2026-07-09 incident false-closed 9
    entries that later needed manual de-annotation).
-4. Merged PRs are closed by the existing sync machinery — do not flip
-   `[open]` → `[fixed]` by hand for fixed entries.
+4. NEVER flip `[open]` → `[fixed]` by hand. Entries fixed by this run
+   close via annotate-pr + merge + sync; already-fixed entries close via
+   annotate-commit or sync's AI-verify pass (Phase 2 bucket 1).
 
 ## Final report (required format)
 

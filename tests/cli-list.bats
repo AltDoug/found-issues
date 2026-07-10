@@ -113,3 +113,52 @@ EOF
   [ "${#lines[@]}" -eq 1 ]
   [[ "$output" == *"a.sh:1"* ]]
 }
+
+@test "list resolves via CLAUDE_PROJECT_DIR when cwd is outside the repo" {
+  proj="$TMP"
+  cd /
+  CLAUDE_PROJECT_DIR="$proj" fi_run list
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  cd "$TMP"
+}
+
+@test "list --cwd resolves against the given directory" {
+  proj="$TMP"
+  cd /
+  fi_run list --cwd "$proj"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  cd "$TMP"
+}
+
+@test "list walks up from a subdirectory like status does" {
+  mkdir -p sub/deeper
+  cd sub/deeper
+  fi_run list
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  cd "$TMP"
+}
+
+@test "list --status with missing value errors with exit 2 and a message" {
+  fi_run list --status
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--status"* ]]
+}
+
+@test "list --json stays valid JSON when an entry contains a control character" {
+  printf -- '- [open] %s ctl.sh:1 — bad \x1b[31mansi\x1b[0m paste\n' "$TODAY" >> docs/found-issues.md
+  fi_run list --json
+  [ "$status" -eq 0 ]
+  [[ "$output" != *$'\x1b'* ]]
+  [[ "$output" == *'"path":"ctl.sh"'* ]]
+}
+
+@test "list --json normalizes leading-zero line numbers to valid JSON" {
+  printf -- '- [open] %s zero.sh:007 — leading zero line ref\n' "$TODAY" >> docs/found-issues.md
+  fi_run list --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"line":7'* ]]
+  [[ "$output" != *'"line":007'* ]]
+}

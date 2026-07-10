@@ -490,3 +490,10 @@ EOF
   run fi_entries issues.md open
   [ "$output" = "- [open] $TODAY a.sh:1 — thing" ]
 }
+
+@test "fi_entries rejects an unknown third argument" {
+  TODAY="$(date +%Y-%m-%d)"
+  printf -- '- [open] %s a.sh:1 — thing\n' "$TODAY" > issues.md
+  run fi_entries issues.md open true
+  [ "$status" -eq 2 ]
+}

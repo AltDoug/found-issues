@@ -219,10 +219,12 @@ COMMANDS
   log <location> — <symptom>            Append an [open] entry
                                         (Use /fi log inside Claude Code)
   sync                                  Annotation-driven flip + tombstone close
-  list [--status=open|deferred|fixed|all] [--json]
+  list [--status=open|deferred|fixed|all] [--json] [--cwd PATH]
                                         Print ledger entries (default: open).
                                         --json emits structured entries for tooling
-                                        (used by /found-issues:fix).
+                                        (used by /found-issues:fix). Resolves the
+                                        ledger like status: --cwd, else
+                                        \$CLAUDE_PROJECT_DIR, else \$PWD (walk-up).
   status [--format=segment|plain|json] [--cwd PATH]
                                         Print counts (for statusline integration).
                                         --cwd overrides where to look for the issues file
@@ -874,14 +876,28 @@ cmd_promote_deferred() {
 # === Subcommand: list ===
 
 # List ledger entries, optionally as JSON. Read-only: never creates the
-# ledger file (unlike fi_resolve_issues_file). Default filter: open —
-# the actionable set, matching the statusline's mental model.
+# ledger file. Default filter: open — the actionable set, matching the
+# statusline's mental model.
 cmd_list() {
-  local status_filter="open" json="no"
+  local status_filter="open" json="no" cwd=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --status=*) status_filter="${1#--status=}"; shift ;;
-      --status)   status_filter="${2:-open}"; shift 2 ;;
+      --status)
+        if [[ $# -lt 2 ]]; then
+          printf 'found-issues list: --status requires a value (open|deferred|fixed|all)\n' >&2
+          return 2
+        fi
+        status_filter="$2"; shift 2
+        ;;
+      --cwd=*)    cwd="${1#--cwd=}"; shift ;;
+      --cwd)
+        if [[ $# -lt 2 ]]; then
+          printf 'found-issues list: --cwd requires a path\n' >&2
+          return 2
+        fi
+        cwd="$2"; shift 2
+        ;;
       --json)     json="yes"; shift ;;
       *)
         printf 'found-issues list: unknown option: %s\n' "$1" >&2
@@ -898,17 +914,14 @@ cmd_list() {
       ;;
   esac
 
-  # Read-only resolution (mirrors fi_resolve_issues_file minus creation).
+  # Same search-root priority and upward walk as cmd_status (:941-953) —
+  # list and status must agree on which ledger "the" ledger is, or a fix
+  # run sees [] while the statusline counts open entries.
+  local search_root="${cwd:-${CLAUDE_PROJECT_DIR:-$PWD}}"
   local file
-  if [[ "$(fi_detect_mode)" == "local" ]]; then
-    file="$PWD/.found-issues.md"
-  else
-    local repo_root
-    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    file="$repo_root/docs/found-issues.md"
-  fi
+  file="$(fi_find_issues_file "$search_root")" || true
 
-  if [[ ! -f "$file" ]]; then
+  if [[ -z "$file" || ! -f "$file" ]]; then
     [[ "$json" == "yes" ]] && printf '[]\n'
     return 0
   fi
@@ -918,18 +931,16 @@ cmd_list() {
     return 0
   fi
 
-  local out="" numbered_line line_no raw obj
+  local numbered_line line_no raw obj sep=""
+  printf '['
   while IFS= read -r numbered_line; do
     line_no="${numbered_line%%:*}"
     raw="${numbered_line#*:}"
     obj="$(fi_entry_to_json "$line_no" "$raw")" || continue
-    if [[ -z "$out" ]]; then
-      out="$obj"
-    else
-      out="$out,$obj"
-    fi
+    printf '%s%s' "$sep" "$obj"
+    sep=","
   done < <(fi_entries "$file" "$status_filter" numbered)
-  printf '[%s]\n' "$out"
+  printf ']\n'
 }
 
 # === Subcommand: status ===
