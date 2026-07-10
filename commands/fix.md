@@ -64,7 +64,8 @@ number. With `--auto`: print the report and proceed with bucket 2 only.
   then oldest first.
 - Per entry/group: write a failing regression test first when the repo
   has a test harness; apply the minimal fix; run the repo's tests +
-  build; commit — ONE commit per entry, message referencing the entry
+  build; commit — one commit per entry, or one per file-group when
+  entries share files, with the message naming every entry it closes
   (`fix: <symptom fragment> (found-issues <path>:<line>)`).
 - **Failure rule:** if a fix won't go green within ~2 attempts, revert it
   completely and record `SKIPPED: <reason>`. Never leave a fix

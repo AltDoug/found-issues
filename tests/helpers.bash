@@ -33,6 +33,14 @@ fi_setup_tmp() {
 fi_teardown_tmp() {
   if [[ -n "${TMP:-}" && -d "$TMP" ]]; then
     cd /tmp
+    # Bounded retry: on Windows a just-dispatched background autosync child
+    # can still hold $TMP as its cwd, making the first rm fail with
+    # "Device or resource busy"; the dir frees as soon as the child exits.
+    local attempt
+    for attempt in 1 2 3; do
+      rm -rf "$TMP" 2>/dev/null && return 0
+      sleep 1
+    done
     rm -rf "$TMP"
   fi
 }

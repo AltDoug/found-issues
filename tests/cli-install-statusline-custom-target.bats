@@ -1085,3 +1085,58 @@ EOF
   [ "$(grep -c 'found-issues:seg' tmp/sl.sh)" = "1" ]
   grep -Fq 'echo "B | none${__FI_SEG}"  # found-issues:seg' tmp/sl.sh
 }
+
+@test "install-statusline --target bash: block lands after the stdin-capture line" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+CWD=$(echo "$input" | jq -r ".workspace.current_dir")
+echo "host $CWD"
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  capture_ln="$(grep -n 'input="\$(cat)"' tmp/sl.sh | head -1 | cut -d: -f1)"
+  block_ln="$(grep -n '=== found-issues plugin segment ===' tmp/sl.sh | head -1 | cut -d: -f1)"
+  [ "$block_ln" -gt "$capture_ln" ]
+}
+
+@test "install-statusline --target bash: segment tracks stdin cwd under hostile CLAUDE_PROJECT_DIR" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+CWD=$(echo "$input" | jq -r ".workspace.current_dir")
+echo "host $CWD"
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  W="$PWD/scratchws" && mkdir -p "$W" && cd "$W" && git init -q -b main
+  printf -- '- [open] %s a.ts:1 — e1\n- [open] %s b.ts:2 — e2\n' "$(date +%Y-%m-%d)" "$(date +%Y-%m-%d)" > .found-issues.md
+  cd ..
+  out="$(printf '{"workspace":{"current_dir":"%s"}}' "$W" | CLAUDE_PROJECT_DIR=/nonexistent PATH="$(dirname "$FI_BIN"):$PATH" bash tmp/sl.sh 2>/dev/null)"
+  echo "$out" | grep -q "2 issues"
+}
+
+@test "install-statusline --target bash: block references a non-input stdin variable name" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/usr/bin/env bash
+json=$(cat)
+echo "line one"
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  grep -Fq '"${json:-}"' tmp/sl.sh
+  grep -Fq 'echo "$json"' tmp/sl.sh
+  ! grep -Fq '"${input:-}"' tmp/sl.sh
+}
+
+@test "install-statusline --target bash: no stdin capture keeps preamble placement" {
+  mkdir -p tmp && cat > tmp/sl.sh <<'EOF'
+#!/usr/bin/env bash
+echo "static line"
+EOF
+  fi_run install-statusline --target tmp/sl.sh --apply
+  [ "$status" -eq 0 ]
+  block_ln="$(grep -n '=== found-issues plugin segment ===' tmp/sl.sh | head -1 | cut -d: -f1)"
+  [ "$block_ln" -eq 2 ]
+  grep -Fq 'echo "static line${__FI_SEG}"  # found-issues:seg' tmp/sl.sh
+}
