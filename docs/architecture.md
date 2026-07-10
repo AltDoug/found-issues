@@ -88,8 +88,10 @@ to promote, what the format is.
 
 Markdown files in `commands/` invoked as `/found-issues:<name>`. Each is
 a thin instruction file that tells Claude what to do — most just delegate
-to the CLI. The exception is `/found-issues:sync`, which has Claude
-itself read code and verify unannotated entries.
+to the CLI. Two exceptions carry real procedure: `/found-issues:sync`
+(Claude reads code and verifies unannotated entries) and
+`/found-issues:fix` (verify → triage → gate → fix → ship over the open
+entries, consuming `list --json`).
 
 ### Hooks (enforcement layer)
 
@@ -124,6 +126,7 @@ Subcommands:
 | `log` | Append a new `[open]` entry with dedup |
 | `sync` | Annotation-driven flips + tombstone close (no AI — that's the slash command's job) |
 | `status` | Print counters in segment / plain / json format |
+| `list [--status=...] [--json]` | Conflict-aware entry listing (default: open); `--json` emits structured entries feeding `/found-issues:fix` |
 | `annotate-pr <N> [--pick <loc>,...] [--all]` | Append `(PR: org/repo#N)` to matching entries; ambiguous file-level matches require explicit selection |
 | `annotate-commit [<sha>]` | Append `(commit: <sha>)` to matching entries |
 | `promote` | List branch-only `[open]` entries needing consolidation |
