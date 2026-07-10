@@ -58,7 +58,7 @@ jobs:
         run: |
           echo "code=true" >> "$GITHUB_OUTPUT"
           echo "meta=true" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: github.event_name == 'push' || github.event_name == 'pull_request'
       - id: filter
         if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -117,7 +117,7 @@ jobs:
         shell: bash
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install bats-core + jq
         run: |
@@ -154,7 +154,7 @@ jobs:
     name: shellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run shellcheck on hooks and CLI
         # SHA-pinned (master @ 2024-06-20). Latest tag is 2.0.0 from Jan 2023,
         # ~18 months stale vs master, so master is the de-facto current ref —
@@ -174,7 +174,7 @@ jobs:
     name: json validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Validate plugin manifests
         run: |
           for f in .claude-plugin/plugin.json hooks/hooks.json; do
@@ -190,7 +190,7 @@ jobs:
     name: version check (SemVer)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Verify FI_VERSION + CHANGELOG consistency
         # See docs/versioning.md for the rules + decision tree.
         # The script enforces:
@@ -207,7 +207,7 @@ jobs:
     name: test name ASCII guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Reject non-ASCII characters in @test names
         # Why this exists: bats on Git Bash for Windows can't parse multi-byte
         # UTF-8 sequences in test NAMES (the body is fine — only the name is
