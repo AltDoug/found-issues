@@ -1,0 +1,71 @@
+name: release
+
+# Auto-cut a GitHub Release when a version bump lands on main.
+#
+# Releases lapsed for 6 versions (v1.5.6–v1.7.1, backfilled 2026-07-10)
+# because cutting them was a manual step nothing enforced. This workflow
+# makes the repo sidebar track reality: whenever a merged commit changes
+# the version in .claude-plugin/plugin.json, it tags v<version> at that
+# commit and creates a release whose notes are that version's CHANGELOG
+# section. check-version CI already guarantees plugin.json, FI_VERSION,
+# and the CHANGELOG top section agree before the bump can merge.
+#
+# Idempotent: if the tag already exists (e.g. a manually cut release),
+# the run is a no-op. Titles are "v<version>" — edit on GitHub afterwards
+# if a descriptive suffix is wanted.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.claude-plugin/plugin.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # tags needed for the already-released check
+
+      - name: Read version
+        id: version
+        run: |
+          v="$(jq -r .version .claude-plugin/plugin.json)"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if already released
+        id: exists
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${{ steps.version.outputs.version }}" >/dev/null; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract CHANGELOG section
+        if: steps.exists.outputs.released == 'false'
+        run: |
+          awk -v ver="${{ steps.version.outputs.version }}" '
+            $0 ~ "^## \\[" ver "\\]" { grab = 1; next }
+            grab && /^## \[/ { exit }
+            grab { print }
+          ' CHANGELOG.md > /tmp/notes.md
+          if ! grep -q '[^[:space:]]' /tmp/notes.md; then
+            echo "(see CHANGELOG.md)" > /tmp/notes.md
+          fi
+
+      - name: Create release
+        if: steps.exists.outputs.released == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --target "$GITHUB_SHA" \
+            --title "v${{ steps.version.outputs.version }}" \
+            --notes-file /tmp/notes.md \
+            --latest
