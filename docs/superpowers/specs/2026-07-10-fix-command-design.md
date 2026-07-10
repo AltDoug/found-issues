@@ -105,9 +105,12 @@ The fix run's last message is a scan target, not an essay. fix.md mandates:
 
 - Built on `lib/parse-entries.sh` (`fi_entries` / `fi_parse_entry`) — conflict-aware, one source of
   parsing truth.
-- JSON fields per entry: `line_no`, `status`, `critical` (bool), `date`, `path`, `line`
-  (nullable), `symptom`, `suggested` (nullable), `annotations` (`pr`, `commit`, `verified`,
-  `reason`, `mute_until`, `closure`, `touched`, `defer_cycle` — nullable each), `raw`.
+- JSON fields per entry (1:1 with the parse layer, plus `mute_until` via the existing
+  `fi_extract_mute_until` and `raw`): `line_no` (number), `status`, `critical` (bool), `date`,
+  `path`, `line` (number|null), `symptom`, `suggested`, `prs`, `prs_closed`, `commits`,
+  `commits_stale`, `verified`, `fixed_date`, `renamed_from`, `mute_until` — strings, `null` when
+  absent — and `raw` (the full entry line; exotic annotations like `(reason:)`/`(closure:)` are
+  read from `raw`, not parsed into fields).
 - Human format (no `--json`): the entry lines as-is, filtered.
 - Generally useful beyond fix (statusline debugging, scripting); ships with bats coverage.
 
