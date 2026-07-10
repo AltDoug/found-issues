@@ -4,6 +4,28 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-07-10
+
+### Added
+
+- `/found-issues:fix` command: works through `[open]` entries with a
+  verify → triage → gate → fix → ship procedure. Re-verifies every entry
+  against current code, buckets them (already-fixed / auto-fixable /
+  needs-decision / not-code-fixable), gates on approval (`--auto` runs the
+  auto-fixable bucket without the gate), fixes on a dedicated branch with
+  one commit per entry, and ships a PR annotated via `annotate-pr --pick`
+  (never `--all`). Deferred entries are surfaced ("worth un-deferring?")
+  but never fixed. The final report is a fixed scannable format:
+  scoreboard line + per-fix Before/After snippets + one-line evidence.
+- `found-issues list [--status=open|deferred|fixed|all] [--json]`
+  subcommand: conflict-aware entry listing (default: open). `--json`
+  emits structured entries (`line_no`, path, line, symptom, suggested,
+  annotations, `mute_until`, raw) with no new dependencies — JSON is
+  hand-rolled, bash 3.2 safe.
+- Parse layer: `fi_json_escape` / `fi_json_str` / `fi_entry_to_json`
+  helpers and an optional numbered mode on `fi_entries` (the 2-arg form
+  is byte-identical, statusline contract untouched).
+
 ## [1.6.0] - 2026-07-09
 
 Zero-open-issues release: closes all 23 `[open]` entries from the 2026-07-09 audit of `docs/found-issues.md` — counter correctness, sync/annotate integrity, hook coverage gaps, CI filter holes, and doc-vs-code drift.

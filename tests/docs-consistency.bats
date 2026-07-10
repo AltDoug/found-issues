@@ -62,3 +62,16 @@ fi_first_line() {
   grep -iFq "order matters" "$AGENTS"
   grep -iFq "order matters" "$README"
 }
+
+@test "docs-consistency: commands/fix.md exists with frontmatter description" {
+  [ -f "$REPO_ROOT/commands/fix.md" ]
+  head -6 "$REPO_ROOT/commands/fix.md" | grep -q '^description:'
+}
+
+@test "docs-consistency: README documents the fix command" {
+  grep -q 'found-issues:fix' "$README"
+}
+
+@test "docs-consistency: fix.md forbids annotate-pr --all" {
+  grep -q 'never .*--all' "$REPO_ROOT/commands/fix.md"
+}

@@ -202,6 +202,16 @@ fi_parse_entry() {
 fi_entries() {
   local file="$1"
   local status_filter="${2:-all}"
+  # Optional 3rd arg "numbered": prefix each line with its file line number
+  # ("<n>:<entry>"). The 2-arg form is a frozen contract (statusline
+  # snapshots) — output must stay byte-identical when the arg is absent.
+  # Any other non-empty value is rejected: silently degrading to
+  # un-numbered output would make the caller's "<n>:" split eat into the
+  # entry text.
+  local numbered="${3:-}"
+  if [[ -n "$numbered" && "$numbered" != "numbered" ]]; then
+    return 2
+  fi
 
   if [[ ! -f "$file" ]]; then
     return 1
@@ -220,7 +230,8 @@ fi_entries() {
   # Note: the status_filter is passed as a plain string (-v sf=) and matched
   # with index() rather than a regex variable — bracket characters in awk -v
   # strings are not reliably escaped across all awk implementations.
-  LC_ALL=C awk -v sf="$status_filter" '
+  LC_ALL=C awk -v sf="$status_filter" -v numbered="$numbered" '
+    function emit() { if (numbered == "numbered") print FNR ":" $0; else print $0 }
     /^<<<<<<< / { in_conflict = 1; next }
     /^>>>>>>> / { in_conflict = 0; next }
     /^=======$/ && in_conflict { next }
@@ -228,9 +239,9 @@ fi_entries() {
       if (sf == "all") {
         if (index($0, "- [open]")     == 1 ||
             index($0, "- [deferred]") == 1 ||
-            index($0, "- [fixed]")    == 1) { print; next }
+            index($0, "- [fixed]")    == 1) { emit(); next }
       } else {
-        if (index($0, "- [" sf "]") == 1) print
+        if (index($0, "- [" sf "]") == 1) emit()
       }
     }
   ' "$file"
@@ -427,6 +438,94 @@ fi_is_muted() {
   [[ -z "$mute_date" ]] && return 1
   [[ "$today" < "$mute_date" ]] && return 0
   return 1
+}
+
+# --- JSON emission (consumed by `found-issues list --json`) -----------------
+# Hand-rolled: bin/found-issues has no jq dependency (hooks may use jq;
+# the CLI must run on a bare Git Bash / macOS bash 3.2).
+
+# Escape a string for embedding in a JSON string literal.
+fi_json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\r'/}"
+  printf '%s' "$s"
+}
+
+# Emit a JSON string literal, or null for the empty string.
+# The escape expansions are inlined (not a nested $(fi_json_escape) call):
+# this runs 13x per entry in list --json, and the subshell per field
+# roughly doubled the fork count on Windows Git Bash for zero gain.
+fi_json_str() {
+  local s="$1"
+  if [[ -z "$s" ]]; then
+    printf 'null'
+  else
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\t'/\\t}"
+    s="${s//$'\r'/}"
+    printf '"%s"' "$s"
+  fi
+}
+
+# Emit one entry as a single-line JSON object.
+# $1 = file line number, $2 = raw entry line. Returns 1 if unparseable.
+fi_entry_to_json() {
+  local line_no="$1" raw="$2"
+  # Strip C0 control characters up front (except TAB, which fi_json_escape
+  # encodes, and CR, which it strips): RFC 8259 forbids them raw inside
+  # string literals, and one pasted ANSI escape in a symptom would
+  # otherwise poison the whole emitted array. One tr per entry.
+  raw="$(printf '%s' "$raw" | LC_ALL=C tr -d '\000-\010\013\014\016-\037')"
+  local parsed
+  parsed="$(fi_parse_entry "$raw")" || return 1
+
+  local status="" critical="" date="" path="" line="" symptom="" fix=""
+  local prs="" prs_closed="" commits="" commits_stale="" renamed_from=""
+  local fixed_date="" verified=""
+  local kv key val
+  while IFS= read -r kv; do
+    key="${kv%%=*}"
+    val="${kv#*=}"
+    case "$key" in
+      status)        status="$val" ;;
+      critical)      critical="$val" ;;
+      date)          date="$val" ;;
+      path)          path="$val" ;;
+      line)          line="$val" ;;
+      symptom)       symptom="$val" ;;
+      fix)           fix="$val" ;;
+      prs)           prs="$val" ;;
+      prs_closed)    prs_closed="$val" ;;
+      commits)       commits="$val" ;;
+      commits_stale) commits_stale="$val" ;;
+      renamed_from)  renamed_from="$val" ;;
+      fixed_date)    fixed_date="$val" ;;
+      verified)      verified="$val" ;;
+    esac
+  done <<< "$parsed"
+
+  local crit_bool="false"
+  [[ "$critical" == "yes" ]] && crit_bool="true"
+  local line_json="null"
+  # 10# base coercion: ":007" must emit as 7 — leading zeros are illegal
+  # JSON number syntax and would invalidate the whole array.
+  [[ -n "$line" ]] && line_json="$((10#$line))"
+  local mute
+  mute="$(fi_extract_mute_until "$raw")"
+
+  printf '{"line_no":%s,"status":"%s","critical":%s,"date":%s,"path":%s,"line":%s,"symptom":%s,"suggested":%s,"prs":%s,"prs_closed":%s,"commits":%s,"commits_stale":%s,"verified":%s,"fixed_date":%s,"renamed_from":%s,"mute_until":%s,"raw":%s}' \
+    "$line_no" "$status" "$crit_bool" \
+    "$(fi_json_str "$date")" "$(fi_json_str "$path")" "$line_json" \
+    "$(fi_json_str "$symptom")" "$(fi_json_str "$fix")" \
+    "$(fi_json_str "$prs")" "$(fi_json_str "$prs_closed")" \
+    "$(fi_json_str "$commits")" "$(fi_json_str "$commits_stale")" \
+    "$(fi_json_str "$verified")" "$(fi_json_str "$fixed_date")" \
+    "$(fi_json_str "$renamed_from")" "$(fi_json_str "$mute")" \
+    "$(fi_json_str "$raw")"
 }
 
 # Compute touch threshold for a given defer-cycle.
