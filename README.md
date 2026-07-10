@@ -147,6 +147,7 @@ All namespaced under `/found-issues:` (Claude Code plugin convention):
 |---|---|
 | `/found-issues:log <path:line> — <symptom>` | Log a new entry (Claude does this proactively) |
 | `/found-issues:sync` | Reconcile with PR/commit history + AI-verify unannotated entries |
+| `/found-issues:fix [--auto] [--only <path>]` | Verify, triage, and fix the open entries — gated batch-fix that ships an annotated PR (`--auto` skips the gate, auto-fixable bucket only) |
 | `/found-issues:annotate-pr <N>` | Link an entry to a PR (auto-prompted by hooks) |
 | `/found-issues:annotate-commit [<sha>]` | Link an entry to a commit (defaults to HEAD) |
 | `/found-issues:defer <path:line> [--reason <text>]` | Mark an entry as deferred (suppress from counter) |
