@@ -219,6 +219,10 @@ COMMANDS
   log <location> — <symptom>            Append an [open] entry
                                         (Use /fi log inside Claude Code)
   sync                                  Annotation-driven flip + tombstone close
+  list [--status=open|deferred|fixed|all] [--json]
+                                        Print ledger entries (default: open).
+                                        --json emits structured entries for tooling
+                                        (used by /found-issues:fix).
   status [--format=segment|plain|json] [--cwd PATH]
                                         Print counts (for statusline integration).
                                         --cwd overrides where to look for the issues file
@@ -865,6 +869,67 @@ cmd_promote_deferred() {
   if [[ "$target" == *"(touched:"* ]]; then
     printf 'Touch history preserved as evidence of recurrence.\n'
   fi
+}
+
+# === Subcommand: list ===
+
+# List ledger entries, optionally as JSON. Read-only: never creates the
+# ledger file (unlike fi_resolve_issues_file). Default filter: open —
+# the actionable set, matching the statusline's mental model.
+cmd_list() {
+  local status_filter="open" json="no"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --status=*) status_filter="${1#--status=}"; shift ;;
+      --status)   status_filter="${2:-open}"; shift 2 ;;
+      --json)     json="yes"; shift ;;
+      *)
+        printf 'found-issues list: unknown option: %s\n' "$1" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  case "$status_filter" in
+    open|deferred|fixed|all) : ;;
+    *)
+      printf 'found-issues list: invalid --status: %s (use open|deferred|fixed|all)\n' "$status_filter" >&2
+      return 2
+      ;;
+  esac
+
+  # Read-only resolution (mirrors fi_resolve_issues_file minus creation).
+  local file
+  if [[ "$(fi_detect_mode)" == "local" ]]; then
+    file="$PWD/.found-issues.md"
+  else
+    local repo_root
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    file="$repo_root/docs/found-issues.md"
+  fi
+
+  if [[ ! -f "$file" ]]; then
+    [[ "$json" == "yes" ]] && printf '[]\n'
+    return 0
+  fi
+
+  if [[ "$json" == "no" ]]; then
+    fi_entries "$file" "$status_filter"
+    return 0
+  fi
+
+  local out="" numbered_line line_no raw obj
+  while IFS= read -r numbered_line; do
+    line_no="${numbered_line%%:*}"
+    raw="${numbered_line#*:}"
+    obj="$(fi_entry_to_json "$line_no" "$raw")" || continue
+    if [[ -z "$out" ]]; then
+      out="$obj"
+    else
+      out="$out,$obj"
+    fi
+  done < <(fi_entries "$file" "$status_filter" numbered)
+  printf '[%s]\n' "$out"
 }
 
 # === Subcommand: status ===
@@ -4142,6 +4207,7 @@ main() {
   case "$cmd" in
     log)              cmd_log "$@" ;;
     sync)             cmd_sync "$@" ;;
+    list)             cmd_list "$@" ;;
     status)
       local format="segment" cwd=""
       while [[ $# -gt 0 ]]; do
