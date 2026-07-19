@@ -8,14 +8,21 @@
 #   gh pr merge|close|reopen → background `found-issues sync` (statusline
 #                             freshness; moved verbatim from post-pr-state.sh)
 #
-# The merge/close/reopen route is exclusive (its own exit 0) since it never
-# co-occurs with annotation output. The pr-create and git-commit routes are
-# evaluated independently and NON-exclusively — a single Bash call can
-# legitimately satisfy both (e.g. `git commit -m x && gh pr create`), so each
-# appends its context text to an accumulator instead of emitting immediately.
-# The accumulator is emitted via fi_emit_post_context exactly ONCE at the end:
-# on Codex the hook's stdout must be a single JSON object, so two emissions
-# would be invalid.
+# All three routes are non-exclusive and evaluated independently — a single
+# Bash call can legitimately satisfy more than one (e.g. `git commit -m x &&
+# gh pr create`, or `gh pr create ... && gh pr merge N --auto`), so the
+# pr-create and git-commit routes append their context text to an
+# accumulator instead of emitting immediately, and the merge/close/reopen
+# route no longer exits early either. The routes are evaluated in this
+# fixed order: pr-create, then git-commit, then merge/close/reopen LAST.
+# The merge route spawns a detached background `found-issues sync`;
+# running it after the two synchronous annotation routes means sync sees
+# the annotations they just wrote instead of racing them — both sides do
+# an atomic tmp-file-then-mv rewrite of the same ledger file, so a
+# concurrent sync could otherwise read a stale copy or clobber the
+# annotation update. The accumulator is emitted via fi_emit_post_context
+# exactly ONCE at the end: on Codex the hook's stdout must be a single JSON
+# object, so two emissions would be invalid.
 #
 # Replaces post-pr-create.sh, post-git-commit.sh, post-pr-state.sh (v2.0.0):
 # one process + one jq parse per Bash call instead of three.
@@ -197,28 +204,16 @@ When the commit lands on the default branch (or already has, for direct
 pushes), \`/found-issues:sync\` will auto-flip these to [fixed]."
 }
 
-# Accumulator for pr-create / git-commit route output. Both routes below are
-# evaluated independently (non-exclusive) and append here instead of emitting
-# immediately; a single fi_emit_post_context call at the bottom of the script
-# flushes it exactly once. See header comment for why.
+# Accumulator for pr-create / git-commit route output. Both routes below
+# are evaluated independently (non-exclusive) and append here instead of
+# emitting immediately; a single fi_emit_post_context call at the bottom of
+# the script flushes it exactly once. See header comment for why. (The
+# merge/close/reopen route, last below, never appends to this — it produces
+# no ctx text of its own.)
 ctx=""
 
-# ============ route: gh pr merge/close/reopen → background sync ============
-# Exclusive on purpose: this route never produces annotation output, so an
-# early exit here can't shadow the pr-create/git-commit routes below.
-if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+(merge|close|reopen)([[:space:]]|$) ]]; then
-  if [[ "${FOUND_ISSUES_POST_PR_STATE:-on}" != "off" ]]; then
-    if [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
-      ( bash -c "$FOUND_ISSUES_AUTOSYNC_CMD" >/dev/null 2>&1 & ) >/dev/null 2>&1
-    else
-      ( "$FI_BIN" sync >/dev/null 2>&1 & ) >/dev/null 2>&1
-    fi
-  fi
-  exit 0
-fi
-
 # ============ route: gh pr create → annotate ============
-# Anchored the same way as the merge/close/reopen matcher above (rather than
+# Anchored the same way as the merge/close/reopen matcher below (rather than
 # a bare substring match) so a commit message that merely mentions the words
 # "gh pr create" doesn't behave differently here than it does anywhere else
 # — the /pull/N stdout guard below is still the main false-positive gate.
@@ -274,6 +269,34 @@ $out
 If this commit addresses any candidate, run the printed --pick command; otherwise ignore."
         ctx+=$'\n\n'
       fi
+    fi
+  fi
+fi
+
+# ============ route: gh pr merge/close/reopen → background sync ============
+# Evaluated LAST and non-exclusively (no early exit): this route produces no
+# ctx text of its own, so ordering it after the pr-create/git-commit routes
+# above doesn't change what gets emitted — it only changes WHEN the
+# background sync spawn happens relative to those two synchronous routes.
+# That ordering matters: `found-issues annotate-pr`/`annotate-commit` above
+# run to completion (writing docs/found-issues.md) before this script
+# continues, so by the time this route spawns the detached background
+# `found-issues sync`, sync sees the freshly written annotations instead of
+# racing them — both sides do an atomic tmp-file-then-mv rewrite of the
+# same ledger file, so a concurrent sync could otherwise read a stale copy
+# or clobber the annotation update. Previously this route exited early
+# (its own `exit 0`) on the theory that it never produces annotation
+# output so it "can't shadow" the routes below it — true for output, but
+# it also meant a chained `git commit -m fix && gh pr merge 7` or
+# `gh pr create ... && gh pr merge N --auto` never reached the annotation
+# routes at all, since they sat below this one's exit. Moving this route
+# last and dropping its exit fixes that.
+if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+(merge|close|reopen)([[:space:]]|$) ]]; then
+  if [[ "${FOUND_ISSUES_POST_PR_STATE:-on}" != "off" ]]; then
+    if [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
+      ( bash -c "$FOUND_ISSUES_AUTOSYNC_CMD" >/dev/null 2>&1 & ) >/dev/null 2>&1
+    else
+      ( "$FI_BIN" sync >/dev/null 2>&1 & ) >/dev/null 2>&1
     fi
   fi
 fi

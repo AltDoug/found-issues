@@ -127,6 +127,49 @@ run_hook_raw() { # $1=raw json
   grep -q 'src/bar.py:42 .*(PR: org/repo#7)' docs/found-issues.md
 }
 
+@test "merge route non-exclusive: chained git commit and gh pr merge both fire" {
+  # Regression test for the second route-shadow finding: the merge/close/
+  # reopen route used to exit early (its own `exit 0`) BEFORE the pr-create
+  # and git-commit routes, so a chained `git commit -m fix && gh pr merge 7`
+  # never reached the commit-annotation route below it. The merge route is
+  # now evaluated LAST and no longer exits early, so both the commit
+  # annotation and the background sync fire from one combined command.
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  marker="$TMP/sync-ran"
+  export FOUND_ISSUES_AUTOSYNC_CMD="touch '$marker'"
+  run run_hook 'git commit -m fix && gh pr merge 7 --squash' ''
+  [ "$status" -eq 0 ]
+  grep -q 'src/foo.py:2 .*(commit:' docs/found-issues.md
+  for i in 1 2 3 4 5; do [ -f "$marker" ] && break; sleep 1; done
+  [ -f "$marker" ]
+}
+
+@test "merge route ordering: autosync snapshot already contains the commit annotation" {
+  # Proves the merge route's background sync is spawned AFTER the
+  # synchronous commit-annotation route has already written to the ledger,
+  # rather than racing it: FOUND_ISSUES_AUTOSYNC_CMD snapshots
+  # docs/found-issues.md into a separate file the moment it runs, and that
+  # snapshot already shows the (commit:) annotation.
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  snap="$TMP/snap.md"
+  export FOUND_ISSUES_AUTOSYNC_CMD="cp '$TMP/docs/found-issues.md' '$snap'"
+  run run_hook 'git commit -m fix && gh pr merge 7 --squash' ''
+  [ "$status" -eq 0 ]
+  for i in 1 2 3 4 5; do [ -f "$snap" ] && break; sleep 1; done
+  [ -f "$snap" ]
+  grep -q 'src/foo.py:2 .*(commit:' "$snap"
+}
+
 @test "missing harness lib: hook exits 0 and still emits plain text" {
   # Fail-open regression test: harness.sh (and thus fi_emit_post_context)
   # is missing from the resolved lib dir, but the default auto-annotate
