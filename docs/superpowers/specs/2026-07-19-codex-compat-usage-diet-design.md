@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-19
 **Status:** approved direction; spec pending operator review
-**Target version:** v1.8.0 (minor — additive surfaces + hook behavior change)
+**Target version:** v2.0.0 (major — dual-harness pivot; operator's call 2026-07-19)
 
 ## Problem
 
@@ -34,27 +34,41 @@ harness adapters (hook wiring, skill/command packaging) differ.
 a prompt; the model then loads `commands/annotate-pr.md`, runs the CLI, maybe
 does a `--pick` round. 2–4 model round-trips at end-of-session (largest context).
 
-**New:** the hook runs `found-issues annotate-pr <N>` itself.
+**New:** the hook runs `found-issues annotate-pr <N> --hook-auto` itself.
 
-- The CLI's auto path (`fi_annotate_auto`) already annotates **only unambiguous
-  matches** (a touched file cited by exactly one `[open]` entry) and refuses
-  contested files — that is the exact safety boundary the 2026-07-09
-  over-annotation incident produced. Hook-driven execution changes *who invokes
-  it*, not *what it annotates*. Zero judgment lost.
-- **Unambiguous outcome:** hook emits ONE context line
-  (`found-issues: auto-annotated N entries with (PR: org/repo#M)`) so the model
-  and operator know the ledger changed. No command load, no extra turns.
-- **Ambiguous outcome:** hook surfaces the CLI's candidate list plus a compact
-  instruction to run `found-issues annotate-pr <N> --pick …` (direct Bash — not
-  the slash command, so the 3KB command file never loads). Model judgment stays
-  exactly where it is actually exercised.
+**Accuracy correction (found during planning):** today the *model* gates
+whether the PR addresses an entry AT ALL — the CLI's "unambiguous" rule only
+resolves *which* entry among several, not *whether* the PR fixes it. Plain
+auto-run would annotate any PR that merely touches a file citing one open
+entry → false `[fixed]` flips on merge. So hook-driven auto-annotation gets a
+stricter gate than the manual path:
+
+- `--hook-auto` annotates an entry only when it is (a) unambiguous by the
+  existing file-contest rule AND (b) **line-matched** — the entry's cited
+  `path:line` falls inside an old-side hunk range of the PR's diff (the fix
+  demonstrably modifies the symptom's cited line). Line-less (abstract)
+  entries never auto-annotate.
+- **Mass-touch guard:** if more than `FOUND_ISSUES_AUTO_ANNOTATE_MAX`
+  (default 3) entries would auto-annotate, none do — everything surfaces as
+  candidates (a formatting/sweep PR hunk-matches everything; that shape is
+  exactly the 2026-07-09 incident).
+- **Auto outcome:** hook emits ONE context line listing what was annotated —
+  auditable by model and operator, no command load, no extra turns.
+- **Everything else** (file-level-only matches, contested files, line-less
+  entries, over-cap): hook surfaces the CLI's compact candidate list plus an
+  instruction to run `found-issues annotate-pr <N> --pick …` directly via Bash
+  (not the slash command, so the 3KB command file never loads). Model judgment
+  stays wherever it is actually exercised.
 - **No matches:** silent (as today).
 
-**CLI change required:** `fi_annotate_auto` currently exits 0 for both outcomes;
-only stdout differs. Add **exit code 3 = "candidates need picking"** (additive;
-error paths keep 1/2, success keeps 0) so the hook branches on exit code, not
-stdout scraping. `commands/annotate-pr.md` (which passes output through) is
-unaffected by the new code but gets a doc note.
+**CLI change required:** add `--hook-auto` flag (annotate-pr and
+annotate-commit) implementing the gate above, and **exit code 3 = "candidates
+need picking"** whenever a candidate list is printed (additive; error paths
+keep 1/2, clean success keeps 0) so the hook branches on exit code, not stdout
+scraping. Manual `annotate-pr` (model/slash-command path) keeps today's
+semantics — there the model has already judged intent. `gh pr diff` /
+`git show` provide the hunk data; the tests/bin-shims/gh mock gains a
+`pr diff` case.
 
 Same pattern for `post-git-commit.sh` → `found-issues annotate-commit <sha>`
 (the CLI has identical `--pick`/`--all` semantics there).
