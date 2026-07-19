@@ -25,7 +25,7 @@ fi_detect_harness() {
 # Emit PostToolUse context text for the current harness.
 # Claude Code injects plain stdout; Codex requires JSON.
 fi_emit_post_context() {
-  local text="$1"
+  local text="${1:-}"
   [[ -z "$text" ]] && return 0
   if [[ "$(fi_detect_harness)" == "codex" ]]; then
     command -v jq >/dev/null 2>&1 || return 0

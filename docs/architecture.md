@@ -28,9 +28,7 @@ How the pieces fit together.
                     │  • PreToolUse(Bash)              │
                     │      └► pre-branch-delete        │
                     │  • PostToolUse(Bash)             │
-                    │      └► post-pr-create           │
-                    │      └► post-git-commit          │
-                    │      └► post-pr-state            │
+                    │      └► post-bash-dispatch       │
                     └────────────────┬─────────────────┘
                                      │
                                      │ shell out
@@ -105,9 +103,7 @@ one optional per-repo git hook:
 | `stop-reminder.sh` | Stop | Require the `<!-- found-issues-checked: ... -->` marker on turns with substantive tool use (Edit/Write/MultiEdit/Bash); pure-conversation turns and non-interactive (`CLAUDE_CODE_ENTRYPOINT != cli`) sessions pass through |
 | `format-enforcer.sh` | PreToolUse Write/Edit | Block malformed entries before they land |
 | `pre-branch-delete.sh` | PreToolUse Bash | Block branch deletion if entries unpromoted |
-| `post-pr-create.sh` | PostToolUse Bash | Surface entries matching files in just-opened PR |
-| `post-git-commit.sh` | PostToolUse Bash | Surface entries matching files in just-made commit |
-| `post-pr-state.sh` | PostToolUse Bash | Background `sync` after `gh pr merge`/`close`/`reopen` so the statusline updates without a session restart |
+| `post-bash-dispatch.sh` | PostToolUse Bash | Auto-annotate PR/commit entries matching just-changed lines (`--hook-auto`), surfacing only judgment cases; background `sync` after `gh pr merge`/`close`/`reopen` |
 | `pre-commit.sh` | git pre-commit (per-repo, opt-in) | Format check at commit time |
 
 Hooks fail open — if anything goes wrong, they exit 0 silently rather
@@ -164,7 +160,7 @@ The lifecycle of a single issue from observation to closure:
 3. **Format check** — Claude's session ends; the next time Claude edits `docs/found-issues.md` directly via Write/Edit, the `format-enforcer` PreToolUse hook fires. If the edit would introduce a malformed line, it blocks (exit 2) with a helpful error.
 
 4. **PR opens** — Some session later, Claude fixes the bug as part of task Y. After `gh pr create --title "fix: null check"`:
-   - `post-pr-create.sh` (PostToolUse on Bash) fires
+   - `post-bash-dispatch.sh` (PostToolUse on Bash) fires
    - Hook extracts PR number from stdout (`https://github.com/.../pull/42`)
    - Calls `gh pr view 42 --json files` to get touched files
    - Cross-references against `[open]` entries' paths via `lib/parse-entries.sh`

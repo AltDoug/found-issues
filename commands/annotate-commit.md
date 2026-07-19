@@ -33,7 +33,7 @@ Pass through the CLI's output:
 
 ## When to invoke
 
-The `post-git-commit` hook surfaces relevant entries automatically right
+The `post-bash-dispatch` hook surfaces relevant entries automatically right
 after `git commit` succeeds. **Run `/found-issues:annotate-commit` immediately** —
 do not defer.
 

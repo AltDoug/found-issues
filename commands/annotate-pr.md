@@ -55,7 +55,7 @@ Pass the result through to the user.
 
 ## When to invoke
 
-The `post-pr-create` hook should surface relevant entries automatically
+The `post-bash-dispatch` hook should surface relevant entries automatically
 right after `gh pr create` runs. That output includes the suggested
 command line. **Run the suggested `/found-issues:annotate-pr <N>` immediately** —
 do not defer.

@@ -14,9 +14,9 @@ overrides.
 The plugin registers 7 hooks (see [architecture](architecture.md) for the
 full table). Four of them have a whole-hook `=off` switch, listed below
 alongside two related switches: the opt-in git pre-commit hook's, and the
-SessionStart hook's auto-migration switch. `session-start`,
-`post-pr-create`, and `post-git-commit` have no whole-hook switch — they
-are informational and never block.
+SessionStart hook's auto-migration switch. `session-start` and
+`post-bash-dispatch` have no whole-hook switch — they are informational
+and never block.
 
 | Variable | Default | What it controls |
 |---|---|---|
@@ -127,7 +127,7 @@ These exist for testing and edge cases. Most users never touch them.
 | `FOUND_ISSUES_LIB_DIR` | (resolved relative to `$FOUND_ISSUES_BIN`) | Path to the `lib/` directory. Hooks source `parse-entries.sh`, `canonicalize.sh`, and `detect-mode.sh` from here. Override when running tests outside the installed-plugin layout. |
 | `CLAUDE_PROJECT_DIR` | (set by Claude Code) | Used as the search root by `found-issues status` when invoked from a statusline subprocess (which doesn't inherit the workspace as cwd). Falls back to `$PWD`. The `--cwd PATH` flag overrides this. |
 | `CLAUDE_PLUGIN_ROOT` | (set by Claude Code) | Used by hooks to locate the plugin's `lib/` when `FOUND_ISSUES_LIB_DIR` isn't set. |
-| `FOUND_ISSUES_AUTOSYNC_CMD` | (none) | Overrides the command dispatched by the segment-autosync and `post-pr-state.sh` hooks. Tests set this to a marker-writer so they can verify dispatch without invoking real `gh pr view` traffic. Production users have no reason to set it. |
+| `FOUND_ISSUES_AUTOSYNC_CMD` | (none) | Overrides the command dispatched by the segment-autosync and `post-bash-dispatch.sh` hooks. Tests set this to a marker-writer so they can verify dispatch without invoking real `gh pr view` traffic. Production users have no reason to set it. |
 | `FOUND_ISSUES_CACHE_DIR` | `$HOME/.cache/found-issues` | Override the cache root that holds segment-autosync's timestamp file (`segment-autosync-ts`) and other plugin caches. Tests use this for isolation. |
 | `FOUND_ISSUES_BASH` | (resolved via `PATH`) | Path to the `bash` binary used by the Python statusline shim on Windows, where PATH resolution can land on the WSL `bash` instead of Git Bash. Set it to Git Bash's `bash.exe` if the Python custom-target segment renders empty on Windows. |
 

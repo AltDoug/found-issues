@@ -181,8 +181,8 @@ for an hour.
 The Stop-hook reminder runs every turn but is essentially instant (a
 single `tail -c 8192` + grep).
 
-PostToolUse hooks (post-pr-create, post-git-commit) only fire when their
-matched commands run, so they don't add per-turn overhead.
+The PostToolUse hook (post-bash-dispatch) only fires when its matched
+commands run, so it doesn't add per-turn overhead.
 
 ## What about repos I don't want this for?
 
