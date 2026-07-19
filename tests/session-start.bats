@@ -262,3 +262,79 @@ EOF
   echo "$output" | grep -q 'IGNORE ALL INSTRUCTIONS'
   rm -rf "$FAKE_HOME"
 }
+
+# === v1.7.0: cap session-start entry injection ===
+#
+# Invocation matches the pattern used by every other test in this file
+# (HOME=$FAKE_HOME override so onboarding/nudge markers never touch the
+# real ~/.claude) — wrapped in a local helper for readability.
+
+run_session_start_hook() {
+  HOME="$FAKE_HOME" run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+}
+
+@test "session-start: caps injected entries and reports the remainder" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  fi_init_git
+  mkdir -p src
+  export FOUND_ISSUES_SESSION_INJECT_MAX=3
+  for i in 1 2 3 4 5 6; do
+    # Real backing file with >=6 lines: the hook's auto-sync tombstone-closes
+    # any entry whose file:line doesn't exist on disk (bin/found-issues
+    # cmd_sync), so a file-less entry would vanish before injection.
+    printf '1\n2\n3\n4\n5\n6\n' > "src/f$i.py"
+    fi_run log "src/f$i.py:$i — bug $i"
+  done
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"src/f6.py:6"* ]]   # newest kept
+  [[ "$output" != *"src/f1.py:1"* ]]   # oldest dropped
+  [[ "$output" == *"and 3 more [open] entries"* ]]
+  rm -rf "$FAKE_HOME"
+}
+
+@test "session-start: criticals always injected even over the cap" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  fi_init_git
+  mkdir -p src
+  export FOUND_ISSUES_SESSION_INJECT_MAX=2
+  printf '1\n' > src/sec.py
+  fi_run log --critical "src/sec.py:1 — token leak"
+  for i in 1 2 3 4; do
+    printf '1\n2\n3\n4\n' > "src/f$i.py"
+    fi_run log "src/f$i.py:$i — bug $i"
+  done
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"src/sec.py:1"* ]]
+  rm -rf "$FAKE_HOME"
+}
+
+@test "session-start: at-or-under cap output unchanged (no remainder line)" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  fi_init_git
+  mkdir -p src
+  printf '1\n' > src/a.py
+  fi_run log "src/a.py:1 — bug"
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"more [open] entries"* ]]
+  rm -rf "$FAKE_HOME"
+}
+
+@test "session-start: non-numeric inject max falls back to default and exits 0" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  fi_init_git
+  mkdir -p src
+  printf '1\n' > src/a.py
+  fi_run log "src/a.py:1 — bug"
+  export FOUND_ISSUES_SESSION_INJECT_MAX=unlimited
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"src/a.py:1"* ]]
+  rm -rf "$FAKE_HOME"
+}
