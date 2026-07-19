@@ -278,6 +278,17 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "codex and claude plugin manifests carry the same version" {
+  cv="$(jq -r .version "$TEST_REPO_ROOT/.codex-plugin/plugin.json")"
+  av="$(jq -r .version "$TEST_REPO_ROOT/.claude-plugin/plugin.json")"
+  [ "$cv" = "$av" ]
+}
+
+@test "codex manifest points skills at codex-skills and hooks at hooks.json" {
+  [ "$(jq -r .skills "$TEST_REPO_ROOT/.codex-plugin/plugin.json")" = "./codex-skills" ]
+  [ "$(jq -r .hooks  "$TEST_REPO_ROOT/.codex-plugin/plugin.json")" = "./hooks/hooks.json" ]
+}
+
 # --- plugin.json invariant ---
 # These guard the manifest-drift class of bug: plugin.json silently lags
 # behind FI_VERSION across releases (the 1.0.5 → 1.1.0 drift was caught by
