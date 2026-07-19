@@ -95,6 +95,57 @@ run_hook_raw() { # $1=raw json
   grep -q '(commit:' docs/found-issues.md
 }
 
+@test "git commit: message mentioning gh pr create still triggers commit route" {
+  # Regression test for the route-shadow finding: the pr-create route used
+  # to match ANY command containing the substring "gh pr create" (even one
+  # sitting inside a git commit message) and exit early, so the commit
+  # route below it never ran. The routes are now evaluated independently.
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m "add gh pr create hook"
+  run run_hook 'git commit -m "add gh pr create hook"' ''
+  [ "$status" -eq 0 ]
+  grep -q '(commit:' docs/found-issues.md
+}
+
+@test "chained git commit and gh pr create: both routes annotate independently" {
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  fi_run log "src/bar.py:42 — wrong cast"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  export GH_MOCK_PR_VIEW=$'7\tsrc/bar.py'
+  export GH_MOCK_PR_DIFF='--- a/src/bar.py\n+++ b/src/bar.py\n@@ -40,6 +40,7 @@\n x'
+  run run_hook 'git commit -m fix && gh pr create' 'https://github.com/org/repo/pull/7'
+  [ "$status" -eq 0 ]
+  grep -q 'src/foo.py:2 .*(commit:' docs/found-issues.md
+  grep -q 'src/bar.py:42 .*(PR: org/repo#7)' docs/found-issues.md
+}
+
+@test "missing harness lib: hook exits 0 and still emits plain text" {
+  # Fail-open regression test: harness.sh (and thus fi_emit_post_context)
+  # is missing from the resolved lib dir, but the default auto-annotate
+  # path still needs canonicalize.sh/detect-mode.sh/parse-entries.sh (which
+  # bin/found-issues sources for itself) — so this copies the real lib dir
+  # minus harness.sh, rather than pointing at a truly empty directory,
+  # which would also break the found-issues binary the hook shells out to.
+  fi_run log "src/foo.py:99 — wrong cast"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF='--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n x'
+  local libcopy="$TMP/lib-no-harness"
+  mkdir -p "$libcopy"
+  cp "$FI_LIB_DIR/canonicalize.sh" "$FI_LIB_DIR/detect-mode.sh" "$FI_LIB_DIR/parse-entries.sh" "$libcopy"/
+  export FOUND_ISSUES_LIB_DIR="$libcopy"
+  run run_hook 'gh pr create' 'https://github.com/org/repo/pull/7'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"found-issues annotate-pr 7 --pick"* ]]
+}
+
 @test "unrelated bash command: silent exit 0" {
   run run_hook 'ls -la' ''
   [ "$status" -eq 0 ]
