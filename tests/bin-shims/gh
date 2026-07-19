@@ -3,6 +3,8 @@
 #
 # Reads mock responses from env vars:
 #   GH_MOCK_PR_VIEW       tab-separated: <pr_num>\t<json>   (newline-separated rows)
+#   GH_MOCK_PR_DIFF       mocked unified diff for `gh pr diff <N>`. Literal \n
+#                         sequences are expanded (same convention as GH_MOCK_PR_VIEW rows).
 #   GH_MOCK_REPO_VIEW     full JSON response for `gh repo view --json ...`
 #   GH_MOCK_PR_LIST       full JSON array for `gh pr list --json ...` (default "[]")
 #   GH_MOCK_AUTH          "ok" (default) or "fail" — controls `gh auth status` exit
@@ -73,6 +75,15 @@ case "$cmd $sub" in
   "repo view")
     if [[ -n "${GH_MOCK_REPO_VIEW:-}" ]]; then
       printf '%s\n' "$GH_MOCK_REPO_VIEW"
+      exit 0
+    fi
+    exit 1
+    ;;
+  "pr diff")
+    # Mocked unified diff for `gh pr diff <N>`. Reads GH_MOCK_PR_DIFF with
+    # literal \n expanded (same convention as GH_MOCK_PR_VIEW rows).
+    if [[ -n "${GH_MOCK_PR_DIFF:-}" ]]; then
+      printf '%s\n' "${GH_MOCK_PR_DIFF//\\n/$'\n'}"
       exit 0
     fi
     exit 1

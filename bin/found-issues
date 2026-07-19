@@ -230,16 +230,22 @@ COMMANDS
                                         Print counts (for statusline integration).
                                         --cwd overrides where to look for the issues file
                                         (defaults to \$CLAUDE_PROJECT_DIR or \$PWD).
-  annotate-pr <N> [--pick <loc>,...] [--all]
+  annotate-pr <N> [--pick <loc>,...] [--all] [--hook-auto]
                                         Annotate matching [open] entries with PR.
                                         Files cited by several entries need an explicit
                                         --pick (path:line list) or --all — file-level
                                         auto-match alone would over-annotate. A pick can
                                         carry a symptom fragment ("path:line — fragment")
                                         to select between co-located entries.
-  annotate-commit [<sha>] [--pick <loc>,...] [--all]
+                                        --hook-auto  stricter auto mode used by the
+                                        PostToolUse hook (line-matched only, capped);
+                                        exits 3 when candidates need --pick.
+  annotate-commit [<sha>] [--pick <loc>,...] [--all] [--hook-auto]
                                         Annotate matching [open] entries with commit.
                                         Same selection rules as annotate-pr.
+                                        --hook-auto  stricter auto mode used by the
+                                        PostToolUse hook (line-matched only, capped);
+                                        exits 3 when candidates need --pick.
   promote                               List entries that need promotion to main
   archive [--dry-run] [--days=N] [--count=N]
                                         Move old [fixed] entries to docs/found-issues-archive.md
@@ -1277,14 +1283,64 @@ fi_annotate_apply_picks() {
 #   - entries already annotated with this annotation still count as
 #     competitors, so a plain re-run after an explicit --pick cannot
 #     auto-annotate the deliberately-excluded sibling
+# fi_diff_old_ranges — stdin: unified diff; stdout: "path<TAB>start<TAB>end"
+# per hunk, OLD-side line ranges. Ledger entries cite pre-fix locations, so
+# the old side is the side that corresponds to the cited line numbers.
+# Pure-addition hunks (old length 0) produce no range — a fix that only adds
+# lines never auto-annotates (conservative by design).
+fi_diff_old_ranges() {
+  LC_ALL=C awk '
+    /^--- / {
+      p = $2
+      sub(/^a\//, "", p)
+      cur = (p == "/dev/null" ? "" : p)
+      next
+    }
+    /^@@ / {
+      if (cur == "") next
+      split($2, m, ",")
+      a = substr(m[1], 2) + 0
+      b = (m[2] != "" ? m[2] + 0 : 1)
+      if (b > 0) printf "%s\t%d\t%d\n", cur, a, a + b - 1
+    }
+  '
+}
+
+# fi_line_matched <path> <line> <ranges> — 0 iff <path>:<line> falls inside
+# any old-side range. Path comparison mirrors the entry/touched-file rule
+# used in fi_annotate_auto (exact or suffix match either way).
+fi_line_matched() {
+  local p="$1" ln="$2" ranges="$3"
+  [[ -z "$ln" || -z "$ranges" ]] && return 1
+  local rp rs re
+  while IFS=$'\t' read -r rp rs re; do
+    [[ -z "$rp" ]] && continue
+    if [[ "$rp" == "$p" || "$rp" == */"$p" || "$p" == */"$rp" ]]; then
+      if (( ln >= rs && ln <= re )); then
+        return 0
+      fi
+    fi
+  done <<<"$ranges"
+  return 1
+}
+
 # --all annotates every candidate.
+# hook_auto (yes|no, $8) gates auto-annotation on a stricter rule for the
+# PostToolUse hook: a candidate must ALSO be unambiguous under the
+# file-contest rule below AND have its cited line fall inside an old_ranges
+# ($9, from fi_diff_old_ranges) hunk range for its path. Line-less entries
+# never line-match (fi_line_matched short-circuits on empty line), so they
+# never auto-annotate in hook mode. See cmd_annotate_pr/cmd_annotate_commit
+# for how hook_auto/old_ranges are produced.
 fi_annotate_auto() {
   local file="$1" annotation="$2" touched_files="$3" annotate_all="$4"
   local cmd_label="$5" rerun_cmd="$6" ref_desc="$7"
+  local hook_auto="${8:-no}" old_ranges="${9:-}"
 
   # Pass 1: collect candidates with the FULL set of touched files each one
   # matches; already-annotated entries contribute their files to ann_tfs.
   local -a cand_lines=() cand_locs=() cand_syms=() cand_tfs=()
+  local -a cand_paths=() cand_lnums=()
   local ann_tfs=""
   local line tf
   while IFS= read -r line; do
@@ -1313,6 +1369,8 @@ fi_annotate_auto() {
     cand_locs+=("$loc")
     cand_syms+=("$e_symptom")
     cand_tfs+=("$matched_tfs")
+    cand_paths+=("$e_path")
+    cand_lnums+=("$e_line")
   done <"$file"
 
   if (( ${#cand_lines[@]} == 0 )); then
@@ -1347,11 +1405,30 @@ fi_annotate_auto() {
       (( shared == 1 )) && break
     done <<<"${cand_tfs[$i]}"
     if (( shared == 0 )); then
-      auto_set+="${cand_lines[$i]}"$'\n'
+      if [[ "$hook_auto" == "yes" ]] && ! fi_line_matched "${cand_paths[$i]}" "${cand_lnums[$i]}" "$old_ranges"; then
+        ambig_indices+=("$i")
+      else
+        auto_set+="${cand_lines[$i]}"$'\n'
+      fi
     else
       ambig_indices+=("$i")
     fi
   done
+
+  if [[ "$hook_auto" == "yes" ]]; then
+    local max_auto="${FOUND_ISSUES_AUTO_ANNOTATE_MAX:-3}"
+    local auto_count
+    auto_count="$(printf '%s' "$auto_set" | grep -c '^-' || true)"
+    if (( auto_count > max_auto )); then
+      # Mass-touch guard: a sweep PR line-matches everything (2026-07-09
+      # incident shape). Annotate nothing; surface all as candidates.
+      auto_set=""
+      ambig_indices=()
+      for (( i = 0; i < ${#cand_lines[@]}; i++ )); do
+        ambig_indices+=("$i")
+      done
+    fi
+  fi
 
   # Pass 3: rewrite the file with the unambiguous annotations.
   local tmp matched=0
@@ -1391,6 +1468,10 @@ fi_annotate_auto() {
   if (( matched > 0 )); then
     cmd_status plain
   fi
+
+  if (( ${#ambig_indices[@]} > 0 )); then
+    return 3
+  fi
   return 0
 }
 
@@ -1417,12 +1498,16 @@ fi_annotate_auto() {
 cmd_annotate_pr() {
   local pr_num=""
   local annotate_all="no"
+  local hook_auto="no"
   local picks_nl=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --all)
         annotate_all="yes"
+        ;;
+      --hook-auto)
+        hook_auto="yes"
         ;;
       --pick)
         shift
@@ -1504,8 +1589,14 @@ cmd_annotate_pr() {
     return 0
   fi
 
+  local old_ranges=""
+  if [[ "$hook_auto" == "yes" ]]; then
+    old_ranges="$(gh pr diff "$pr_num" 2>/dev/null | fi_diff_old_ranges || true)"
+  fi
+
   fi_annotate_auto "$file" "$annotation" "$touched_files" "$annotate_all" \
-    "annotate-pr" "found-issues annotate-pr $pr_num" "PR #$pr_num"
+    "annotate-pr" "found-issues annotate-pr $pr_num" "PR #$pr_num" \
+    "$hook_auto" "$old_ranges" || return $?
 }
 
 # === Subcommand: annotate-commit ===
@@ -1518,12 +1609,16 @@ cmd_annotate_pr() {
 cmd_annotate_commit() {
   local target=""
   local annotate_all="no"
+  local hook_auto="no"
   local picks_nl=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --all)
         annotate_all="yes"
+        ;;
+      --hook-auto)
+        hook_auto="yes"
         ;;
       --pick)
         shift
@@ -1587,8 +1682,14 @@ cmd_annotate_commit() {
     return 0
   fi
 
+  local old_ranges=""
+  if [[ "$hook_auto" == "yes" ]]; then
+    old_ranges="$(git show --format= "$full_sha" | fi_diff_old_ranges || true)"
+  fi
+
   fi_annotate_auto "$file" "$annotation" "$touched_files" "$annotate_all" \
-    "annotate-commit" "found-issues annotate-commit $target" "commit $short_sha"
+    "annotate-commit" "found-issues annotate-commit $target" "commit $short_sha" \
+    "$hook_auto" "$old_ranges" || return $?
 }
 
 # === Subcommand: sync ===
