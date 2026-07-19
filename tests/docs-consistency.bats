@@ -75,3 +75,9 @@ fi_first_line() {
 @test "docs-consistency: fix.md forbids annotate-pr --all" {
   grep -q 'never .*--all' "$REPO_ROOT/commands/fix.md"
 }
+
+@test "rules skill stays under the 3.7KB injection budget" {
+  size=$(wc -c < "$TEST_REPO_ROOT/skills/rules/SKILL.md")
+  # budget raised 3584->3700 on review to restore the commit-annotation rule; the diet target is the 8.6KB->3.6KB reduction, not the exact byte line.
+  [ "$size" -le 3700 ]
+}
