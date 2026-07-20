@@ -1,0 +1,7 @@
+# Force LF on checkout everywhere, including Windows CI runners
+# (core.autocrlf=true on windows-latest images). The suite has
+# byte- and diff-sensitive tests — codex-skills drift (diff -r against
+# freshly generated LF files), the rules-skill 3.7KB injection budget,
+# and the harness JSON-envelope roundtrips — that all break on a CRLF
+# checkout (PR #114 windows-latest run 29781125664).
+* text=auto eol=lf
