@@ -2,6 +2,7 @@
 name: fi-setup
 description: First-run setup for found-issues — explains the system, surfaces optional config, walks user through statusline integration if desired
 ---
+<!-- loc-override: generated 1:1 from commands/setup.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 > **Note on the Edit permission (v1.4.0+):** Used ONLY when CLI returns an AI-fallback exit code (11 splice_point_not_found, 16 multiple_splices_detected, 17 markers_missing_but_invocation_present) during custom-statusline auto-integration. Never used in the happy path — `found-issues install-statusline --target --apply` does the file write deterministically.
 

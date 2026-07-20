@@ -2,6 +2,7 @@
 name: fi-sync
 description: Sync found-issues — flip merged PRs/commits to [fixed], verify unannotated entries, surface stale work
 ---
+<!-- loc-override: generated 1:1 from commands/sync.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 Reconcile `docs/found-issues.md` against the current state of the code
 and the PR/commit history. Two phases — the CLI does mechanical phase 1,

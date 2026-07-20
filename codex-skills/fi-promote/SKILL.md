@@ -2,6 +2,7 @@
 name: fi-promote
 description: Consolidate [open] entries from current branch into the default branch before deletion
 ---
+<!-- loc-override: generated 1:1 from commands/promote.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 Move `[open]` entries that exist only on the current branch over to the
 default branch, so they survive when this branch gets deleted.

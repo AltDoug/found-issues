@@ -2,6 +2,7 @@
 name: fi-status
 description: Print the current open / in-PR / critical / stale counts
 ---
+<!-- loc-override: generated 1:1 from commands/status.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 Show the current state of the found-issues file in this repo.
 

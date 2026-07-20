@@ -2,6 +2,7 @@
 name: fi-archive
 description: Move old [fixed] found-issues entries to an archive file (count threshold 50 OR days threshold 30, whichever first)
 ---
+<!-- loc-override: generated 1:1 from commands/archive.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 Run `found-issues archive <the user-provided arguments>` to move old `[fixed]` entries from the
 active `docs/found-issues.md` to `docs/found-issues-archive.md`.

@@ -58,6 +58,7 @@ for cmd in commands/*.md; do
     printf 'name: fi-%s\n' "$name"
     printf 'description: %s\n' "$desc"
     printf -- '---\n'
+    printf '<!-- loc-override: generated 1:1 from commands/%s.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->\n' "$name"
     # Body = everything after the closing frontmatter fence, with Claude-only
     # syntax rewritten for Codex. The trailing sed fixes relative-link depth:
     # commands/*.md live one level under the repo root, but generated skills

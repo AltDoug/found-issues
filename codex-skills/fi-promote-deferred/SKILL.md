@@ -2,6 +2,7 @@
 name: fi-promote-deferred
 description: Promote a [deferred] found-issue back to [open] — preserves all annotations (touch history, defer-cycle, reason) as evidence of recurrence and historical context. Inverse of $fi-defer.
 ---
+<!-- loc-override: generated 1:1 from commands/promote-deferred.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 The user wants to promote a `[deferred]` found-issue back to `[open]`. This usually happens after the touch counter has triggered a nudge (3 touches in cycle 1; 6 in cycle 2; etc.) — the deferred entry has been bitten enough times that it warrants real attention.
 

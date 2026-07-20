@@ -2,6 +2,7 @@
 name: fi-defer
 description: Defer a [open] found-issue to [deferred] — suppresses it from the statusline counter, optionally adds reason or mute-until window. Re-defers (after promotion) automatically increment the defer-cycle and escalate the touch threshold for the next nudge.
 ---
+<!-- loc-override: generated 1:1 from commands/defer.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 The user wants to defer a `[open]` found-issue. Deferring means: keep the entry visible in `docs/found-issues.md` but suppress it from the statusline counter and exempt it from `[open]`-only checks. The entry stays in the file as a parking-lot record.
 

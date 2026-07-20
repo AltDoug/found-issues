@@ -2,6 +2,7 @@
 name: fi-log
 description: Log an out-of-scope issue to docs/found-issues.md
 ---
+<!-- loc-override: generated 1:1 from commands/log.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 Log an `[open]` issue via the `found-issues` CLI. The CLI handles file
 location detection, format validation, dedup against existing entries,

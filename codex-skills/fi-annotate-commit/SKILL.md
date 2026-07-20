@@ -2,6 +2,7 @@
 name: fi-annotate-commit
 description: Annotate matching [open] entries with a (commit: <sha>) reference
 ---
+<!-- loc-override: generated 1:1 from commands/annotate-commit.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 After a `git commit` that addresses an `[open]` entry — typically in
 `github-direct` mode (push-to-main without PRs) or for fixes that don't

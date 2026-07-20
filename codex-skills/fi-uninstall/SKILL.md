@@ -2,6 +2,7 @@
 name: fi-uninstall
 description: Clean up plugin-private state (statusline segment, onboarding marker, mode cache, fi alias) before removing the found-issues plugin
 ---
+<!-- loc-override: generated 1:1 from commands/uninstall.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 The user wants to uninstall `found-issues`. Claude Code's `/plugin uninstall`
 removes the plugin itself, but plugin-private state under `~/.claude/` and

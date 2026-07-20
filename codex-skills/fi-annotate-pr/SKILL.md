@@ -2,6 +2,7 @@
 name: fi-annotate-pr
 description: Annotate matching [open] entries with a (PR: org/repo#N) reference
 ---
+<!-- loc-override: generated 1:1 from commands/annotate-pr.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 After running `gh pr create` (or noticing a PR was opened), annotate any
 `[open]` entries the PR addresses with `(PR: org/repo#N)`. The sync hook

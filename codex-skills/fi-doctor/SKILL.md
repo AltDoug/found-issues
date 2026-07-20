@@ -2,6 +2,7 @@
 name: fi-doctor
 description: General-purpose health check — CLI version, statusline, gh auth, mode detection, hook opt-outs, issues file state. Read-only diagnostic.
 ---
+<!-- loc-override: generated 1:1 from commands/doctor.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
 Run a one-shot health diagnostic on the found-issues plugin in this repo. Read-only — no file modifications. Always exits 0 (informational).
 
