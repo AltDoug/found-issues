@@ -27,6 +27,30 @@ Print a short, friendly intro along these lines (adapt tone to the user):
 
 Then check the user's environment and surface the relevant options.
 
+## Codex users: hooks require a separate one-time step
+
+Everything above (rules injection, ledger tracking) works the same on
+Codex — but Codex CLI 0.144.5 removed the `plugin_hooks` feature, so a
+plugin's own `hooks.json` manifest pointer never loads there (skills
+still load fine). If this session is running under Codex, tell the user
+to run this once, right after `codex plugin add`:
+
+```
+found-issues install-codex-hooks
+```
+
+This wires SessionStart, the format enforcer, the branch-delete guard,
+and the PostToolUse annotator into Codex's own `$CODEX_HOME/hooks.json`
+(default `~/.codex/hooks.json`). It's idempotent — safe to re-run — and
+**must be re-run after every `codex plugin update`** (the plugin cache
+path changes on update, and the installer self-heals stale paths on
+re-run). There is no Stop-hook marker discipline on Codex yet (deferred —
+the transcript rollout format isn't parsed).
+
+The statusline picker and per-repo pre-commit hook below are Claude Code
+concepts with no Codex equivalent — skip straight to the reporting step
+for Codex users once `install-codex-hooks` is confirmed.
+
 ## How to present the optional integrations
 
 Use a **single multi-select picker** (Claude Code's `AskUserQuestion` tool

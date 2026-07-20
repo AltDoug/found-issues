@@ -349,6 +349,35 @@ run_session_start_hook() {
   [[ "$output" == *"found-issues — agent rules"* ]]
 }
 
+# === Task 11b: Codex SessionStart output is a JSON envelope, not plain
+# text (resolves found-issues.md:37 — mirrors the PostToolUse schema fix
+# in lib/harness.sh / 4c8b711). ===
+
+@test "session-start on codex: emits a single JSON envelope (hookEventName SessionStart) even with no ledger" {
+  unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
+  export PLUGIN_DATA="$TMP/pd"
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"'
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext | contains("found-issues — agent rules")'
+}
+
+@test "session-start on codex: JSON envelope contains both the rules heading and the ledger entries fence" {
+  unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
+  export PLUGIN_DATA="$TMP/pd"
+  fi_init_git
+  mkdir -p src
+  printf '1\n' > src/a.py
+  fi_run log "src/a.py:1 — bug"
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"'
+  ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+  [[ "$ctx" == *"found-issues — agent rules"* ]]
+  [[ "$ctx" == *'```'* ]]
+  [[ "$ctx" == *"src/a.py:1"* ]]
+}
+
 @test "session-start on codex: skips statusline nudge and onboarding hint" {
   unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
   export PLUGIN_DATA="$TMP/pd"

@@ -70,8 +70,48 @@ found-issues is dual-harness: the same plugin installs into OpenAI Codex.
 
 ```
 codex plugin marketplace add AltDoug/claude-plugins
-codex plugin install found-issues
+codex plugin add found-issues
 ```
+
+(Codex CLI subcommands are `add` / `list` / `marketplace` / `remove` — there
+is no `install` / `uninstall`.)
+
+**Local checkout installs** (not the published marketplace) need a
+`.agents/plugins/marketplace.json` manifest alongside the checkout:
+
+```json
+{
+  "name": "found-issues-local",
+  "interface": { "displayName": "Found Issues Local" },
+  "plugins": [
+    { "name": "found-issues",
+      "source": { "source": "local", "path": "./plugins/found-issues" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity" }
+  ]
+}
+```
+
+`source.path` is relative to the marketplace root, which must contain
+`<name>/.codex-plugin/plugin.json`.
+
+Codex CLI 0.144.5 removed the `plugin_hooks` feature — a plugin's own
+`hooks.json` manifest pointer never loads there (verified; see
+`docs/found-issues.md`). Skills still load automatically; hooks do not.
+**Run this once, right after `codex plugin add`, to wire hooks into
+Codex's stable user-level hooks file:**
+
+```
+found-issues install-codex-hooks
+```
+
+This installs SessionStart (rules + ledger injection), the format
+enforcer, the branch-delete guard, and the PostToolUse annotator into
+`$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`; override with
+`--codex-home <path>` or `FOUND_ISSUES_CODEX_HOME`). It's idempotent —
+safe to re-run — and **must be re-run after every `codex plugin
+update`**: the plugin cache path changes on update, and the installer
+self-heals any stale path left behind.
 
 Then start a new Codex session. The SessionStart hook injects the agent
 rules and any open ledger entries; skills are available as `fi-log`,
@@ -140,9 +180,10 @@ On Codex the same order applies, via the `fi-uninstall` skill before the
 platform uninstall:
 
 ```
-$fi-uninstall                                      # 1. plugin's own cleanup
-codex plugin uninstall found-issues                # 2. platform uninstall
-codex plugin marketplace remove altdoug-plugins    # 3. (only if also removing the marketplace)
+$fi-uninstall                                       # 1. plugin's own cleanup
+found-issues uninstall-codex-hooks                  # 2. remove hooks.json entries
+codex plugin remove found-issues                    # 3. platform uninstall
+codex plugin marketplace remove altdoug-plugins     # 4. (only if also removing the marketplace)
 ```
 
 Why the order: `/plugin uninstall` (Claude Code's built-in command) only

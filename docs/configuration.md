@@ -114,6 +114,20 @@ export FOUND_ISSUES_STALE_DAYS=7
 export FOUND_ISSUES_SEGMENT_AUTOSYNC_INTERVAL=120
 ```
 
+## Harness detection & Codex hooks
+
+| Variable | Default | What it controls |
+|---|---|---|
+| `FOUND_ISSUES_HARNESS` | (auto-detected) | Forces which harness a hook or the CLI thinks it's running under: `claude` or `codex`. Takes priority over the `CLAUDE_CODE_ENTRYPOINT` / `PLUGIN_DATA` auto-detection in `lib/harness.sh:fi_detect_harness`. This is what `found-issues install-codex-hooks` sets on every command it writes into `hooks.json` (`env FOUND_ISSUES_HARNESS=codex ...`) — Codex 0.144.5 hooks run outside the plugin manifest, so they never receive `PLUGIN_DATA` on their own. Also useful for testing either code path deterministically. |
+| `FOUND_ISSUES_CODEX_HOME` | `$HOME/.codex` | Overrides where `found-issues install-codex-hooks` / `uninstall-codex-hooks` read and write `hooks.json`. The `--codex-home <path>` flag on either subcommand wins over this. |
+
+Codex CLI 0.144.5 removed the `plugin_hooks` feature, so a plugin's own
+`hooks.json` manifest pointer never loads on Codex — run `found-issues
+install-codex-hooks` once after `codex plugin add` (and again after every
+`codex plugin update`) to wire hooks into Codex's stable user-level
+`$CODEX_HOME/hooks.json` instead. See
+[`AGENTS.md`](../AGENTS.md#installing-for-codex).
+
 ## Mode override
 
 The plugin auto-detects which mode each repo is in (`local` / `git` /

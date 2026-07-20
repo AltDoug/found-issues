@@ -93,9 +93,12 @@ entries, consuming `list --json`).
 
 ### Hooks (enforcement layer)
 
-Bash scripts in `hooks/` registered via `hooks/hooks.json`. They turn
-the CLAUDE.md rules into mechanical behavior. Five lifecycle hooks plus
-one optional per-repo git hook:
+Bash scripts in `hooks/`, registered via `hooks/hooks.json` on Claude
+Code (the plugin manifest) or via `found-issues install-codex-hooks`
+into `$CODEX_HOME/hooks.json` on Codex — see Harness adapters below for
+why registration differs by harness. They turn the CLAUDE.md rules into
+mechanical behavior. Five lifecycle hooks plus one optional per-repo git
+hook:
 
 | Hook | Event | Job |
 |---|---|---|
@@ -121,20 +124,39 @@ core into each harness's own UI conventions:
 - **Codex adapter** — `codex-skills/fi-<name>/SKILL.md`, generated from
   `commands/*.md` by `scripts/gen-codex-skills.sh` (invoked as `$fi-<name>`
   mentions or by description match), plus SessionStart rules injection:
-  `hooks/session-start.sh` emits the rules body directly into context on
-  Codex, since Codex has no auto-loaded-skill mechanism equivalent to
-  Claude's.
+  `hooks/session-start.sh` emits the rules body into context on Codex
+  (wrapped in Codex's SessionStart JSON envelope — see below), since
+  Codex has no auto-loaded-skill mechanism equivalent to Claude's.
 
-Hooks themselves are shared, not adapted — `hooks/hooks.json` and every
-script in `hooks/` run unmodified on both harnesses; the same JSON
-payload shape arrives on stdin either way. `lib/harness.sh` is the one
-harness-detection point: `fi_detect_harness` reads
-`CLAUDE_CODE_ENTRYPOINT` (Claude) vs `PLUGIN_DATA` (Codex), and
-`fi_emit_post_context` formats PostToolUse hook output for whichever
-harness is running — plain text on Claude, `{additionalContext: ...}`
-JSON on Codex. Both adapters read and write the same committed
-`docs/found-issues.md` — a repo worked on from both harnesses shares one
-ledger with no migration step.
+The hook *scripts* themselves are shared, not adapted — every script in
+`hooks/` runs unmodified on both harnesses; the same JSON payload shape
+arrives on stdin either way. Registration differs, though: on Claude
+Code, `hooks/hooks.json` (the plugin manifest) auto-wires them at
+install time. On Codex, that path is dead — Codex CLI 0.144.5 removed
+the `plugin_hooks` feature, so a plugin's `hooks.json` pointer never
+loads (`.codex-plugin/plugin.json`'s `"hooks"` key is inert there). The
+same scripts still work on Codex; they just have to be registered a
+different way: `found-issues install-codex-hooks` copies the same four
+non-Stop hook entries into Codex's own stable user-level
+`$CODEX_HOME/hooks.json`, each command prefixed with `env
+FOUND_ISSUES_HARNESS=codex` so the script self-identifies without
+needing `PLUGIN_DATA` (which a hook run outside the plugin manifest
+never receives). Re-running it after `codex plugin update` is required —
+the installer strips-then-reinstalls its own entries every time, so
+stale plugin-cache paths from a prior version self-heal.
+
+`lib/harness.sh` is the one harness-detection point: `fi_detect_harness`
+honors `FOUND_ISSUES_HARNESS` first, then falls back to
+`CLAUDE_CODE_ENTRYPOINT` (Claude) vs `PLUGIN_DATA` (Codex). Two emit
+helpers format hook output for whichever harness is running — plain text
+on Claude either way; on Codex, `fi_emit_post_context` nests
+`additionalContext` under `hookSpecificOutput` with
+`hookEventName: "PostToolUse"`, and `fi_emit_session_context` does the
+same for SessionStart with `hookEventName: "SessionStart"` (both mirror
+Codex's `*.command.output` JSON Schema — flat top-level fields are
+dropped, not extra data). Both adapters read and write the same
+committed `docs/found-issues.md` — a repo worked on from both harnesses
+shares one ledger with no migration step.
 
 ### CLI (`bin/found-issues`)
 
@@ -158,6 +180,7 @@ Subcommands:
 | `install-statusline` / `uninstall-statusline` | Install or remove the statusline counter segment (canonical or `--target` custom shims) |
 | `doctor` / `doctor-statusline` / `doctor-statusline-runtime` | Health checks: general, statusline integration, runtime probe |
 | `install-fi-alias` / `uninstall-fi-alias` | Manage the personal `/fi` shortcut |
+| `install-codex-hooks` / `uninstall-codex-hooks [--codex-home PATH]` | Merge/remove found-issues' own hook entries in Codex's user-level `$CODEX_HOME/hooks.json` (see Harness adapters below) |
 | `uninstall` | Wipe plugin-private state before `/plugin uninstall` |
 
 ### lib (shared bash)

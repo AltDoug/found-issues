@@ -267,6 +267,14 @@ COMMANDS
   doctor-statusline-runtime             Runtime probe only (synthetic stdin → segment assert)
   install-fi-alias                      Create the /fi shortcut at ~/.claude/commands/fi.md
   uninstall-fi-alias                    Remove the /fi shortcut (only if it's ours)
+  install-codex-hooks [--codex-home PATH]
+                                        Wire found-issues hooks into Codex's user-level
+                                        \$CODEX_HOME/hooks.json (Codex 0.144.5 removed
+                                        plugin-bundled hooks). Idempotent; re-run after
+                                        \`codex plugin update\`. --codex-home overrides
+                                        \$FOUND_ISSUES_CODEX_HOME / \$HOME/.codex.
+  uninstall-codex-hooks [--codex-home PATH]
+                                        Remove only found-issues' own entries from that file
   uninstall                             Wipe plugin-private state (run before /plugin uninstall)
 
   --version                             Print version
@@ -4294,6 +4302,167 @@ cmd_uninstall_statusline_custom_target() {
   return 0
 }
 
+# === Subcommands: install-codex-hooks / uninstall-codex-hooks ===
+#
+# Codex CLI 0.144.5 removed the plugin_hooks feature (ledger:
+# .codex-plugin/plugin.json:14) — a plugin's own hooks.json manifest
+# pointer never loads there. The stable alternative is Codex's user-level
+# hooks file, $CODEX_HOME/hooks.json (the `hooks` feature, which stayed
+# stable). This installer merges found-issues' own hook entries into that
+# file, preserving every entry that isn't ours.
+#
+# Ownership rule for "is this entry ours?": its command string contains
+# both "/hooks/" and "found-issues" (true for every real install path —
+# both harnesses' plugin caches embed the plugin name as a path segment,
+# e.g. .../plugins/cache/found-issues-local/found-issues/2.0.0/hooks/...).
+# Install always removes every entry matching that rule first, then
+# appends fresh ones built from the CURRENTLY running binary's own
+# location — idempotent, and self-heals stale paths left behind by a
+# prior `codex plugin update` (the cache path embeds a version segment
+# that changes on update).
+#
+# No Stop entry: Stop-hook marker discipline needs the transcript rollout
+# format parsed, which Codex support doesn't have yet (deferred — see
+# docs/found-issues.md).
+
+readonly FI_CODEX_HOOKS_STRIP_JQ='
+  .hooks //= {}
+  | .hooks |= (
+      with_entries(
+        .value = (
+          (.value // [])
+          | map(.hooks |= ((. // []) | map(select(((.command // "") | (contains("/hooks/") and contains("found-issues"))) | not))))
+          | map(select((.hooks | length) > 0))
+        )
+      )
+      | with_entries(select((.value | length) > 0))
+    )
+'
+
+# Default $CODEX_HOME, honoring the FOUND_ISSUES_CODEX_HOME override.
+# The --codex-home flag on either subcommand wins over both.
+fi_codex_home_default() {
+  if [[ -n "${FOUND_ISSUES_CODEX_HOME:-}" ]]; then
+    printf '%s' "$FOUND_ISSUES_CODEX_HOME"
+  else
+    printf '%s' "$HOME/.codex"
+  fi
+}
+
+# Absolute path to this checkout/cache copy's hooks/ dir, derived from
+# the CURRENTLY running binary's own location (FI_BIN_DIR is resolved by
+# fi_script_dir at the top of this file, follows symlinks, always
+# absolute). Per Task 11 §3 the plugin cache copies bin/, lib/, hooks/
+# together, so hooks/ is always FI_BIN_DIR's sibling.
+fi_codex_hooks_dir() {
+  printf '%s/hooks' "$(cd "$FI_BIN_DIR/.." && pwd)"
+}
+
+# Build the JSON object of found-issues' own hook entries (3 events, 4
+# command entries — no Stop), commands resolved to the current install
+# root.
+fi_codex_hooks_new_entries_json() {
+  local hooks_dir
+  hooks_dir="$(fi_codex_hooks_dir)"
+  jq -n \
+    --arg session_cmd "env FOUND_ISSUES_HARNESS=codex $hooks_dir/session-start.sh" \
+    --arg fmt_cmd "env FOUND_ISSUES_HARNESS=codex $hooks_dir/format-enforcer.sh" \
+    --arg preb_cmd "env FOUND_ISSUES_HARNESS=codex $hooks_dir/pre-branch-delete.sh" \
+    --arg postb_cmd "env FOUND_ISSUES_HARNESS=codex $hooks_dir/post-bash-dispatch.sh" \
+    '{
+      SessionStart: [ { hooks: [ { type: "command", command: $session_cmd } ] } ],
+      PreToolUse: [
+        { matcher: "Write|Edit|MultiEdit", hooks: [ { type: "command", command: $fmt_cmd } ] },
+        { matcher: "Bash", hooks: [ { type: "command", command: $preb_cmd } ] }
+      ],
+      PostToolUse: [
+        { matcher: "Bash", hooks: [ { type: "command", command: $postb_cmd } ] }
+      ]
+    }'
+}
+
+# Parse the shared --codex-home / --codex-home=VALUE flag for both
+# subcommands below. Sets $codex_home in the caller's scope (must be
+# `local codex_home=""` before calling). $1 is the caller's own name,
+# used only in the error message.
+fi_codex_hooks_parse_args() {
+  local self="$1"; shift
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --codex-home) codex_home="${2:-}"; shift 2 ;;
+      --codex-home=*) codex_home="${1#--codex-home=}"; shift ;;
+      *) fi_err "$self: unknown argument: $1"; return 1 ;;
+    esac
+  done
+  [[ -z "$codex_home" ]] && codex_home="$(fi_codex_home_default)"
+  return 0
+}
+
+cmd_install_codex_hooks() {
+  local codex_home=""
+  fi_codex_hooks_parse_args "install-codex-hooks" "$@" || return 1
+
+  if ! command -v jq >/dev/null 2>&1; then
+    fi_err "install-codex-hooks: jq is required to edit Codex's hooks.json — install jq and re-run."
+    return 1
+  fi
+
+  mkdir -p "$codex_home"
+  local hooks_file="$codex_home/hooks.json"
+  [[ -f "$hooks_file" ]] || printf '{"hooks":{}}' > "$hooks_file"
+
+  local new_entries merged
+  new_entries="$(fi_codex_hooks_new_entries_json)"
+  merged="$(jq --argjson new "$new_entries" "
+    ${FI_CODEX_HOOKS_STRIP_JQ}
+    | .hooks.SessionStart = ((.hooks.SessionStart // []) + (\$new.SessionStart // []))
+    | .hooks.PreToolUse   = ((.hooks.PreToolUse   // []) + (\$new.PreToolUse   // []))
+    | .hooks.PostToolUse  = ((.hooks.PostToolUse  // []) + (\$new.PostToolUse  // []))
+  " "$hooks_file")"
+  printf '%s\n' "$merged" > "$hooks_file"
+
+  local hooks_dir
+  hooks_dir="$(fi_codex_hooks_dir)"
+  cat <<EOF
+install-codex-hooks: wrote $hooks_file
+
+  SessionStart                       -> $hooks_dir/session-start.sh
+  PreToolUse  (Write|Edit|MultiEdit) -> $hooks_dir/format-enforcer.sh
+  PreToolUse  (Bash)                 -> $hooks_dir/pre-branch-delete.sh
+  PostToolUse (Bash)                 -> $hooks_dir/post-bash-dispatch.sh
+
+No Stop hook installed — marker-discipline enforcement needs Codex's
+transcript rollout format parsed, which isn't wired up yet (deferred,
+see docs/found-issues.md).
+
+Re-run \`found-issues install-codex-hooks\` after every \`codex plugin
+update\` — the plugin cache path changes on update, and stale entries
+would otherwise keep pointing at a removed directory (this command
+self-heals that on re-run).
+EOF
+}
+
+cmd_uninstall_codex_hooks() {
+  local codex_home=""
+  fi_codex_hooks_parse_args "uninstall-codex-hooks" "$@" || return 1
+
+  local hooks_file="$codex_home/hooks.json"
+  if [[ ! -f "$hooks_file" ]]; then
+    printf 'uninstall-codex-hooks: nothing to remove (no %s)\n' "$hooks_file"
+    return 0
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    fi_err "uninstall-codex-hooks: jq is required to edit Codex's hooks.json — install jq and re-run."
+    return 1
+  fi
+
+  local stripped
+  stripped="$(jq "$FI_CODEX_HOOKS_STRIP_JQ" "$hooks_file")"
+  printf '%s\n' "$stripped" > "$hooks_file"
+  printf 'uninstall-codex-hooks: removed found-issues hook entries from %s (your own entries preserved)\n' "$hooks_file"
+}
+
 # === Subcommands: install-fi-alias / uninstall-fi-alias ===
 #
 # Optional `/fi` slash-command shortcut so the user can type
@@ -4403,6 +4572,8 @@ main() {
     doctor)               cmd_doctor "$@" ;;
     install-fi-alias)     cmd_install_fi_alias "$@" ;;
     uninstall-fi-alias)   cmd_uninstall_fi_alias "$@" ;;
+    install-codex-hooks)   cmd_install_codex_hooks "$@" ;;
+    uninstall-codex-hooks) cmd_uninstall_codex_hooks "$@" ;;
     uninstall)            cmd_uninstall "$@" ;;
     archive)              cmd_archive "$@" ;;
     -v|--version)     cmd_version ;;

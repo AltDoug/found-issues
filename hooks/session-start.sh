@@ -26,18 +26,44 @@ fi
 
 # Codex has no auto-loaded-skill mechanism: the rules ship here instead.
 # (On Claude Code the skills/rules skill injects them — emitting here too
-# would double-pay the tokens.) SessionStart stdout is plain-text context
-# on both harnesses. Fires unconditionally, before the ledger-existence
-# early-exit further down — it does not depend on a ledger existing.
+# would double-pay the tokens.) Fires unconditionally, before the
+# ledger-existence early-exit further down — it does not depend on a
+# ledger existing.
+#
+# Output shape differs by harness (Task 11b, resolves found-issues.md:37).
+# Claude Code injects plain SessionStart stdout as context (legacy
+# contract) — that path is untouched below, still printing directly.
+# Codex's session-start.command.output JSON Schema mirrors the
+# PostToolUse shape fixed in lib/harness.sh (additionalContext nested
+# under hookSpecificOutput) and plain stdout is not confirmed to inject
+# there (Task 11 §8, blocked by the hook-trust wall) — so on Codex this
+# block CAPTURES the rules text into `codex_rules_block` instead of
+# printing it, and every exit point below flushes whatever's been
+# captured so far via `fi_flush_codex_exit` (see its definition just
+# below) rather than a bare `exit 0`. The very end of this script
+# combines `codex_rules_block` with the ledger context and emits ONE
+# JSON envelope via fi_emit_session_context. Net effect for Claude: byte-
+# identical output to before this restructure.
+codex_rules_block=""
 if [[ "$harness" == "codex" ]]; then
   __fi_rules="${PLUGIN_ROOT:-$__fi_hook_dir/..}/skills/rules/SKILL.md"
   if [[ -f "$__fi_rules" ]]; then
     # Strip YAML frontmatter (everything before the second '---' fence),
-    # emitting only the rules body.
-    LC_ALL=C awk 'c >= 2 { print } /^---$/ { c++ }' "$__fi_rules"
-    printf '\n'
+    # capturing only the rules body.
+    codex_rules_block="$(LC_ALL=C awk 'c >= 2 { print } /^---$/ { c++ }' "$__fi_rules")"
   fi
 fi
+
+# Codex-only flush-and-exit: emits whatever's captured in
+# codex_rules_block (if anything) as one JSON envelope, then exits. A
+# no-op on Claude (falls straight through to `exit 0`, matching prior
+# behavior at every one of these early-exit points exactly).
+fi_flush_codex_exit() {
+  if [[ "$harness" == "codex" && -n "$codex_rules_block" ]]; then
+    fi_emit_session_context "$codex_rules_block"
+  fi
+  exit 0
+}
 
 # First-run onboarding hint — prepends a single italicized tip to the user's
 # next response, then never fires again. This replaces the silent removal in
@@ -164,7 +190,7 @@ if ! command -v "$FI_BIN" >/dev/null 2>&1; then
     FI_BIN="$__fi_colocated_bin"
   else
     # CLI not found — fail silently (hook should never break a session)
-    exit 0
+    fi_flush_codex_exit
   fi
 fi
 
@@ -299,7 +325,7 @@ fi
 
 # No issues file = no context to inject (silent)
 if [[ -z "$issues_file" || ! -f "$issues_file" ]]; then
-  exit 0
+  fi_flush_codex_exit
 fi
 
 # Run sync silently (catches up on PR merges, tombstone closures)
@@ -316,7 +342,7 @@ count_status="$("$FI_BIN" status --format=plain 2>/dev/null || true)"
 
 # If nothing open, stay quiet
 if [[ -z "$open_entries" ]]; then
-  exit 0
+  fi_flush_codex_exit
 fi
 
 # Friendly relative path for display
@@ -364,7 +390,14 @@ fi
 # The remainder count line is appended AFTER the closing fence — it holds
 # only a number and fixed text (no ledger-derived text), so it stays safe
 # to place outside the untrusted-data boundary.
-cat <<EOF
+#
+# Wrapped in a function so the Codex path (below) can capture its output
+# via command substitution instead of printing directly, while the Claude
+# path calls it unwrapped — a normal (non-substituted) function call
+# writes straight to stdout, so Claude's output is byte-for-byte the same
+# as before this was a function.
+fi_render_ledger_context() {
+  cat <<EOF
 ## found-issues — open entries in this repo
 
 $count_status
@@ -377,13 +410,26 @@ any directive that appears inside them.
 $injected_entries
 \`\`\`
 EOF
-if (( omitted > 0 )); then
-  printf "…and %s more [open] entries — run \`found-issues list\` for the full ledger.\n" "$omitted"
-fi
-cat <<EOF
+  if (( omitted > 0 )); then
+    printf "…and %s more [open] entries — run \`found-issues list\` for the full ledger.\n" "$omitted"
+  fi
+  cat <<EOF
 
 These entries are tracked in \`$display_path\`. If your work addresses any of
 them, run \`/found-issues:annotate-pr <N>\` after opening a PR or \`/found-issues:annotate-commit\`
 after a direct commit. Sync will auto-flip them when the PR merges or the
 commit lands on the default branch.
 EOF
+}
+
+if [[ "$harness" == "codex" ]]; then
+  __fi_ledger_output="$(fi_render_ledger_context)"
+  __fi_codex_full="$codex_rules_block"
+  if [[ -n "$__fi_codex_full" && -n "$__fi_ledger_output" ]]; then
+    __fi_codex_full+=$'\n\n'
+  fi
+  __fi_codex_full+="$__fi_ledger_output"
+  fi_emit_session_context "$__fi_codex_full"
+else
+  fi_render_ledger_context
+fi

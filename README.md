@@ -57,14 +57,19 @@ Codex:
 
 ```
 codex plugin marketplace add AltDoug/claude-plugins
-codex plugin install found-issues
+codex plugin add found-issues
+found-issues install-codex-hooks
 ```
 
-Then start a new Codex session. The ledger (`docs/found-issues.md`) is
-shared across harnesses with no migration or sync step — a repo worked
-on from both Claude Code and Codex is just one ledger. Skills are
-available as `$fi-log`, `$fi-sync`, `$fi-status`, etc. Details and known
-v1 gaps (no statusline, no stop-hook marker on Codex): [`AGENTS.md`](AGENTS.md#installing-for-codex).
+`install-codex-hooks` is a required one-time step (re-run after `codex
+plugin update`): Codex 0.144.5 removed plugin-bundled hooks, so
+found-issues wires SessionStart / format-enforcer / branch-guard /
+annotator into Codex's own `$CODEX_HOME/hooks.json` instead. Then start a
+new Codex session. The ledger (`docs/found-issues.md`) is shared across
+harnesses with no migration or sync step — a repo worked on from both
+Claude Code and Codex is just one ledger. Skills are available as
+`$fi-log`, `$fi-sync`, `$fi-status`, etc. Details and known v1 gaps (no
+statusline, no stop-hook marker on Codex): [`AGENTS.md`](AGENTS.md#installing-for-codex).
 
 ## Quick start
 
