@@ -4311,10 +4311,17 @@ cmd_uninstall_statusline_custom_target() {
 # stable). This installer merges found-issues' own hook entries into that
 # file, preserving every entry that isn't ours.
 #
-# Ownership rule for "is this entry ours?": its command string contains
-# both "/hooks/" and "found-issues" (true for every real install path —
-# both harnesses' plugin caches embed the plugin name as a path segment,
-# e.g. .../plugins/cache/found-issues-local/found-issues/2.0.0/hooks/...).
+# Ownership rule for "is this entry ours?": its command string starts
+# with our literal sentinel prefix, `env FOUND_ISSUES_HARNESS=codex `
+# (exactly what fi_codex_hooks_new_entries_json generates — see below).
+# Tightened from an earlier "/hooks/ + found-issues substring" rule that
+# was too loose: a user's own hook whose command happened to contain both
+# substrings (e.g. their own script living under a path with "/hooks/"
+# and "found-issues" in it) would get silently deleted. The sentinel
+# prefix is stable across versions — stale prior-version entries carry
+# the identical prefix (only the path after it changes), so the
+# self-heal-on-update behavior described below is preserved.
+#
 # Install always removes every entry matching that rule first, then
 # appends fresh ones built from the CURRENTLY running binary's own
 # location — idempotent, and self-heals stale paths left behind by a
@@ -4325,13 +4332,16 @@ cmd_uninstall_statusline_custom_target() {
 # format parsed, which Codex support doesn't have yet (deferred — see
 # docs/found-issues.md).
 
+readonly FI_CODEX_HOOKS_SENTINEL='env FOUND_ISSUES_HARNESS=codex '
+
+# shellcheck disable=SC2016 # $sentinel is a jq variable (--arg sentinel), not a bash one
 readonly FI_CODEX_HOOKS_STRIP_JQ='
   .hooks //= {}
   | .hooks |= (
       with_entries(
         .value = (
           (.value // [])
-          | map(.hooks |= ((. // []) | map(select(((.command // "") | (contains("/hooks/") and contains("found-issues"))) | not))))
+          | map(.hooks |= ((. // []) | map(select(((.command // "") | startswith($sentinel)) | not))))
           | map(select((.hooks | length) > 0))
         )
       )
@@ -4415,6 +4425,31 @@ fi_codex_hooks_parse_args() {
   return 0
 }
 
+# True (exit 0) iff $1 is non-empty, well-formed JSON. jq silently
+# produces zero output — not an error — when fed empty or whitespace-only
+# input, so an empty `$merged`/`$stripped` must be checked explicitly
+# before ever writing it out; a bare `jq -e .` on an empty string alone
+# would report success on effectively no content.
+fi_codex_hooks_is_valid_json() {
+  [[ -n "$1" ]] && printf '%s' "$1" | jq -e . >/dev/null 2>&1
+}
+
+# Atomically write $2 (content) to $1 (target path). mktemp is created in
+# the SAME directory as the target (not system tmp) so the final `mv` is
+# a same-filesystem rename — atomic — rather than a cross-filesystem
+# copy+unlink that could leave a partial file on interruption. Caller
+# must validate $2 first (fi_codex_hooks_is_valid_json). Returns 1 (target
+# untouched) if the temp file can't be created.
+fi_codex_hooks_atomic_write() {
+  local target="$1" content="$2" dir tmp
+  dir="$(dirname "$target")"
+  tmp="$(mktemp "$dir/$(basename "$target").XXXXXX")" || return 1
+  trap 'rm -f "$tmp"' EXIT
+  printf '%s\n' "$content" > "$tmp"
+  mv "$tmp" "$target"
+  trap - EXIT
+}
+
 cmd_install_codex_hooks() {
   local codex_home=""
   fi_codex_hooks_parse_args "install-codex-hooks" "$@" || return 1
@@ -4426,17 +4461,42 @@ cmd_install_codex_hooks() {
 
   mkdir -p "$codex_home"
   local hooks_file="$codex_home/hooks.json"
-  [[ -f "$hooks_file" ]] || printf '{"hooks":{}}' > "$hooks_file"
+
+  # Empty, whitespace-only, or missing content is treated identically:
+  # seed the minimal skeleton. Without this, feeding an empty/whitespace
+  # file straight to the merge below would silently produce zero jq
+  # output (see fi_codex_hooks_is_valid_json) while still reporting
+  # success — the bug this hardening pass fixes.
+  local existing_content
+  existing_content="$(cat "$hooks_file" 2>/dev/null || true)"
+  if [[ ! "$existing_content" =~ [^[:space:]] ]]; then
+    fi_codex_hooks_atomic_write "$hooks_file" '{"hooks":{}}' || {
+      fi_err "install-codex-hooks: could not seed $hooks_file — leaving it untouched."
+      return 5
+    }
+  fi
 
   local new_entries merged
   new_entries="$(fi_codex_hooks_new_entries_json)"
-  merged="$(jq --argjson new "$new_entries" "
+  merged="$(jq --argjson new "$new_entries" --arg sentinel "$FI_CODEX_HOOKS_SENTINEL" "
     ${FI_CODEX_HOOKS_STRIP_JQ}
     | .hooks.SessionStart = ((.hooks.SessionStart // []) + (\$new.SessionStart // []))
     | .hooks.PreToolUse   = ((.hooks.PreToolUse   // []) + (\$new.PreToolUse   // []))
     | .hooks.PostToolUse  = ((.hooks.PostToolUse  // []) + (\$new.PostToolUse  // []))
   " "$hooks_file")"
-  printf '%s\n' "$merged" > "$hooks_file"
+
+  # Belt-and-braces: never write unless $merged is confirmed non-empty,
+  # well-formed JSON. The target file is left completely untouched on
+  # failure.
+  if ! fi_codex_hooks_is_valid_json "$merged"; then
+    fi_err "install-codex-hooks: failed to produce valid JSON for $hooks_file — leaving it untouched."
+    return 5
+  fi
+
+  fi_codex_hooks_atomic_write "$hooks_file" "$merged" || {
+    fi_err "install-codex-hooks: could not write $hooks_file safely — leaving it untouched."
+    return 5
+  }
 
   local hooks_dir
   hooks_dir="$(fi_codex_hooks_dir)"
@@ -4469,15 +4529,33 @@ cmd_uninstall_codex_hooks() {
     return 0
   fi
 
+  local existing_content
+  existing_content="$(cat "$hooks_file" 2>/dev/null || true)"
+  if [[ ! "$existing_content" =~ [^[:space:]] ]]; then
+    printf 'uninstall-codex-hooks: nothing to remove (%s is empty)\n' "$hooks_file"
+    return 0
+  fi
+
   if ! command -v jq >/dev/null 2>&1; then
     fi_err "uninstall-codex-hooks: jq is required to edit Codex's hooks.json — install jq and re-run."
     return 1
   fi
 
   local stripped
-  stripped="$(jq "$FI_CODEX_HOOKS_STRIP_JQ" "$hooks_file")"
-  printf '%s\n' "$stripped" > "$hooks_file"
-  printf 'uninstall-codex-hooks: removed found-issues hook entries from %s (your own entries preserved)\n' "$hooks_file"
+  stripped="$(jq --arg sentinel "$FI_CODEX_HOOKS_SENTINEL" "$FI_CODEX_HOOKS_STRIP_JQ" "$hooks_file")"
+
+  if ! fi_codex_hooks_is_valid_json "$stripped"; then
+    fi_err "uninstall-codex-hooks: failed to produce valid JSON for $hooks_file — leaving it untouched."
+    return 5
+  fi
+
+  fi_codex_hooks_atomic_write "$hooks_file" "$stripped" || {
+    fi_err "uninstall-codex-hooks: could not write $hooks_file safely — leaving it untouched."
+    return 5
+  }
+
+  printf 'uninstall-codex-hooks: removed hook entries whose command starts with the found-issues sentinel prefix (%s...) from %s\n' \
+    "$FI_CODEX_HOOKS_SENTINEL" "$hooks_file"
 }
 
 # === Subcommands: install-fi-alias / uninstall-fi-alias ===

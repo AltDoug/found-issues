@@ -74,6 +74,56 @@ teardown() { fi_teardown_tmp; }
   done
 }
 
+@test "install-codex-hooks: empty hooks.json is seeded then installed (4 entries, exit 0)" {
+  CODEX_HOME="$TMP/codex-home"
+  mkdir -p "$CODEX_HOME"
+  : > "$CODEX_HOME/hooks.json"
+  fi_run install-codex-hooks --codex-home "$CODEX_HOME"
+  [ "$status" -eq 0 ]
+  jq -e '.hooks.SessionStart | length == 1' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PreToolUse | length == 2' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PostToolUse | length == 1' "$CODEX_HOME/hooks.json"
+}
+
+@test "install-codex-hooks: whitespace-only hooks.json is seeded then installed (4 entries, exit 0)" {
+  CODEX_HOME="$TMP/codex-home"
+  mkdir -p "$CODEX_HOME"
+  printf '   \n  \t \n' > "$CODEX_HOME/hooks.json"
+  fi_run install-codex-hooks --codex-home "$CODEX_HOME"
+  [ "$status" -eq 0 ]
+  jq -e '.hooks.SessionStart | length == 1' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PreToolUse | length == 2' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PostToolUse | length == 1' "$CODEX_HOME/hooks.json"
+}
+
+@test "install-codex-hooks: corrupt-JSON hooks.json errors rc 5 and leaves the file byte-unchanged" {
+  CODEX_HOME="$TMP/codex-home"
+  mkdir -p "$CODEX_HOME"
+  printf '{not valid json' > "$CODEX_HOME/hooks.json"
+  before="$(cat "$CODEX_HOME/hooks.json")"
+  fi_run install-codex-hooks --codex-home "$CODEX_HOME"
+  [ "$status" -eq 5 ]
+  after="$(cat "$CODEX_HOME/hooks.json")"
+  [ "$before" = "$after" ]
+}
+
+@test "install-codex-hooks + uninstall-codex-hooks: a user hook whose command contains both 'found-issues' and '/hooks/' survives (tightened sentinel ownership)" {
+  CODEX_HOME="$TMP/codex-home"
+  mkdir -p "$CODEX_HOME"
+  cat > "$CODEX_HOME/hooks.json" <<'EOF'
+{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/opt/my-found-issues-fork/hooks/custom.sh"}]}]}}
+EOF
+  fi_run install-codex-hooks --codex-home "$CODEX_HOME"
+  [ "$status" -eq 0 ]
+  jq -e '.hooks.SessionStart | length == 2' "$CODEX_HOME/hooks.json"
+  jq -e '[.hooks.SessionStart[].hooks[0].command] | index("/opt/my-found-issues-fork/hooks/custom.sh") != null' "$CODEX_HOME/hooks.json"
+
+  fi_run uninstall-codex-hooks --codex-home "$CODEX_HOME"
+  [ "$status" -eq 0 ]
+  jq -e '.hooks.SessionStart | length == 1' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.SessionStart[0].hooks[0].command == "/opt/my-found-issues-fork/hooks/custom.sh"' "$CODEX_HOME/hooks.json"
+}
+
 @test "install-codex-hooks: preserves a pre-existing user hook entry" {
   CODEX_HOME="$TMP/codex-home"
   mkdir -p "$CODEX_HOME"
