@@ -24,7 +24,8 @@ echo "$LINE1"
 EOF
   HOME="$FAKE_HOME" run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -q "migrating v1.4.x"
+  run grep -q "migrating v1.4.x" <<<"$output"
+  [ "$status" -ne 0 ]
   rm -rf "$FAKE_HOME"
 }
 
@@ -50,7 +51,8 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "v1.4.x"
   ls "$FAKE_HOME"/custom.js.fi-bak-* >/dev/null 2>&1
-  ! grep -q "process.env.HOME" "$FAKE_HOME/custom.js"
+  run grep -q "process.env.HOME" "$FAKE_HOME/custom.js"
+  [ "$status" -ne 0 ]
   grep -q "os.homedir" "$FAKE_HOME/custom.js"
   rm -rf "$FAKE_HOME"
 }
@@ -73,7 +75,8 @@ EOF
   HOME="$FAKE_HOME" FOUND_ISSUES_AUTO_MIGRATE=off run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
   [ "$status" -eq 0 ]
   grep -q "process.env.HOME" "$FAKE_HOME/custom.js"
-  ! ls "$FAKE_HOME"/custom.js.fi-bak-* 2>/dev/null
+  run ls "$FAKE_HOME"/custom.js.fi-bak-*
+  [ "$status" -ne 0 ]
   rm -rf "$FAKE_HOME"
 }
 
@@ -163,7 +166,8 @@ echo "repo${__FI_SEG}"
 EOF
   HOME="$FAKE_HOME" run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -q "self-heal nudge"
+  run grep -q "self-heal nudge" <<<"$output"
+  [ "$status" -ne 0 ]
   HOME="$FAKE_HOME" run "$FI_BIN" doctor-statusline
   echo "$output" | grep -q "State: installed-fixed"
   rm -rf "$FAKE_HOME"
@@ -238,10 +242,13 @@ EOF
 EOF
   HOME="$FAKE_HOME" run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
   [ "$status" -eq 0 ]
-  ! ls "$FAKE_HOME"/.claude/statusline.sh.fi-bak-* 2>/dev/null
-  ! echo "$output" | grep -q "auto-migrated"
+  session_output="$output"
+  run ls "$FAKE_HOME"/.claude/statusline.sh.fi-bak-*
+  [ "$status" -ne 0 ]
+  run grep -q "auto-migrated" <<<"$session_output"
+  [ "$status" -ne 0 ]
   # The nudge still covers the broken canonical block
-  echo "$output" | grep -q "self-heal nudge"
+  echo "$session_output" | grep -q "self-heal nudge"
   rm -rf "$FAKE_HOME"
 }
 
