@@ -8,9 +8,14 @@
 # must never be used as discriminators. Unknown environments behave as
 # claude (plain-text output — the legacy contract).
 #
-# NOTE: the Codex additionalContext JSON shape is isolated here on purpose;
-# if empirical testing (plan Task 11) shows different nesting, this is the
-# only place to fix.
+# NOTE: the Codex additionalContext JSON shape is isolated here on purpose.
+# Empirical testing (Task 11, Codex CLI 0.144.5) confirmed the required
+# nesting: Codex's PostToolUse hook-output JSON Schema
+# ("post-tool-use.command.output") sets top-level "additionalProperties": false
+# and only accepts additionalContext INSIDE a "hookSpecificOutput" object that
+# also carries "hookEventName": "PostToolUse". A flat {additionalContext: .}
+# is an unrecognized top-level field and is dropped, so the context never
+# reaches the model. The nested shape below matches the schema.
 
 fi_detect_harness() {
   if [[ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]]; then
@@ -29,7 +34,7 @@ fi_emit_post_context() {
   [[ -z "$text" ]] && return 0
   if [[ "$(fi_detect_harness)" == "codex" ]]; then
     command -v jq >/dev/null 2>&1 || return 0
-    printf '%s' "$text" | jq -Rs '{additionalContext: .}'
+    printf '%s' "$text" | jq -Rs '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: .}}'
   else
     printf '%s\n' "$text"
   fi

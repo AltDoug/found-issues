@@ -212,7 +212,10 @@ run_hook_raw() { # $1=raw json
   export GH_MOCK_PR_DIFF='--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n x'
   run run_hook 'gh pr create' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | jq -e '.additionalContext' >/dev/null
+  # Verified against Codex 0.144.5's PostToolUse hook-output schema (Task 11):
+  # additionalContext nests under hookSpecificOutput with hookEventName.
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
+  [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.hookEventName')" = "PostToolUse" ]
 }
 
 # --- ported from the retired tests/post-pr-state.bats ---

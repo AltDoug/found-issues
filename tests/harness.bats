@@ -35,9 +35,13 @@ teardown() { fi_teardown_tmp; }
 @test "emit: JSON additionalContext on codex" {
   unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
   PLUGIN_DATA=/tmp/x run fi_emit_post_context $'line1\nline "2"'
-  # Valid JSON with the text round-tripping through jq
-  printf '%s' "$output" | jq -e '.additionalContext' >/dev/null
-  [ "$(printf '%s' "$output" | jq -r '.additionalContext')" = $'line1\nline "2"' ]
+  # Codex PostToolUse hook-output schema (verified empirically, Task 11,
+  # codex-cli 0.144.5): additionalContext must be nested under
+  # hookSpecificOutput alongside hookEventName="PostToolUse". A flat
+  # top-level additionalContext is dropped (schema additionalProperties:false).
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
+  [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.hookEventName')" = "PostToolUse" ]
+  [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')" = $'line1\nline "2"' ]
 }
 
 @test "emit: codex without jq emits nothing and exits 0" {
