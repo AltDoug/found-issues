@@ -37,18 +37,35 @@ per-turn token overhead without losing enforcement.
 
 ### Added
 
-- **Codex plugin support.** `.codex-plugin/plugin.json` manifest
-  (mirrors the Claude manifest; points `skills` at `./codex-skills` and
-  `hooks` at `./hooks/hooks.json`). `codex-skills/fi-<name>/SKILL.md` —
-  one generated skill per `commands/*.md`, produced by
-  `scripts/gen-codex-skills.sh` and enforced in sync by
-  `tests/codex-skills-drift.bats`. `hooks/session-start.sh` injects the
-  rules skill body directly into Codex context (Codex has no
-  auto-loaded-skill mechanism) plus the same `[open]`-entry injection
-  Claude Code gets. `lib/harness.sh` detects the running harness
-  (`CLAUDE_CODE_ENTRYPOINT` vs `PLUGIN_DATA`) and formats PostToolUse
-  hook output accordingly — plain text on Claude, `{additionalContext:
-  ...}` JSON on Codex.
+- **Codex plugin support.** found-issues installs into OpenAI Codex
+  alongside Claude Code, sharing one ledger, one CLI, and one hook set.
+  - **Skills.** `codex-skills/fi-<name>/SKILL.md` — one generated skill
+    per `commands/*.md`, produced by `scripts/gen-codex-skills.sh` (Claude
+    slash syntax like `/found-issues:log` rewritten to Codex's `$fi-log`
+    `$`-mention sigil) and kept in sync by `tests/codex-skills-drift.bats`.
+    `.codex-plugin/plugin.json` is the Codex manifest (mirrors the Claude
+    one; points `skills` at `./codex-skills`).
+  - **Hooks install via `found-issues install-codex-hooks`.** Codex 0.144.5
+    removed `plugin_hooks`, so the manifest's `hooks` pointer is inert on
+    Codex — hooks are instead merged into Codex's user-level
+    `$CODEX_HOME/hooks.json` by `install-codex-hooks` (and removed by
+    `uninstall-codex-hooks`, which touches only found-issues' own entries).
+    Each installed hook command is prefixed `env FOUND_ISSUES_HARNESS=codex`
+    so it self-identifies without relying on `PLUGIN_DATA`.
+  - **Harness adapter.** `lib/harness.sh` detects the running harness
+    (`FOUND_ISSUES_HARNESS` override, else `CLAUDE_CODE_ENTRYPOINT` vs
+    `PLUGIN_DATA`) and formats hook output for it: plain stdout on Claude
+    Code (legacy contract), and the **`hookSpecificOutput` envelope** on
+    Codex — `{hookSpecificOutput: {hookEventName, additionalContext}}` with
+    `hookEventName` set to `PostToolUse` or `SessionStart` — the shape
+    Codex 0.144.5's hook-output JSON Schema requires (a flat
+    `{additionalContext}` is dropped). `hooks/session-start.sh` injects the
+    rules-skill body into Codex context (Codex has no auto-loaded-skill
+    mechanism), rewritten through the same `lib/codex-rewrite.sh` the skill
+    generator uses, plus the same `[open]`-entry injection Claude Code gets.
+  - **Env vars.** `FOUND_ISSUES_HARNESS` (`claude`|`codex`) forces the
+    harness; `FOUND_ISSUES_CODEX_HOME` overrides the `$CODEX_HOME` default
+    (`$HOME/.codex`) that the install/uninstall commands target.
 - `--hook-auto` flag on `annotate-pr` / `annotate-commit`: a stricter
   auto-annotation mode used by the post-bash dispatcher — only annotates
   entries whose cited line falls inside the PR/commit diff's changed

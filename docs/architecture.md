@@ -210,13 +210,10 @@ The lifecycle of a single issue from observation to closure:
 3. **Format check** — Claude's session ends; the next time Claude edits `docs/found-issues.md` directly via Write/Edit, the `format-enforcer` PreToolUse hook fires. If the edit would introduce a malformed line, it blocks (exit 2) with a helpful error.
 
 4. **PR opens** — Some session later, Claude fixes the bug as part of task Y. After `gh pr create --title "fix: null check"`:
-   - `post-bash-dispatch.sh` (PostToolUse on Bash) fires
-   - Hook extracts PR number from stdout (`https://github.com/.../pull/42`)
-   - Calls `gh pr view 42 --json files` to get touched files
-   - Cross-references against `[open]` entries' paths via `lib/parse-entries.sh`
-   - Outputs to Claude: "PR #42 touches files matching these entries: ..."
-   - Claude reads the output, runs `/found-issues:annotate-pr 42` immediately
-   - The CLI appends `(PR: org/repo#42)` to the matching entry
+   - `post-bash-dispatch.sh` (PostToolUse on Bash) fires and extracts the PR number from stdout (`https://github.com/.../pull/42`)
+   - It runs `found-issues annotate-pr 42 --hook-auto`, which cross-references the PR's diff against `[open]` entries. For each entry whose cited `path:line` falls inside a line the diff actually **modifies** (removes), the CLI appends `(PR: org/repo#42)` silently and reports the annotation in one line — no round-trip through Claude
+   - Entries that match a touched file but whose cited line the diff did *not* change — or where several entries contest the same file — are **not** annotated. They surface as candidates: the hook prints them with the exact `found-issues annotate-pr 42 --pick <path:line>` (or `--all`) command for Claude to run after a symptom-level judgment call
+   - Only under `FOUND_ISSUES_AUTO_ANNOTATE=off` does the hook fall back to the legacy flow of merely prompting Claude to run `/found-issues:annotate-pr 42` itself
 
 5. **PR merges** — On GitHub, the PR merges to main. Claude isn't running.
 
