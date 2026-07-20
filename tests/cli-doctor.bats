@@ -35,9 +35,11 @@ teardown() {
 @test "doctor: prints CLI version in header" {
   fi_run doctor
   [ "$status" -eq 0 ]
-  # Header should mention the version string
+  # Header should mention the version string. Match "vX.Y.Z" generically
+  # instead of hardcoding a major version — this hardcoded "v1." and broke
+  # on the v2.0.0 bump; a regex keeps future bumps from re-breaking it.
   [[ "$output" == *"found-issues doctor"* ]]
-  [[ "$output" == *"v1."* ]]
+  [[ "$output" =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]
 }
 
 @test "doctor: reports 'no issues file' when none present" {

@@ -94,7 +94,7 @@ entries, consuming `list --json`).
 ### Hooks (enforcement layer)
 
 Bash scripts in `hooks/` registered via `hooks/hooks.json`. They turn
-the CLAUDE.md rules into mechanical behavior. Seven lifecycle hooks plus
+the CLAUDE.md rules into mechanical behavior. Five lifecycle hooks plus
 one optional per-repo git hook:
 
 | Hook | Event | Job |
@@ -108,6 +108,33 @@ one optional per-repo git hook:
 
 Hooks fail open — if anything goes wrong, they exit 0 silently rather
 than break the session.
+
+### Harness adapters
+
+One CLI, one `lib/`, one ledger — two thin adapters translate the same
+core into each harness's own UI conventions:
+
+- **Claude Code adapter** — `commands/*.md` slash commands
+  (`/found-issues:<name>`) plus the auto-loaded `skills/rules/SKILL.md`
+  skill (rules injected into context every session via the plugin's
+  auto-load mechanism).
+- **Codex adapter** — `codex-skills/fi-<name>/SKILL.md`, generated from
+  `commands/*.md` by `scripts/gen-codex-skills.sh` (invoked as `$fi-<name>`
+  mentions or by description match), plus SessionStart rules injection:
+  `hooks/session-start.sh` emits the rules body directly into context on
+  Codex, since Codex has no auto-loaded-skill mechanism equivalent to
+  Claude's.
+
+Hooks themselves are shared, not adapted — `hooks/hooks.json` and every
+script in `hooks/` run unmodified on both harnesses; the same JSON
+payload shape arrives on stdin either way. `lib/harness.sh` is the one
+harness-detection point: `fi_detect_harness` reads
+`CLAUDE_CODE_ENTRYPOINT` (Claude) vs `PLUGIN_DATA` (Codex), and
+`fi_emit_post_context` formats PostToolUse hook output for whichever
+harness is running — plain text on Claude, `{additionalContext: ...}`
+JSON on Codex. Both adapters read and write the same committed
+`docs/found-issues.md` — a repo worked on from both harnesses shares one
+ledger with no migration step.
 
 ### CLI (`bin/found-issues`)
 

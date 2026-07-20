@@ -48,6 +48,22 @@ straight to main lately.
 | SessionStart count + sync | yes | yes | yes | yes |
 | Stop-hook reminder | yes | yes | yes | yes |
 
+## Harness-agnostic: same mode, same ledger, on Claude Code or Codex
+
+Mode detection and the annotation/closure mechanisms above are entirely
+about the *repo's* git/GitHub state — they don't care which agent harness
+is driving. A repo detected as `github-pr` behaves identically whether
+Claude Code or Codex opened the session, and both harnesses read and
+write the same `docs/found-issues.md`.
+
+One row in the behavior matrix above is harness-limited rather than
+mode-limited: the **Stop-hook reminder** is Claude Code only in v1 —
+Codex's transcript format isn't parsed by the smart-fire logic, so the
+hook fails open there regardless of mode. **SessionStart count + sync**
+runs on both harnesses, but only Claude Code has a statusline surface to
+render the count as a segment; Codex gets the same entries injected into
+context at session start with no persistent glance-view.
+
 ## Mixed workflows: PR sometimes, push direct sometimes
 
 A repo where you sometimes open PRs (for big features) and sometimes

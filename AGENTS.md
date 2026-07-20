@@ -5,9 +5,9 @@ follow these instructions exactly. **Do not improvise.**
 
 ## How to install
 
-This is a Claude Code plugin. Install via the plugin marketplace, then
-start a new session before running setup (the plugin's hooks load at
-session boundary):
+This is a dual-harness plugin for Claude Code and OpenAI Codex. Install
+via the plugin marketplace, then start a new session before running
+setup (the plugin's hooks load at session boundary):
 
 ```
 /plugin marketplace add AltDoug/claude-plugins
@@ -64,20 +64,31 @@ setup flow itself never auto-fires — it stays explicit and opt-in via
 (v0.1.5 regression), but hijacking the user's first prompt with a banner
 is sloppy UX — one italic line is the compromise (v0.1.10).
 
-## If the user is NOT using Claude Code
+## Installing for Codex
 
-This plugin requires Claude Code. If the user is using a different agent
-(Codex, Cursor, Aider, plain Claude API, etc.), tell them:
+found-issues is dual-harness: the same plugin installs into OpenAI Codex.
 
-> `found-issues` is currently a Claude Code plugin. The markdown format
-> (`docs/found-issues.md`) is portable, but the slash commands and hooks
-> require Claude Code. You can adopt the format manually — see the format
-> spec at <https://github.com/AltDoug/found-issues/blob/main/docs/format-spec.md>
-> — but the automated logging/sync/annotation flow won't work without
-> Claude Code.
+```
+codex plugin marketplace add AltDoug/claude-plugins
+codex plugin install found-issues
+```
 
-Do not attempt to manually replicate the system in a non-Claude-Code
-environment. The architecture depends on Claude Code's hook system.
+Then start a new Codex session. The SessionStart hook injects the agent
+rules and any open ledger entries; skills are available as `fi-log`,
+`fi-sync`, `fi-status`, etc. (explicitly via `$fi-log` mentions or
+implicitly by description match).
+
+The ledger is the same committed `docs/found-issues.md` in either harness —
+a repo worked on from both Claude Code and Codex shares one ledger with no
+migration or sync step. Known v1 limitations on Codex: no statusline
+counter (Codex has no statusline surface) and the stop-hook marker
+discipline is inactive (documented in the ledger).
+
+## Other agents (Cursor, Aider, plain API)
+
+The markdown format is portable — see
+<https://github.com/AltDoug/found-issues/blob/main/docs/format-spec.md> —
+but hooks and skills require Claude Code or Codex.
 
 ## Verifying the install worked
 
@@ -123,6 +134,15 @@ uninstall, or plugin-private state will be orphaned in `~/.claude/`.
 /found-issues:uninstall                            # 1. plugin's own cleanup
 /plugin uninstall found-issues                     # 2. platform uninstall
 /plugin marketplace remove altdoug-plugins         # 3. (only if also removing the marketplace)
+```
+
+On Codex the same order applies, via the `fi-uninstall` skill before the
+platform uninstall:
+
+```
+$fi-uninstall                                      # 1. plugin's own cleanup
+codex plugin uninstall found-issues                # 2. platform uninstall
+codex plugin marketplace remove altdoug-plugins    # 3. (only if also removing the marketplace)
 ```
 
 Why the order: `/plugin uninstall` (Claude Code's built-in command) only

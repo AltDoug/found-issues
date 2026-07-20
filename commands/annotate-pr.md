@@ -55,14 +55,17 @@ Pass the result through to the user.
 
 ## When to invoke
 
-The `post-bash-dispatch` hook should surface relevant entries automatically
-right after `gh pr create` runs. That output includes the suggested
-command line. **Run the suggested `/found-issues:annotate-pr <N>` immediately** —
-do not defer.
+The post-bash dispatcher hook normally handles this automatically
+(`--hook-auto`: line-matched entries annotate silently; exit 3 surfaces
+candidates). This command is the manual fallback for web-UI PRs or when
+hooks are disabled.
 
-If the hook didn't fire (e.g., user opened the PR via the GitHub web UI
-or via a non-Bash tool), the user can invoke this command manually with
-the PR number.
+If the hook did surface a candidate list (exit 3) right after `gh pr create`,
+that output includes the suggested `--pick` command line — **run it
+immediately**, don't defer. If the hook didn't fire at all (e.g., user
+opened the PR via the GitHub web UI or via a non-Bash tool, or
+`FOUND_ISSUES_AUTO_ANNOTATE=off`), invoke this command manually with the
+PR number.
 
 ## Multi-PR entries
 

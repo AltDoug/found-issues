@@ -11,12 +11,21 @@ overrides.
 
 ## Hook opt-outs
 
-The plugin registers 7 hooks (see [architecture](architecture.md) for the
-full table). Four of them have a whole-hook `=off` switch, listed below
-alongside two related switches: the opt-in git pre-commit hook's, and the
-SessionStart hook's auto-migration switch. `session-start` and
-`post-bash-dispatch` have no whole-hook switch — they are informational
-and never block.
+The plugin registers 5 hooks in `hooks/hooks.json` (see
+[architecture](architecture.md) for the full table): `format-enforcer`,
+`pre-branch-delete`, `post-bash-dispatch`, `session-start`, and
+`stop-reminder`. `post-bash-dispatch` is a router — it fires on every
+PostToolUse `Bash` call and dispatches up to three independent routes
+(auto-annotate after `gh pr create`, auto-annotate after `git commit`,
+background sync after `gh pr merge`/`close`/`reopen`), so it has two
+route-scoped opt-outs (`FOUND_ISSUES_AUTO_ANNOTATE`,
+`FOUND_ISSUES_POST_PR_STATE`) instead of one whole-hook switch. Three
+hooks (`stop-reminder`, `pre-branch-delete`, `format-enforcer`) have a
+whole-hook `=off` switch, listed below alongside the route-scoped
+switches, the opt-in git pre-commit hook's, and the SessionStart hook's
+auto-migration switch. `session-start` and `post-bash-dispatch` are
+informational/additive and never block a tool call, on top of their
+individual opt-outs.
 
 | Variable | Default | What it controls |
 |---|---|---|
@@ -26,8 +35,11 @@ and never block.
 | `FOUND_ISSUES_FORMAT_ENFORCER` | `on` | The `PreToolUse` format-enforcer that validates entries written via `Write` / `Edit` / `MultiEdit`. In `local` mode it's already off; in `git` mode it warns-only; in `github-*` modes it hard-blocks. Set to `off` to disable globally. |
 | `FOUND_ISSUES_PRE_COMMIT` | `on` | The optional per-repo `pre-commit.sh` git hook (installed manually: `cp <plugin-root>/hooks/pre-commit.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit` — there is no installer subcommand). Same validation rules as the in-Claude-Code enforcer but at git commit time. Set to `off` to disable. |
 | `FOUND_ISSUES_AUTO_ARCHIVE` | `on` | The auto-archive that runs after every `/found-issues:sync`. Moves old `[fixed]` entries to `docs/found-issues-archive.md` per the count + days thresholds. Set to `off` if you'd rather control archiving manually via `/found-issues:archive`. |
-| `FOUND_ISSUES_POST_PR_STATE` | `on` | The PostToolUse Bash hook that fires `found-issues sync` in the background after `gh pr merge` / `gh pr close` / `gh pr reopen`. Lets the statusline reflect the new state immediately instead of waiting for the next session start. Set to `off` if you'd rather sync only at SessionStart. |
+| `FOUND_ISSUES_AUTO_ANNOTATE` | `on` | The `post-bash-dispatch` routes that auto-annotate after `gh pr create` / `git commit`. Line-matched `[open]` entries (the PR/commit diff actually touches the cited line) annotate silently with `(PR: org/repo#N)` / `(commit: <sha>)`; entries needing judgment are surfaced as a candidate list instead. Set to `off` to fall back to the pre-2.0 behavior: the hook only prompts (`/found-issues:annotate-pr <N>` / `/found-issues:annotate-commit`), annotating nothing itself. |
+| `FOUND_ISSUES_AUTO_ANNOTATE_MAX` | `3` | Mass-touch guard for `--hook-auto` mode. If a single PR or commit would silently auto-annotate more than this many entries (a sweep PR line-matching everything — the shape of the 2026-07-09 over-annotation incident), the hook annotates none of them and surfaces the full candidate list for manual `--pick`/`--all` instead. |
+| `FOUND_ISSUES_POST_PR_STATE` | `on` | The `post-bash-dispatch` route that fires `found-issues sync` in the background after `gh pr merge` / `gh pr close` / `gh pr reopen`. Lets the statusline reflect the new state immediately instead of waiting for the next session start. Set to `off` to disable just this route — the hook's annotation routes above keep running. |
 | `FOUND_ISSUES_AUTO_MIGRATE` | `on` | The SessionStart auto-migration of broken statusline marker blocks (v1.4.x POSIX-only and v1.5.0–v1.5.5 `--cwd`-less custom targets). Set to `off` to keep session start fully hands-off and migrate manually via `found-issues install-statusline --target <path> --apply`. |
+| `FOUND_ISSUES_SESSION_INJECT_MAX` | `15` | Caps how many `[open]` entries the SessionStart hook injects into context. Critical (`[!]`) entries are always injected in full; the newest non-critical entries fill the remaining slots up to this cap; anything past the cap is summarized as a one-line count instead of injected verbatim. Raise it for repos with a large deliberate backlog you want fully visible every session; lower it to shrink the SessionStart token cost. |
 | `FOUND_ISSUES_SEGMENT_AUTOSYNC` | `on` | Throttled in-segment background sync (default once per 10 min). Triggered from `found-issues status --format=segment` — runs detached, statusline returns immediately. Set to `off` to disable the auto-refresh entirely. |
 
 Example — silence the Stop reminder and disable auto-archive, but keep

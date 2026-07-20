@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**7 lifecycle hooks · 13 slash commands · 575 tests on Linux/macOS/Windows · zero manual bookkeeping**
+**5 lifecycle hooks · 13 slash commands · 618 tests on Linux/macOS/Windows · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -50,6 +50,22 @@ That wires the statusline counter (so open issues stay visible at a
 glance), the optional `/fi` shortcut, and the optional git pre-commit
 hook. SSH install errors and update/uninstall details: [footnotes below](#install-notes).
 
+### Codex
+
+found-issues is dual-harness — the same plugin installs into OpenAI
+Codex:
+
+```
+codex plugin marketplace add AltDoug/claude-plugins
+codex plugin install found-issues
+```
+
+Then start a new Codex session. The ledger (`docs/found-issues.md`) is
+shared across harnesses with no migration or sync step — a repo worked
+on from both Claude Code and Codex is just one ledger. Skills are
+available as `$fi-log`, `$fi-sync`, `$fi-status`, etc. Details and known
+v1 gaps (no statusline, no stop-hook marker on Codex): [`AGENTS.md`](AGENTS.md#installing-for-codex).
+
 ## Quick start
 
 Just work normally — Claude logs out-of-scope findings on its own. To
@@ -77,8 +93,8 @@ The closure loop runs **on its own**:
 | When | What happens |
 |---|---|
 | Claude notices an out-of-scope issue | Logs it via `/found-issues:log` per the auto-loaded [rules](skills/rules/SKILL.md) |
-| Claude opens a PR addressing an entry | Hook surfaces matching entries, prompts `/found-issues:annotate-pr <N>` |
-| Claude commits a fix directly to main | Hook prompts `/found-issues:annotate-commit` |
+| Claude opens a PR addressing an entry | Hook auto-annotates line-matched entries silently; ambiguous cases surface as a candidate list for `/found-issues:annotate-pr <N> --pick` |
+| Claude commits a fix directly to main | Hook auto-annotates line-matched entries silently; ambiguous cases surface for `/found-issues:annotate-commit` |
 | PR merges or commit lands on main | Background sync flips `[open]` → `[fixed]` automatically — instantly when merged from inside the session, within ~10min for external merges, always at the next `SessionStart` as a fallback |
 | Referenced file/line is deleted | Tombstone detection auto-closes the entry |
 | Branch with un-promoted entries about to be deleted | `pre-branch-delete` hook blocks until `/found-issues:promote` runs |
@@ -178,7 +194,7 @@ three platforms.
 
 ## Status
 
-**v1.7.1** — actively developed and dogfooded (this repo's own ledger is
+**v2.0.0** — actively developed and dogfooded (this repo's own ledger is
 maintained by the plugin, including a `/found-issues:fix` run that
 closed it to zero). End-to-end runtime probes exercise the generated
 statusline shims against synthetic Claude Code stdin on every CI run.
