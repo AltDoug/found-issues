@@ -7,7 +7,7 @@ Every release commit must update **four places in lockstep**:
 1. `FI_VERSION` in `bin/found-issues` (line 9)
 2. A new `## [X.Y.Z] — YYYY-MM-DD` section at the top of `CHANGELOG.md` (immediately after `## [Unreleased]`)
 3. `"version"` in `.claude-plugin/plugin.json` — this is the manifest Claude Code reads to advertise the installed version. Drift here silently lies to users about which release they're on.
-4. The "Status & roadmap" header in `README.md`
+4. The "Status" header in `README.md`
 
 `scripts/check-version.sh` (run in CI) enforces invariants #1, #2, and #3 plus the bump-classification rule below.
 
@@ -82,7 +82,7 @@ When opening a release PR:
 1. [ ] Edit `FI_VERSION` in `bin/found-issues`
 2. [ ] Edit `"version"` in `.claude-plugin/plugin.json` to match
 3. [ ] Add a `## [X.Y.Z] — YYYY-MM-DD` section in `CHANGELOG.md` with the right `### Added` / `### Changed` / `### Fixed` / `### Removed` / `### Security` subsections
-4. [ ] Update the `## Status & roadmap` header in `README.md`
+4. [ ] Update the `## Status` section in `README.md`
 5. [ ] Run `bash scripts/check-version.sh` locally — must pass before push
 6. [ ] PR title: `release: vX.Y.Z` (or include the version in a feature-focused title; CI keys off the version files, not the PR title)
 7. [ ] After merge: `git tag -a vX.Y.Z -m "vX.Y.Z" <merge_sha> && git push origin vX.Y.Z`
