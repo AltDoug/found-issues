@@ -69,8 +69,11 @@ teardown() { fi_teardown_tmp; }
   # hookSpecificOutput alongside hookEventName="PostToolUse". A flat
   # top-level additionalContext is dropped (schema additionalProperties:false).
   printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
-  [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.hookEventName')" = "PostToolUse" ]
-  [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')" = $'line1\nline "2"' ]
+  # Compare inside jq, not on jq -r output: jq on Windows writes stdout in
+  # text mode (\r\n), which pollutes decoded multiline strings and fails
+  # bash-side equality even when the JSON is byte-correct.
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext == "line1\nline \"2\""' >/dev/null
 }
 
 @test "emit: codex without jq emits nothing and exits 0" {
@@ -93,8 +96,10 @@ teardown() { fi_teardown_tmp; }
   # additionalContext nested under hookSpecificOutput, hookEventName is
   # the literal event name for this hook.
   printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null
-  [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.hookEventName')" = "SessionStart" ]
-  [ "$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')" = $'line1\nline "2"' ]
+  # In-jq comparisons for the same Windows text-mode reason as the
+  # PostToolUse emit test above.
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext == "line1\nline \"2\""' >/dev/null
 }
 
 @test "session-emit: codex without jq emits nothing and exits 0" {
