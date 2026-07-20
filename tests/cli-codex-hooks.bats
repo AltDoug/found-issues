@@ -32,10 +32,46 @@ teardown() { fi_teardown_tmp; }
   jq -e '.hooks.PreToolUse[1].hooks[0].command | contains("/hooks/pre-branch-delete.sh")' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PostToolUse[0].hooks[0].command | contains("/hooks/post-bash-dispatch.sh")' "$CODEX_HOME/hooks.json"
 
-  # Absolute path — every installed command's script path starts with "/".
-  run jq -r '.hooks.SessionStart[0].hooks[0].command | capture("codex (?<p>\\S+)$").p' "$CODEX_HOME/hooks.json"
+  # Quote-safety (found-issues.md:4368 fix): the script path is
+  # single-quoted, e.g. `env FOUND_ISSUES_HARNESS=codex '<ABS>/hooks/session-start.sh'`
+  # — not the bare unquoted form.
+  jq -e '.hooks.SessionStart[0].hooks[0].command | test("env FOUND_ISSUES_HARNESS=codex '\''.*/hooks/session-start\\.sh'\''$")' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PreToolUse[0].hooks[0].command | test("env FOUND_ISSUES_HARNESS=codex '\''.*/hooks/format-enforcer\\.sh'\''$")' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PreToolUse[1].hooks[0].command | test("env FOUND_ISSUES_HARNESS=codex '\''.*/hooks/pre-branch-delete\\.sh'\''$")' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PostToolUse[0].hooks[0].command | test("env FOUND_ISSUES_HARNESS=codex '\''.*/hooks/post-bash-dispatch\\.sh'\''$")' "$CODEX_HOME/hooks.json"
+
+  # Absolute path — the quoted script path starts with '/ (open quote, then /).
+  run jq -r '.hooks.SessionStart[0].hooks[0].command | capture("codex (?<p>'\''.*'\'')$").p' "$CODEX_HOME/hooks.json"
   [ "$status" -eq 0 ]
-  [[ "$output" == /* ]]
+  [[ "$output" == "'"/* ]]
+}
+
+@test "install-codex-hooks: generated commands are space-safe (checkout copied under a path with a space)" {
+  CODEX_HOME="$TMP/codex-home"
+  copy_root="$TMP/with space/root"
+  mkdir -p "$copy_root"
+  cp -R "$TEST_REPO_ROOT/bin" "$TEST_REPO_ROOT/lib" "$TEST_REPO_ROOT/hooks" "$copy_root/"
+  chmod +x "$copy_root/bin/found-issues"
+
+  run "$copy_root/bin/found-issues" install-codex-hooks --codex-home "$CODEX_HOME"
+  [ "$status" -eq 0 ]
+
+  # Quoted form present, and the space-bearing segment sits inside the
+  # quotes (not split into a bare unquoted path).
+  jq -e '.hooks.SessionStart[0].hooks[0].command | test("'\''.*/with space/root/hooks/session-start\\.sh'\''$")' "$CODEX_HOME/hooks.json"
+
+  # Full e2e: each generated command string round-trips through `bash -c`
+  # as one correctly-split invocation. An unquoted space would word-split
+  # the path — bash would try to exec the truncated prefix, exit 127
+  # "command not found" instead of 0.
+  for key in '.hooks.SessionStart[0].hooks[0].command' \
+             '.hooks.PreToolUse[0].hooks[0].command' \
+             '.hooks.PreToolUse[1].hooks[0].command' \
+             '.hooks.PostToolUse[0].hooks[0].command'; do
+    cmd="$(jq -r "$key" "$CODEX_HOME/hooks.json")"
+    run bash -c "$cmd" < /dev/null
+    [ "$status" -eq 0 ]
+  done
 }
 
 @test "install-codex-hooks: preserves a pre-existing user hook entry" {
@@ -78,7 +114,7 @@ EOF
   jq -e '.hooks.SessionStart | length == 1' "$CODEX_HOME/hooks.json"
   run jq -r '.hooks.SessionStart[0].hooks[0].command' "$CODEX_HOME/hooks.json"
   [[ "$output" != *"/old/cache/"* ]]
-  [[ "$output" == *"/hooks/session-start.sh" ]]
+  [[ "$output" == *"/hooks/session-start.sh'" ]]
 }
 
 @test "uninstall-codex-hooks: removes only our entries" {

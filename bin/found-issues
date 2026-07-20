@@ -4358,17 +4358,34 @@ fi_codex_hooks_dir() {
   printf '%s/hooks' "$(cd "$FI_BIN_DIR/.." && pwd)"
 }
 
+# Single-quote $1 for safe embedding in a generated shell command string
+# (found-issues.md:4368 — an unquoted install root breaks on a path
+# containing a space, same class as the fixed bin/found-issues:927
+# segment-autosync bug). Escapes embedded single quotes via the standard
+# close-escape-reopen technique: ' -> '\''.
+fi_shell_quote() {
+  local s="$1"
+  printf "'%s'" "${s//\'/\'\\\'\'}"
+}
+
 # Build the JSON object of found-issues' own hook entries (3 events, 4
 # command entries — no Stop), commands resolved to the current install
-# root.
+# root. Each script path is single-quoted (fi_shell_quote) so the
+# generated command string is safe if the install root ever contains a
+# space or other shell-special character.
 fi_codex_hooks_new_entries_json() {
   local hooks_dir
   hooks_dir="$(fi_codex_hooks_dir)"
+  local q_session q_fmt q_preb q_postb
+  q_session="$(fi_shell_quote "$hooks_dir/session-start.sh")"
+  q_fmt="$(fi_shell_quote "$hooks_dir/format-enforcer.sh")"
+  q_preb="$(fi_shell_quote "$hooks_dir/pre-branch-delete.sh")"
+  q_postb="$(fi_shell_quote "$hooks_dir/post-bash-dispatch.sh")"
   jq -n \
-    --arg session_cmd "env FOUND_ISSUES_HARNESS=codex $hooks_dir/session-start.sh" \
-    --arg fmt_cmd "env FOUND_ISSUES_HARNESS=codex $hooks_dir/format-enforcer.sh" \
-    --arg preb_cmd "env FOUND_ISSUES_HARNESS=codex $hooks_dir/pre-branch-delete.sh" \
-    --arg postb_cmd "env FOUND_ISSUES_HARNESS=codex $hooks_dir/post-bash-dispatch.sh" \
+    --arg session_cmd "env FOUND_ISSUES_HARNESS=codex $q_session" \
+    --arg fmt_cmd "env FOUND_ISSUES_HARNESS=codex $q_fmt" \
+    --arg preb_cmd "env FOUND_ISSUES_HARNESS=codex $q_preb" \
+    --arg postb_cmd "env FOUND_ISSUES_HARNESS=codex $q_postb" \
     '{
       SessionStart: [ { hooks: [ { type: "command", command: $session_cmd } ] } ],
       PreToolUse: [
