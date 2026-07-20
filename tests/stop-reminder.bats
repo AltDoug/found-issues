@@ -333,3 +333,19 @@ TRANSCRIPT
   [ "$status" -eq 0 ] || { echo "FAIL: expected exit 0 (marker present), got $status. Full output:"; echo "$output"; false; }
   rm -f "$TR"
 }
+
+@test "stop-reminder: codex harness exits 0 without reading stdin transcript" {
+  unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
+  TR="$(mktemp)"
+  # Substantive tool use without marker would normally block (exit 2) on Claude,
+  # but with Codex detection it should exit 0 (fail open).
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+  export PLUGIN_DATA="$TMP/pd"
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "echo '$input' | PLUGIN_DATA='$PLUGIN_DATA' '$HOOK'"
+  [ "$status" -eq 0 ]
+  rm -f "$TR"
+}

@@ -75,3 +75,32 @@ fi_first_line() {
 @test "docs-consistency: fix.md forbids annotate-pr --all" {
   grep -q 'never .*--all' "$REPO_ROOT/commands/fix.md"
 }
+
+@test "docs-consistency: README test-count stat matches actual @test count across tests/*.bats" {
+  # found-issues.md 2026-07-20 (README.md:11) — the stat strip's literal
+  # "N tests" number drifts every time a test is added without a matching
+  # README edit (it already said "618" while the suite was at 623+ before
+  # this test existed). Turn that into a CI failure instead of a ledger
+  # entry: compute the actual count here and compare.
+  local actual=0 f n
+  for f in "$REPO_ROOT"/tests/*.bats; do
+    n="$(grep -c '^@test ' "$f")"
+    actual=$(( actual + n ))
+  done
+
+  local stated
+  stated="$(grep -oE '[0-9]+ tests on Linux/macOS/Windows' "$README" | grep -oE '^[0-9]+')"
+  [ -n "$stated" ]
+
+  echo "README states \"$stated tests\"; tests/*.bats actually defines $actual @test cases."
+  if [ "$stated" -ne "$actual" ]; then
+    echo "FIX: update the '... tests on Linux/macOS/Windows' stat-strip line near the top of README.md to say \"$actual tests\"."
+  fi
+  [ "$stated" -eq "$actual" ]
+}
+
+@test "rules skill stays under the 3.7KB injection budget" {
+  size=$(wc -c < "$TEST_REPO_ROOT/skills/rules/SKILL.md")
+  # budget raised 3584->3700 on review to restore the commit-annotation rule; the diet target is the 8.6KB->3.6KB reduction, not the exact byte line.
+  [ "$size" -le 3700 ]
+}

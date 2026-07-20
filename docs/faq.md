@@ -84,18 +84,41 @@ See [`docs/modes.md`](modes.md) for details.
 
 ## Does this require Claude Code?
 
-The plugin is for Claude Code specifically. Hooks, slash commands, and
-the auto-loading skill all use Claude Code's plugin spec.
+No — found-issues is dual-harness: the same plugin installs into both
+Claude Code and OpenAI Codex. Claude Code gets slash commands
+(`/found-issues:<name>`) plus the auto-loaded rules skill; Codex gets
+generated skills (`$fi-<name>`) plus SessionStart rules injection. Both
+run the same hooks and CLI underneath.
 
 The markdown format itself (`docs/found-issues.md` with the canonical
-entry shape) is portable. You could adopt the convention manually with a
-different agent — but you'd lose the automation.
+entry shape) is portable beyond both. You could adopt the convention
+manually with a different agent (Cursor, Aider, plain API) — but you'd
+lose the automation; see [`docs/format-spec.md`](format-spec.md).
 
-## Will it work with Codex / Cursor / Aider?
+## Does the ledger stay in sync between Claude Code and Codex?
 
-Not currently. The architecture relies on Claude Code's hook lifecycle
-events (PreToolUse, PostToolUse, SessionStart, Stop). Other agents have
-different (or no) hook systems.
+Yes, trivially — there's only ever one ledger. `docs/found-issues.md` is
+a single committed file; whichever harness is running reads and writes
+the same file, so a repo worked on from both Claude Code and Codex in
+the same day shares one ledger with no migration or sync step required.
+
+Two known v1 gaps on Codex specifically:
+
+- **No statusline counter.** Codex has no statusline surface, so the
+  `3 critical · 12 other` glance-view only exists in Claude Code. The
+  SessionStart entry injection and `found-issues status` still work on
+  Codex — you just don't get the always-visible segment.
+- **No stop-hook marker discipline.** The `<!-- found-issues-checked:
+  ... -->` enforcement is Claude-only in v1 — Codex's transcript format
+  isn't parsed by the smart-fire logic, so the hook fails open (never
+  blocks) on Codex. Logging still works via the auto-injected rules;
+  it's just not mechanically enforced every turn.
+
+## Will it work with Cursor / Aider / plain API?
+
+Not currently. Beyond Claude Code and Codex, the architecture relies on
+hook lifecycle events (PreToolUse, PostToolUse, SessionStart, Stop) that
+other agents don't expose the same way.
 
 If there's demand, the slash commands and CLI could be extracted into a
 universal layer, with per-agent integration shims. Open an issue if you
@@ -181,8 +204,8 @@ for an hour.
 The Stop-hook reminder runs every turn but is essentially instant (a
 single `tail -c 8192` + grep).
 
-PostToolUse hooks (post-pr-create, post-git-commit) only fire when their
-matched commands run, so they don't add per-turn overhead.
+The PostToolUse hook (post-bash-dispatch) only fires when its matched
+commands run, so it doesn't add per-turn overhead.
 
 ## What about repos I don't want this for?
 

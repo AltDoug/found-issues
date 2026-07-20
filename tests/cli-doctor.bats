@@ -35,9 +35,11 @@ teardown() {
 @test "doctor: prints CLI version in header" {
   fi_run doctor
   [ "$status" -eq 0 ]
-  # Header should mention the version string
+  # Header should mention the version string. Match "vX.Y.Z" generically
+  # instead of hardcoding a major version — this hardcoded "v1." and broke
+  # on the v2.0.0 bump; a regex keeps future bumps from re-breaking it.
   [[ "$output" == *"found-issues doctor"* ]]
-  [[ "$output" == *"v1."* ]]
+  [[ "$output" =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]
 }
 
 @test "doctor: reports 'no issues file' when none present" {
@@ -272,6 +274,30 @@ EOF
 EOF
   HOME="$(pwd)/tmp" fi_run doctor
   echo "$output" | grep -qE "splice gap|output statements"
+}
+
+@test "doctor: runtime probe emits no arithmetic noise when grep counts are zero" {
+  mkdir -p tmp/.claude
+  cat > tmp/.found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — entry
+EOF
+  # Statusline with NO output statements and NO seg markers: both grep -c
+  # probes find nothing (print 0 AND exit 1), and the script renders nothing
+  # so the probe takes the FAIL path into sub-probe (b).
+  cat > tmp/custom.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+: "$input"
+EOF
+  chmod +x tmp/custom.sh
+  cat > tmp/.claude/settings.json <<EOF
+{"statusLine": {"command": "bash $(pwd)/tmp/custom.sh"}}
+EOF
+  HOME="$(pwd)/tmp" fi_run doctor
+  doctor_output="$output"
+  echo "$doctor_output" | grep -q "did NOT render"
+  run grep -q "syntax error" <<<"$doctor_output"
+  [ "$status" -ne 0 ]
 }
 
 @test "doctor-statusline-runtime: standalone subcommand emits only the runtime probe section" {

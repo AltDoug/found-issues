@@ -28,9 +28,7 @@ How the pieces fit together.
                     │  • PreToolUse(Bash)              │
                     │      └► pre-branch-delete        │
                     │  • PostToolUse(Bash)             │
-                    │      └► post-pr-create           │
-                    │      └► post-git-commit          │
-                    │      └► post-pr-state            │
+                    │      └► post-bash-dispatch       │
                     └────────────────┬─────────────────┘
                                      │
                                      │ shell out
@@ -95,9 +93,12 @@ entries, consuming `list --json`).
 
 ### Hooks (enforcement layer)
 
-Bash scripts in `hooks/` registered via `hooks/hooks.json`. They turn
-the CLAUDE.md rules into mechanical behavior. Seven lifecycle hooks plus
-one optional per-repo git hook:
+Bash scripts in `hooks/`, registered via `hooks/hooks.json` on Claude
+Code (the plugin manifest) or via `found-issues install-codex-hooks`
+into `$CODEX_HOME/hooks.json` on Codex — see Harness adapters below for
+why registration differs by harness. They turn the CLAUDE.md rules into
+mechanical behavior. Five lifecycle hooks plus one optional per-repo git
+hook:
 
 | Hook | Event | Job |
 |---|---|---|
@@ -105,13 +106,57 @@ one optional per-repo git hook:
 | `stop-reminder.sh` | Stop | Require the `<!-- found-issues-checked: ... -->` marker on turns with substantive tool use (Edit/Write/MultiEdit/Bash); pure-conversation turns and non-interactive (`CLAUDE_CODE_ENTRYPOINT != cli`) sessions pass through |
 | `format-enforcer.sh` | PreToolUse Write/Edit | Block malformed entries before they land |
 | `pre-branch-delete.sh` | PreToolUse Bash | Block branch deletion if entries unpromoted |
-| `post-pr-create.sh` | PostToolUse Bash | Surface entries matching files in just-opened PR |
-| `post-git-commit.sh` | PostToolUse Bash | Surface entries matching files in just-made commit |
-| `post-pr-state.sh` | PostToolUse Bash | Background `sync` after `gh pr merge`/`close`/`reopen` so the statusline updates without a session restart |
+| `post-bash-dispatch.sh` | PostToolUse Bash | Auto-annotate PR/commit entries matching just-changed lines (`--hook-auto`), surfacing only judgment cases; background `sync` after `gh pr merge`/`close`/`reopen` |
 | `pre-commit.sh` | git pre-commit (per-repo, opt-in) | Format check at commit time |
 
 Hooks fail open — if anything goes wrong, they exit 0 silently rather
 than break the session.
+
+### Harness adapters
+
+One CLI, one `lib/`, one ledger — two thin adapters translate the same
+core into each harness's own UI conventions:
+
+- **Claude Code adapter** — `commands/*.md` slash commands
+  (`/found-issues:<name>`) plus the auto-loaded `skills/rules/SKILL.md`
+  skill (rules injected into context every session via the plugin's
+  auto-load mechanism).
+- **Codex adapter** — `codex-skills/fi-<name>/SKILL.md`, generated from
+  `commands/*.md` by `scripts/gen-codex-skills.sh` (invoked as `$fi-<name>`
+  mentions or by description match), plus SessionStart rules injection:
+  `hooks/session-start.sh` emits the rules body into context on Codex
+  (wrapped in Codex's SessionStart JSON envelope — see below), since
+  Codex has no auto-loaded-skill mechanism equivalent to Claude's.
+
+The hook *scripts* themselves are shared, not adapted — every script in
+`hooks/` runs unmodified on both harnesses; the same JSON payload shape
+arrives on stdin either way. Registration differs, though: on Claude
+Code, `hooks/hooks.json` (the plugin manifest) auto-wires them at
+install time. On Codex, that path is dead — Codex CLI 0.144.5 removed
+the `plugin_hooks` feature, so a plugin's `hooks.json` pointer never
+loads (`.codex-plugin/plugin.json`'s `"hooks"` key is inert there). The
+same scripts still work on Codex; they just have to be registered a
+different way: `found-issues install-codex-hooks` copies the same four
+non-Stop hook entries into Codex's own stable user-level
+`$CODEX_HOME/hooks.json`, each command prefixed with `env
+FOUND_ISSUES_HARNESS=codex` so the script self-identifies without
+needing `PLUGIN_DATA` (which a hook run outside the plugin manifest
+never receives). Re-running it after `codex plugin update` is required —
+the installer strips-then-reinstalls its own entries every time, so
+stale plugin-cache paths from a prior version self-heal.
+
+`lib/harness.sh` is the one harness-detection point: `fi_detect_harness`
+honors `FOUND_ISSUES_HARNESS` first, then falls back to
+`CLAUDE_CODE_ENTRYPOINT` (Claude) vs `PLUGIN_DATA` (Codex). Two emit
+helpers format hook output for whichever harness is running — plain text
+on Claude either way; on Codex, `fi_emit_post_context` nests
+`additionalContext` under `hookSpecificOutput` with
+`hookEventName: "PostToolUse"`, and `fi_emit_session_context` does the
+same for SessionStart with `hookEventName: "SessionStart"` (both mirror
+Codex's `*.command.output` JSON Schema — flat top-level fields are
+dropped, not extra data). Both adapters read and write the same
+committed `docs/found-issues.md` — a repo worked on from both harnesses
+shares one ledger with no migration step.
 
 ### CLI (`bin/found-issues`)
 
@@ -135,6 +180,7 @@ Subcommands:
 | `install-statusline` / `uninstall-statusline` | Install or remove the statusline counter segment (canonical or `--target` custom shims) |
 | `doctor` / `doctor-statusline` / `doctor-statusline-runtime` | Health checks: general, statusline integration, runtime probe |
 | `install-fi-alias` / `uninstall-fi-alias` | Manage the personal `/fi` shortcut |
+| `install-codex-hooks` / `uninstall-codex-hooks [--codex-home PATH]` | Merge/remove found-issues' own hook entries in Codex's user-level `$CODEX_HOME/hooks.json` (see Harness adapters below) |
 | `uninstall` | Wipe plugin-private state before `/plugin uninstall` |
 
 ### lib (shared bash)
@@ -164,13 +210,10 @@ The lifecycle of a single issue from observation to closure:
 3. **Format check** — Claude's session ends; the next time Claude edits `docs/found-issues.md` directly via Write/Edit, the `format-enforcer` PreToolUse hook fires. If the edit would introduce a malformed line, it blocks (exit 2) with a helpful error.
 
 4. **PR opens** — Some session later, Claude fixes the bug as part of task Y. After `gh pr create --title "fix: null check"`:
-   - `post-pr-create.sh` (PostToolUse on Bash) fires
-   - Hook extracts PR number from stdout (`https://github.com/.../pull/42`)
-   - Calls `gh pr view 42 --json files` to get touched files
-   - Cross-references against `[open]` entries' paths via `lib/parse-entries.sh`
-   - Outputs to Claude: "PR #42 touches files matching these entries: ..."
-   - Claude reads the output, runs `/found-issues:annotate-pr 42` immediately
-   - The CLI appends `(PR: org/repo#42)` to the matching entry
+   - `post-bash-dispatch.sh` (PostToolUse on Bash) fires and extracts the PR number from stdout (`https://github.com/.../pull/42`)
+   - It runs `found-issues annotate-pr 42 --hook-auto`, which cross-references the PR's diff against `[open]` entries. For each entry whose cited `path:line` falls inside a line the diff actually **modifies** (removes), the CLI appends `(PR: org/repo#42)` silently and reports the annotation in one line — no round-trip through Claude
+   - Entries that match a touched file but whose cited line the diff did *not* change — or where several entries contest the same file — are **not** annotated. They surface as candidates: the hook prints them with the exact `found-issues annotate-pr 42 --pick <path:line>` (or `--all`) command for Claude to run after a symptom-level judgment call
+   - Only under `FOUND_ISSUES_AUTO_ANNOTATE=off` does the hook fall back to the legacy flow of merely prompting Claude to run `/found-issues:annotate-pr 42` itself
 
 5. **PR merges** — On GitHub, the PR merges to main. Claude isn't running.
 

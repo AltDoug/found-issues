@@ -122,7 +122,7 @@ _setup_pr_repo() {
   fi_run log "src/hot.py:1 — first bug"
   fi_run log "src/hot.py:2 — second bug"
   fi_run annotate-pr 9
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 3 ]
   ! grep -q '(PR: org/repo#9)' docs/found-issues.md
   [[ "$output" == *"src/hot.py:1"* ]]
   [[ "$output" == *"src/hot.py:2"* ]]
@@ -178,7 +178,7 @@ _setup_pr_repo() {
   fi_run log "src/hot.py:2 — second bug"
   fi_run log "src/cold.py:5 — lone bug"
   fi_run annotate-pr 9
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 3 ]
   grep -q 'lone bug (PR: org/repo#9)' docs/found-issues.md
   ! grep -q 'first bug (PR:' docs/found-issues.md
   [[ "$output" == *"src/hot.py:1"* ]]
@@ -231,7 +231,7 @@ _setup_pr_repo() {
   fi_run log "util.py:5 — bare-filename entry matching both copies"
   fi_run log "src/util.py:9 — entry on the src copy"
   fi_run annotate-pr 9
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 3 ]
   # Both entries suffix-share src/util.py — neither may auto-annotate
   ! grep -q '(PR: org/repo#9)' docs/found-issues.md
   [[ "$output" == *"util.py:5"* ]]
@@ -247,7 +247,7 @@ _setup_pr_repo() {
   fi_run log "src/hot.py:2 — second bug"
   fi_run annotate-pr 9 --pick src/hot.py:1
   fi_run annotate-pr 9
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 3 ]
   # The deliberately-unpicked entry must stay un-annotated (listed, not tagged)
   ! grep -q 'second bug (PR:' docs/found-issues.md
   [[ "$output" == *"src/hot.py:2"* ]]
@@ -302,7 +302,7 @@ _setup_pr_repo() {
   git add src/hot.py
   git commit -q -m "touch hot"
   fi_run annotate-commit HEAD
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 3 ]
   ! grep -q '(commit:' docs/found-issues.md
   [[ "$output" == *"src/hot.py:1"* ]]
   [[ "$output" == *"--pick"* ]]

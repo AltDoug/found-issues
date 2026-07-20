@@ -4,6 +4,96 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-07-20
+
+Dual-harness release: found-issues now installs into OpenAI Codex as well
+as Claude Code, sharing one ledger, one CLI, and one hook set across
+both. Paired with a usage diet on the Claude Code side (compressed rules
+skill, capped session injection, hook-driven auto-annotation) that cuts
+per-turn token overhead without losing enforcement.
+
+### BREAKING
+
+- **Three PostToolUse hooks merged into one dispatcher.** `hooks/post-pr-create.sh`,
+  `hooks/post-git-commit.sh`, and `hooks/post-pr-state.sh` are removed.
+  `hooks/post-bash-dispatch.sh` is now the plugin's only PostToolUse(Bash)
+  hook and routes internally (PR-create annotate, commit annotate,
+  merge/close/reopen background sync) — `hooks/hooks.json` registers 5
+  hooks instead of 7. Anything referencing the old hook script paths
+  directly needs to update; `FOUND_ISSUES_POST_PR_STATE` keeps its
+  existing meaning as a route-scoped opt-out on the merged hook.
+- **`annotate-pr` / `annotate-commit` exit 3 on ambiguous candidate lists**
+  (previously exit 0). When a file-level match is ambiguous, the CLI
+  prints the candidate list and a `--pick`/`--all` suggestion instead of
+  annotating, and now signals that with exit 3 rather than a false
+  success. Scripts or CI checking these subcommands' exit codes must
+  treat 3 as "needs a `--pick`/`--all` re-run," not success.
+- **Hook-driven auto-annotation is on by default.** The post-bash
+  dispatcher now writes `(PR: org/repo#N)` / `(commit: <sha>)` directly
+  for line-matched entries after `gh pr create` / `git commit`, instead
+  of only prompting Claude to run the annotate command. Set
+  `FOUND_ISSUES_AUTO_ANNOTATE=off` to restore the pre-2.0 prompt-only
+  behavior verbatim (moved into the hook as a legacy fallback path).
+
+### Added
+
+- **Codex plugin support.** found-issues installs into OpenAI Codex
+  alongside Claude Code, sharing one ledger, one CLI, and one hook set.
+  - **Skills.** `codex-skills/fi-<name>/SKILL.md` — one generated skill
+    per `commands/*.md`, produced by `scripts/gen-codex-skills.sh` (Claude
+    slash syntax like `/found-issues:log` rewritten to Codex's `$fi-log`
+    `$`-mention sigil) and kept in sync by `tests/codex-skills-drift.bats`.
+    `.codex-plugin/plugin.json` is the Codex manifest (mirrors the Claude
+    one; points `skills` at `./codex-skills`).
+  - **Hooks install via `found-issues install-codex-hooks`.** Codex 0.144.5
+    removed `plugin_hooks`, so the manifest's `hooks` pointer is inert on
+    Codex — hooks are instead merged into Codex's user-level
+    `$CODEX_HOME/hooks.json` by `install-codex-hooks` (and removed by
+    `uninstall-codex-hooks`, which touches only found-issues' own entries).
+    Each installed hook command is prefixed `env FOUND_ISSUES_HARNESS=codex`
+    so it self-identifies without relying on `PLUGIN_DATA`.
+  - **Harness adapter.** `lib/harness.sh` detects the running harness
+    (`FOUND_ISSUES_HARNESS` override, else `CLAUDE_CODE_ENTRYPOINT` vs
+    `PLUGIN_DATA`) and formats hook output for it: plain stdout on Claude
+    Code (legacy contract), and the **`hookSpecificOutput` envelope** on
+    Codex — `{hookSpecificOutput: {hookEventName, additionalContext}}` with
+    `hookEventName` set to `PostToolUse` or `SessionStart` — the shape
+    Codex 0.144.5's hook-output JSON Schema requires (a flat
+    `{additionalContext}` is dropped). `hooks/session-start.sh` injects the
+    rules-skill body into Codex context (Codex has no auto-loaded-skill
+    mechanism), rewritten through the same `lib/codex-rewrite.sh` the skill
+    generator uses, plus the same `[open]`-entry injection Claude Code gets.
+  - **Env vars.** `FOUND_ISSUES_HARNESS` (`claude`|`codex`) forces the
+    harness; `FOUND_ISSUES_CODEX_HOME` overrides the `$CODEX_HOME` default
+    (`$HOME/.codex`) that the install/uninstall commands target.
+- `--hook-auto` flag on `annotate-pr` / `annotate-commit`: a stricter
+  auto-annotation mode used by the post-bash dispatcher — only annotates
+  entries whose cited line falls inside the PR/commit diff's changed
+  ranges, and only when unambiguous.
+- New env vars: `FOUND_ISSUES_AUTO_ANNOTATE` (default `on`; `off` reverts
+  to legacy prompt-only), `FOUND_ISSUES_AUTO_ANNOTATE_MAX` (default `3`;
+  mass-touch guard — a sweep PR/commit line-matching more than this many
+  entries auto-annotates none of them and surfaces all as candidates),
+  `FOUND_ISSUES_SESSION_INJECT_MAX` (default `15`; caps how many `[open]`
+  entries SessionStart injects into context — criticals always injected
+  in full, newest non-criticals fill the rest, the remainder summarizes
+  as a count line).
+
+### Changed
+
+- `skills/rules/SKILL.md` compressed from ~8.6KB to ~3.7KB — the
+  always-on injection budget that ships on every session on both
+  harnesses. Same rules content, denser prose.
+- Docs caught up with the dispatcher consolidation: `docs/architecture.md`
+  and `docs/configuration.md` now describe 5 registered hooks (not the
+  stale 7/8) with `post-bash-dispatch`'s internal routes spelled out, plus
+  a new "Harness adapters" section in `architecture.md` and a
+  harness-agnostic note in `docs/modes.md`. `commands/doctor.md`'s
+  dangling `/found-issues:doctor-statusline` reference now points at the
+  real `found-issues doctor-statusline` CLI command. `docs/faq.md` gets a
+  shared-ledger entry and drops the "Codex isn't supported" answer.
+  `README.md` and `AGENTS.md` document the Codex install path.
+
 ## [1.7.1] - 2026-07-10
 
 ### Fixed

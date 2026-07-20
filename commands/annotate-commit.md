@@ -33,9 +33,15 @@ Pass through the CLI's output:
 
 ## When to invoke
 
-The `post-git-commit` hook surfaces relevant entries automatically right
-after `git commit` succeeds. **Run `/found-issues:annotate-commit` immediately** —
-do not defer.
+The post-bash dispatcher hook normally handles this automatically
+(`--hook-auto`: line-matched entries annotate silently; exit 3 surfaces
+candidates). This command is the manual fallback for web-UI PRs or when
+hooks are disabled.
+
+If the hook surfaced a candidate list (exit 3) right after `git commit`
+succeeded, **run the suggested `/found-issues:annotate-commit` immediately** —
+do not defer. If the hook didn't fire at all (e.g. a non-Bash commit path,
+or `FOUND_ISSUES_AUTO_ANNOTATE=off`), invoke this command manually.
 
 For fixes spread across multiple commits, run `/found-issues:annotate-commit <sha>`
 once per relevant commit. The CLI is idempotent — running it twice with

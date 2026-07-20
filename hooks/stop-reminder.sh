@@ -43,6 +43,13 @@ if [[ -n "${CLAUDE_CODE_ENTRYPOINT:-}" && "${CLAUDE_CODE_ENTRYPOINT}" != "cli" ]
   exit 0
 fi
 
+# Codex v1: the marker discipline is Claude-only. Codex transcripts use a
+# different rollout format the smart-fire parser below does not understand,
+# and a Stop block it can't satisfy burns full-context turns. Fail open.
+if [[ -z "${CLAUDE_CODE_ENTRYPOINT:-}" && -n "${PLUGIN_DATA:-}" ]]; then
+  exit 0
+fi
+
 # Read JSON from stdin
 input="$(cat)"
 

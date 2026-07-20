@@ -4,15 +4,35 @@
 # The script enforces:
 #   1. FI_VERSION in bin/found-issues matches the top CHANGELOG version.
 #   2. "version" field in .claude-plugin/plugin.json matches FI_VERSION.
+#   2b. "version" field in .codex-plugin/plugin.json matches FI_VERSION too.
 #   3. A PATCH-only bump must NOT contain '### Added' in its section.
 
 load 'helpers'
 
 SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/scripts/check-version.sh"
 
+# Default codex plugin.json fixture, parameterised by version. Tests that
+# care about the codex-manifest invariant call this AFTER fi_write_plugin_json
+# to override with a mismatched version.
+fi_write_codex_plugin_json() {
+  local version="$1"
+  mkdir -p "$TMP/.codex-plugin"
+  cat > "$TMP/.codex-plugin/plugin.json" <<EOF
+{
+  "name": "found-issues",
+  "version": "$version",
+  "skills": "./codex-skills",
+  "hooks": "./hooks/hooks.json"
+}
+EOF
+}
+
 # Default plugin.json fixture, parameterised by version. Tests that care about
 # the plugin.json invariant override $PJ_VERSION before writing; tests that
-# don't care just inherit the matching default.
+# don't care just inherit the matching default. Also writes a matching codex
+# plugin.json (check-version.sh requires both manifests to exist) — tests
+# exercising the codex-specific invariant call fi_write_codex_plugin_json
+# again afterward with a different version.
 fi_write_plugin_json() {
   local version="$1"
   mkdir -p "$TMP/.claude-plugin"
@@ -22,25 +42,28 @@ fi_write_plugin_json() {
   "version": "$version"
 }
 EOF
+  fi_write_codex_plugin_json "$version"
 }
 
 setup() {
   fi_setup_tmp
-  # Build a fresh minimal fixture (CLI file + CHANGELOG + plugin.json) per test,
-  # override the script's lookups via env vars. Keeps each test isolated and
-  # avoids depending on the real repo state.
+  # Build a fresh minimal fixture (CLI file + CHANGELOG + plugin.json +
+  # codex plugin.json) per test, override the script's lookups via env vars.
+  # Keeps each test isolated and avoids depending on the real repo state.
   CLI="$TMP/bin/found-issues"
   CL="$TMP/CHANGELOG.md"
   PJ="$TMP/.claude-plugin/plugin.json"
+  PJC="$TMP/.codex-plugin/plugin.json"
   mkdir -p "$TMP/bin"
   export CHECK_VERSION_CLI_FILE="$CLI"
   export CHECK_VERSION_CHANGELOG="$CL"
   export CHECK_VERSION_PLUGIN_JSON="$PJ"
+  export CHECK_VERSION_CODEX_JSON="$PJC"
 }
 
 teardown() {
   fi_teardown_tmp
-  unset CHECK_VERSION_CLI_FILE CHECK_VERSION_CHANGELOG CHECK_VERSION_PLUGIN_JSON
+  unset CHECK_VERSION_CLI_FILE CHECK_VERSION_CHANGELOG CHECK_VERSION_PLUGIN_JSON CHECK_VERSION_CODEX_JSON
 }
 
 # --- Positive paths ---
@@ -271,11 +294,22 @@ EOF
 
 @test "check-version: real repo state passes" {
   # Sanity check that the actual repo bin/found-issues + CHANGELOG.md +
-  # plugin.json pass the check (i.e. release branches that get to this
-  # point are valid).
-  unset CHECK_VERSION_CLI_FILE CHECK_VERSION_CHANGELOG CHECK_VERSION_PLUGIN_JSON
+  # plugin.json + codex plugin.json pass the check (i.e. release branches
+  # that get to this point are valid).
+  unset CHECK_VERSION_CLI_FILE CHECK_VERSION_CHANGELOG CHECK_VERSION_PLUGIN_JSON CHECK_VERSION_CODEX_JSON
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
+}
+
+@test "codex and claude plugin manifests carry the same version" {
+  cv="$(jq -r .version "$TEST_REPO_ROOT/.codex-plugin/plugin.json")"
+  av="$(jq -r .version "$TEST_REPO_ROOT/.claude-plugin/plugin.json")"
+  [ "$cv" = "$av" ]
+}
+
+@test "codex manifest points skills at codex-skills and hooks at hooks.json" {
+  [ "$(jq -r .skills "$TEST_REPO_ROOT/.codex-plugin/plugin.json")" = "./codex-skills" ]
+  [ "$(jq -r .hooks  "$TEST_REPO_ROOT/.codex-plugin/plugin.json")" = "./hooks/hooks.json" ]
 }
 
 # --- plugin.json invariant ---
@@ -300,6 +334,38 @@ EOF
   [[ "$output" == *"plugin.json version mismatch"* ]]
   [[ "$output" == *"1.0.5"* ]]
   [[ "$output" == *"1.1.0"* ]]
+}
+
+@test "check-version: codex plugin.json version mismatch with FI_VERSION fails (exit 1)" {
+  printf 'readonly FI_VERSION="1.1.0"\n' > "$CLI"
+  fi_write_plugin_json "1.1.0"
+  fi_write_codex_plugin_json "1.0.5"
+  cat > "$CL" <<'EOF'
+# Changelog
+
+## [1.1.0] — 2026-05-11
+
+### Added
+
+- New thing
+EOF
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"codex plugin.json version mismatch"* ]]
+  [[ "$output" == *"1.0.5"* ]]
+  [[ "$output" == *"1.1.0"* ]]
+}
+
+@test "check-version: missing codex plugin.json fails (exit 2)" {
+  printf 'readonly FI_VERSION="1.0.0"\n' > "$CLI"
+  fi_write_plugin_json "1.0.0"
+  rm -f "$PJC"
+  cat > "$CL" <<'EOF'
+## [1.0.0] — 2026-05-09
+EOF
+  run bash "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"codex plugin.json not found"* ]]
 }
 
 @test "check-version: missing plugin.json fails (exit 2)" {

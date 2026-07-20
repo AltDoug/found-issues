@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # check-version.sh — SemVer enforcement guard
 #
-# Enforces three invariants on every PR + push to main:
+# Enforces four invariants on every PR + push to main:
 #   1. FI_VERSION in bin/found-issues matches the top-most [X.Y.Z] header
 #      in CHANGELOG.md.
 #   2. "version" field in .claude-plugin/plugin.json matches FI_VERSION.
 #      (Without this, the plugin manifest can silently drift behind the CLI
 #      and release tags — exactly what happened pre-v1.1.0 when plugin.json
 #      stuck at 1.0.5 through three subsequent releases.)
+#   2b. "version" field in .codex-plugin/plugin.json matches FI_VERSION too
+#      (the dual-manifest setup introduced in v2.0.0 — the Codex manifest
+#      must stay in lockstep with the Claude one and the CLI).
 #   3. If the latest version's bump from the previous is PATCH-only
 #      (X.Y unchanged, Z incremented), the latest CHANGELOG section MUST
 #      NOT contain an `### Added` heading. Additive changes require a
@@ -26,6 +29,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLI_FILE="${CHECK_VERSION_CLI_FILE:-$REPO_ROOT/bin/found-issues}"
 CHANGELOG="${CHECK_VERSION_CHANGELOG:-$REPO_ROOT/CHANGELOG.md}"
 PLUGIN_JSON="${CHECK_VERSION_PLUGIN_JSON:-$REPO_ROOT/.claude-plugin/plugin.json}"
+CODEX_JSON="${CHECK_VERSION_CODEX_JSON:-$REPO_ROOT/.codex-plugin/plugin.json}"
 
 err() { printf 'check-version: %s\n' "$@" >&2; }
 
@@ -67,6 +71,21 @@ if [[ -z "$plugin_version" ]]; then
   exit 2
 fi
 
+# --- 1c. Extract version from the codex plugin.json ---
+if [[ ! -f "$CODEX_JSON" ]]; then
+  err "codex plugin.json not found at $CODEX_JSON"
+  exit 2
+fi
+codex_version="$(grep -Eo '"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "$CODEX_JSON" 2>/dev/null \
+  | head -1 \
+  | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)"$/\1/' || true)"
+
+if [[ -z "$codex_version" ]]; then
+  err "could not parse \"version\" from $CODEX_JSON"
+  err "expected: \"version\": \"X.Y.Z\""
+  exit 2
+fi
+
 # --- 2. Extract released CHANGELOG versions (skip [Unreleased]) ---
 # `|| true` same reason as above — grep-no-match should fall through, not abort.
 changelog_versions="$(grep -E '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' "$CHANGELOG" 2>/dev/null \
@@ -93,6 +112,14 @@ if [[ "$plugin_version" != "$cli_version" ]]; then
   err "plugin.json version mismatch: .claude-plugin/plugin.json has '$plugin_version' but FI_VERSION is '$cli_version'"
   err "Fix: update the \"version\" field in .claude-plugin/plugin.json to '$cli_version'."
   err "(This is the manifest Claude Code reads to advertise the installed version.)"
+  exit 1
+fi
+
+# --- 3c. Invariant 2b: codex plugin.json ⟷ FI_VERSION ---
+if [[ "$codex_version" != "$cli_version" ]]; then
+  err "codex plugin.json version mismatch: .codex-plugin/plugin.json has '$codex_version' but FI_VERSION is '$cli_version'"
+  err "Fix: update the \"version\" field in .codex-plugin/plugin.json to '$cli_version'."
+  err "(This is the manifest Codex reads to advertise the installed version.)"
   exit 1
 fi
 
@@ -134,6 +161,7 @@ fi
 printf 'check-version: OK\n'
 printf '  FI_VERSION (%s) matches CHANGELOG top section [%s]\n' "$cli_version" "$latest_version"
 printf '  plugin.json version (%s) matches FI_VERSION\n' "$plugin_version"
+printf '  codex plugin.json version (%s) matches FI_VERSION\n' "$codex_version"
 if [[ -n "$previous_version" ]]; then
   IFS='.' read -r lat_x lat_y lat_z <<< "$latest_version"
   IFS='.' read -r prev_x prev_y prev_z <<< "$previous_version"

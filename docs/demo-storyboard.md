@@ -67,7 +67,7 @@ Sleep 600ms
 Type "git checkout -b fix/null-check && git commit -am fix && gh pr create --fill" Enter
 Sleep 1.5s
 
-# Step 5: Claude annotates the PR (auto-prompted by post-pr-create hook)
+# Step 5: Claude annotates the PR (auto-prompted by post-bash-dispatch hook)
 Type "found-issues annotate-pr 1" Enter
 Sleep 2s
 

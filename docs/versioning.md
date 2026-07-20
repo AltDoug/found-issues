@@ -2,16 +2,17 @@
 
 This project follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). Version strings are `MAJOR.MINOR.PATCH` (e.g. `1.1.0`).
 
-Every release commit must update **four places in lockstep**:
+Every release commit must update **five places in lockstep**:
 
 1. `FI_VERSION` in `bin/found-issues` (line 9)
 2. A new `## [X.Y.Z] — YYYY-MM-DD` section at the top of `CHANGELOG.md` (immediately after `## [Unreleased]`)
 3. `"version"` in `.claude-plugin/plugin.json` — this is the manifest Claude Code reads to advertise the installed version. Drift here silently lies to users about which release they're on.
-4. The "Status & roadmap" header in `README.md`
+4. `"version"` in `.codex-plugin/plugin.json` — the Codex manifest, added in v2.0.0. Must stay in lockstep with the Claude manifest and the CLI (Codex reads it to advertise the installed version).
+5. The "Status" header in `README.md`
 
-`scripts/check-version.sh` (run in CI) enforces invariants #1, #2, and #3 plus the bump-classification rule below.
+`scripts/check-version.sh` (run in CI) enforces invariants #1, #2, #3, and #4 plus the bump-classification rule below.
 
-There is a **fifth place** that lives in a separate repo: the marketplace manifest at `AltDoug/claude-plugins/.claude-plugin/marketplace.json`. That bump must happen *after* this repo's release PR merges, not in parallel — see [Marketplace ordering](#marketplace-ordering) below.
+There is a **sixth place** that lives in a separate repo: the marketplace manifest at `AltDoug/claude-plugins/.claude-plugin/marketplace.json`. That bump must happen *after* this repo's release PR merges, not in parallel — see [Marketplace ordering](#marketplace-ordering) below.
 
 ## When to bump which segment
 
@@ -81,12 +82,13 @@ When opening a release PR:
 
 1. [ ] Edit `FI_VERSION` in `bin/found-issues`
 2. [ ] Edit `"version"` in `.claude-plugin/plugin.json` to match
-3. [ ] Add a `## [X.Y.Z] — YYYY-MM-DD` section in `CHANGELOG.md` with the right `### Added` / `### Changed` / `### Fixed` / `### Removed` / `### Security` subsections
-4. [ ] Update the `## Status & roadmap` header in `README.md`
-5. [ ] Run `bash scripts/check-version.sh` locally — must pass before push
-6. [ ] PR title: `release: vX.Y.Z` (or include the version in a feature-focused title; CI keys off the version files, not the PR title)
-7. [ ] After merge: `git tag -a vX.Y.Z -m "vX.Y.Z" <merge_sha> && git push origin vX.Y.Z`
-8. [ ] **Then** (not in parallel) open a PR in `AltDoug/claude-plugins` bumping the `"version"` field in `.claude-plugin/marketplace.json` to match. See [Marketplace ordering](#marketplace-ordering) for why this step is last.
+3. [ ] Edit `"version"` in `.codex-plugin/plugin.json` to match (enforced by `check-version.sh`)
+4. [ ] Add a `## [X.Y.Z] — YYYY-MM-DD` section in `CHANGELOG.md` with the right `### Added` / `### Changed` / `### Fixed` / `### Removed` / `### Security` subsections
+5. [ ] Update the `## Status` section in `README.md`
+6. [ ] Run `bash scripts/check-version.sh` locally — must pass before push
+7. [ ] PR title: `release: vX.Y.Z` (or include the version in a feature-focused title; CI keys off the version files, not the PR title)
+8. [ ] After merge: `git tag -a vX.Y.Z -m "vX.Y.Z" <merge_sha> && git push origin vX.Y.Z`
+9. [ ] **Then** (not in parallel) open a PR in `AltDoug/claude-plugins` bumping the `"version"` field in `.claude-plugin/marketplace.json` to match. See [Marketplace ordering](#marketplace-ordering) for why this step is last.
 
 ## Marketplace ordering
 

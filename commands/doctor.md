@@ -39,5 +39,5 @@ If a section flags something (statusline `BROKEN`, hook opt-out, suspicious entr
 
 ## See also
 
-- [`/found-issues:doctor-statusline`](#) — statusline-specific deep dive (5-state classifier).
+- `found-issues doctor-statusline` — statusline-specific deep dive (5-state classifier). CLI-only; there is no `/found-issues:doctor-statusline` slash command.
 - [`docs/configuration.md`](../docs/configuration.md) — full env-var reference referenced by the hook-opt-out + tunables sections.
