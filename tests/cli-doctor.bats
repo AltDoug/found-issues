@@ -276,6 +276,30 @@ EOF
   echo "$output" | grep -qE "splice gap|output statements"
 }
 
+@test "doctor: runtime probe emits no arithmetic noise when grep counts are zero" {
+  mkdir -p tmp/.claude
+  cat > tmp/.found-issues.md <<'EOF'
+- [open] 2026-05-13 a.ts:1 — entry
+EOF
+  # Statusline with NO output statements and NO seg markers: both grep -c
+  # probes find nothing (print 0 AND exit 1), and the script renders nothing
+  # so the probe takes the FAIL path into sub-probe (b).
+  cat > tmp/custom.sh <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+: "$input"
+EOF
+  chmod +x tmp/custom.sh
+  cat > tmp/.claude/settings.json <<EOF
+{"statusLine": {"command": "bash $(pwd)/tmp/custom.sh"}}
+EOF
+  HOME="$(pwd)/tmp" fi_run doctor
+  doctor_output="$output"
+  echo "$doctor_output" | grep -q "did NOT render"
+  run grep -q "syntax error" <<<"$doctor_output"
+  [ "$status" -ne 0 ]
+}
+
 @test "doctor-statusline-runtime: standalone subcommand emits only the runtime probe section" {
   mkdir -p tmp/.claude
   cat > tmp/.found-issues.md <<'EOF'

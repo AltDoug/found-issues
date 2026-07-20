@@ -3758,12 +3758,17 @@ fi_run_statusline_runtime_probe() {
 
     # Sub-probe (b): splice gap detection — always run as a static analysis.
     local output_count seg_count
+    # grep -c prints 0 on its own when nothing matches (while exiting 1), so
+    # an `|| echo 0` fallback would double it into "0\n0" and break the
+    # arithmetic below — fall back only when the value is not a number.
     case "$statusline_language" in
-      node)   output_count="$(LC_ALL=C grep -cE 'console\.log|process\.stdout\.write' "$statusline_target" 2>/dev/null || echo 0)" ;;
-      python) output_count="$(LC_ALL=C grep -cE '^[[:space:]]*print[[:space:]]*\(|sys\.stdout\.write' "$statusline_target" 2>/dev/null || echo 0)" ;;
-      bash)   output_count="$(LC_ALL=C grep -cE '^[[:space:]]*echo[[:space:]]|^[[:space:]]*printf[[:space:]]' "$statusline_target" 2>/dev/null || echo 0)" ;;
+      node)   output_count="$(LC_ALL=C grep -cE 'console\.log|process\.stdout\.write' "$statusline_target" 2>/dev/null || true)" ;;
+      python) output_count="$(LC_ALL=C grep -cE '^[[:space:]]*print[[:space:]]*\(|sys\.stdout\.write' "$statusline_target" 2>/dev/null || true)" ;;
+      bash)   output_count="$(LC_ALL=C grep -cE '^[[:space:]]*echo[[:space:]]|^[[:space:]]*printf[[:space:]]' "$statusline_target" 2>/dev/null || true)" ;;
     esac
-    seg_count="$(LC_ALL=C grep -c 'found-issues:seg' "$statusline_target" 2>/dev/null || echo 0)"
+    seg_count="$(LC_ALL=C grep -c 'found-issues:seg' "$statusline_target" 2>/dev/null || true)"
+    [[ "$output_count" =~ ^[0-9]+$ ]] || output_count=0
+    [[ "$seg_count" =~ ^[0-9]+$ ]] || seg_count=0
     if (( seg_count < output_count )); then
       printf '   - cause: splice gap — %s output statements, only %s patched with `found-issues:seg`.\n' "$output_count" "$seg_count"
       printf '     Re-run: found-issues install-statusline --target %s --apply\n' "$statusline_target"
