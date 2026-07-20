@@ -454,6 +454,17 @@ cmd_log() {
   if [[ "$location" =~ ^([^:[:space:]]+):([0-9]+)$ ]]; then
     path="${BASH_REMATCH[1]}"
     line_num="${BASH_REMATCH[2]}"
+  elif [[ "$location" =~ ^([^:[:space:]]+):([0-9][^[:space:]]*)$ ]]; then
+    # A colon suffix starting with a digit was clearly intended as a line
+    # spec (e.g. 10,85 / 10-20 / 42abc) but isn't a bare integer.
+    # fi_parse_entry (lib/parse-entries.sh) can only round-trip ^[0-9]+$
+    # line specs — anything else silently drops the path, breaking dedup,
+    # annotate-commit/annotate-pr matching, and tombstone sync. Same
+    # charset-alignment class as the v1.5.7 path fix (bin/found-issues:426).
+    # Abstract topics with a non-numeric colon suffix (e.g. "workflow:shutdown")
+    # don't match this branch and keep their existing behavior below.
+    fi_err "found-issues log: invalid line spec '${BASH_REMATCH[2]}' in location — use a single numeric line (path:42) or an abstract topic without a colon"
+    return 2
   elif [[ "$location" == */* || "$location" == *.* ]]; then
     # Looks like a file path
     path="$location"

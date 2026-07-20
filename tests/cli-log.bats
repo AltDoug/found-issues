@@ -451,3 +451,38 @@ EOF
   [[ "$output" == *"Skipped — already logged"* ]]
   [ "$(grep -c 'UIView+Ext' docs/found-issues.md)" -eq 1 ]
 }
+
+@test "log: rejects comma line spec (path:10,85)" {
+  fi_run log "src/foo.py:10,85 — bug"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid line spec '10,85'"* ]]
+  [ ! -f docs/found-issues.md ]
+}
+
+@test "log: rejects dash-range line spec (path:10-20)" {
+  fi_run log "src/foo.py:10-20 — bug"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid line spec '10-20'"* ]]
+  [ ! -f docs/found-issues.md ]
+}
+
+@test "log: rejects alpha-suffixed line spec (path:42abc)" {
+  fi_run log "src/foo.py:42abc — bug"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid line spec '42abc'"* ]]
+  [ ! -f docs/found-issues.md ]
+}
+
+@test "log: plain numeric line spec still works (path:10)" {
+  fi_run log "src/foo.py:10 — bug"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Logged:"* ]]
+  [[ "$output" == *"src/foo.py:10"* ]]
+}
+
+@test "log: abstract topic with non-numeric colon suffix keeps current behavior" {
+  fi_run log "workflow:shutdown — sigterm kills sessions silently"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Logged:"* ]]
+  grep -qE '^- \[open\] [0-9-]+ workflow:shutdown — ' docs/found-issues.md
+}
