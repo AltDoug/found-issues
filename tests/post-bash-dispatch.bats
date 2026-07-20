@@ -55,7 +55,7 @@ run_hook_raw() { # $1=raw json
 @test "pr create: line-matched entry auto-annotates, one-line report" {
   fi_run log "src/foo.py:42 — null check"
   export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
-  export GH_MOCK_PR_DIFF='--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n x'
+  export GH_MOCK_PR_DIFF='diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n ctx40\n ctx41\n-old42\n+new42\n+added\n ctx43\n ctx44\n ctx45'
   run run_hook 'gh pr create --fill' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
   grep -q '(PR: org/repo#7)' docs/found-issues.md
@@ -66,11 +66,12 @@ run_hook_raw() { # $1=raw json
 @test "pr create: unmatched-line candidates surface with pick instruction" {
   fi_run log "src/foo.py:99 — wrong cast"
   export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
-  export GH_MOCK_PR_DIFF='--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n x'
+  export GH_MOCK_PR_DIFF='diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n ctx40\n ctx41\n-old42\n+new42\n+added\n ctx43\n ctx44\n ctx45'
   run run_hook 'gh pr create' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
-  ! grep -q '(PR:' docs/found-issues.md
   [[ "$output" == *"found-issues annotate-pr 7 --pick"* ]]
+  run grep -q '(PR:' docs/found-issues.md
+  [ "$status" -ne 0 ]
 }
 
 @test "pr create: FOUND_ISSUES_AUTO_ANNOTATE=off falls back to legacy prompt" {
@@ -79,8 +80,9 @@ run_hook_raw() { # $1=raw json
   export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
   run run_hook 'gh pr create' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
-  ! grep -q '(PR:' docs/found-issues.md
   [[ "$output" == *"/found-issues:annotate-pr 7"* ]]
+  run grep -q '(PR:' docs/found-issues.md
+  [ "$status" -ne 0 ]
 }
 
 @test "git commit: line-matched entry auto-annotates" {
@@ -120,7 +122,7 @@ run_hook_raw() { # $1=raw json
   printf 'l1\nFIX\nl3\n' > src/foo.py
   git add -A && git commit -q -m fix
   export GH_MOCK_PR_VIEW=$'7\tsrc/bar.py'
-  export GH_MOCK_PR_DIFF='--- a/src/bar.py\n+++ b/src/bar.py\n@@ -40,6 +40,7 @@\n x'
+  export GH_MOCK_PR_DIFF='diff --git a/src/bar.py b/src/bar.py\n--- a/src/bar.py\n+++ b/src/bar.py\n@@ -40,6 +40,7 @@\n ctx40\n ctx41\n-old42\n+new42\n+added\n ctx43\n ctx44\n ctx45'
   run run_hook 'git commit -m fix && gh pr create' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
   grep -q 'src/foo.py:2 .*(commit:' docs/found-issues.md
@@ -179,7 +181,7 @@ run_hook_raw() { # $1=raw json
   # which would also break the found-issues binary the hook shells out to.
   fi_run log "src/foo.py:99 — wrong cast"
   export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
-  export GH_MOCK_PR_DIFF='--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n x'
+  export GH_MOCK_PR_DIFF='diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n ctx40\n ctx41\n-old42\n+new42\n+added\n ctx43\n ctx44\n ctx45'
   local libcopy="$TMP/lib-no-harness"
   mkdir -p "$libcopy"
   cp "$FI_LIB_DIR/canonicalize.sh" "$FI_LIB_DIR/detect-mode.sh" "$FI_LIB_DIR/parse-entries.sh" "$libcopy"/
@@ -209,7 +211,7 @@ run_hook_raw() { # $1=raw json
   export PLUGIN_DATA="$TMP/plugdata"
   fi_run log "src/foo.py:99 — wrong cast"
   export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
-  export GH_MOCK_PR_DIFF='--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n x'
+  export GH_MOCK_PR_DIFF='diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n ctx40\n ctx41\n-old42\n+new42\n+added\n ctx43\n ctx44\n ctx45'
   run run_hook 'gh pr create' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
   # Verified against Codex 0.144.5's PostToolUse hook-output schema (Task 11):

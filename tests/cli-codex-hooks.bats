@@ -203,3 +203,20 @@ EOF
   [[ "$output" == *"jq"* ]]
   [ ! -f "$CODEX_HOME/hooks.json" ]
 }
+
+# Regression: `--codex-home` as the LAST arg used to `shift 2` on a single
+# remaining positional, which fails silently (errexit is disabled — the parse
+# fn runs on the left of `|| return 1`), leaving $# unchanged so the loop
+# spun forever at 100% CPU. The fix rejects the empty value and returns 1.
+# bats has no per-test timeout; the fix is what makes this terminate at all.
+@test "install-codex-hooks: --codex-home with no value exits 1, does not hang" {
+  fi_run install-codex-hooks --codex-home
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--codex-home requires"* ]]
+}
+
+@test "uninstall-codex-hooks: --codex-home with no value exits 1, does not hang" {
+  fi_run uninstall-codex-hooks --codex-home
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--codex-home requires"* ]]
+}

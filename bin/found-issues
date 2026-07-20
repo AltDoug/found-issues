@@ -1303,25 +1303,58 @@ fi_annotate_apply_picks() {
 #     competitors, so a plain re-run after an explicit --pick cannot
 #     auto-annotate the deliberately-excluded sibling
 # fi_diff_old_ranges — stdin: unified diff; stdout: "path<TAB>start<TAB>end"
-# per hunk, OLD-side line ranges. Ledger entries cite pre-fix locations, so
-# the old side is the side that corresponds to the cited line numbers.
-# Pure-addition hunks (old length 0) produce no range — a fix that only adds
-# lines never auto-annotates (conservative by design).
+# per contiguous run of REMOVED lines, OLD-side line numbers. Ledger entries
+# cite pre-fix locations, so the old side is the side that corresponds to the
+# cited line numbers.
+#
+# Only actually-removed lines produce ranges — context lines within a hunk do
+# NOT, so a cited line merely NEAR (but not in) an edit never auto-annotates.
+# Pure-addition hunks produce no range (a fix that only adds lines is
+# conservative by design).
+#
+# Parser shape:
+#   - Header-state tracking: '--- ' is a file header ONLY when armed by a
+#     preceding 'diff --git' (git and `gh pr diff` always emit that). A hunk
+#     BODY line like '--- old comment' (a deleted SQL '-- comment') is then a
+#     removal, not a bogus header, so it can't corrupt path attribution.
+#   - The path is the substring after '--- ' (leading 'a/' stripped,
+#     /dev/null → empty), not $2 — so paths containing spaces parse fully.
+#   - An old-side line counter starts at the @@ old-start and advances on
+#     context (' ') and removed ('-') lines; added ('+') lines do not advance
+#     it. Contiguous '-' lines are emitted as one start/end run.
 fi_diff_old_ranges() {
   LC_ALL=C awk '
-    /^--- / {
-      p = $2
+    function flush() {
+      if (in_run) { printf "%s\t%d\t%d\n", cur, run_start, run_end; in_run = 0 }
+    }
+    /^diff --git / { flush(); armed = 1; next }
+    armed && /^--- / {
+      p = substr($0, 5)          # strip the "--- " marker (4 chars)
       sub(/^a\//, "", p)
       cur = (p == "/dev/null" ? "" : p)
+      armed = 0                  # consumed; the "+++" that follows is not a header
       next
     }
     /^@@ / {
-      if (cur == "") next
-      split($2, m, ",")
-      a = substr(m[1], 2) + 0
-      b = (m[2] != "" ? m[2] + 0 : 1)
-      if (b > 0) printf "%s\t%d\t%d\n", cur, a, a + b - 1
+      flush()
+      armed = 0
+      s = $2; sub(/^-/, "", s); split(s, m, ",")
+      oldline = m[1] + 0
+      next
     }
+    {
+      if (cur == "") next
+      c = substr($0, 1, 1)
+      if (c == "+") { flush(); next }        # addition: no old-side advance
+      if (c == "-") {                        # removal on the old side
+        if (in_run) { run_end = oldline } else { in_run = 1; run_start = oldline; run_end = oldline }
+        oldline++
+        next
+      }
+      flush()                                # context or metadata ends any run
+      if (c == " ") oldline++                # only real context advances the counter
+    }
+    END { flush() }
   '
 }
 
@@ -4416,7 +4449,16 @@ fi_codex_hooks_parse_args() {
   local self="$1"; shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --codex-home) codex_home="${2:-}"; shift 2 ;;
+      --codex-home)
+        # Guard the trailing-flag case: `--codex-home` with no value would
+        # otherwise `shift 2` on a single remaining arg, which fails silently
+        # (errexit is off — this fn is called on the left of `|| return 1`),
+        # leaving $# unchanged so the loop spins forever at 100% CPU.
+        if [[ -z "${2:-}" ]]; then
+          fi_err "$self: --codex-home requires a directory path"
+          return 1
+        fi
+        codex_home="$2"; shift 2 ;;
       --codex-home=*) codex_home="${1#--codex-home=}"; shift ;;
       *) fi_err "$self: unknown argument: $1"; return 1 ;;
     esac
@@ -4681,4 +4723,9 @@ main() {
   esac
 }
 
-main "$@"
+# Dispatch only when executed directly. Sourcing the script (e.g. a unit test
+# exercising an internal function such as fi_diff_old_ranges) loads the
+# function definitions without running the CLI.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
