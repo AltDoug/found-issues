@@ -12,6 +12,33 @@
 
 set -euo pipefail
 
+# Locate this hook's own directory (BASH_SOURCE[0] survives relative-path or
+# `bash -c` invocation better than $0) and detect which agent harness is
+# running us. Unknown/undetected environments default to "claude" (today's
+# behavior), matching fi_detect_harness's own fallback.
+__fi_hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+harness=claude
+if [[ -f "$__fi_hook_dir/../lib/harness.sh" ]]; then
+  # shellcheck source=../lib/harness.sh disable=SC1091
+  source "$__fi_hook_dir/../lib/harness.sh"
+  harness="$(fi_detect_harness)"
+fi
+
+# Codex has no auto-loaded-skill mechanism: the rules ship here instead.
+# (On Claude Code the skills/rules skill injects them — emitting here too
+# would double-pay the tokens.) SessionStart stdout is plain-text context
+# on both harnesses. Fires unconditionally, before the ledger-existence
+# early-exit further down — it does not depend on a ledger existing.
+if [[ "$harness" == "codex" ]]; then
+  __fi_rules="${PLUGIN_ROOT:-$__fi_hook_dir/..}/skills/rules/SKILL.md"
+  if [[ -f "$__fi_rules" ]]; then
+    # Strip YAML frontmatter (everything before the second '---' fence),
+    # emitting only the rules body.
+    LC_ALL=C awk 'c >= 2 { print } /^---$/ { c++ }' "$__fi_rules"
+    printf '\n'
+  fi
+fi
+
 # First-run onboarding hint — prepends a single italicized tip to the user's
 # next response, then never fires again. This replaces the silent removal in
 # v0.1.5 (users couldn't discover /found-issues:setup) and the verbose
@@ -21,6 +48,11 @@ set -euo pipefail
 # is context, not user UI. The directive is now a single italic line — visible
 # enough to discover the setup command, light enough to not derail what the
 # user actually asked.
+#
+# Claude-only: this is a "prepend to your reply" directive aimed at Claude
+# Code's response convention, and it points at Claude-only surfaces
+# (statusline, /fi alias). Codex has no equivalent onboarding hook.
+if [[ "$harness" == "claude" ]]; then
 ONBOARD_DIR="$HOME/.claude/found-issues"
 ONBOARD_MARKER="$ONBOARD_DIR/.onboarded"
 if [[ ! -f "$ONBOARD_MARKER" ]]; then
@@ -37,6 +69,7 @@ Do not paraphrase or expand. One line, then the user's actual task.
 EOF
   touch "$ONBOARD_MARKER"
 fi
+fi
 
 # Broken-statusline self-heal nudge — fires at most once per day per machine.
 # Detects pre-v0.1.7 handwritten snippets and v1.0.0/1.0.1 marker-bracketed
@@ -47,6 +80,10 @@ fi
 # for real users), the cost of a one-line nudge is low. Re-checking each
 # session also means: if the user ignores it once, they get reminded daily
 # until they fix it OR uninstall.
+#
+# Claude-only: targets ~/.claude/statusline.sh, a Claude Code-specific
+# integration point that has no Codex equivalent.
+if [[ "$harness" == "claude" ]]; then
 mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
 STATUSLINE_NUDGE_MARKER="$ONBOARD_DIR/.statusline-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
 if [[ ! -f "$STATUSLINE_NUDGE_MARKER" ]] && [[ -f "$HOME/.claude/statusline.sh" ]]; then
@@ -111,11 +148,9 @@ EOF
     touch "$STATUSLINE_NUDGE_MARKER" 2>/dev/null || true
   fi
 fi
+fi
 
 # Locate the CLI binary.
-# Use BASH_SOURCE[0] (the script's own path) for co-located resolution — $0
-# is unreliable when the caller passes a relative path or pipes via bash -c.
-__fi_hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 __fi_colocated_bin="${FI_BIN_DIR:-$__fi_hook_dir/../bin}/found-issues"
 FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
 if ! command -v "$FI_BIN" >/dev/null 2>&1; then
@@ -147,6 +182,10 @@ fi
 # excluded: it is owned by the daily self-heal nudge above + plain
 # `install-statusline`, and running the --target path on it would double up
 # the two mechanisms.
+#
+# Claude-only: targets ~/.claude/settings.json's statusLine.command, a
+# Claude Code-specific concept with no Codex equivalent.
+if [[ "$harness" == "claude" ]]; then
 if [[ "${FOUND_ISSUES_AUTO_MIGRATE:-on}" != "off" ]]; then
   __fi_settings="$HOME/.claude/settings.json"
   if [[ -f "$__fi_settings" ]] && command -v jq >/dev/null 2>&1; then
@@ -237,6 +276,7 @@ if [[ "${FOUND_ISSUES_AUTO_MIGRATE:-on}" != "off" ]]; then
     fi
   fi
 fi
+fi
 # --- end broken custom-target marker migration ---
 
 # Read input (cwd, session_id) — we mostly care about the cwd context
@@ -294,8 +334,8 @@ fi
 # file order rather than reversed.
 max_inject="${FOUND_ISSUES_SESSION_INJECT_MAX:-15}"
 [[ "$max_inject" =~ ^[0-9]+$ ]] || max_inject=15
-crit_entries="$(printf '%s\n' "$open_entries" | grep -F '[!]' || true)"
-noncrit_entries="$(printf '%s\n' "$open_entries" | grep -Fv '[!]' || true)"
+crit_entries="$(printf '%s\n' "$open_entries" | grep -E '^- \[open\] \[!\] ' || true)"
+noncrit_entries="$(printf '%s\n' "$open_entries" | grep -Ev '^- \[open\] \[!\] ' || true)"
 crit_count=0; [[ -n "$crit_entries" ]] && crit_count="$(printf '%s\n' "$crit_entries" | grep -c '^-' || true)"
 noncrit_count=0; [[ -n "$noncrit_entries" ]] && noncrit_count="$(printf '%s\n' "$noncrit_entries" | grep -c '^-' || true)"
 crit_count="${crit_count:-0}"

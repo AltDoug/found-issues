@@ -270,7 +270,7 @@ EOF
 # real ~/.claude) — wrapped in a local helper for readability.
 
 run_session_start_hook() {
-  HOME="$FAKE_HOME" run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  HOME="${FAKE_HOME:-$TMP}" run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
 }
 
 @test "session-start: caps injected entries and reports the remainder" {
@@ -336,5 +336,54 @@ run_session_start_hook() {
   run_session_start_hook
   [ "$status" -eq 0 ]
   [[ "$output" == *"src/a.py:1"* ]]
+  rm -rf "$FAKE_HOME"
+}
+
+# === v1.8.0: harness-aware — Codex rules injection, skip Claude-only nudges ===
+
+@test "session-start on codex: injects rules block even with no ledger" {
+  unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
+  export PLUGIN_DATA="$TMP/pd"
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"found-issues — agent rules"* ]]
+}
+
+@test "session-start on codex: skips statusline nudge and onboarding hint" {
+  unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
+  export PLUGIN_DATA="$TMP/pd"
+  rm -f "$HOME/.claude/found-issues/.onboarded" 2>/dev/null || true
+  run_session_start_hook
+  [[ "$output" != *"/found-issues:setup"* ]]
+  [[ "$output" != *"statusline"* ]]
+}
+
+@test "session-start on claude: does NOT inject the rules block (skill owns it)" {
+  export CLAUDE_CODE_ENTRYPOINT=cli
+  run_session_start_hook
+  [[ "$output" != *"found-issues — agent rules"* ]]
+}
+
+# === found-issues.md:296 fix: critical detection must anchor to the status
+# prefix, not grep '[!]' anywhere in the entry line ===
+
+@test "session-start: symptom text containing literal [!] is not miscounted as critical" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  fi_init_git
+  mkdir -p src
+  export FOUND_ISSUES_SESSION_INJECT_MAX=1
+  printf '1\n' > src/sec.py
+  fi_run log --critical "src/sec.py:1 — token leak"
+  printf '1\n2\n' > src/fake.py
+  fi_run log "src/fake.py:2 — false positive marker [!] inside symptom text"
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  # Real critical always shown (uncapped).
+  [[ "$output" == *"src/sec.py:1"* ]]
+  # Fake-critical (symptom merely contains literal "[!]") must be treated as
+  # non-critical and capped out — slots = max_inject(1) - crit_count(1) = 0.
+  [[ "$output" != *"src/fake.py:2"* ]]
+  [[ "$output" != *"false positive marker"* ]]
   rm -rf "$FAKE_HOME"
 }
