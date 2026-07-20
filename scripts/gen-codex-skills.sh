@@ -29,6 +29,12 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 export LC_ALL=C
 
+# Shared Claude→Codex rewrites, also used by hooks/session-start.sh. Sourced
+# (not duplicated) so the two rewrite paths can't drift — see
+# tests/codex-skills-drift.bats (which copies this helper into its sandbox).
+# shellcheck source=../lib/codex-rewrite.sh
+source lib/codex-rewrite.sh
+
 rm -rf codex-skills
 mkdir -p codex-skills
 
@@ -41,10 +47,8 @@ for cmd in commands/*.md; do
   # `/fi` alias file). No other description matches these two patterns, so
   # this is a no-op everywhere else.
   desc="$(awk '/^description:/ { sub(/^description:[ ]*/, ""); print; exit }' "$cmd" \
+    | fi_codex_rewrite_core \
     | sed -E \
-        -e 's|/found-issues:([a-z-]+)|$fi-\1|g' \
-        -e 's|\$ARGUMENTS|<the user-provided arguments>|g' \
-        -e 's|@found-issues-rules\.md|the auto-injected found-issues rules|g' \
         -e 's|/plugin uninstall|removing the found-issues plugin|g' \
         -e 's|/fi alias|fi alias|g')"
 
@@ -55,12 +59,13 @@ for cmd in commands/*.md; do
     printf 'description: %s\n' "$desc"
     printf -- '---\n'
     # Body = everything after the closing frontmatter fence, with Claude-only
-    # syntax rewritten for Codex.
+    # syntax rewritten for Codex. The trailing sed fixes relative-link depth:
+    # commands/*.md live one level under the repo root, but generated skills
+    # live at codex-skills/fi-<name>/ (two levels down), so a `](../foo)`
+    # link resolves to the wrong parent unless bumped to `](../../foo)`.
     awk 'c >= 2 { print } /^---$/ { c++ }' "$cmd" \
-      | sed -E \
-          -e 's|/found-issues:([a-z-]+)|$fi-\1|g' \
-          -e 's|\$ARGUMENTS|<the user-provided arguments>|g' \
-          -e 's|@found-issues-rules\.md|the auto-injected found-issues rules|g'
+      | fi_codex_rewrite_core \
+      | sed -E -e 's|\]\(\.\./|](../../|g'
   } > "codex-skills/fi-$name/SKILL.md"
 done
 

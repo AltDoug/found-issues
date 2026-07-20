@@ -24,6 +24,16 @@ if [[ -f "$__fi_hook_dir/../lib/harness.sh" ]]; then
   harness="$(fi_detect_harness)"
 fi
 
+# Shared Claude→Codex text rewrites — used below to strip Claude-only slash
+# syntax (/found-issues:<name> -> $fi-<name>, etc.) from the rules body before
+# injecting it into Codex context. Same rules gen-codex-skills.sh applies,
+# sourced from one place so they can't drift. Sourced defensively: session-start
+# must fail open (fall back to the raw body) if the helper is missing.
+if [[ -f "$__fi_hook_dir/../lib/codex-rewrite.sh" ]]; then
+  # shellcheck source=../lib/codex-rewrite.sh disable=SC1091
+  source "$__fi_hook_dir/../lib/codex-rewrite.sh"
+fi
+
 # Codex has no auto-loaded-skill mechanism: the rules ship here instead.
 # (On Claude Code the skills/rules skill injects them — emitting here too
 # would double-pay the tokens.) Fires unconditionally, before the
@@ -49,8 +59,13 @@ if [[ "$harness" == "codex" ]]; then
   __fi_rules="${PLUGIN_ROOT:-$__fi_hook_dir/..}/skills/rules/SKILL.md"
   if [[ -f "$__fi_rules" ]]; then
     # Strip YAML frontmatter (everything before the second '---' fence),
-    # capturing only the rules body.
+    # capturing only the rules body, then rewrite Claude-only slash syntax
+    # for Codex so the injected rules never advertise /found-issues:… commands
+    # that don't exist on Codex (they become $fi-… mentions instead).
     codex_rules_block="$(LC_ALL=C awk 'c >= 2 { print } /^---$/ { c++ }' "$__fi_rules")"
+    if declare -F fi_codex_rewrite_core >/dev/null 2>&1; then
+      codex_rules_block="$(printf '%s\n' "$codex_rules_block" | fi_codex_rewrite_core)"
+    fi
   fi
 fi
 
@@ -397,6 +412,18 @@ fi
 # writes straight to stdout, so Claude's output is byte-for-byte the same
 # as before this was a function.
 fi_render_ledger_context() {
+  # Annotation-command references are harness-specific: Claude Code uses the
+  # /found-issues:… slash commands; Codex has no slash commands, only the
+  # $fi-… skill mentions the codex-skills carry.
+  local fi_annotate_pr_ref fi_annotate_commit_ref
+  # shellcheck disable=SC2016  # $fi- is Codex's literal mention sigil, not a shell expansion
+  if [[ "$harness" == "codex" ]]; then
+    fi_annotate_pr_ref='$fi-annotate-pr'
+    fi_annotate_commit_ref='$fi-annotate-commit'
+  else
+    fi_annotate_pr_ref='/found-issues:annotate-pr'
+    fi_annotate_commit_ref='/found-issues:annotate-commit'
+  fi
   cat <<EOF
 ## found-issues — open entries in this repo
 
@@ -416,7 +443,7 @@ EOF
   cat <<EOF
 
 These entries are tracked in \`$display_path\`. If your work addresses any of
-them, run \`/found-issues:annotate-pr <N>\` after opening a PR or \`/found-issues:annotate-commit\`
+them, run \`$fi_annotate_pr_ref <N>\` after opening a PR or \`$fi_annotate_commit_ref\`
 after a direct commit. Sync will auto-flip them when the PR merges or the
 commit lands on the default branch.
 EOF

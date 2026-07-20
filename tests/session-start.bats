@@ -376,12 +376,20 @@ run_session_start_hook() {
   [[ "$ctx" == *"found-issues — agent rules"* ]]
   [[ "$ctx" == *'```'* ]]
   [[ "$ctx" == *"src/a.py:1"* ]]
+  # Claude-only slash syntax must be rewritten to the Codex $fi- mention sigil
+  # in BOTH the rules body and the ledger footer — a Codex reader has no
+  # /found-issues:… slash commands.
+  [[ "$ctx" == *'$fi-'* ]]
+  [[ "$ctx" != *'/found-issues:'* ]]
 }
 
 @test "session-start on codex: skips statusline nudge and onboarding hint" {
   unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
   export PLUGIN_DATA="$TMP/pd"
-  rm -f "$HOME/.claude/found-issues/.onboarded" 2>/dev/null || true
+  # (No .onboarded reset here: the hook runs with HOME=$TMP via
+  # run_session_start_hook, and the onboarding hint is Claude-only anyway. The
+  # earlier `rm -f "$HOME/.claude/found-issues/.onboarded"` deleted the
+  # OPERATOR's real marker and was a no-op for this codex test.)
   run_session_start_hook
   [[ "$output" != *"/found-issues:setup"* ]]
   [[ "$output" != *"statusline"* ]]

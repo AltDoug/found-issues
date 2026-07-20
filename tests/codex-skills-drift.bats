@@ -13,6 +13,9 @@ load 'helpers'
   cp -R "$TEST_REPO_ROOT/commands" "$tmp/commands"
   cp "$TEST_REPO_ROOT/scripts/gen-codex-skills.sh" "$tmp/"
   mkdir -p "$tmp/scripts" && mv "$tmp/gen-codex-skills.sh" "$tmp/scripts/"
+  # The generator sources lib/codex-rewrite.sh (shared with session-start.sh);
+  # copy it into the sandbox too or the regeneration can't run.
+  mkdir -p "$tmp/lib" && cp "$TEST_REPO_ROOT/lib/codex-rewrite.sh" "$tmp/lib/"
   (cd "$tmp" && bash scripts/gen-codex-skills.sh)
   diff -r "$tmp/codex-skills" "$TEST_REPO_ROOT/codex-skills"
   rm -rf "$tmp"
