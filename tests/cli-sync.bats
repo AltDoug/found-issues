@@ -117,6 +117,62 @@ EOF
   [[ "$output" != *"Hint"* ]]
 }
 
+# === home-relative / env-var locations must never tombstone (2026-07-20) ===
+# A ledger can legitimately cite machine state outside the repo
+# (~/.claude.json, $HOME/.config/...). Probing those as repo-relative
+# literals ($repo_root/~/.claude.json) always misses, so sync tombstoned
+# them on every run — reproduced live in agent-config: four false closures
+# of the same ~-path entry in one day, each hand-repair lost within
+# seconds to the next post-bash dispatcher fire.
+
+@test "sync: never tombstones a ~-prefixed (home-relative) location" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+
+- [open] 2026-07-20 ~/.claude.json someFlag (recurrence) — flag reset by an update (suggested: post-update check)
+EOF
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] 2026-07-20 ~/.claude.json' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: never tombstones a \$VAR-prefixed location" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+
+- [open] 2026-07-20 $HOME/.config/tool/config.json — drift outside the repo (suggested: doctor check)
+EOF
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] 2026-07-20 \$HOME/.config' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+# === annotation tokens inside symptom text must not drive flips ===
+
+@test "sync: commit annotation form inside SYMPTOM text does not flip the entry" {
+  mkdir -p src
+  echo "x" > src/foo.py
+  git add src/foo.py
+  git commit -q -m "add foo"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+
+  # The canonical form appears mid-symptom (narrating another entry's fix),
+  # followed by more symptom text — it is NOT a trailing annotation.
+  mkdir -p docs
+  cat > docs/found-issues.md <<EOF
+# found-issues
+
+- [open] 2026-07-20 src/foo.py:1 — earlier repair shipped as (commit: $short_sha) but this symptom persists (suggested: real fix)
+EOF
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] 2026-07-20 src/foo.py:1' docs/found-issues.md
+}
+
 @test "sync: tombstone never probes paths with .. components (path traversal)" {
   # Regression (2026-07-09 audit, critical): entry paths are attacker-
   # controlled (committed found-issues.md in any cloned repo) and were

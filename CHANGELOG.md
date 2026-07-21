@@ -4,6 +4,29 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-07-20
+
+Two false-flip fixes, both reproduced live in a consumer ledger the day
+v2.0.0 shipped (four false closures of one entry in a single day).
+
+### Fixed
+
+- **Sync tombstoned `~`- and `$VAR`-prefixed locations on every run.** The
+  tombstone probe guarded absolute (`/…`) and glob paths but not
+  home-relative or env-var forms, so entries citing machine state outside
+  the repo (`~/.claude.json`, `$HOME/.config/…`) were probed as
+  repo-relative literals, always missed, and were closed as
+  `(closure: tombstone)` at every sync — including the post-bash
+  dispatcher's auto-sync, which re-closed hand-repairs within seconds.
+  Such locations are now never filesystem-probed.
+- **Annotation tokens quoted inside symptom text drove flips.** PR/commit
+  annotations were extracted from the whole entry line, so a symptom that
+  narrated another fix ("earlier repair shipped as `(commit: abc1234)`
+  but…") flipped THIS entry when that artifact landed. Flip-driving
+  annotations (`PR`, `PR-closed`, `commit`, `commit-stale`) are now read
+  only from the entry's trailing annotation run (`fi_annotation_tail`);
+  mid-symptom mentions are narrative.
+
 ## [2.0.0] - 2026-07-20
 
 Dual-harness release: found-issues now installs into OpenAI Codex as well

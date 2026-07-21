@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.0.0"
+readonly FI_VERSION="2.0.1"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1860,9 +1860,15 @@ cmd_sync() {
         # the probes below (stat, wc -l, rename detection) reach outside the
         # repo: an existence/line-count oracle plus false tombstone flips.
         # SessionStart auto-runs sync, so this fires with no user action.
-        if [[ "$e_path" == /* || "$e_path" == ".." || "$e_path" == ../* \
+        if [[ "$e_path" == /* || "$e_path" == "~"* || "$e_path" == \$* \
+              || "$e_path" == ".." || "$e_path" == ../* \
               || "$e_path" == */../* || "$e_path" == */.. ]]; then
-          : # not a repo-relative path — never probe the filesystem for it
+          : # Not a repo-relative path — never probe the filesystem for it.
+            # ~-prefixed and $VAR-prefixed locations cite machine state
+            # outside the repo (~/.claude.json, $HOME/.config/...): probing
+            # them as repo-relative literals always misses, which tombstoned
+            # such entries on every sync (agent-config 2026-07-20 — four
+            # false closures of one entry in a day).
         elif [[ "$e_path" == *[\*\?]* || "$e_path" == *\{*\}* || "$e_path" == *\[*\]* ]]; then
           # Glob/brace location tokens (tests/*.bats, config/{dev,prod}.yml)
           # are pattern descriptors, not filenames — the parser accepts them

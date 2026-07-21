@@ -51,6 +51,23 @@ fi_has_conflict_markers() {
   LC_ALL=C grep -qE '^(<<<<<<< |=======$|>>>>>>> )' "$file"
 }
 
+# Return the trailing run of recognized "(key: ...)" annotation groups —
+# the annotation tail. Walks backward from end-of-line consuming groups
+# whose key is in the recognized set; stops at the first thing that is not
+# one (prose, a nested-paren suggested block, the symptom). Tokens that
+# LOOK like annotations but sit mid-line are therefore excluded.
+# Compatible with bash 3.2 (regex in a variable, no lookbehind).
+fi_annotation_tail() {
+  local line="$1" tail=""
+  local re_tail_group='\((PR|PR-closed|commit|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested): [^)]*\)[[:space:]]*$'
+  while [[ "$line" =~ $re_tail_group ]]; do
+    local grp="${BASH_REMATCH[0]}"
+    tail="${grp}${tail}"
+    line="${line%"$grp"}"
+  done
+  printf '%s' "$tail"
+}
+
 # Parse a single entry line into KEY=VALUE pairs (one per line).
 # Returns 1 if the line is not a valid entry.
 fi_parse_entry() {
@@ -128,30 +145,39 @@ fi_parse_entry() {
     fix="${BASH_REMATCH[1]}"
   fi
 
+  # Flip-driving annotations (PR/PR-closed/commit/commit-stale) are extracted
+  # from the trailing annotation run ONLY — a canonical form quoted inside
+  # the symptom ("earlier repair shipped as (commit: abc1234) but…") is
+  # narrative, not an annotation. Whole-line extraction let sync flip a live
+  # entry whenever a PR/commit it merely MENTIONED landed (agent-config
+  # 2026-07-20, twice on the same entry).
+  local ann_tail
+  ann_tail="$(fi_annotation_tail "$line")"
+
   # PR annotations (multiple allowed) — extract via grep -oE
   local prs
-  prs="$(printf '%s' "$line" \
+  prs="$(printf '%s' "$ann_tail" \
     | grep -oE '\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' \
     | sed -E 's/^\(PR: //; s/\)$//' \
     | paste -sd , - 2>/dev/null || true)"
 
   # PR-closed annotations (sync-demoted form; multiple allowed)
   local prs_closed
-  prs_closed="$(printf '%s' "$line" \
+  prs_closed="$(printf '%s' "$ann_tail" \
     | grep -oE '\(PR-closed: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' \
     | sed -E 's/^\(PR-closed: //; s/\)$//' \
     | paste -sd , - 2>/dev/null || true)"
 
   # Commit annotations (multiple allowed)
   local commits
-  commits="$(printf '%s' "$line" \
+  commits="$(printf '%s' "$ann_tail" \
     | grep -oE '\(commit: [a-f0-9]{7,40}\)' \
     | sed -E 's/^\(commit: //; s/\)$//' \
     | paste -sd , - 2>/dev/null || true)"
 
   # Commit-stale annotations (sync-demoted form; multiple allowed)
   local commits_stale
-  commits_stale="$(printf '%s' "$line" \
+  commits_stale="$(printf '%s' "$ann_tail" \
     | grep -oE '\(commit-stale: [a-f0-9]{7,40}\)' \
     | sed -E 's/^\(commit-stale: //; s/\)$//' \
     | paste -sd , - 2>/dev/null || true)"

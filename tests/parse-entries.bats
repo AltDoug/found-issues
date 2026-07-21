@@ -174,6 +174,33 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
+# === annotation-tail scoping (2026-07-20): tokens inside symptom text are
+# narrative, not annotations — sync flipped a live entry because the
+# canonical (PR: org/repo#N) form appeared mid-symptom describing ANOTHER
+# entry's fix, then flipped again for the same reason after a hand-repair.
+# Only the trailing run of recognized (key: ...) groups counts.
+
+@test "parse_entry: PR form inside symptom text is not an annotation" {
+  out="$(fi_parse_entry '- [open] 2026-07-20 src/a.py:1 — sync false-flipped this because (PR: org/repo#232) appeared mid-symptom and more text follows (suggested: scope matching to the tail)')"
+  [[ "$out" == *$'prs=\n'* ]]
+}
+
+@test "parse_entry: commit form inside symptom text is not an annotation" {
+  out="$(fi_parse_entry '- [open] 2026-07-20 src/a.py:1 — repair shipped as (commit: a1b2c3d) but symptom persists (suggested: real fix)')"
+  [[ "$out" == *$'commits=\n'* ]]
+}
+
+@test "parse_entry: trailing PR annotation still extracted after a symptom mention" {
+  out="$(fi_parse_entry '- [open] 2026-07-20 src/a.py:1 — mentions (PR: org/repo#1) mid-symptom (suggested: fix) (PR: org/repo#9)')"
+  [[ "$out" == *"prs=org/repo#9"* ]]
+}
+
+@test "parse_entry: full trailing annotation run parses (PR + fixed + closure)" {
+  out="$(fi_parse_entry '- [fixed] 2026-07-20 src/a.py:1 — bug (suggested: x) (PR: org/repo#5) (closure: tombstone) (fixed: 2026-07-20)')"
+  [[ "$out" == *"prs=org/repo#5"* ]]
+  [[ "$out" == *"fixed_date=2026-07-20"* ]]
+}
+
 # === fi_entries / fi_count ===
 
 @test "entries: filters by status open" {
