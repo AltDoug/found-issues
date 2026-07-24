@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.0.1"
+readonly FI_VERSION="2.0.2"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1094,6 +1094,13 @@ cmd_status() {
           fi
         done
         printf '%s\n' "$out"
+      elif [[ -n "$file" && -f "$file" ]]; then
+        # A ledger exists and it's clean: say so. Silence here is
+        # indistinguishable from a broken invocation (2026-07-23 consumer
+        # report). No-file stays silent — plain is also scripted against
+        # repos that never adopted a ledger, and segment keeps its
+        # quiet-at-zero statusline contract.
+        printf '0 open\n'
       fi
       ;;
     segment)
@@ -4703,6 +4710,7 @@ main() {
           --format)   format="${2:-segment}"; shift 2 ;;
           --cwd=*)    cwd="${1#--cwd=}"; shift ;;
           --cwd)      cwd="${2:-}"; shift 2 ;;
+          -h|--help)  cmd_help; return 0 ;;
           *)          shift ;;
         esac
       done
