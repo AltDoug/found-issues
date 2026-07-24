@@ -71,6 +71,42 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
+@test "status: plain prints '0 open' when a ledger exists with zero open entries" {
+  # Silence here is indistinguishable from a broken invocation (2026-07-23
+  # consumer report: ledger cleaned to zero, status printed nothing, user
+  # had to grep the file to trust the CLI). No-file plain stays silent —
+  # that contract is pinned by the first test in this file.
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [fixed] 2026-05-10 src/foo.py:42 — null check (fixed: 2026-05-11)
+- [deferred] 2026-05-10 src/bar.py:99 — kicked down road
+EOF
+  fi_run status --format=plain
+  [ "$status" -eq 0 ]
+  [ "$output" = "0 open" ]
+}
+
+@test "status: segment stays empty at zero open (statusline quiet-at-zero contract)" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [fixed] 2026-05-10 src/foo.py:42 — null check (fixed: 2026-05-11)
+EOF
+  fi_run status --format=segment
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "status: --help prints usage instead of silently rendering the segment" {
+  # `--help` used to fall into the arg-loop's catch-all shift, leaving the
+  # default segment format to render — which at zero open printed nothing
+  # at all (exit 0). Help must win over rendering.
+  fi_run status --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--format=json"* ]]
+}
+
 @test "status: [deferred] entries do not count toward 'issues'" {
   mkdir -p docs
   cat > docs/found-issues.md <<'EOF'

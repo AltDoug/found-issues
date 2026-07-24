@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-07-24
+
+Two silence fixes in `status`, both hit live in a consumer session right
+after a ledger was cleaned to zero open (silence read as a broken CLI).
+
+### Fixed
+
+- **`status --format=plain` printed nothing when a ledger exists with zero
+  open entries.** It now prints `0 open` so a clean ledger is
+  distinguishable from a failed invocation. The two neighboring contracts
+  are unchanged and now pinned by tests: no-ledger plain stays silent
+  (scripted use against repos that never adopted a ledger), and segment
+  stays empty at zero (statusline quiet-at-zero).
+- **`status --help` printed nothing and exited 0.** The flag fell into the
+  status arg-loop's catch-all `shift`, leaving the default segment format
+  to render — empty at zero open. `-h`/`--help` now print the usage text.
+
 ## [2.0.1] - 2026-07-20
 
 Two false-flip fixes, both reproduced live in a consumer ledger the day
