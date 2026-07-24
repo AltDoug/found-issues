@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-07-24
+
+### Added
+
+- **`annotate-pr` accepts cross-repo refs: `annotate-pr org/repo#N`.** An
+  entry fixed by a PR in a different repo (e.g. an upstream plugin fix for
+  a consumer-ledger entry) was un-annotatable — the CLI accepted only a
+  numeric PR and resolved `org/repo` from the CWD repo — even though sync
+  fully supports reading `org/repo#N` refs. Cross-repo refs require
+  `--pick`: file-level auto-matching compares the PR's touched files
+  against this repo's entry paths, which is meaningless when the PR lives
+  in another repo's tree. Verification runs `gh pr view N --repo org/repo`.
+
 ## [2.0.2] - 2026-07-24
 
 Two silence fixes in `status`, both hit live in a consumer session right
