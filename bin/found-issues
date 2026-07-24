@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.0.2"
+readonly FI_VERSION="2.1.0"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1599,13 +1599,28 @@ cmd_annotate_pr() {
     fi_err "Usage: found-issues annotate-pr <PR-number> [--pick <path:line>[,<path:line>...]] [--all]"
     return 2
   fi
-  if ! [[ "$pr_num" =~ ^[0-9]+$ ]]; then
-    fi_err "annotate-pr: PR number must be numeric, got: $pr_num"
+  local ref_repo="" _ref_re='^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#([0-9]+)$'
+  if [[ "$pr_num" =~ $_ref_re ]]; then
+    # Cross-repo ref (e.g. an upstream plugin fix for a consumer-ledger
+    # entry). Sync already reads org/repo#N annotations; this makes them
+    # producible. --pick is mandatory: file-level auto-matching compares
+    # the PR's touched files against THIS repo's entry paths, which is
+    # meaningless when the PR lives in another repo's tree.
+    ref_repo="${BASH_REMATCH[1]}"
+    pr_num="${BASH_REMATCH[2]}"
+    if [[ -z "$picks_nl" ]]; then
+      fi_err "annotate-pr: cross-repo ref $ref_repo#$pr_num requires --pick <path:line>[,...]"
+      return 2
+    fi
+  elif ! [[ "$pr_num" =~ ^[0-9]+$ ]]; then
+    fi_err "annotate-pr: PR argument must be numeric or org/repo#N, got: $pr_num"
     return 2
   fi
 
   local repo_id
-  if ! repo_id="$(fi_repo_id)"; then
+  if [[ -n "$ref_repo" ]]; then
+    repo_id="$ref_repo"
+  elif ! repo_id="$(fi_repo_id)"; then
     fi_err "annotate-pr: not in a GitHub repo"
     return 1
   fi
@@ -1615,8 +1630,13 @@ cmd_annotate_pr() {
     return 1
   fi
 
-  # Verify PR exists
-  if ! gh pr view "$pr_num" --json number >/dev/null 2>&1; then
+  # Verify PR exists (in the ref's repo when cross-repo)
+  if [[ -n "$ref_repo" ]]; then
+    if ! gh pr view "$pr_num" --repo "$ref_repo" --json number >/dev/null 2>&1; then
+      fi_err "annotate-pr: PR #$pr_num not found in $repo_id"
+      return 1
+    fi
+  elif ! gh pr view "$pr_num" --json number >/dev/null 2>&1; then
     fi_err "annotate-pr: PR #$pr_num not found in $repo_id"
     return 1
   fi
@@ -1635,7 +1655,7 @@ cmd_annotate_pr() {
   # silently drop the requested annotations.
   if [[ -n "$picks_nl" ]]; then
     fi_annotate_apply_picks "$file" "$annotation" "$picks_nl" \
-      "annotate-pr" "found-issues annotate-pr $pr_num"
+      "annotate-pr" "found-issues annotate-pr ${ref_repo:+$ref_repo#}$pr_num"
     return $?
   fi
 

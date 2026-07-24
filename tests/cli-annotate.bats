@@ -333,3 +333,43 @@ _setup_pr_repo() {
   [ "$status" -eq 0 ]
   [ "$(grep -c '(commit:' docs/found-issues.md)" -eq 2 ]
 }
+
+# === annotate-pr cross-repo refs (v2.1.0) ===
+#
+# An entry fixed by a PR in a DIFFERENT repo (e.g. an upstream plugin fix
+# for a consumer-ledger entry) was previously un-annotatable: the CLI
+# accepted only a numeric PR and resolved org/repo from CWD — yet sync
+# fully supports reading org/repo#N refs. Cross-repo refs require --pick:
+# file-level auto-matching is meaningless against another repo's tree.
+
+@test "annotate-pr: org/repo#N ref with --pick writes the given canonical ref" {
+  fi_use_gh_shim
+  export GH_MOCK_PR_VIEW=$'12\tupstream/file.sh'
+  export GH_MOCK_TRACE="$PWD/gh-trace.txt"
+  mkdir -p src && echo x > src/foo.py
+  fi_run log "src/foo.py:1 — bug fixed upstream"
+  fi_run annotate-pr "acme/upstream#12" --pick src/foo.py:1
+  [ "$status" -eq 0 ]
+  grep -q '(PR: acme/upstream#12)' docs/found-issues.md
+  grep -q -- '--repo acme/upstream' "$GH_MOCK_TRACE"
+  unset GH_MOCK_PR_VIEW GH_MOCK_TRACE
+}
+
+@test "annotate-pr: cross-repo ref without --pick is refused with guidance" {
+  fi_use_gh_shim
+  export GH_MOCK_PR_VIEW=$'12\tupstream/file.sh'
+  mkdir -p src && echo x > src/foo.py
+  fi_run log "src/foo.py:1 — bug"
+  fi_run annotate-pr "acme/upstream#12"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--pick"* ]]
+  # run + status, not bare `! grep` — bats swallows mid-function `!` failures
+  run grep -q '(PR: acme/upstream#12)' docs/found-issues.md
+  [ "$status" -ne 0 ]
+  unset GH_MOCK_PR_VIEW
+}
+
+@test "annotate-pr: malformed org/repo ref is rejected" {
+  fi_run annotate-pr "acme/upstream#12x"
+  [ "$status" -ne 0 ]
+}
