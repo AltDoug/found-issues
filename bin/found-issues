@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.1.0"
+readonly FI_VERSION="2.1.1"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1906,7 +1906,10 @@ cmd_sync() {
           local repo_root
           repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           local full_path="$repo_root/$e_path"
-          if [[ ! -f "$full_path" ]]; then
+          if [[ ! -e "$full_path" ]]; then
+            # -e, not -f: an entry may cite a DIRECTORY (.git/worktrees,
+            # src/utils) — an existing dir is not a missing file (agent-config
+            # 2026-07-27: fresh dir entry false-closed twice within minutes).
             # C1: check if file was renamed before declaring tombstone
             local detected_new_path
             if detected_new_path="$(cd "$repo_root" && fi_detect_rename "$e_path")"; then
@@ -1918,7 +1921,7 @@ cmd_sync() {
               closure_label="(closure: tombstone) (fixed: $today)"
               closed_tomb=$((closed_tomb + 1))
             fi
-          elif [[ -n "$e_line" ]]; then
+          elif [[ -f "$full_path" && -n "$e_line" ]]; then
             local file_lines
             # awk END{NR}, not wc -l: wc counts newline characters, so a file
             # lacking a trailing newline undercounts by one and an entry on

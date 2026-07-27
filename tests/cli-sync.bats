@@ -242,3 +242,27 @@ EOF
   ! grep -q 'closure: tombstone' docs/found-issues.md
   [ "$(grep -c '^- \[open\]' docs/found-issues.md)" -eq 2 ]
 }
+
+# === directory paths must never tombstone (agent-config 2026-07-27) ===
+# An entry can cite a directory (.git/worktrees, src/utils). The probe used
+# [[ ! -f ]], so an EXISTING directory read as "file missing" and sync
+# tombstoned the entry on every pass — reproduced live in agent-config:
+# a fresh .git/worktrees entry false-closed twice within minutes of landing.
+
+@test "sync: never tombstones an entry whose path is an existing directory" {
+  mkdir -p .git/worktrees
+  fi_run log ".git/worktrees — orphaned worktree registration left by ended session"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*\.git/worktrees' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: existing directory cited with a line number is not line-probed" {
+  mkdir -p src/utils
+  fi_run log "src/utils:3 — dead module tree"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*src/utils:3' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
