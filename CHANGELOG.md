@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-07-27
+
+### Fixed
+
+- **Sync no longer tombstones entries whose path is an existing
+  directory.** The tombstone probe used `[[ ! -f ]]`, so an entry citing a
+  directory (`.git/worktrees`, `src/utils`) read as "file missing" and was
+  false-closed on every sync pass — reproduced live in a consumer ledger:
+  a fresh directory-path entry flipped twice within minutes of landing,
+  each hand-repair lost to the next pass. The probe is now `[[ ! -e ]]`,
+  and the line-past-EOF check only runs for regular files (a directory
+  cited with a line number is never line-probed).
+
 ## [2.1.0] - 2026-07-24
 
 ### Added
