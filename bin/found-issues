@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.1.1"
+readonly FI_VERSION="2.1.2"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1906,7 +1906,29 @@ cmd_sync() {
           local repo_root
           repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           local full_path="$repo_root/$e_path"
-          if [[ ! -e "$full_path" ]]; then
+          # fi_parse_entry takes the first whitespace-delimited token as the
+          # path (lib/parse-entries.sh) — it has to, since the location field
+          # also carries `path symbol ~1982-1989` forms. So a path containing
+          # spaces ("docs/handoff/HO production env setup.md:88") silently
+          # becomes a DIFFERENT, non-existent path ("docs/handoff/HO") and the
+          # entry is tombstoned on every pass even though the file is present.
+          # `log` creates such entries itself (the */* branch at :476 takes the
+          # location verbatim), so this is not limited to hand-edited ledgers.
+          # Recover the untruncated location from the raw line and re-probe
+          # before declaring a closure. Deliberately does NOT widen the parser:
+          # that would shift dedup keys and break the `path symbol ~range`
+          # forms first_token exists to support.
+          local recovered_loc=""
+          if [[ "$e_path" != *[[:space:]]* ]]; then
+            recovered_loc="$(printf '%s' "$line" | sed -E 's/^- \[(open|deferred|fixed)\]( \[!\])? [0-9]{4}-[0-9]{2}-[0-9]{2} //')"
+            recovered_loc="${recovered_loc%% — *}"
+            recovered_loc="${recovered_loc%:[0-9]*}"
+            # only meaningful when the raw location actually contained spaces
+            [[ "$recovered_loc" == *[[:space:]]* ]] || recovered_loc=""
+          fi
+          if [[ -n "$recovered_loc" && -e "$repo_root/$recovered_loc" ]]; then
+            : # parser truncated a real, existing path — never tombstone
+          elif [[ ! -e "$full_path" ]]; then
             # -e, not -f: an entry may cite a DIRECTORY (.git/worktrees,
             # src/utils) — an existing dir is not a missing file (agent-config
             # 2026-07-27: fresh dir entry false-closed twice within minutes).
