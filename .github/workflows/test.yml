@@ -29,9 +29,31 @@ on:
 # dispatch runs never share a group with push-to-main — without it, a push
 # landing during the ~15-min canary window cancels the canary (or vice versa,
 # leaving the merged commit's checks 'cancelled').
+#
+# cancel-in-progress is OFF for push-to-main. A push cancelling the previous
+# push's run silently voids the multi-OS verification of whatever that run was
+# testing: the cancelled run's `ci` correctly reports failure, but the NEWER run
+# is the one whose status attaches to the branch head — and when that newer push
+# is docs-only, every job skips and `ci` reports success. Net effect: main reads
+# green having never run bats on macOS or Windows.
+#
+# Hit for real 2026-08-11 — a one-line ledger flip (#130) merged two minutes
+# after the v2.2.1 fix (#129) and cancelled its matrix mid-run; caught only by
+# watching the run, recovered by re-running it by hand. This restores the
+# quality floor the OS-matrix comment below already promises: every commit that
+# LANDS runs all three OSes.
+#
+# Fixing it at the aggregator instead was considered and rejected: `ci` already
+# treats `cancelled` as blocking (it did report failure here), so the aggregator
+# was never the defect — and failing it on *skipped* bats would break the
+# legitimate docs-only-push skip that the path filter exists to provide.
+#
+# PRs keep cancelling: that is where fix-up commits arrive in quick succession
+# and stale results are pure waste. The added cost is bounded by how often two
+# commits land on main inside one matrix window.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   # Detect whether this PR/push touches anything that affects test outcomes.

@@ -209,6 +209,19 @@ if ! command -v "$FI_BIN" >/dev/null 2>&1; then
   fi
 fi
 
+# Which binary won is otherwise invisible, and the answer surprises people: a
+# `found-issues` on PATH — the INSTALLED plugin — outranks the co-located
+# FI_BIN_DIR binary, so running this hook from a source checkout silently
+# exercises the installed version. A local change then looks like it had no
+# effect, and a bug you just fixed looks unfixed. (Cost two false "no bug here"
+# readings during the v2.2.1 work; the override is FOUND_ISSUES_BIN, and
+# FI_BIN_DIR only applies once nothing named found-issues is on PATH.)
+# Diagnostic only — this never changes which binary is chosen.
+if [[ -n "${FOUND_ISSUES_DEBUG_BIN:-}" ]]; then
+  printf 'found-issues: hook resolved FI_BIN=%s\n' \
+    "$(command -v "$FI_BIN" 2>/dev/null || printf '%s' "$FI_BIN")" >&2
+fi
+
 # --- broken custom-target marker migration (auto-trigger) ---
 # Detect broken marker blocks in custom statusline targets and auto-migrate
 # them in place. Two generations of breakage:

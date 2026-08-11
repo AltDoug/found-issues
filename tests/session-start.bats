@@ -431,3 +431,35 @@ run_session_start_hook() {
   [[ "$output" != *"false positive marker"* ]]
   rm -rf "$FAKE_HOME"
 }
+
+# === FI_BIN resolution visibility ===
+#
+# A `found-issues` on PATH (the INSTALLED plugin) outranks the co-located
+# FI_BIN_DIR binary, so running this hook from a source checkout silently
+# exercises the installed version -- a local change looks like it had no
+# effect. FOUND_ISSUES_DEBUG_BIN makes the choice visible without changing it.
+
+@test "session-start: FOUND_ISSUES_DEBUG_BIN reports the resolved CLI path" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  fi_init_git
+  export FOUND_ISSUES_DEBUG_BIN=1
+  export FOUND_ISSUES_BIN="$FI_BIN"
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hook resolved FI_BIN=$FI_BIN"* ]]
+  unset FOUND_ISSUES_DEBUG_BIN FOUND_ISSUES_BIN
+  rm -rf "$FAKE_HOME"
+}
+
+@test "session-start: the resolved-CLI notice stays silent unless asked for" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  fi_init_git
+  export FOUND_ISSUES_BIN="$FI_BIN"
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"hook resolved FI_BIN"* ]]
+  unset FOUND_ISSUES_BIN
+  rm -rf "$FAKE_HOME"
+}
