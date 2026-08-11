@@ -486,3 +486,23 @@ EOF
   [[ "$output" == *"Logged:"* ]]
   grep -qE '^- \[open\] [0-9-]+ workflow:shutdown — ' docs/found-issues.md
 }
+
+# === final-partial-line data loss (v2.2.1) ===
+#
+# Logging a dedup-key match against a [deferred] entry appends to its
+# (touched: ...) annotation via fi_append_touch, which rewrites the ledger.
+
+@test "log: touching a deferred entry does not drop a final entry lacking a trailing newline" {
+  mkdir -p docs src
+  printf 'line1\nline2\n' > src/a.py
+  printf 'line1\nline2\n' > src/b.py
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [deferred] 2026-08-11 src/a.py:1 — first entry\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/b.py:2 — final entry with no trailing newline' \
+    >> docs/found-issues.md
+
+  fi_run log "src/a.py:1 — first entry"
+  [ "$status" -eq 0 ]
+  fi_assert_both_entries_survived
+  grep -q '(touched:' docs/found-issues.md
+}

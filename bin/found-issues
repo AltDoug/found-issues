@@ -10,10 +10,32 @@
 # scheduled; it is NOT a claim that ~4800 lines is the right shape. lib/
 # already exists as the split mechanism, so the cohesion carve-out does not
 # apply here. Remove this line when the cmd_* groups are extracted.
+#
+# === READ-LOOP GUARD (file-wide convention) ===
+#
+# Every loop that reads the ledger from a plain redirect MUST be written
+#
+#   while IFS= read -r line || [[ -n "$line" ]]; do ... done <"$file"
+#
+# `read` returns non-zero on a FINAL line with no trailing newline, so a plain
+# `while read` never runs its body for that line. In a rewrite loop the entry is
+# silently DROPPED (v2.2.1: defer, sync, annotate-commit and promote-deferred
+# each turned a 2-entry ledger into 1 — sync being the worst case, since
+# SessionStart runs it with no user action and no output saying anything was
+# removed). In a scan loop the final entry becomes unselectable, which is the
+# same input shape misbehaving. Hand-edited ledgers and some editors produce
+# exactly this shape. Same data-loss class as the wc -l undercount (v1.6.x).
+#
+# Loops fed by process substitution (`< <(fi_entries ...)`) or a here-string
+# (`<<<"$content"`) are exempt and deliberately left unguarded: awk output and
+# bash here-strings are always newline-terminated.
+#
+# tests/source-guards.bats enforces this by parsing this file — a new unguarded
+# file-fed read loop fails CI with its line number.
 
 set -euo pipefail
 
-readonly FI_VERSION="2.2.0"
+readonly FI_VERSION="2.2.1"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -742,7 +764,9 @@ cmd_defer() {
   tmp="$(mktemp -t fi-defer.XXXXXX)"
   local found=0
   local flipped_entry=""
-  while IFS= read -r line; do
+  local line
+  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
+  while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "$target" ]] && (( found == 0 )); then
       found=1
       local new_line="${line/- \[open\]/- [deferred]}"
@@ -908,10 +932,7 @@ cmd_resolve() {
   tmp="$(mktemp -t fi-resolve.XXXXXX)"
   local found=0
   local line
-  # `|| [[ -n "$line" ]]`: read returns non-zero on a FINAL line with no
-  # trailing newline, so a plain `while read` never runs the body for it and
-  # the rewrite silently drops that entry. Hand-edited ledgers and some editors
-  # produce exactly that shape. Same data-loss class as the wc -l undercount.
+  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "$target" ]] && (( found == 0 )); then
       found=1
@@ -942,7 +963,9 @@ fi_promote_entry_to_open() {
   local tmp
   tmp="$(mktemp -t fi-promote.XXXXXX)"
   local found=0
-  while IFS= read -r line; do
+  local line
+  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
+  while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "$target" ]] && (( found == 0 )); then
       found=1
       local new_line="${line/- \[deferred\]/- [open]}"
@@ -1368,7 +1391,10 @@ fi_annotate_apply_picks() {
 
   # Pass A: per selector, count matching [open] entries and keep their lines.
   local line loc sym i p_loc p_frag
-  while IFS= read -r line; do
+  # Final-partial-line guard (READ-LOOP GUARD, top of file). This pass only
+  # scans, but dropping the final entry here makes it unpickable — the pick
+  # reports "no [open] entry matches" for an entry that is plainly there.
+  while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ ^-\ \[open\] ]] || continue
     loc="$(fi_entry_loc "$line")" || continue
     sym=""
@@ -1411,7 +1437,8 @@ fi_annotate_apply_picks() {
   local tmp matched=0 already=0
   tmp="$(mktemp -t found-issues.XXXXXX)"
   trap "rm -f '$tmp'" EXIT
-  while IFS= read -r line; do
+  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
+  while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
       if [[ "$line" == *"$annotation"* ]]; then
         already=$((already + 1))
@@ -1559,7 +1586,10 @@ fi_annotate_auto() {
   local -a cand_paths=() cand_lnums=()
   local ann_tfs=""
   local line tf
-  while IFS= read -r line; do
+  # Final-partial-line guard (READ-LOOP GUARD, top of file). Scan-only, but a
+  # dropped final entry never becomes a candidate — it would silently miss
+  # annotation while pass 3 below rewrites the file around it.
+  while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ ^-\ \[open\] ]] || continue
     local e_data e_path e_line e_symptom
     e_data="$(fi_parse_entry "$line")" || continue
@@ -1657,7 +1687,8 @@ fi_annotate_auto() {
   local tmp matched=0
   tmp="$(mktemp -t found-issues.XXXXXX)"
   trap "rm -f '$tmp'" EXIT
-  while IFS= read -r line; do
+  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
+  while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
       printf '%s %s\n' "$line" "$annotation" >>"$tmp"
       matched=$((matched + 1))
@@ -1971,7 +2002,11 @@ cmd_sync() {
   tmp="$(mktemp -t found-issues.XXXXXX)"
   trap "rm -f '$tmp'" EXIT
 
-  while IFS= read -r line; do
+  local line
+  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
+  # Worst case of the class: SessionStart runs sync automatically, so the loss
+  # happened with no user action and no output saying anything was removed.
+  while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^-\ \[open\] ]]; then
       local e_data e_path e_line e_prs e_commits
       local -a demote_pr_refs=()
@@ -2363,7 +2398,11 @@ cmd_promote() {
   local needs_promotion=0
   printf 'Entries on %s not yet on %s:\n\n' "$current_branch" "$default_branch"
 
-  while IFS= read -r line; do
+  local line
+  # Final-partial-line guard (READ-LOOP GUARD, top of file). Listing only, but
+  # the entry most likely to need promoting is the one just appended — exactly
+  # the one an unguarded loop omits.
+  while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^-\ \[open\] ]]; then
       if [[ -z "$main_content" ]] || ! printf '%s' "$main_content" | grep -Fxq -- "$line"; then
         printf '%s\n' "$line"

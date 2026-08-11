@@ -428,3 +428,37 @@ _setup_pr_repo() {
   run grep -q '(commit: ' docs/found-issues.md
   [ "$status" -ne 0 ]
 }
+
+# === final-partial-line data loss (v2.2.1) ===
+#
+# annotate-commit rewrites via fi_annotate_auto pass 3; --pick rewrites via
+# fi_annotate_apply_picks pass B, whose pass A scan must ALSO see the final
+# entry or the pick reports "no [open] entry matches". See
+# fi_seed_no_trailing_newline in helpers.bash.
+
+@test "annotate-commit: does not drop a final entry that lacks a trailing newline" {
+  fi_seed_no_trailing_newline
+  git add -A
+  git commit -q -m "touch both cited files"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+
+  fi_run annotate-commit HEAD
+  [ "$status" -eq 0 ]
+  fi_assert_both_entries_survived
+  grep -q "final entry with no trailing newline (commit: $short_sha)" docs/found-issues.md
+}
+
+@test "annotate-pr: --pick can select and keep a final entry lacking a trailing newline" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src docs && echo x > src/hot.py
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/hot.py:1 — first bug\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/hot.py:2 — final entry with no trailing newline' >> docs/found-issues.md
+
+  fi_run annotate-pr 9 --pick src/hot.py:2
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^- \[' docs/found-issues.md)" -eq 2 ]
+  grep -q 'final entry with no trailing newline (PR: org/repo#9)' docs/found-issues.md
+  unset GH_MOCK_PR_VIEW
+}

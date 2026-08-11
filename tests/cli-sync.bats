@@ -326,3 +326,18 @@ EOF
   run grep -q 'closure: tombstone' docs/found-issues.md
   [ "$status" -ne 0 ]
 }
+
+# === final-partial-line data loss (v2.2.1) ===
+#
+# The worst case of the bug class: SessionStart runs sync automatically, so an
+# unguarded rewrite loses the last entry with no user action and no output
+# saying anything was removed. See fi_seed_no_trailing_newline in helpers.bash.
+
+@test "sync: does not drop a final entry that lacks a trailing newline" {
+  fi_seed_no_trailing_newline
+
+  fi_run sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Nothing to close"* ]]
+  fi_assert_both_entries_survived
+}

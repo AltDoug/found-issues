@@ -198,3 +198,23 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$(grep -c 'duplicated line' docs/found-issues.md)" -eq 1 ]
 }
+
+# === final-partial-line data loss (v2.2.1) ===
+#
+# promote's listing scan does not rewrite the ledger, but an unguarded read
+# loop under-reports: the entry most likely to need promoting (the one just
+# appended) is the one silently omitted.
+
+@test "promote: lists a final entry that lacks a trailing newline" {
+  fi_run log "src/foo.py:1 — entry on main"
+  git add -A; git commit -q -m "init"
+
+  git checkout -q -b feat/test
+  printf -- '- [open] 2026-08-11 src/bar.py:1 — final entry with no trailing newline' \
+    >> docs/found-issues.md
+  git add -A; git commit -q -m "branch entry"
+
+  fi_run promote
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"final entry with no trailing newline"* ]]
+}

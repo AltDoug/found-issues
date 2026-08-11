@@ -95,3 +95,18 @@ EOF
   grep -F "(reason: blocked)" docs/found-issues.md
   grep -F "(touched: 2026-05-21)" docs/found-issues.md
 }
+
+# === final-partial-line data loss (v2.2.1) ===
+#
+# promote-deferred rewrites via fi_promote_entry_to_open, which is also the
+# auto-promote path fired by a deferred entry crossing its touch threshold.
+# See fi_seed_no_trailing_newline in helpers.bash.
+
+@test "promote-deferred: does not drop a final entry that lacks a trailing newline" {
+  fi_seed_no_trailing_newline deferred
+
+  fi_run promote-deferred "first entry"
+  [ "$status" -eq 0 ]
+  fi_assert_both_entries_survived
+  grep -q '^- \[open\].*first entry' docs/found-issues.md
+}

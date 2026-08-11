@@ -4,6 +4,58 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-08-11
+
+### Fixed
+
+- **Five shipped commands silently dropped the ledger's last entry when the
+  file lacked a trailing newline.** `read` returns non-zero on a final partial
+  line, so `while IFS= read -r line` never runs its body for it and the rewrite
+  loses that entry. Verified by driving v2.2.0: a 2-entry ledger became 1 after
+  `defer`, after `sync`, after `annotate-commit`, after `promote-deferred`
+  (through `fi_promote_entry_to_open`), and after `log` (see the next entry).
+  Each reported success — `defer` printed `Deferred 1 entry.` and exited 0.
+
+  `sync` was the worst case — `SessionStart` runs it automatically, so the loss
+  happened with no user action and no output saying anything was removed.
+  Hand-edited ledgers and some editors produce exactly this file shape.
+
+  All ledger-rewriting loops now carry the `|| [[ -n "$line" ]]` guard that
+  `resolve` shipped with in v2.2.0 (`defer`, `sync`, `promote-deferred`, and
+  both annotation rewrites).
+
+- **`log` dropped the last entry when it touched a `[deferred]` entry.** The
+  same defect in `fi_append_touch` (`lib/parse-entries.sh`), reached when a
+  `log` call matches a deferred entry's dedup key and appends to its
+  `(touched: ...)` annotation. Found by extending the sweep past
+  `bin/found-issues` — a CLI-only fix would have shipped this one intact.
+  `fi_increment_defer_cycle` is guarded alongside it: today it is safe only
+  because `cmd_defer`'s own guarded rewrite normalizes the file first, and
+  depending on a caller's side effect is not a safety property.
+
+- **`annotate --pick` and `promote`'s listing missed a final entry with no
+  trailing newline.** These loops scan rather than rewrite, so no data was lost,
+  but the same input shape made the last entry unpickable (`--pick` reported "no
+  `[open]` entry matches" for an entry plainly present) and omitted it from
+  `promote`'s branch-only listing. Guarded alongside the rewrites, so a pick
+  cannot select an entry the rewrite would then drop.
+
+- **The guard is now enforced at author time, not just tested per command.**
+  `tests/source-guards.bats` parses `bin/found-issues`, `lib/`, `hooks/` and
+  `scripts/`, and fails CI with the `file:line` of any file-fed read loop
+  missing the guard. Here-strings are exempt unconditionally (bash appends a
+  trailing newline); process substitution is exempt only for producers known to
+  emit newline-terminated output — today just `fi_entries`, which is awk. It is
+  not safe in general: `< <(cat "$file")` hands a missing trailing newline
+  straight through, so the check still requires a guard there. The rationale
+  now lives in one place (the
+  `READ-LOOP GUARD` note at the top of the CLI) instead of being restated per
+  site.
+
+  Scanning `lib/` is deliberate, not incidental: the scheduled extraction of
+  the `cmd_*` groups out of `bin/found-issues` would otherwise move code out of
+  the check's scope as it moved.
+
 ## [2.2.0] - 2026-08-11
 
 ### Added
