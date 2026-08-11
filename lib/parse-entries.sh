@@ -98,7 +98,7 @@ fi_parse_entry() {
 
   # Location: path:line, path-only, or abstract topic
   # Note: em-dash is U+2014 (—); using grep for portability instead of inline regex
-  local path="" line_num=""
+  local path="" line_num="" line_end=""
   local after_date
   # Anchor the strip to the status-prefix pattern so only the entry's leading
   # date is consumed. The earlier `^.*[0-9]{4}-…` form was greedy: if the
@@ -115,7 +115,18 @@ fi_parse_entry() {
   # like + (src/UIView+Ext.swift), so accepted-at-log-time entries
   # round-tripped with an empty path — dedup double-logged, annotate-pr /
   # annotate-commit never matched, tombstone sync never fired.
-  local re_path_line='^([^:[:space:]]+):([0-9]+)$'
+  # A line spec may be a single line (`:42`) or a RANGE (`:23-49`). Ranges are
+  # split into a numeric start (line_num) and a numeric end (line_end) rather
+  # than kept verbatim in line_num: three consumers evaluate the line field
+  # arithmetically — fi_entry_to_json's `10#` coercion below, cmd_sync's
+  # tombstone `-lt` probe, and fi_line_matched's `(( ))` — and bash silently
+  # evaluates "23-49" as the SUBTRACTION -26, so a verbatim range would emit
+  # `"line":-26` in --json and exit 0. Keeping the field numeric leaves those
+  # three sites correct untouched; only location RECONSTRUCTION (fi_entry_loc
+  # and the annotate candidate list) has to rejoin the two halves, and a site
+  # that forgets to degrades to "no match" — the visible failure that already
+  # existed — instead of a silently wrong number.
+  local re_path_line='^([^:[:space:]]+):([0-9]+)(-([0-9]+))?$'
   local re_path_only='^([^:[:space:]]+)$'
   # Entries sometimes follow the path with a symbol name and/or approximate
   # line range (e.g. `bin/found-issues fi_strip_target_markers ~1982-1989`),
@@ -126,6 +137,7 @@ fi_parse_entry() {
   if [[ "$first_token" =~ $re_path_line ]]; then
     path="${BASH_REMATCH[1]}"
     line_num="${BASH_REMATCH[2]}"
+    line_end="${BASH_REMATCH[4]}"
   elif [[ "$first_token" =~ $re_path_only ]]; then
     path="${BASH_REMATCH[1]}"
   elif [[ "$first_token" == *:* && ( "${first_token#*:}" == */* || "${first_token#*:}" == *.* ) ]]; then
@@ -152,10 +164,11 @@ fi_parse_entry() {
     # "path":null contract.
     #
     # Greedy `.+` splits on the LAST colon, so only a trailing all-numeric
-    # segment is taken as the line number.
-    if [[ "$first_token" =~ ^(.+):([0-9]+)$ ]]; then
+    # segment (or numeric range) is taken as the line number.
+    if [[ "$first_token" =~ ^(.+):([0-9]+)(-([0-9]+))?$ ]]; then
       path="${BASH_REMATCH[1]}"
       line_num="${BASH_REMATCH[2]}"
+      line_end="${BASH_REMATCH[4]}"
     else
       path="$first_token"
     fi
@@ -239,6 +252,9 @@ fi_parse_entry() {
   printf 'date=%s\n' "$date"
   printf 'path=%s\n' "$path"
   printf 'line=%s\n' "$line_num"
+  # Empty unless the location carried a range. Consumers grep '^line=' and
+  # '^line_end=' — anchored, so neither key matches the other's prefix.
+  printf 'line_end=%s\n' "$line_end"
   printf 'symptom=%s\n' "$symptom"
   printf 'fix=%s\n' "$fix"
   printf 'prs=%s\n' "$prs"
@@ -540,7 +556,7 @@ fi_entry_to_json() {
   local parsed
   parsed="$(fi_parse_entry "$raw")" || return 1
 
-  local status="" critical="" date="" path="" line="" symptom="" fix=""
+  local status="" critical="" date="" path="" line="" line_end="" symptom="" fix=""
   local prs="" prs_closed="" commits="" commits_stale="" renamed_from=""
   local fixed_date="" verified=""
   local kv key val
@@ -553,6 +569,7 @@ fi_entry_to_json() {
       date)          date="$val" ;;
       path)          path="$val" ;;
       line)          line="$val" ;;
+      line_end)      line_end="$val" ;;
       symptom)       symptom="$val" ;;
       fix)           fix="$val" ;;
       prs)           prs="$val" ;;
@@ -571,12 +588,17 @@ fi_entry_to_json() {
   # 10# base coercion: ":007" must emit as 7 — leading zeros are illegal
   # JSON number syntax and would invalidate the whole array.
   [[ -n "$line" ]] && line_json="$((10#$line))"
+  # Range end, additive and null for single-line entries. `line` stays the
+  # numeric START so existing consumers are untouched; the pair is what
+  # reconstructs the `path:23-49` token that --pick matches on.
+  local line_end_json="null"
+  [[ -n "$line_end" ]] && line_end_json="$((10#$line_end))"
   local mute
   mute="$(fi_extract_mute_until "$raw")"
 
-  printf '{"line_no":%s,"status":"%s","critical":%s,"date":%s,"path":%s,"line":%s,"symptom":%s,"suggested":%s,"prs":%s,"prs_closed":%s,"commits":%s,"commits_stale":%s,"verified":%s,"fixed_date":%s,"renamed_from":%s,"mute_until":%s,"raw":%s}' \
+  printf '{"line_no":%s,"status":"%s","critical":%s,"date":%s,"path":%s,"line":%s,"line_end":%s,"symptom":%s,"suggested":%s,"prs":%s,"prs_closed":%s,"commits":%s,"commits_stale":%s,"verified":%s,"fixed_date":%s,"renamed_from":%s,"mute_until":%s,"raw":%s}' \
     "$line_no" "$status" "$crit_bool" \
-    "$(fi_json_str "$date")" "$(fi_json_str "$path")" "$line_json" \
+    "$(fi_json_str "$date")" "$(fi_json_str "$path")" "$line_json" "$line_end_json" \
     "$(fi_json_str "$symptom")" "$(fi_json_str "$fix")" \
     "$(fi_json_str "$prs")" "$(fi_json_str "$prs_closed")" \
     "$(fi_json_str "$commits")" "$(fi_json_str "$commits_stale")" \

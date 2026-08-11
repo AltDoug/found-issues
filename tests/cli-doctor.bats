@@ -324,3 +324,86 @@ EOF
   ! echo "$output" | grep -q "Plugin runtime"
   ! echo "$output" | grep -q "Mode detection"
 }
+
+# === stale-CLI detection (#135) ===
+#
+# Claude Code injects a VERSION-PINNED plugin bin dir into the environment at
+# session start, so a session started before a release keeps resolving the old
+# version indefinitely (installed_plugins.json installPath=2.2.2 while $PATH
+# still had .../found-issues/2.2.0/bin). Two concurrent sessions ran 2.2.0 for
+# hours after v2.2.1 shipped a data-loss fix, including 2.2.0's SessionStart
+# auto-sync. Doctor printed a bare "CLI: <path>" and reported healthy — it is
+# the one command whose entire job is catching this class.
+#
+# The version dirs accumulate rather than prune, which is why a stale path
+# resolves quietly instead of failing loudly.
+
+# Write a fake plugin manifest under tmp/.claude. $1 = installPath, $2 = version.
+_fi_fake_plugin_manifest() {
+  mkdir -p tmp/.claude/plugins "$1/.claude-plugin"
+  cat > tmp/.claude/plugins/installed_plugins.json <<EOF
+{"plugins":{"found-issues@altdoug-plugins":[{"scope":"user","installPath":"$1","version":"$2"}]}}
+EOF
+  cat > "$1/.claude-plugin/plugin.json" <<EOF
+{"name":"found-issues","version":"$2"}
+EOF
+}
+
+# The running CLI's own version, so fixtures never hardcode a release number.
+_fi_running_version() {
+  "$FI_BIN" --version | sed -E 's/.*version //'
+}
+
+@test "doctor: reports plugin version match when running CLI equals installed plugin" {
+  command -v jq >/dev/null 2>&1 || skip "jq not available"
+  local ver
+  ver="$(_fi_running_version)"
+  _fi_fake_plugin_manifest "$(pwd)/tmp/.claude/plugins/cache/altdoug-plugins/found-issues/$ver" "$ver"
+
+  HOME="$(pwd)/tmp" fi_run doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "matches the installed plugin"
+  ! echo "$output" | grep -q "does not match"
+}
+
+@test "doctor: warns to restart the session when a stale plugin bin dir is resolved" {
+  command -v jq >/dev/null 2>&1 || skip "jq not available"
+  # Run a COPY of this checkout's bin+lib from inside the fake plugin cache,
+  # so the resolved CLI really does live at a version-pinned cache path. bin
+  # and lib come from the same checkout: an old bin against a fixed lib is a
+  # false negative (hazard 2 of the v2.2.1 session).
+  local stale_dir="$(pwd)/tmp/.claude/plugins/cache/altdoug-plugins/found-issues/0.0.1"
+  mkdir -p "$stale_dir/bin" "$stale_dir/lib"
+  cp "$FI_BIN" "$stale_dir/bin/found-issues"
+  cp "$FI_LIB_DIR"/*.sh "$stale_dir/lib/"
+  chmod +x "$stale_dir/bin/found-issues"
+  _fi_fake_plugin_manifest "$(pwd)/tmp/.claude/plugins/cache/altdoug-plugins/found-issues/9.9.9" "9.9.9"
+
+  HOME="$(pwd)/tmp" FOUND_ISSUES_LIB_DIR="$stale_dir/lib" run "$stale_dir/bin/found-issues" doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "does not match the installed plugin"
+  echo "$output" | grep -q "9.9.9"
+  echo "$output" | grep -q "restart your session"
+}
+
+@test "doctor: does not tell a dev checkout to restart its session" {
+  command -v jq >/dev/null 2>&1 || skip "jq not available"
+  _fi_fake_plugin_manifest "$(pwd)/tmp/.claude/plugins/cache/altdoug-plugins/found-issues/9.9.9" "9.9.9"
+
+  HOME="$(pwd)/tmp" fi_run doctor
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "does not match the installed plugin"
+  ! echo "$output" | grep -q "restart your session"
+  echo "$output" | grep -q "outside the plugin cache"
+}
+
+@test "doctor: stays quiet about plugin version when no plugin manifest exists" {
+  # CI and any non-plugin install have no ~/.claude/plugins. The check must
+  # skip silently rather than reporting a bogus mismatch on all three OSes.
+  mkdir -p tmp/.claude
+
+  HOME="$(pwd)/tmp" fi_run doctor
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q "does not match the installed plugin"
+  ! echo "$output" | grep -q "matches the installed plugin"
+}

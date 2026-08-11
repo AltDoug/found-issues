@@ -35,7 +35,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.2.2"
+readonly FI_VERSION="2.2.3"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1328,17 +1328,24 @@ cmd_status() {
 # selection. Keeping it in one place means the guard cannot drift between
 # the two commands (annotate-commit shipped guard-less at first).
 
-# Echo the entry's location token (path:line, or bare path for line-less
-# entries) — the same form the candidate list prints and --pick matches.
+# Echo the entry's location token (path:line, path:start-end for line-range
+# entries, or bare path for line-less entries) — the same form the candidate
+# list prints and --pick matches.
 # Returns 1 when the line does not parse as an entry with a path.
 fi_entry_loc() {
   local line="$1"
-  local e_data e_path e_line
+  local e_data e_path e_line e_line_end
   e_data="$(fi_parse_entry "$line")" || return 1
   e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
   e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+  # The parser splits `:23-49` into a numeric start plus line_end so the three
+  # arithmetic consumers of `line` stay correct; rejoining is this function's
+  # job, since --pick matches the location token by exact string equality.
+  e_line_end="$(printf '%s' "$e_data" | grep '^line_end=' | head -1 | cut -d= -f2-)"
   [[ -z "$e_path" ]] && return 1
-  if [[ -n "$e_line" ]]; then
+  if [[ -n "$e_line" && -n "$e_line_end" ]]; then
+    printf '%s:%s-%s' "$e_path" "$e_line" "$e_line_end"
+  elif [[ -n "$e_line" ]]; then
     printf '%s:%s' "$e_path" "$e_line"
   else
     printf '%s' "$e_path"
@@ -1617,8 +1624,12 @@ fi_annotate_auto() {
     e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
     e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
     cand_lines+=("$line")
-    local loc="$e_path"
-    [[ -n "$e_line" ]] && loc="$e_path:$e_line"
+    # Must render the SAME token fi_entry_loc emits — this list is what the
+    # user copies into --pick, which matches by exact string equality. Line
+    # ranges therefore have to be rejoined here too. cand_lnums stays the
+    # numeric start: it feeds fi_line_matched's (( )) hunk comparison.
+    local loc
+    loc="$(fi_entry_loc "$line")" || loc="$e_path"
     cand_locs+=("$loc")
     cand_syms+=("$e_symptom")
     cand_tfs+=("$matched_tfs")
@@ -4186,6 +4197,78 @@ cmd_doctor_statusline_runtime() {
 
 # === Subcommand: doctor ===
 #
+# Compare the RUNNING CLI's version against the INSTALLED plugin's and report
+# a divergence (#135).
+#
+# Claude Code injects a version-pinned plugin bin dir into the environment at
+# session start, so a session started before a release keeps resolving the old
+# version for its entire life — installed_plugins.json said installPath=2.2.2
+# while $PATH still had .../found-issues/2.2.0/bin. Two concurrent sessions ran
+# 2.2.0 for hours after v2.2.1 shipped a data-loss fix, including 2.2.0's
+# SessionStart auto-sync, and doctor printed a bare "CLI: <path>" and called it
+# healthy. The version dirs accumulate rather than prune, which is why a stale
+# path resolves quietly instead of failing loudly.
+#
+# Silent no-op without a plugin manifest (CI, non-plugin installs) or without
+# jq — matching every other jq-dependent probe in this file. A missing manifest
+# is not a health finding.
+fi_doctor_plugin_version() {
+  local ok="$1" warn="$2"
+  local manifest="$HOME/.claude/plugins/installed_plugins.json"
+  [[ -f "$manifest" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+
+  local row
+  row="$(jq -r '
+    (.plugins // {}) | to_entries[]
+    | select(.key | startswith("found-issues@"))
+    | (.value | if type == "array" then .[0] else . end)
+    | [(.installPath // ""), (.version // "")] | @tsv
+  ' "$manifest" 2>/dev/null | head -1 || true)"
+  [[ -n "$row" ]] || return 0
+
+  local install_path installed_ver
+  install_path="${row%%$'\t'*}"
+  installed_ver="${row#*$'\t'}"
+
+  # plugin.json inside installPath is the on-disk truth; the manifest's own
+  # version field is the fallback when that directory was pruned.
+  if [[ -f "$install_path/.claude-plugin/plugin.json" ]]; then
+    local pj_ver
+    pj_ver="$(jq -r '.version // ""' "$install_path/.claude-plugin/plugin.json" 2>/dev/null || true)"
+    [[ -n "$pj_ver" ]] && installed_ver="$pj_ver"
+  fi
+  [[ -n "$installed_ver" ]] || return 0
+
+  if [[ "$FI_VERSION" == "$installed_ver" ]]; then
+    printf '%s Plugin version: v%s matches the installed plugin.\n' "$ok" "$FI_VERSION"
+    return 0
+  fi
+
+  printf '%s CLI version v%s does not match the installed plugin v%s.\n' \
+    "$warn" "$FI_VERSION" "$installed_ver"
+  printf '   Installed at: %s\n' "$install_path"
+  # Direction matters: a cache-resident CLI on the wrong version is the stale
+  # session this check exists for, but a dev checkout is legitimately ahead of
+  # (or behind) the installed plugin and must not be told to restart.
+  #
+  # FI_BIN_DIR comes from fi_script_dir's `cd -P`, so it is PHYSICAL, while
+  # $HOME stays logical. On macOS a temp/symlinked home makes the two forms
+  # differ (/var/... vs /private/var/...) and a plain prefix test misfires,
+  # handing a genuinely stale session the "dev checkout" message. Compare
+  # against both forms.
+  local cache_root="$HOME/.claude/plugins/cache"
+  local cache_root_phys="$cache_root"
+  if [[ -d "$cache_root" ]]; then
+    cache_root_phys="$(cd -P "$cache_root" 2>/dev/null && pwd || printf '%s' "$cache_root")"
+  fi
+  if [[ "$FI_BIN_DIR" == "$cache_root"/* || "$FI_BIN_DIR" == "$cache_root_phys"/* ]]; then
+    printf '   This session resolved a stale version-pinned plugin bin dir; restart your session to pick up v%s.\n' "$installed_ver"
+  else
+    printf '   The running CLI is outside the plugin cache (dev checkout), so this is expected.\n'
+  fi
+}
+
 # General-purpose health diagnostic — aggregates statusline state, gh auth,
 # mode detection, hook opt-outs, and issues-file state into a single
 # printable report. Read-only (no file modifications). Always exits 0.
@@ -4232,6 +4315,7 @@ cmd_doctor() {
   # --- Plugin runtime ---
   printf '== Plugin runtime ==\n'
   printf '%s CLI: %s\n' "$section_pass" "${FI_BIN_DIR}/found-issues"
+  fi_doctor_plugin_version "$section_pass" "$section_warn"
   printf '%s lib dir: %s\n' "$section_pass" "$FI_LIB_DIR"
   if [[ -d "$HOME/.claude/found-issues" ]]; then
     if [[ -f "$HOME/.claude/found-issues/.onboarded" ]]; then
