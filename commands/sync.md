@@ -1,7 +1,7 @@
 ---
 description: Sync found-issues — flip merged PRs/commits to [fixed], verify unannotated entries, surface stale work
 argument-hint: (no arguments)
-allowed-tools: Bash(found-issues:*), Read, Edit, Glob, Grep
+allowed-tools: Bash(found-issues:*), Read, Glob, Grep
 ---
 
 Reconcile `docs/found-issues.md` against the current state of the code
@@ -44,7 +44,20 @@ For each eligible entry:
 3. **Decide**: is the issue *still present*, *fixed*, or *unclear*?
 4. **Act**:
    - If **still-present** — leave the entry as `[open]`. Do not touch it.
-   - If **fixed** — edit the file: change `[open]` → `[fixed]` and append `(verified: ai) (fixed: YYYY-MM-DD)` (today's date).
+   - If **fixed** — close it through the CLI:
+
+     ```bash
+     found-issues resolve "<distinctive text from the entry>" --verified ai
+     ```
+
+     This flips `[open]` → `[fixed]` and appends `(verified: ai) (fixed: <today>)`.
+     **Never edit `docs/found-issues.md` directly.** The ledger is a shared
+     file that concurrent sessions also write; a direct `Edit` loses writes,
+     drifts the format, and bypasses the guards. `resolve` is the serialized
+     path. If the match is ambiguous it exits 2 and prints the candidates —
+     re-run with a longer, more distinctive fragment rather than reaching for
+     `Edit`. If it exits 4, the entry has an active `(PR: ...)` and is not
+     yours to close; leave it.
    - If **unclear** — leave as `[open]`. Don't guess.
 
 ## Conservative bias is mandatory
@@ -81,9 +94,9 @@ entries: verify by reading the code at `path:line`; flip only on clear
 evidence the symptom is no longer present.
 
 The demoted annotation stays on the line as audit trail regardless of
-your verdict — if you flip the entry, append `(verified: ai) (fixed: ...)`
-in addition to the existing demoted annotation. Do not strip the demoted
-annotation.
+your verdict. `found-issues resolve` appends `(verified: ai) (fixed: ...)`
+without touching what is already on the line, so the demoted annotation
+survives on its own. Do not try to strip it.
 
 ## Reporting
 
@@ -104,7 +117,7 @@ After both phases, report concisely:
 > mutex via `Promise.withResolvers`; concurrent calls await the same
 > promise. The race described in the symptom is no longer possible.
 >
-> → Flip to `[fixed] (verified: ai) (fixed: 2026-05-07)`.
+> → `found-issues resolve "race on session refresh" --verified ai`
 
 > Entry: `- [open] 2026-04-20 src/queue.py:42 — possible memory leak when worker pool exhausted`
 >

@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**5 lifecycle hooks · 13 slash commands · 687 tests on Linux/macOS/Windows · zero manual bookkeeping**
+**5 lifecycle hooks · 13 slash commands · 703 tests on Linux/macOS/Windows · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
