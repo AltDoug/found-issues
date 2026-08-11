@@ -4,6 +4,27 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2026-07-31
+
+### Fixed
+
+- **Sync no longer tombstones entries whose path contains spaces.**
+  `fi_parse_entry` takes the first whitespace-delimited token as the path — it
+  has to, since the location field also carries `path symbol ~1982-1989`
+  forms — so an entry citing a file whose name contains spaces
+  (`docs/handoff/HO production env setup.md:88`) silently became a different,
+  non-existent path (`docs/handoff/HO`) and was false-closed on every sync
+  pass, *even though the cited file was present*. `log` creates such entries
+  itself (the `*/*` location branch takes the value verbatim), so no
+  hand-editing was needed to hit it. Reproduced live in a consumer ledger,
+  where it closed a critical credential-exposure entry whose credential was
+  still unrotated — caught only because that flip happened to sit uncommitted
+  and was inspected before a reset. The tombstone probe now recovers the
+  untruncated location from the raw entry line and re-probes before declaring
+  a closure; the parser is deliberately unchanged, so dedup keys and
+  `path symbol ~range` forms behave exactly as before. Fourth member of the
+  same family as the `~`/`$VAR`, glob-token and directory guards.
+
 ## [2.1.1] - 2026-07-27
 
 ### Fixed

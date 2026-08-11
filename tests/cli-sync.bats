@@ -266,3 +266,38 @@ EOF
   grep -q '^- \[open\].*src/utils:3' docs/found-issues.md
   ! grep -q 'closure: tombstone' docs/found-issues.md
 }
+
+# === paths containing spaces must never tombstone (2026-07-31) ===
+# fi_parse_entry takes the first whitespace-delimited token as the path, so a
+# path containing spaces ("docs/handoff/HO production env setup.md:88") became
+# a DIFFERENT, non-existent path ("docs/handoff/HO") and was tombstoned on
+# every pass even though the file was present. `log` creates such entries
+# itself, so it needed no hand-editing. Reproduced live in a consumer ledger,
+# where it false-closed a critical credential-exposure entry whose credential
+# was still unrotated. Fourth member of the ~/$VAR, glob and directory family.
+
+@test "sync: never tombstones an entry whose path contains spaces" {
+  mkdir -p "docs/handoff"
+  printf 'line\n%.0s' $(seq 1 20) > "docs/handoff/HO production env setup.md"
+  fi_run log "docs/handoff/HO production env setup.md:12 — token committed in plaintext"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*HO production env setup\.md' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: spaced path that is genuinely missing still tombstones" {
+  fi_run log "docs/handoff/absent report file.md:3 — cites a file that does not exist"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: existing directory whose path contains spaces is not tombstoned" {
+  mkdir -p "src/legacy modules"
+  fi_run log "src/legacy modules — dead tree pending deletion"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*legacy modules' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
