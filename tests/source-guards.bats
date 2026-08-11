@@ -35,38 +35,47 @@ CLI="$REPO_ROOT/bin/found-issues"
 # across files, so a multi-file scan would report line numbers past the end of
 # the file it names.
 #
-# Loop openers (while/until/for) are tracked on a stack so the `done` line is
-# attributed to the RIGHT `while` -- fi_annotate_auto nests two `read tf` loops
-# inside a file-fed `read line` loop, and a naive last-while-seen match would
-# blame the wrong one.
+# A `done <file` line is paired with its `while` by INDENTATION: the nearest
+# preceding non-blank line at the same indent that opens a loop. That correctly
+# skips the two nested `read tf` loops inside fi_annotate_auto's file-fed loop,
+# where a naive last-while-seen match would blame the wrong one.
+#
+# Indentation rather than a while/done counter, deliberately. A counter drifts:
+# bin/found-issues embeds awk programs (`for (i = 0; ...)`) and heredoc'd
+# Node/Python/bash statusline blocks whose loop keywords are text, not shell
+# structure -- they open without ever closing, leaving the count 13 too high by
+# EOF. A drifted counter pops the wrong entry and MISSES a real unguarded loop,
+# which is the one failure mode this check must not have. Indentation reads no
+# global state, so embedded text cannot perturb it.
 #
 # POSIX awk only (no GNU extensions): macOS CI runs BSD awk, Windows runs
 # whatever Git Bash ships.
 fi_unguarded_read_loops() {
   awk '
-    FNR == 1 { sp = 0 }
+    FNR == 1 { n = 0 }
+    { n++; raw[n] = $0 }
     {
       s = $0
+      ind = match(s, /[^ \t]/) - 1
       sub(/^[[:space:]]+/, "", s)
-      if (s ~ /^(while|until|for)[[:space:](]/) {
-        sp++
-        at[sp] = FNR
-        isread[sp] = (s ~ /^while[[:space:]]+(IFS=[^[:space:]]*[[:space:]]+)?read[[:space:]]/) ? 1 : 0
-        guarded[sp] = (index(s, "|| [[ -n") > 0) ? 1 : 0
-      } else if (s ~ /^done([[:space:]]|$)/) {
-        if (sp > 0) {
-          p = index(s, "<")
-          rest = ""
-          if (p > 0) {
-            rest = substr(s, p + 1)
-            sub(/^[[:space:]]+/, "", rest)
-          }
-          # A plain file redirect: a single "<" whose target is neither a
-          # here-string ("<<<") nor a process substitution ("<(").
-          fromfile = (p > 0 && rest !~ /^</ && rest !~ /^\(/) ? 1 : 0
-          if (isread[sp] && fromfile && !guarded[sp]) print FILENAME ":" at[sp]
-          sp--
-        }
+      if (s !~ /^done([[:space:]]|$)/) next
+      p = index(s, "<")
+      if (p == 0) next
+      rest = substr(s, p + 1)
+      sub(/^[[:space:]]+/, "", rest)
+      # A plain file redirect: a single "<" whose target is neither a
+      # here-string ("<<<") nor a process substitution ("<(").
+      if (rest ~ /^</ || rest ~ /^\(/) next
+      for (i = n - 1; i > 0; i--) {
+        t = raw[i]
+        if (t ~ /^[[:space:]]*$/) continue
+        ti = match(t, /[^ \t]/) - 1
+        if (ti != ind) continue
+        sub(/^[[:space:]]+/, "", t)
+        if (t !~ /^(while|until|for)[[:space:](]/) continue
+        if (t ~ /^while[[:space:]]+(IFS=[^[:space:]]*[[:space:]]+)?read[[:space:]]/ &&
+            index(t, "|| [[ -n") == 0) print FILENAME ":" i
+        break
       }
     }
   ' "$@"
@@ -102,6 +111,32 @@ f() {
 SAMPLE
   run fi_unguarded_read_loops "$BATS_TEST_TMPDIR/sample.sh"
   [ "$output" = "$BATS_TEST_TMPDIR/sample.sh:2" ]
+}
+
+@test "source-guards: embedded loop keywords do not hide a real unguarded loop" {
+  # bin/found-issues embeds awk programs and heredoc'd Node/Python/bash blocks
+  # whose loop keywords are text, not shell structure. A while/done counter
+  # drifts on those (13 too high by EOF in the real file) and then pops the
+  # wrong entry, MISSING a genuinely unguarded loop. The unguarded loop below
+  # sits after the noise and must still be reported.
+  cat >"$BATS_TEST_TMPDIR/noisy.sh" <<'SAMPLE'
+emit() {
+  awk '
+    for (i = 0; i < 3; i++) { print i }
+  ' "$1"
+  cat <<'BLOCK'
+for x in 1 2 3; do echo $x
+while true; do echo hi
+BLOCK
+}
+g() {
+  while IFS= read -r line; do
+    :
+  done <"$file"
+}
+SAMPLE
+  run fi_unguarded_read_loops "$BATS_TEST_TMPDIR/noisy.sh"
+  [ "$output" = "$BATS_TEST_TMPDIR/noisy.sh:11" ]
 }
 
 @test "source-guards: the detector numbers lines per file, not cumulatively" {
