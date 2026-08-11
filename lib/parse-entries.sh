@@ -639,8 +639,12 @@ fi_append_touch() {
 
   local found=0
   local re_touched='\(touched: ([^)]+)\)'
+  local line
 
-  while IFS= read -r line; do
+  # Final-partial-line guard — see READ-LOOP GUARD at the top of bin/found-issues.
+  # Reached from `log` when the entry matches a [deferred] entry's dedup key,
+  # against a ledger no earlier pass has normalized.
+  while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "$target_entry" ]] && (( found == 0 )); then
       found=1
       local new_line
@@ -735,7 +739,14 @@ fi_increment_defer_cycle() {
   tmp="$(mktemp -t fi-defercycle.XXXXXX)"
 
   local found=0
-  while IFS= read -r line; do
+  local line
+
+  # Final-partial-line guard — see READ-LOOP GUARD at the top of bin/found-issues.
+  # Today's only caller (cmd_defer's re-defer path) has already normalized the
+  # file with its own guarded rewrite, so this site is safe by call ORDER alone.
+  # Guarded regardless: relying on a caller's side effect is not a safety
+  # property, and a future direct caller would silently drop the final entry.
+  while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "$target_entry" ]] && (( found == 0 )); then
       found=1
       local new_line="$line"

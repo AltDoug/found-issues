@@ -19,9 +19,18 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   happened with no user action and no output saying anything was removed.
   Hand-edited ledgers and some editors produce exactly this file shape.
 
-  All five ledger-rewriting loops now carry the `|| [[ -n "$line" ]]` guard that
+  All ledger-rewriting loops now carry the `|| [[ -n "$line" ]]` guard that
   `resolve` shipped with in v2.2.0 (`defer`, `sync`, `promote-deferred`, and
   both annotation rewrites).
+
+- **`log` dropped the last entry when it touched a `[deferred]` entry.** The
+  same defect in `fi_append_touch` (`lib/parse-entries.sh`), reached when a
+  `log` call matches a deferred entry's dedup key and appends to its
+  `(touched: ...)` annotation. Found by extending the sweep past
+  `bin/found-issues` — a CLI-only fix would have shipped this one intact.
+  `fi_increment_defer_cycle` is guarded alongside it: today it is safe only
+  because `cmd_defer`'s own guarded rewrite normalizes the file first, and
+  depending on a caller's side effect is not a safety property.
 
 - **`annotate --pick` and `promote`'s listing missed a final entry with no
   trailing newline.** These loops scan rather than rewrite, so no data was lost,
@@ -31,12 +40,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cannot select an entry the rewrite would then drop.
 
 - **The guard is now enforced at author time, not just tested per command.**
-  `tests/source-guards.bats` parses `bin/found-issues` and fails CI with the
-  line number of any file-fed read loop missing the guard. Loops fed by process
-  substitution or a here-string are exempt and stay unguarded, since awk output
-  and bash here-strings are always newline-terminated. The rationale now lives
-  in one place (the `READ-LOOP GUARD` note at the top of the CLI) instead of
-  being restated per site.
+  `tests/source-guards.bats` parses `bin/found-issues`, `lib/`, `hooks/` and
+  `scripts/`, and fails CI with the `file:line` of any file-fed read loop
+  missing the guard. Loops fed by process substitution or a here-string are
+  exempt and stay unguarded, since awk output and bash here-strings are always
+  newline-terminated. The rationale now lives in one place (the
+  `READ-LOOP GUARD` note at the top of the CLI) instead of being restated per
+  site.
+
+  Scanning `lib/` is deliberate, not incidental: the scheduled extraction of
+  the `cmd_*` groups out of `bin/found-issues` would otherwise move code out of
+  the check's scope as it moved.
 
 ## [2.2.0] - 2026-08-11
 

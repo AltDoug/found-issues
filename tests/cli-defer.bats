@@ -190,3 +190,25 @@ EOF
   fi_assert_both_entries_survived
   grep -q '^- \[deferred\].*first entry' docs/found-issues.md
 }
+
+@test "defer: re-defer does not drop a final entry that lacks a trailing newline" {
+  # The re-defer path rewrites a SECOND time via fi_increment_defer_cycle in
+  # lib/parse-entries.sh. That site is safe here only by call ORDER: cmd_defer's
+  # guarded loop has already rewritten every line with a trailing newline, so
+  # the second pass never sees a partial final line. It is guarded anyway (a
+  # caller reaching it first WOULD drop the entry); this test pins the composite
+  # so a future reordering cannot reintroduce the loss unnoticed.
+  mkdir -p docs src
+  printf 'line1\nline2\n' > src/a.py
+  printf 'line1\nline2\n' > src/b.py
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/a.py:1 — first entry (touched: 2026-08-01) (defer-cycle: 1)\n' \
+    >> docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/b.py:2 — final entry with no trailing newline' \
+    >> docs/found-issues.md
+
+  fi_run defer "first entry"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Re-deferred"* ]]
+  fi_assert_both_entries_survived
+}
