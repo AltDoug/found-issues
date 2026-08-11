@@ -88,6 +88,35 @@ Test fixture.
 EOF
 }
 
+# Seed a 2-entry ledger whose FINAL line carries NO trailing newline, plus the
+# source files both entries cite (so sync's tombstone check stays quiet).
+#
+# `read` returns non-zero on a final partial line, so an unguarded
+# `while IFS= read -r line` never runs its body for it and a rewrite silently
+# drops that entry — the v2.2.1 data-loss bug (defer, sync, annotate-commit and
+# promote-deferred each turned this 2-entry ledger into 1). Hand-edited ledgers
+# and some editors produce exactly this shape.
+#
+# Args: $1 = status of the FIRST entry (default "open"; pass "deferred" for
+# the promote-deferred path). The final entry is always [open].
+fi_seed_no_trailing_newline() {
+  local first_status="${1:-open}"
+  mkdir -p docs src
+  printf 'line1\nline2\n' > src/a.py
+  printf 'line1\nline2\n' > src/b.py
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [%s] 2026-08-11 src/a.py:1 — first entry\n' "$first_status" >> docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/b.py:2 — final entry with no trailing newline' >> docs/found-issues.md
+}
+
+# Assert both entries seeded by fi_seed_no_trailing_newline survived the
+# command under test. Counts entry lines rather than diffing, so a status flip
+# on the first entry (open -> deferred/fixed) still passes.
+fi_assert_both_entries_survived() {
+  [ "$(grep -c '^- \[' docs/found-issues.md)" -eq 2 ]
+  grep -q 'final entry with no trailing newline' docs/found-issues.md
+}
+
 # Activate the gh shim for this test by prepending bin-shims to PATH.
 # Caller must set GH_MOCK_PR_VIEW / GH_MOCK_REPO_VIEW / GH_MOCK_AUTH as needed.
 fi_use_gh_shim() {

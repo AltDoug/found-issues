@@ -177,3 +177,16 @@ EOF
   [ "$status" -eq 0 ]
   grep -q '^- \[deferred\].*src/a.py:1' docs/found-issues.md
 }
+
+# === final-partial-line data loss (v2.2.1) ===
+#
+# See fi_seed_no_trailing_newline in helpers.bash for the bug shape.
+
+@test "defer: does not drop a final entry that lacks a trailing newline" {
+  fi_seed_no_trailing_newline
+
+  fi_run defer "first entry"
+  [ "$status" -eq 0 ]
+  fi_assert_both_entries_survived
+  grep -q '^- \[deferred\].*first entry' docs/found-issues.md
+}

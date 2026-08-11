@@ -4,6 +4,40 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-08-11
+
+### Fixed
+
+- **Three shipped commands silently dropped the ledger's last entry when the
+  file lacked a trailing newline.** `read` returns non-zero on a final partial
+  line, so `while IFS= read -r line` never runs its body for it and the rewrite
+  loses that entry. Verified by probe on v2.2.0: a 2-entry ledger became 1 after
+  `defer`, after `sync`, and after `annotate-commit`. `promote-deferred` was
+  affected by the same defect through `fi_promote_entry_to_open`.
+
+  `sync` was the worst case — `SessionStart` runs it automatically, so the loss
+  happened with no user action and no output saying anything was removed.
+  Hand-edited ledgers and some editors produce exactly this file shape.
+
+  All five ledger-rewriting loops now carry the `|| [[ -n "$line" ]]` guard that
+  `resolve` shipped with in v2.2.0 (`defer`, `sync`, `promote-deferred`, and
+  both annotation rewrites).
+
+- **`annotate --pick` and `promote`'s listing missed a final entry with no
+  trailing newline.** These loops scan rather than rewrite, so no data was lost,
+  but the same input shape made the last entry unpickable (`--pick` reported "no
+  `[open]` entry matches" for an entry plainly present) and omitted it from
+  `promote`'s branch-only listing. Guarded alongside the rewrites, so a pick
+  cannot select an entry the rewrite would then drop.
+
+- **The guard is now enforced at author time, not just tested per command.**
+  `tests/source-guards.bats` parses `bin/found-issues` and fails CI with the
+  line number of any file-fed read loop missing the guard. Loops fed by process
+  substitution or a here-string are exempt and stay unguarded, since awk output
+  and bash here-strings are always newline-terminated. The rationale now lives
+  in one place (the `READ-LOOP GUARD` note at the top of the CLI) instead of
+  being restated per site.
+
 ## [2.2.0] - 2026-08-11
 
 ### Added
