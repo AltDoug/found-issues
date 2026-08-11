@@ -561,3 +561,90 @@ EOF
   out="$(fi_parse_entry '- [open] 2026-08-06 bin/found-issues fi_strip_target_markers ~1982-1989 — control')"
   [ "$(printf '%s' "$out" | grep '^path=')" = "path=bin/found-issues" ]
 }
+
+# === line-range locations (#134) ===
+# `path:23-49` matched neither location regex (the line spec was `^[0-9]+$`),
+# so the entry parsed with an EMPTY path and an EMPTY line. fi_entry_loc
+# returns 1 on an empty path, so range entries never entered the --pick
+# candidate list and could not be closed through annotate-pr / annotate-commit
+# at all — --pick reported "no [open] entry matches" for an entry plainly
+# present in the file, reading as user error rather than a parser limit.
+#
+# `line` stays NUMERIC (the range START) and the end goes in a separate
+# `line_end` field, rather than keeping `23-49` verbatim in `line`. Three
+# consumers evaluate `line` arithmetically — fi_entry_to_json's `10#` base
+# coercion, the sync tombstone probe's `-lt`, and fi_line_matched's `(( ))` —
+# and bash arithmetic silently evaluates "23-49" as the SUBTRACTION -26.
+# Verbatim would emit `"line":-26` in --json and exit 0. Splitting the field
+# keeps every numeric consumer correct with no change at those sites, and a
+# missed location-construction site degrades to "no match" (today's visible
+# failure) instead of a silently wrong number.
+#
+# Fixtures are real entries from the orchard ledger, which is 6-of-11
+# range-form.
+
+@test "parse_entry: line-range location parses path with range start and end" {
+  out="$(fi_parse_entry '- [open] 2026-06-29 repos/Engine/lib/orchard/session/worker/spawn.ex:72-75 — bare shell on unresolvable binary')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=repos/Engine/lib/orchard/session/worker/spawn.ex" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=72" ]
+  [ "$(printf '%s' "$out" | grep '^line_end=')" = "line_end=75" ]
+}
+
+@test "parse_entry: wide line range parses both bounds" {
+  out="$(fi_parse_entry '- [open] 2026-07-21 repos/Engine/tools/config-seeder/src/adapters/global_permissions.rs:353-425 — mutates machine-global settings')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=repos/Engine/tools/config-seeder/src/adapters/global_permissions.rs" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=353" ]
+  [ "$(printf '%s' "$out" | grep '^line_end=')" = "line_end=425" ]
+}
+
+@test "parse_entry: markdown line range at repo root parses" {
+  out="$(fi_parse_entry '- [open] 2026-08-04 ORCHARD.md:109-110 — PubSub topic list is incomplete')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=ORCHARD.md" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=109" ]
+  [ "$(printf '%s' "$out" | grep '^line_end=')" = "line_end=110" ]
+}
+
+@test "parse_entry: single-line location emits an empty line_end" {
+  out="$(fi_parse_entry '- [open] 2026-08-11 repos/Engine/lib/orchard_web/channels/monitor_channel.ex:9 — stale base topics')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=repos/Engine/lib/orchard_web/channels/monitor_channel.ex" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=9" ]
+  [ "$(printf '%s' "$out" | grep '^line_end=')" = "line_end=" ]
+}
+
+@test "parse_entry: tilde home location still parses as pathless with no range" {
+  out="$(fi_parse_entry '- [open] 2026-08-11 ~/.local/bin/orchard — the orchard CLI shim is a broken symlink')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=~/.local/bin/orchard" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=" ]
+  [ "$(printf '%s' "$out" | grep '^line_end=')" = "line_end=" ]
+}
+
+@test "parse_entry: abstract topic location is not swallowed by range tolerance" {
+  out="$(fi_parse_entry '- [deferred] 2026-08-11 topic:with:colons — parked thing')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=" ]
+  [ "$(printf '%s' "$out" | grep '^line_end=')" = "line_end=" ]
+}
+
+@test "parse_entry: legacy Repo:path with a line range keeps the prefix and splits the range" {
+  out="$(fi_parse_entry '- [open] 2026-08-11 LendMatrix-svc:src/services/foo.ts:23-49 — bad thing')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=LendMatrix-svc:src/services/foo.ts" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=23" ]
+  [ "$(printf '%s' "$out" | grep '^line_end=')" = "line_end=49" ]
+}
+
+@test "fi_entry_to_json emits a numeric line and line_end for a range entry" {
+  line="- [open] 2026-06-29 repos/Engine/lib/orchard/session/worker/spawn.ex:72-75 — bare shell (suggested: extend the guard)"
+  run fi_entry_to_json 3 "$line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"line":72'* ]]
+  [[ "$output" == *'"line_end":75'* ]]
+  [[ "$output" != *'"line":-'* ]]
+}
+
+@test "fi_entry_to_json emits a null line_end for a single-line entry" {
+  line="- [open] 2026-08-11 src/app.sh:42 — bad thing"
+  run fi_entry_to_json 4 "$line"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"line":42'* ]]
+  [[ "$output" == *'"line_end":null'* ]]
+}

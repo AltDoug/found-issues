@@ -462,3 +462,53 @@ _setup_pr_repo() {
   grep -q 'final entry with no trailing newline (PR: org/repo#9)' docs/found-issues.md
   unset GH_MOCK_PR_VIEW
 }
+
+# === line-range locations (#134) ===
+#
+# `path:23-49` parsed to an EMPTY path, so range entries never reached the
+# --pick candidate list: --pick reported "no [open] entry matches" for an
+# entry plainly present in the file. `log` rejects range specs, so these
+# fixtures are seeded directly the way a hand-edited or foreign ledger
+# carries them (the orchard ledger is 6-of-11 range-form).
+
+@test "annotate-pr: --pick selects an entry whose location is a line range" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src docs && echo x > src/hot.py
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/hot.py:1 — single line bug\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/hot.py:23-49 — range bug\n' >> docs/found-issues.md
+
+  fi_run annotate-pr 9 --pick src/hot.py:23-49
+  [ "$status" -eq 0 ]
+  grep -q 'src/hot.py:23-49 — range bug (PR: org/repo#9)' docs/found-issues.md
+  ! grep -q 'single line bug (PR:' docs/found-issues.md
+  unset GH_MOCK_PR_VIEW
+}
+
+@test "annotate-pr: candidate list prints the full range as the pick token" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src docs && echo x > src/hot.py
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/hot.py:1 — single line bug\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/hot.py:23-49 — range bug\n' >> docs/found-issues.md
+
+  fi_run annotate-pr 9
+  [[ "$output" == *"src/hot.py:23-49"* ]]
+  unset GH_MOCK_PR_VIEW
+}
+
+@test "annotate-commit: auto-match reaches a line-range entry" {
+  mkdir -p src docs
+  printf 'a\nb\nc\n' > src/only.py
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/only.py:1-3 — range bug\n' >> docs/found-issues.md
+  git add -A
+  git commit -q -m "touch the cited file"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+
+  fi_run annotate-commit HEAD
+  [ "$status" -eq 0 ]
+  grep -q "src/only.py:1-3 — range bug (commit: $short_sha)" docs/found-issues.md
+}

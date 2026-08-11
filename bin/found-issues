@@ -1328,17 +1328,24 @@ cmd_status() {
 # selection. Keeping it in one place means the guard cannot drift between
 # the two commands (annotate-commit shipped guard-less at first).
 
-# Echo the entry's location token (path:line, or bare path for line-less
-# entries) — the same form the candidate list prints and --pick matches.
+# Echo the entry's location token (path:line, path:start-end for line-range
+# entries, or bare path for line-less entries) — the same form the candidate
+# list prints and --pick matches.
 # Returns 1 when the line does not parse as an entry with a path.
 fi_entry_loc() {
   local line="$1"
-  local e_data e_path e_line
+  local e_data e_path e_line e_line_end
   e_data="$(fi_parse_entry "$line")" || return 1
   e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
   e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+  # The parser splits `:23-49` into a numeric start plus line_end so the three
+  # arithmetic consumers of `line` stay correct; rejoining is this function's
+  # job, since --pick matches the location token by exact string equality.
+  e_line_end="$(printf '%s' "$e_data" | grep '^line_end=' | head -1 | cut -d= -f2-)"
   [[ -z "$e_path" ]] && return 1
-  if [[ -n "$e_line" ]]; then
+  if [[ -n "$e_line" && -n "$e_line_end" ]]; then
+    printf '%s:%s-%s' "$e_path" "$e_line" "$e_line_end"
+  elif [[ -n "$e_line" ]]; then
     printf '%s:%s' "$e_path" "$e_line"
   else
     printf '%s' "$e_path"
@@ -1617,8 +1624,12 @@ fi_annotate_auto() {
     e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
     e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
     cand_lines+=("$line")
-    local loc="$e_path"
-    [[ -n "$e_line" ]] && loc="$e_path:$e_line"
+    # Must render the SAME token fi_entry_loc emits — this list is what the
+    # user copies into --pick, which matches by exact string equality. Line
+    # ranges therefore have to be rejoined here too. cand_lnums stays the
+    # numeric start: it feeds fi_line_matched's (( )) hunk comparison.
+    local loc
+    loc="$(fi_entry_loc "$line")" || loc="$e_path"
     cand_locs+=("$loc")
     cand_syms+=("$e_symptom")
     cand_tfs+=("$matched_tfs")
