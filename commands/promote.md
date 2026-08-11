@@ -1,7 +1,7 @@
 ---
 description: Consolidate [open] entries from current branch into the default branch before deletion
 argument-hint: (no arguments — operates on current branch)
-allowed-tools: Bash(found-issues:*), Bash(git:*), Bash(gh:*), Read, Edit, Write
+allowed-tools: Bash(found-issues:*), Bash(git:*), Bash(gh:*), Read
 ---
 
 Move `[open]` entries that exist only on the current branch over to the
@@ -43,11 +43,26 @@ entries land on the default branch through that PR.
 
 If the current branch won't be merged (it's exploratory, abandoned, etc.):
 
-1. Save the entries the CLI listed (or copy them from the current branch's `docs/found-issues.md`)
+1. Note the source branch name: `git branch --show-current`
 2. Switch to the default branch: `git checkout main` (or whatever the default is)
 3. Pull latest: `git pull`
 4. Create a new branch: `git checkout -b chore/promote-found-issues-from-<branch>`
-5. Append the entries to `docs/found-issues.md` (use `Edit` or `Write` — the format-enforcer will validate)
+5. Copy the entries across with the CLI:
+
+   ```bash
+   found-issues promote --apply --from <source-branch>
+   ```
+
+   This reads the source branch's ledger with `git show` and appends its
+   `[open]` entries **verbatim**, so original dates survive and entry age
+   stays honest. It is idempotent, so a re-run adds nothing. `[fixed]` and
+   `[deferred]` entries are deliberately left behind.
+
+   **Never append to `docs/found-issues.md` with `Edit` or `Write`.** The
+   ledger is a shared file that concurrent sessions also write; a direct edit
+   loses writes and bypasses the guards. Re-logging with `found-issues log`
+   is also wrong here: it stamps today's date, which resets entry age and
+   corrupts the stale-entry counts.
 6. Commit: `git commit -m "chore: promote found-issues entries from <branch>"`
 7. Push and open a PR: `gh pr create --base main --title ...`
 

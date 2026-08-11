@@ -4,6 +4,45 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-08-11
+
+### Added
+
+- **`found-issues resolve <match> [--verified ai|human]`** — the serialized
+  `[open]` → `[fixed]` flip, appending `(verified: ...) (fixed: <today>)`.
+  This is what `/found-issues:sync` Phase 2 now calls. Match semantics and exit
+  codes mirror `defer`: `1` no match, `2` usage or ambiguous (candidates are
+  printed), `3` already `[fixed]`, `4` the entry carries an active `(PR: ...)`
+  and is in-flight work that `sync` will close on merge.
+
+  `resolve`'s rewrite loop is guarded with `|| [[ -n "$line" ]]`, so a ledger
+  whose final line lacks a trailing newline keeps that entry. The shipped
+  `defer`, `sync` and `annotate-commit` rewrites are **not** guarded and do
+  drop it — verified by probe, and logged as a critical entry in
+  `docs/found-issues.md` rather than fixed here, since it is a pre-existing
+  repo-wide pattern across ~10 read loops.
+
+- **`found-issues promote --apply --from <branch>`** — the transactional import
+  path for `/found-issues:promote`. Run on the target branch (freshly cut from
+  the default branch), it reads the source branch's ledger with `git show` and
+  appends its `[open]` entries **verbatim**. Verbatim matters: re-logging with
+  `log` would stamp today's date, resetting entry age and corrupting the
+  stale-entry counts that drive the statusline and the sync nudges. Idempotent,
+  and `[fixed]` / `[deferred]` entries are deliberately left behind.
+
+### Fixed
+
+- **The shipped command docs no longer instruct agents to hand-edit the ledger.**
+  `commands/sync.md` Phase 2 step 4 told the agent to "edit the file: change
+  `[open]` → `[fixed]` and append `(verified: ai) (fixed: YYYY-MM-DD)`", and
+  shipped `Edit` in its `allowed-tools`. `commands/promote.md` step 5 told it to
+  "append the entries to `docs/found-issues.md` (use `Edit` or `Write`)". Both
+  are exactly the unserialized direct write the CLI exists to prevent: lost
+  writes under concurrent sessions, format drift, guard bypass. Agents following
+  the shipped docs were doing the wrong thing by the book. Both now call the CLI,
+  and `Edit` / `Write` are dropped from both `allowed-tools` lists. Reported in
+  #124.
+
 ## [2.1.3] - 2026-08-11
 
 ### Fixed

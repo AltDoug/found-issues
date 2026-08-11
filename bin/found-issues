@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.1.3"
+readonly FI_VERSION="2.2.0"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -263,6 +263,10 @@ COMMANDS
                                         to touched annotation.
   promote-deferred <match>              Flip [deferred] → [open], preserving all
                                         annotations as evidence of recurrence.
+  resolve <match> [--verified ai|human] Flip [open] → [fixed], appending
+                                        (verified: ...) (fixed: <today>). Use this
+                                        instead of editing the ledger by hand.
+                                        Refuses entries with an active (PR: ...).
   install-statusline [--no-migrate]     Append the counter segment to ~/.claude/statusline.sh.
                                         Self-healing: auto-rewrites broken v1.0.0/1.0.1 marker blocks
                                         AND auto-migrates pre-v0.1.7 handwritten snippets (with a
@@ -776,6 +780,152 @@ cmd_defer() {
   else
     printf 'Re-deferred 1 entry. (cycle %s, threshold for next nudge: %s touches)\n' "$current_cycle" "$next_threshold"
   fi
+}
+
+# === Subcommand: resolve ===
+#
+# Flips [open] → [fixed] for the entry matching <match>, appending
+# `(verified: <who>) (fixed: <today>)`.
+#
+# Exists so agents never hand-edit the ledger. commands/sync.md Phase 2 used
+# to instruct "edit the file: change [open] → [fixed] and append
+# (verified: ai) (fixed: YYYY-MM-DD)" and shipped `Edit` in its allowed-tools,
+# which is the unserialized direct write the CLI exists to prevent — lost
+# writes under concurrent sessions, format drift, guard bypass (#124).
+#
+# Match semantics and exit codes mirror `defer` deliberately, so the two
+# closure verbs behave the same way under ambiguity.
+#
+# Exits:
+#   0 success
+#   1 no matching [open] entry
+#   2 usage error, bad --verified value, or ambiguous match
+#   3 entry is already [fixed]
+#   4 entry has an active (PR: ...) annotation
+cmd_resolve() {
+  local match=""
+  local verified="ai"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --match)
+        match="${2:-}"
+        shift 2 || break
+        ;;
+      --verified)
+        verified="${2:-}"
+        shift 2 || break
+        ;;
+      -h|--help)
+        printf 'Usage: found-issues resolve <match>   OR   --match <match>\n'
+        printf '       [--verified ai|human]   (default: ai)\n'
+        return 0
+        ;;
+      *)
+        [[ -z "$match" ]] && match="$1"
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$match" ]]; then
+    fi_err "resolve: missing <match> argument"
+    fi_err "Usage: found-issues resolve <match> [--verified ai|human]   OR   --match <match>"
+    return 2
+  fi
+
+  # Only two verdict sources are meaningful: an agent that read the code, or a
+  # human who confirmed it. Anything else would land in the ledger as an
+  # unrecognized annotation and drift the format.
+  if [[ "$verified" != "ai" && "$verified" != "human" ]]; then
+    fi_err "resolve: --verified must be 'ai' or 'human', got: $verified"
+    return 2
+  fi
+
+  local file
+  file="$(fi_resolve_issues_file)"
+
+  local matches=()
+  local entry lower_entry lower_match
+  lower_match="$(printf '%s' "$match" | tr '[:upper:]' '[:lower:]')"
+  while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    lower_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$lower_entry" == *"$lower_match"* ]]; then
+      matches+=("$entry")
+    fi
+  done < <(fi_entries "$file" open 2>/dev/null || true)
+
+  if (( ${#matches[@]} == 0 )); then
+    # Distinguish "already closed" from "never existed" — re-running sync over
+    # a ledger it just cleaned would otherwise report a confusing hard failure.
+    local fixed_matches=()
+    while IFS= read -r entry; do
+      [[ -z "$entry" ]] && continue
+      lower_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
+      if [[ "$lower_entry" == *"$lower_match"* ]]; then
+        fixed_matches+=("$entry")
+      fi
+    done < <(fi_entries "$file" fixed 2>/dev/null || true)
+
+    if (( ${#fixed_matches[@]} > 0 )); then
+      fi_err "resolve: already [fixed]. Nothing to do."
+      return 3
+    fi
+
+    fi_err "resolve: no [open] entries match \"$match\""
+    return 1
+  fi
+
+  if (( ${#matches[@]} > 1 )); then
+    fi_err "resolve: ambiguous match — ${#matches[@]} [open] entries match \"$match\":"
+    local m
+    for m in "${matches[@]}"; do
+      fi_err "  $m"
+    done
+    fi_err "Use a more specific match."
+    return 2
+  fi
+
+  local target="${matches[0]}"
+
+  # An active (PR: ...) annotation means in-flight work. Closing it by hand
+  # races the PR-merge flip that `sync` performs, and sync.md already excludes
+  # such entries from AI verification. Same refusal `defer` makes.
+  local re_pr='\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)'
+  if [[ "$target" =~ $re_pr ]]; then
+    local pr_match="${BASH_REMATCH[0]}"
+    fi_err "resolve: entry has an active PR annotation $pr_match."
+    fi_err "It will flip to [fixed] on its own when that PR merges (via /found-issues:sync)."
+    fi_err "If the PR was abandoned, remove the annotation first, then re-run resolve."
+    return 4
+  fi
+
+  local today
+  today="$(fi_today)"
+
+  local tmp
+  tmp="$(mktemp -t fi-resolve.XXXXXX)"
+  local found=0
+  local line
+  # `|| [[ -n "$line" ]]`: read returns non-zero on a FINAL line with no
+  # trailing newline, so a plain `while read` never runs the body for it and
+  # the rewrite silently drops that entry. Hand-edited ledgers and some editors
+  # produce exactly that shape. Same data-loss class as the wc -l undercount.
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$target" ]] && (( found == 0 )); then
+      found=1
+      local new_line="${line/- \[open\]/- [fixed]}"
+      new_line="${new_line} (verified: ${verified}) (fixed: ${today})"
+      printf '%s\n' "$new_line" >> "$tmp"
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$file"
+  mv "$tmp" "$file"
+
+  printf 'Resolved 1 entry. (verified: %s, fixed: %s)\n' "$verified" "$today"
+  cmd_status plain
 }
 
 # Flip a single matched [deferred] entry to [open] in $file.
@@ -2083,7 +2233,85 @@ cmd_sync() {
 # Does NOT auto-edit the default branch — prints entries for the user/agent
 # to consolidate manually (consistent with "no direct push to main").
 
+# Copy [open] entries from <source-branch>'s ledger into the current branch's
+# ledger, verbatim and serialized. Backs `promote --apply --from <branch>`.
+#
+# Runs on the TARGET branch (freshly cut from the default branch), reading the
+# source with `git show`, because by step 5 of the promote workflow the operator
+# has already left the source branch behind.
+#
+# Entries are copied VERBATIM rather than re-logged: `log` would stamp today's
+# date, resetting entry age and corrupting the stale-entry counts that drive
+# the statusline and the sync nudges.
+#
+#   $1 target ledger path, $2 repo-relative ledger path, $3 source branch
+# Exits: 0 applied (or nothing to apply), 2 usage / unreadable source.
+fi_promote_apply() {
+  local file="$1" rel_path="$2" from_branch="$3"
+
+  if [[ -z "$from_branch" ]]; then
+    fi_err "promote --apply: missing --from <source-branch>"
+    fi_err "Usage: found-issues promote --apply --from <source-branch>"
+    return 2
+  fi
+
+  local source_content
+  if ! source_content="$(git show "$from_branch:$rel_path" 2>/dev/null)"; then
+    fi_err "promote --apply: cannot read $rel_path on branch \"$from_branch\""
+    fi_err "Check the branch name exists and carries a ledger at that path."
+    return 2
+  fi
+
+  # Guarantee a trailing newline before appending, or the first copied entry
+  # would be glued onto the target's last line.
+  if [[ -s "$file" ]] && [[ -n "$(tail -c 1 "$file")" ]]; then
+    printf '\n' >> "$file"
+  fi
+
+  local tmp added=0 line
+  tmp="$(mktemp -t fi-promote.XXXXXX)"
+  cat "$file" > "$tmp"
+  while IFS= read -r line; do
+    # [open] only: [fixed] entries are already resolved history, and a
+    # [deferred] entry carries defer-cycle state that belongs to its branch.
+    [[ "$line" =~ ^-\ \[open\] ]] || continue
+    # -F -x: exact whole-line match. Substring matching here is the cmd_archive
+    # data-loss bug in reverse — a prefix entry would be silently skipped.
+    #
+    # Checked against $tmp, not $file: $tmp starts as a copy of the target and
+    # accumulates this run's additions, so a source ledger carrying the same
+    # line twice collapses to one instead of copying both.
+    grep -Fxq -- "$line" "$tmp" && continue
+    printf '%s\n' "$line" >> "$tmp"
+    added=$(( added + 1 ))
+  done <<< "$source_content"
+  mv "$tmp" "$file"
+
+  if (( added == 0 )); then
+    printf 'promote: nothing to apply — every [open] entry on %s is already here.\n' "$from_branch"
+  elif (( added == 1 )); then
+    printf 'Applied 1 entry from %s.\n' "$from_branch"
+  else
+    printf 'Applied %d entries from %s.\n' "$added" "$from_branch"
+  fi
+  cmd_status plain
+}
+
 cmd_promote() {
+  local apply=0 from_branch=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --apply)   apply=1; shift ;;
+      --from)    from_branch="${2:-}"; shift 2 || break ;;
+      -h|--help)
+        printf 'Usage: found-issues promote                              List branch-only [open] entries\n'
+        printf '       found-issues promote --apply --from <branch>      Copy them onto the current branch\n'
+        return 0
+        ;;
+      *) shift ;;
+    esac
+  done
+
   if ! git rev-parse --git-dir >/dev/null 2>&1; then
     fi_err "promote: not in a git repo"
     return 1
@@ -2122,6 +2350,11 @@ cmd_promote() {
   else
     rel_path="$(basename "$file")"
   fi
+  if (( apply == 1 )); then
+    fi_promote_apply "$file" "$rel_path" "$from_branch"
+    return $?
+  fi
+
   main_content="$(git show "origin/$default_branch:$rel_path" 2>/dev/null \
     || git show "$default_branch:$rel_path" 2>/dev/null \
     || true)"
@@ -4788,6 +5021,7 @@ main() {
     annotate-commit)  cmd_annotate_commit "$@" ;;
     defer)            cmd_defer "$@" ;;
     promote-deferred)     cmd_promote_deferred "$@" ;;
+    resolve)          cmd_resolve "$@" ;;
     promote)          cmd_promote "$@" ;;
     install-statusline)   cmd_install_statusline "$@" ;;
     uninstall-statusline) cmd_uninstall_statusline "$@" ;;
