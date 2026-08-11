@@ -8,12 +8,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Three shipped commands silently dropped the ledger's last entry when the
+- **Five shipped commands silently dropped the ledger's last entry when the
   file lacked a trailing newline.** `read` returns non-zero on a final partial
   line, so `while IFS= read -r line` never runs its body for it and the rewrite
-  loses that entry. Verified by probe on v2.2.0: a 2-entry ledger became 1 after
-  `defer`, after `sync`, and after `annotate-commit`. `promote-deferred` was
-  affected by the same defect through `fi_promote_entry_to_open`.
+  loses that entry. Verified by driving v2.2.0: a 2-entry ledger became 1 after
+  `defer`, after `sync`, after `annotate-commit`, after `promote-deferred`
+  (through `fi_promote_entry_to_open`), and after `log` (see the next entry).
+  Each reported success — `defer` printed `Deferred 1 entry.` and exited 0.
 
   `sync` was the worst case — `SessionStart` runs it automatically, so the loss
   happened with no user action and no output saying anything was removed.
@@ -42,9 +43,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The guard is now enforced at author time, not just tested per command.**
   `tests/source-guards.bats` parses `bin/found-issues`, `lib/`, `hooks/` and
   `scripts/`, and fails CI with the `file:line` of any file-fed read loop
-  missing the guard. Loops fed by process substitution or a here-string are
-  exempt and stay unguarded, since awk output and bash here-strings are always
-  newline-terminated. The rationale now lives in one place (the
+  missing the guard. Here-strings are exempt unconditionally (bash appends a
+  trailing newline); process substitution is exempt only for producers known to
+  emit newline-terminated output — today just `fi_entries`, which is awk. It is
+  not safe in general: `< <(cat "$file")` hands a missing trailing newline
+  straight through, so the check still requires a guard there. The rationale
+  now lives in one place (the
   `READ-LOOP GUARD` note at the top of the CLI) instead of being restated per
   site.
 
