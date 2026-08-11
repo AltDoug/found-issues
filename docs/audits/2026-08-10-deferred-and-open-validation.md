@@ -193,7 +193,41 @@ path you may have mangled* — is the accurate generalization.
 
 ---
 
-## 6. Open items not tracked in the ledger
+## 6. Outcome (appended 2026-08-11, after the sweep)
+
+Everything in sections 1 and 4 was acted on the same session.
+
+| Action | Result |
+|---|---|
+| Archive move + this audit doc | PR #125, merged |
+| PR #122 fork workflows | approved (run `30619666614`, then `31455519325` after a branch update) |
+| PR #122 | **merged** — v2.1.2 on main; issue #121 auto-closed |
+| GitHub release v2.1.2 | auto-cut by `release.yml`, no manual step |
+| Post-merge full OS matrix (run `31455669198`) | **green — 678 passing on ubuntu, macOS AND Windows, 0 failures** |
+| Marketplace manifest | `AltDoug/claude-plugins` PR #30, merged — 2.0.0 → 2.1.2 |
+
+**The Windows risk flagged in section 4 is closed.** The three spaced-path tests
+ran and passed on `windows-latest` (`ok 382`, `ok 383`, `ok 384`), which is the
+first time they ever executed there — PR runs are ubuntu-only under the two-tier matrix.
+
+Two calibration notes for future sessions:
+
+- **Windows bats takes ~20–34 min on this repo**, not the 7–15 commonly assumed.
+  Measured: 21.5, 30.6, 30.7 min historically; 34.1 min for this run. A Windows job
+  sitting at 20 minutes is normal, not hung.
+- **The marketplace `version` field is display metadata, not the resolution key.**
+  It had drifted five releases (stuck at 2.0.0 through v2.1.2) with zero user impact,
+  because the entry's `source` is a git url — Claude Code clones `main` and reads the
+  plugin's own `plugin.json`. The local install cache was correctly named `2.1.1`.
+  A stale manifest version is listing hygiene, not a shipping incident.
+
+**Still open and unfixed:** #123 and #124. Both confirmed real in section 3; neither
+was in scope for this sweep. Note that #124's suggested fix is not actionable as
+written, since `resolve`/`reopen` do not exist.
+
+---
+
+## 7. Open items not tracked in the ledger
 
 The three open GitHub issues have no corresponding `[open]` entries in
 `docs/found-issues.md`. The ledger reads 0 open while three confirmed defects are
