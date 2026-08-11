@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.1.2"
+readonly FI_VERSION="2.1.3"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -1408,6 +1408,13 @@ fi_annotate_auto() {
     e_data="$(fi_parse_entry "$line")" || continue
     e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
     [[ -z "$e_path" ]] && continue
+    # Repo-prefixed locations (`LendMatrix-svc:src/foo.ts`, #123) name another
+    # repo's file. The comparison below matches with glob suffix tolerance, so
+    # a local `services/foo.ts` would match `LendMatrix-svc:src/services/foo.ts`
+    # and silently false-flip a foreign-repo entry to [fixed] on merge, wearing
+    # a plausible-looking annotation — harder to notice than a tombstone.
+    # Explicit --pick still selects these entries by their exact location.
+    [[ "$e_path" == *:* ]] && continue
     local matched_tfs=""
     while IFS= read -r tf; do
       [[ -z "$tf" ]] && continue
@@ -1901,6 +1908,15 @@ cmd_sync() {
           # are pattern descriptors, not filenames — the parser accepts them
           # for dedup, but probing them as literal paths always misses and
           # would false-tombstone the entry at every SessionStart sync.
+          :
+        elif [[ "$e_path" == *:* ]]; then
+          # Repo-prefixed locations (`LendMatrix-svc:src/services/foo.ts`)
+          # name a file in ANOTHER repo. Probing them against this repo's
+          # root always misses, so before #123 taught the parser this shape
+          # they would have false-tombstoned on every sync — the same failure
+          # the ~/$VAR, glob/brace and directory guards above exist to stop.
+          # A plain path can never contain ':' (the parser's charset excludes
+          # it), so this only catches the legacy multi-repo shape.
           :
         elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
           local repo_root

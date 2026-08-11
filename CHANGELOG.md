@@ -4,6 +4,40 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.3] - 2026-08-11
+
+### Fixed
+
+- **Legacy `Repo:path[:line]` locations are selectable again.** Ledger entries
+  whose location uses the multi-repo colon shape
+  (`LendMatrix-svc:src/services/foo.ts:42`, `LendMatrix-svc:node_modules/dotenv`)
+  parsed with an *empty* path, because the location charsets exclude `:`.
+  `fi_entry_loc` rejects an empty path, so these entries never entered the
+  `--pick` candidate list and could not be closed through `annotate-pr` /
+  `annotate-commit` at all — the only workaround was editing the ledger by
+  hand, which the command-only discipline forbids. `log` writes the shape
+  verbatim, so the CLI produced entries it could not then select. The parser
+  now accepts the shape, splitting a trailing all-numeric segment off the last
+  colon as the line number.
+
+  The repo prefix stays *inside* the parsed path deliberately. Exposing the
+  bare sub-path would make it look repo-relative to every caller that resolves
+  paths against this repo. Two such callers are now explicitly guarded: `sync`
+  skips the tombstone probe for any `:`-bearing path, since a repo-prefixed
+  path can never resolve here and probing it would have made this the fifth
+  member of the `~`/`$VAR`, glob, directory and whitespace false-closure
+  family; and auto-annotate skips them too, because its comparison uses glob
+  suffix tolerance, so a local `services/foo.ts` would otherwise match
+  `LendMatrix-svc:src/services/foo.ts` and false-flip a foreign-repo entry on
+  merge while wearing a plausible-looking annotation. Explicit `--pick` still
+  selects them by exact location, which is the point of the fix.
+
+  Abstract topic locations such as `topic:with:colons` are unaffected: the new
+  branch only engages when the text after the first colon looks path-ish
+  (contains `/` or `.`), the same heuristic the tombstone probe already uses.
+
+  Reported in #123.
+
 ## [2.1.2] - 2026-07-31
 
 ### Fixed

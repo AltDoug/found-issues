@@ -524,3 +524,40 @@ EOF
   run fi_entries issues.md open true
   [ "$status" -eq 2 ]
 }
+
+# === legacy Repo:path[:line] locations (#123) ===
+# Multi-repo ledgers historically logged locations as `Repo:path` or
+# `Repo:path:line`. The path charset excludes ':', so these tokens matched
+# neither location regex and parsed with an EMPTY path. fi_entry_loc returns
+# 1 on an empty path, so such entries never entered the --pick candidate list
+# and could not be closed through annotate-pr / annotate-commit at all.
+# `log` accepts and writes these shapes verbatim, so the CLI creates entries
+# it then cannot select.
+#
+# The repo prefix stays INSIDE the parsed path deliberately. Exposing the bare
+# sub-path would let sync probe it against THIS repo's root, and would let
+# auto-annotate match it against a same-named local file and false-flip a
+# foreign-repo entry to [fixed] on merge.
+
+@test "parse_entry: legacy Repo:path:line keeps the repo prefix inside the path" {
+  out="$(fi_parse_entry '- [open] 2026-08-06 LendMatrix-svc:src/services/foo.ts:42 — bad thing')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=LendMatrix-svc:src/services/foo.ts" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=42" ]
+}
+
+@test "parse_entry: legacy Repo:path without a line parses with an empty line" {
+  out="$(fi_parse_entry '- [open] 2026-08-06 LendMatrix-svc:node_modules/dotenv — outdated dep')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=LendMatrix-svc:node_modules/dotenv" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=" ]
+}
+
+@test "parse_entry: plain path:line is unaffected by colon tolerance" {
+  out="$(fi_parse_entry '- [open] 2026-08-06 src/foo/bar.ts:42 — control')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=src/foo/bar.ts" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=42" ]
+}
+
+@test "parse_entry: path symbol range form is unaffected by colon tolerance" {
+  out="$(fi_parse_entry '- [open] 2026-08-06 bin/found-issues fi_strip_target_markers ~1982-1989 — control')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=bin/found-issues" ]
+}

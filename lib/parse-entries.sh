@@ -128,6 +128,37 @@ fi_parse_entry() {
     line_num="${BASH_REMATCH[2]}"
   elif [[ "$first_token" =~ $re_path_only ]]; then
     path="${BASH_REMATCH[1]}"
+  elif [[ "$first_token" == *:* && ( "${first_token#*:}" == */* || "${first_token#*:}" == *.* ) ]]; then
+    # Legacy multi-repo locations use a `Repo:path` / `Repo:path:line` shape.
+    # The charsets above exclude ':' from a path, so these tokens matched
+    # neither regex and returned an EMPTY path — fi_entry_loc rejects an empty
+    # path, so the entries never reached the --pick candidate list and could
+    # not be closed through annotate-pr / annotate-commit at all. cmd_log
+    # writes the shape verbatim, so the CLI produced entries it could not
+    # then select.
+    #
+    # The repo prefix stays INSIDE the path on purpose. Exposing the bare
+    # sub-path would make it look repo-relative to every caller that resolves
+    # paths against this repo: sync would probe it and false-tombstone the
+    # entry, and auto-annotate would match it against a same-named local file
+    # and false-flip a foreign-repo entry on merge. Both callers additionally
+    # skip ':' paths outright, so keeping the prefix means a missed guard
+    # degrades to "no match" instead of a wrong match.
+    #
+    # The remainder after the FIRST colon must still look path-ish ('/' or
+    # '.', the same heuristic the tombstone probe uses) so that abstract topic
+    # locations like `topic:with:colons` keep parsing as pathless. Without
+    # that check this branch swallowed them and broke fi_entry_to_json's
+    # "path":null contract.
+    #
+    # Greedy `.+` splits on the LAST colon, so only a trailing all-numeric
+    # segment is taken as the line number.
+    if [[ "$first_token" =~ ^(.+):([0-9]+)$ ]]; then
+      path="${BASH_REMATCH[1]}"
+      line_num="${BASH_REMATCH[2]}"
+    else
+      path="$first_token"
+    fi
   fi
 
   # Symptom: text after ' — ' up to first '(' or end of line
