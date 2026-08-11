@@ -154,3 +154,20 @@ teardown() {
   grep -q '^- \[fixed\].*first symptom' docs/found-issues.md
   grep -q '^- \[open\].*second symptom' docs/found-issues.md
 }
+
+# A ledger whose final line lacks a trailing newline must not lose that entry.
+# `while read -r line` returns non-zero on a final partial line, so the loop
+# body never runs for it and the rewrite silently drops it. Same data-loss
+# class as the wc -l undercount fixed in v1.6.x. Hand-edited ledgers and some
+# editors produce exactly this shape.
+@test "resolve: does not drop a final entry that lacks a trailing newline" {
+  mkdir -p docs
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/a.py:1 — first entry\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/b.py:2 — final entry with no trailing newline' >> docs/found-issues.md
+
+  fi_run resolve "first entry"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^- \[' docs/found-issues.md)" -eq 2 ]
+  grep -q 'final entry with no trailing newline' docs/found-issues.md
+}

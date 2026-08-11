@@ -15,6 +15,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   printed), `3` already `[fixed]`, `4` the entry carries an active `(PR: ...)`
   and is in-flight work that `sync` will close on merge.
 
+  `resolve`'s rewrite loop is guarded with `|| [[ -n "$line" ]]`, so a ledger
+  whose final line lacks a trailing newline keeps that entry. The shipped
+  `defer`, `sync` and `annotate-commit` rewrites are **not** guarded and do
+  drop it — verified by probe, and logged as a critical entry in
+  `docs/found-issues.md` rather than fixed here, since it is a pre-existing
+  repo-wide pattern across ~10 read loops.
+
 - **`found-issues promote --apply --from <branch>`** — the transactional import
   path for `/found-issues:promote`. Run on the target branch (freshly cut from
   the default branch), it reads the source branch's ledger with `git show` and
