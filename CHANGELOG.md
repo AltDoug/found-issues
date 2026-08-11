@@ -4,6 +4,54 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.3] - 2026-08-11
+
+### Fixed
+
+- **Entries whose location is a line range were unreachable by every annotate
+  path.** `fi_parse_entry` accepted only `^[0-9]+$` as a line spec, so
+  `path:23-49` matched neither location regex and parsed to `path='' line=''`.
+  `fi_entry_loc` returns 1 on an empty path, so such entries never entered the
+  `--pick` candidate list: `--pick` reported "no `[open]` entry matches" for an
+  entry plainly present in the file, reading as user error rather than a parser
+  limit. `log` rejects range specs, so the stranded entries are ones written
+  before that guard, by hand, or by another repo's ledger — the orchard ledger
+  is 6-of-11 range-form, and v2.2.2 parsed 0 of its 7 range entries.
+
+  PR and commit flips were **not** affected: `fi_parse_entry` emits `prs=` from
+  the annotation tail independently of path parsing, and sync gates the flip on
+  `$e_prs` rather than `$e_path`. The impact was unreachability, not data loss.
+
+  `line` stays a NUMBER — the range start — with the end in a new `line_end`
+  field, rather than holding `23-49` verbatim. Three consumers evaluate that
+  field arithmetically (the `10#` coercion in `fi_entry_to_json`, sync's
+  tombstone `-lt` probe, and `fi_line_matched`'s `(( ))`), and bash silently
+  evaluates `"23-49"` as the subtraction **-26** — a verbatim range would have
+  emitted `"line":-26` in `--json` and exited 0. Splitting the field leaves all
+  three sites correct untouched, and a location-reconstruction site that forgets
+  to rejoin degrades to "no match" (the visible failure that already existed)
+  instead of a silently wrong number.
+
+  `--json` gains a `"line_end"` key, `null` for single-line entries. `"line"` is
+  unchanged for every existing consumer.
+
+- **`doctor` reported a healthy CLI while the session ran a stale binary.** It
+  printed a bare `CLI: <path>` without comparing it to the *installed* plugin
+  version. Claude Code injects a version-pinned plugin bin dir at session start,
+  so a session started before a release keeps resolving the old version for its
+  entire life (`installPath` said 2.2.2 while `$PATH` still had
+  `.../found-issues/2.2.0/bin`). Two concurrent sessions ran 2.2.0 for hours
+  after v2.2.1 shipped the read-loop data-loss fix, including 2.2.0's
+  SessionStart auto-sync — doctor would have called that healthy, and it is the
+  one command whose whole job is catching this class. The version directories
+  accumulate rather than prune, which is why a stale path resolves quietly
+  instead of failing loudly.
+
+  The advice is direction-aware: a cache-resident CLI on the wrong version is
+  told to restart the session, while a dev checkout — legitimately ahead of the
+  installed plugin — is told it is outside the plugin cache. Silent no-op when
+  there is no plugin manifest (CI, non-plugin installs) or no `jq`.
+
 ## [2.2.2] - 2026-08-11
 
 ### Fixed
