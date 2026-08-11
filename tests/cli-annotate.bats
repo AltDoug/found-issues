@@ -373,3 +373,58 @@ _setup_pr_repo() {
   fi_run annotate-pr "acme/upstream#12x"
   [ "$status" -ne 0 ]
 }
+
+# === repo-prefixed locations (#123, 2026-08-11) ===
+# These entries used to parse with an empty path, so fi_entry_loc rejected
+# them and they never reached the --pick candidate list. Selecting them by
+# their exact location string is the whole point of the fix.
+
+@test "annotate-commit: --pick selects an entry whose location carries a repo prefix" {
+  mkdir -p src
+  echo "x" > src/foo.py
+  fi_run log "LendMatrix-svc:src/services/foo.ts:42 — foreign repo entry"
+  git add -A
+  git commit -q -m "fix"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+
+  fi_run annotate-commit HEAD --pick "LendMatrix-svc:src/services/foo.ts:42"
+  [ "$status" -eq 0 ]
+  grep -q "LendMatrix-svc:src/services/foo.ts:42.*(commit: $short_sha)" docs/found-issues.md
+}
+
+# Auto-match compares entry paths to touched files with glob suffix tolerance
+# (`"$e_path" == */"$tf"`). A repo-prefixed path is NOT a path in this repo,
+# so it must be excluded from auto-matching outright. Without the exclusion a
+# local `services/foo.ts` glob-matches `LendMatrix-svc:src/services/foo.ts`
+# and silently false-flips a foreign-repo entry to [fixed] on merge, carrying
+# a plausible-looking commit annotation. Harder to spot than a tombstone.
+
+@test "annotate-commit: auto-match never annotates a repo-prefixed entry via glob suffix collision" {
+  mkdir -p services
+  printf 'a\nb\nc\n' > services/foo.ts
+  git add -A
+  git commit -q -m base
+  fi_run log "LendMatrix-svc:src/services/foo.ts:2 — foreign repo entry"
+  printf 'a\nCHANGED\nc\n' > services/foo.ts
+  git add -A
+  git commit -q -m "touch local services/foo.ts"
+
+  fi_run annotate-commit HEAD
+  run grep -q '(commit: ' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "annotate-commit: auto-match never annotates a repo-prefixed entry from a same-named local file" {
+  mkdir -p src/services
+  printf 'a\nb\nc\n' > src/services/foo.ts
+  git add -A
+  git commit -q -m base
+  fi_run log "LendMatrix-svc:src/services/foo.ts:2 — foreign repo entry"
+  printf 'a\nCHANGED\nc\n' > src/services/foo.ts
+  git add -A
+  git commit -q -m "touch local src/services/foo.ts"
+
+  fi_run annotate-commit HEAD
+  run grep -q '(commit: ' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}

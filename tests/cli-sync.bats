@@ -301,3 +301,28 @@ EOF
   grep -q '^- \[open\].*legacy modules' docs/found-issues.md
   ! grep -q 'closure: tombstone' docs/found-issues.md
 }
+
+# === repo-prefixed locations must never be probed (#123, 2026-08-11) ===
+# Teaching the parser the legacy `Repo:path[:line]` shape gives these entries
+# a non-empty path for the first time, which would otherwise route them into
+# the tombstone probe and false-close them against THIS repo's root. They are
+# not repo-local paths, so the probe chain skips them entirely, exactly like
+# the ~/$VAR and glob/brace guards. Fifth potential member of that family.
+
+@test "sync: never tombstones an entry whose location carries a repo prefix" {
+  fi_run log "LendMatrix-svc:src/services/foo.ts:42 — foreign repo entry, no such local file"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*LendMatrix-svc:src/services/foo\.ts:42' docs/found-issues.md
+  run grep -q 'closure: tombstone' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "sync: repo-prefixed entry without a line number is not tombstoned" {
+  fi_run log "LendMatrix-svc:node_modules/dotenv — outdated dep"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*LendMatrix-svc:node_modules/dotenv' docs/found-issues.md
+  run grep -q 'closure: tombstone' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
