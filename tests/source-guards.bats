@@ -69,10 +69,24 @@ fi_unguarded_read_loops() {
       p = index(s, "<")
       if (p == 0) next
       rest = substr(s, p + 1)
+      # Whitespace is what separates the two forms, so test BEFORE stripping:
+      # a here-string is "<<<" (another "<" immediately), while process
+      # substitution is "< <(" (a space, then "<("). Stripping first collapses
+      # them and the exemptions below cannot be told apart.
+      #
+      # here-strings are exempt unconditionally: bash appends a trailing
+      # newline, so a final partial line cannot exist.
+      if (rest ~ /^</) next
       sub(/^[[:space:]]+/, "", rest)
-      # A plain file redirect: a single "<" whose target is neither a
-      # here-string ("<<<") nor a process substitution ("<(").
-      if (rest ~ /^</ || rest ~ /^\(/) next
+      if (rest ~ /^<\(/) {
+        # Process substitution is exempt only for producers KNOWN to emit
+        # newline-terminated output -- today just fi_entries, which is awk
+        # (awk terminates every record with ORS even when its input did not).
+        # It is NOT safe in general: `< <(cat "$file")` and
+        # `< <(git show ref:path)` hand a missing trailing newline straight
+        # through and carry the identical bug, so they must still be guarded.
+        if (rest ~ /^<\([[:space:]]*fi_entries[[:space:]]/) next
+      }
       for (i = n - 1; i > 0; i--) {
         t = raw[i]
         if (t ~ /^[[:space:]]*$/) continue
@@ -176,4 +190,28 @@ f() {
 SAMPLE
   run fi_unguarded_read_loops "$TMP/ok.sh"
   [ -z "$output" ]
+}
+
+@test "source-guards: process substitution is exempt only for known-safe producers" {
+  # `< <(fi_entries ...)` is awk-backed, so every record is newline-terminated
+  # regardless of the input file. `cat` and `git show` are not -- they hand the
+  # missing trailing newline straight through, so a loop fed by either carries
+  # the identical bug and must still be guarded. A blanket process-substitution
+  # exemption would call all three of these clean.
+  cat >"$TMP/procsub.sh" <<'SAMPLE'
+f() {
+  while IFS= read -r line; do
+    :
+  done < <(fi_entries "$file" open)
+  while IFS= read -r line; do
+    :
+  done < <(cat "$file")
+  while IFS= read -r line; do
+    :
+  done < <(git show "$ref:$path")
+}
+SAMPLE
+  run fi_unguarded_read_loops "$TMP/procsub.sh"
+  [ "$output" = "$TMP/procsub.sh:5
+$TMP/procsub.sh:8" ]
 }

@@ -112,9 +112,17 @@ fi_seed_no_trailing_newline() {
 # Assert both entries seeded by fi_seed_no_trailing_newline survived the
 # command under test. Counts entry lines rather than diffing, so a status flip
 # on the first entry (open -> deferred/fixed) still passes.
+#
+# BOTH entries are named explicitly, not just the count and the final one: a
+# rewrite that dropped entry 1 while duplicating entry 2 would satisfy a
+# count-plus-final-entry check while having destroyed an entry.
 fi_assert_both_entries_survived() {
   [ "$(grep -c '^- \[' docs/found-issues.md)" -eq 2 ]
+  grep -q 'first entry' docs/found-issues.md
   grep -q 'final entry with no trailing newline' docs/found-issues.md
+  # Exactly one of each -- a duplicate is data corruption too.
+  [ "$(grep -c 'first entry' docs/found-issues.md)" -eq 1 ]
+  [ "$(grep -c 'final entry with no trailing newline' docs/found-issues.md)" -eq 1 ]
 }
 
 # Activate the gh shim for this test by prepending bin-shims to PATH.
