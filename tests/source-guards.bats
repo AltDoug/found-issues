@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Static source guards over bin/found-issues.
+# Static source guards over the shell sources (bin/, lib/, hooks/, scripts/).
 #
 # Cheap structural checks that catch a whole bug CLASS at author time, rather
 # than waiting for one more per-command regression test to be remembered.
@@ -20,6 +20,13 @@
 
 load 'helpers'
 
+# Per-test tmpdir via the suite's own helper rather than BATS_TEST_TMPDIR:
+# that variable only exists in bats >= 1.4, and this suite runs on apt bats
+# (ubuntu), brew bats-core (macOS) and npm bats (Windows Git Bash). Every other
+# test file here uses fi_setup_tmp, so it is the portable, already-proven path.
+setup() { fi_setup_tmp; }
+teardown() { fi_teardown_tmp; }
+
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 CLI="$REPO_ROOT/bin/found-issues"
 
@@ -31,9 +38,9 @@ CLI="$REPO_ROOT/bin/found-issues"
 # declared the bug class fixed while `log` still dropped entries -- and the
 # scheduled cmd_* extraction into lib/ would quietly move code out of scope.
 #
-# FNR (not NR) and the per-file stack reset are load-bearing: NR keeps counting
-# across files, so a multi-file scan would report line numbers past the end of
-# the file it names.
+# The per-file line counter `n` resets on FNR == 1 rather than riding awk's NR:
+# NR keeps counting across files, so a multi-file scan would report line numbers
+# past the end of the file it names.
 #
 # A `done <file` line is paired with its `while` by INDENTATION: the nearest
 # preceding non-blank line at the same indent that opens a loop. That correctly
@@ -102,15 +109,15 @@ fi_unguarded_read_loops() {
   # Negative control. Without this, a detector that silently stopped matching
   # anything (a bad regex, a refactor of the loop style) would keep the test
   # above green forever while enforcing nothing.
-  cat >"$BATS_TEST_TMPDIR/sample.sh" <<'SAMPLE'
+  cat >"$TMP/sample.sh" <<'SAMPLE'
 f() {
   while IFS= read -r line; do
     printf '%s\n' "$line"
   done <"$file"
 }
 SAMPLE
-  run fi_unguarded_read_loops "$BATS_TEST_TMPDIR/sample.sh"
-  [ "$output" = "$BATS_TEST_TMPDIR/sample.sh:2" ]
+  run fi_unguarded_read_loops "$TMP/sample.sh"
+  [ "$output" = "$TMP/sample.sh:2" ]
 }
 
 @test "source-guards: embedded loop keywords do not hide a real unguarded loop" {
@@ -119,7 +126,7 @@ SAMPLE
   # drifts on those (13 too high by EOF in the real file) and then pops the
   # wrong entry, MISSING a genuinely unguarded loop. The unguarded loop below
   # sits after the noise and must still be reported.
-  cat >"$BATS_TEST_TMPDIR/noisy.sh" <<'SAMPLE'
+  cat >"$TMP/noisy.sh" <<'SAMPLE'
 emit() {
   awk '
     for (i = 0; i < 3; i++) { print i }
@@ -135,26 +142,26 @@ g() {
   done <"$file"
 }
 SAMPLE
-  run fi_unguarded_read_loops "$BATS_TEST_TMPDIR/noisy.sh"
-  [ "$output" = "$BATS_TEST_TMPDIR/noisy.sh:11" ]
+  run fi_unguarded_read_loops "$TMP/noisy.sh"
+  [ "$output" = "$TMP/noisy.sh:11" ]
 }
 
 @test "source-guards: the detector numbers lines per file, not cumulatively" {
   # awk's NR keeps counting across files; only FNR restarts. With NR the
   # second file's findings are reported at line numbers past its own end,
   # sending a reader to a line that does not exist.
-  printf 'x\ny\nz\n' >"$BATS_TEST_TMPDIR/first.sh"
-  cat >"$BATS_TEST_TMPDIR/second.sh" <<'SAMPLE'
+  printf 'x\ny\nz\n' >"$TMP/first.sh"
+  cat >"$TMP/second.sh" <<'SAMPLE'
 while IFS= read -r line; do
   :
 done <"$file"
 SAMPLE
-  run fi_unguarded_read_loops "$BATS_TEST_TMPDIR/first.sh" "$BATS_TEST_TMPDIR/second.sh"
-  [ "$output" = "$BATS_TEST_TMPDIR/second.sh:1" ]
+  run fi_unguarded_read_loops "$TMP/first.sh" "$TMP/second.sh"
+  [ "$output" = "$TMP/second.sh:1" ]
 }
 
 @test "source-guards: the detector accepts a guarded loop and exempt feeds" {
-  cat >"$BATS_TEST_TMPDIR/ok.sh" <<'SAMPLE'
+  cat >"$TMP/ok.sh" <<'SAMPLE'
 f() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     printf '%s\n' "$line"
@@ -167,6 +174,6 @@ f() {
   done <<<"$picks"
 }
 SAMPLE
-  run fi_unguarded_read_loops "$BATS_TEST_TMPDIR/ok.sh"
+  run fi_unguarded_read_loops "$TMP/ok.sh"
   [ -z "$output" ]
 }
