@@ -2277,7 +2277,11 @@ fi_promote_apply() {
     [[ "$line" =~ ^-\ \[open\] ]] || continue
     # -F -x: exact whole-line match. Substring matching here is the cmd_archive
     # data-loss bug in reverse — a prefix entry would be silently skipped.
-    grep -Fxq -- "$line" "$file" && continue
+    #
+    # Checked against $tmp, not $file: $tmp starts as a copy of the target and
+    # accumulates this run's additions, so a source ledger carrying the same
+    # line twice collapses to one instead of copying both.
+    grep -Fxq -- "$line" "$tmp" && continue
     printf '%s\n' "$line" >> "$tmp"
     added=$(( added + 1 ))
   done <<< "$source_content"

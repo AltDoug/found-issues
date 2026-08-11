@@ -178,3 +178,23 @@ teardown() {
   run grep -q 'parked' docs/found-issues.md
   [ "$status" -ne 0 ]
 }
+
+# The dedup check must consider entries added earlier in the SAME run, not just
+# what was already on the target branch. Checking the original file only means
+# a source ledger carrying the same line twice copies it twice.
+@test "promote --apply: collapses duplicate identical entries within one run" {
+  mkdir -p docs
+  printf '# found-issues\n\n' > docs/found-issues.md
+  git add -A && git commit -q -m base
+
+  git checkout -q -b feature/dup
+  printf -- '- [open] 2026-02-09 src/a.py:1 — duplicated line\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-02-09 src/a.py:1 — duplicated line\n' >> docs/found-issues.md
+  git add -A && git commit -q -m dup
+
+  git checkout -q main
+  git checkout -q -b chore/promote-dup
+  fi_run promote --apply --from feature/dup
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'duplicated line' docs/found-issues.md)" -eq 1 ]
+}
