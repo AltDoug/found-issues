@@ -4,6 +4,43 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-08-11
+
+### Fixed
+
+- **A push landing on main could silently void the previous push's multi-OS
+  verification.** `cancel-in-progress` was unconditional, so a commit landing
+  while an earlier commit's matrix was still running cancelled it. The cancelled
+  run's `ci` correctly reports failure, but the *newer* run owns the branch
+  head's status — and when that newer push is docs-only, the path filter skips
+  every job and `ci` reports success. Main then reads green having never run
+  bats on macOS or Windows.
+
+  Hit during the v2.2.1 release: a one-line ledger flip (#130) merged two
+  minutes after the fix (#129) and cancelled its matrix mid-run. v2.2.1 was
+  verified only because the run was re-triggered by hand.
+
+  Push events no longer cancel; pull-request events still do, which is where
+  fix-up commits arrive in quick succession and stale results are pure waste.
+  This restores the quality floor the OS-matrix comment already promised: every
+  commit that lands runs all three OSes.
+
+  Fixing it at the aggregator instead was considered and rejected — `ci` already
+  treats `cancelled` as blocking, so it was never the defect, and failing it on
+  *skipped* bats would break the legitimate docs-only skip the path filter
+  exists to provide. `tests/ci-workflow.bats` now guards both properties.
+
+- **The SessionStart hook gave no way to tell which CLI it ran.** `FI_BIN`
+  resolves to a `found-issues` on PATH — the *installed* plugin — before the
+  co-located `FI_BIN_DIR` binary, so running the hook from a source checkout
+  silently exercises the installed version: a local change looks like it had no
+  effect, and a bug just fixed looks unfixed. This produced two false "no bug
+  here" readings while investigating v2.2.1.
+
+  `FOUND_ISSUES_DEBUG_BIN=1` now prints the resolved path to stderr. Resolution
+  order is deliberately unchanged (PATH-first is correct for installed users);
+  the override remains `FOUND_ISSUES_BIN`.
+
 ## [2.2.1] - 2026-08-11
 
 ### Fixed
