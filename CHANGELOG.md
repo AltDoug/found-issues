@@ -4,6 +4,32 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.5] - 2026-08-11
+
+### Fixed
+
+- **`bin/found-issues` was 5,209 lines against a 500-line refactor signal.**
+  The statusline family — install, the `--target <path>` bash/node/python
+  backends, the doctor probes and both uninstall paths — moved out of the CLI
+  into four new `lib/` files, taking the CLI to 3,443 lines. First step of the
+  tracked §12 split; the `loc-override` marker stays until the remaining
+  `cmd_*` groups follow, because it is what keeps the hook from blocking
+  unrelated PRs in the meantime.
+
+  **A pure move: no renames, no signature changes, no cleanups.** Every
+  extracted line is byte-identical to its origin in 2.2.4, and the CLI's only
+  remaining change is the four `source` lines. Function order is preserved
+  even where the CLI had interleaved the family with `cmd_doctor`
+  (`cmd_install_statusline_inline`/`_append` sat below it and keep their
+  relative position in `statusline-install.sh`). Behavior is unchanged, which
+  is the point — the 750-test suite is only a meaningful oracle for this
+  refactor if nothing but line addresses moved.
+
+  `lib/` was already the split mechanism and needs no packaging change: the
+  plugin cache copies the whole repo, and `tests/source-guards.bats` already
+  scanned `lib/*.sh` for the READ-LOOP GUARD convention precisely so a
+  scheduled extraction could not quietly move code out of enforcement scope.
+
 ## [2.2.4] - 2026-08-11
 
 ### Fixed

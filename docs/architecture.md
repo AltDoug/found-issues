@@ -55,6 +55,9 @@ How the pieces fit together.
                     │    parse + count entries         │
                     │  • detect-mode.sh — mode         │
                     │    auto-detection (1h cache)     │
+                    │  • statusline-*.sh — the         │
+                    │    install/target/uninstall      │
+                    │    statusline subcommands        │
                     └────────────────┬─────────────────┘
                                      │
                                      │ reads/writes
