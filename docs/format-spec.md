@@ -35,7 +35,7 @@ Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract
 | Renamed-from annotation | `(renamed-from: PATH)` | `(renamed-from: lib/old-name.py)` | Added by `/found-issues:sync` when entry path was git-mv'd |
 | Fixed date | `(fixed: YYYY-MM-DD)` | `(fixed: 2026-05-08)` | Added by `/found-issues:sync` on closure |
 | Verification | `(verified: ai)` or `(verified: review)` | `(verified: ai)` | Added when sync verifies via AI |
-| Closure annotation | `(closure: tombstone)` | `(closure: tombstone)` | Added by `found-issues sync` when the cited file is gone or the cited line is past end-of-file |
+| Closure annotation | `(closure: tombstone)` | `(closure: tombstone)` | Added by `found-issues sync` when the cited file is gone (a merely shorter file is line drift, not a closure) |
 | Touched annotation | `(touched: DATE[, DATE...][; ...])` | `(touched: 2026-05-08, 2026-05-12)` | Appended by `found-issues log` when a new log matches a `[deferred]` entry; `;` separates defer cycles |
 | Defer-cycle annotation | `(defer-cycle: N)` | `(defer-cycle: 2)` | Added by `found-issues defer` on re-defer (absent = cycle 1) |
 | Reason annotation | `(reason: ...)` | `(reason: wait for second user report)` | Added by `found-issues defer --reason` |

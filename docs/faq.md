@@ -47,8 +47,9 @@ Three mechanisms, in priority order:
    the default branch.
 
 2. **Tombstone.** If the file referenced by the entry no longer exists,
-   or the file is shorter than the line number, the entry auto-closes
-   with `(closure: tombstone)`.
+   the entry auto-closes with `(closure: tombstone)`. A file that is merely
+   shorter than the cited line number is line drift, not a closure — the
+   entry stays `[open]`.
 
 3. **AI verification** (only when you run `/found-issues:sync` inside
    Claude Code, not the background sync). Claude reads the code at each
