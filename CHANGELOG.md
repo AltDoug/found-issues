@@ -4,6 +4,30 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.7] - 2026-08-12
+
+### Fixed
+
+- **Third step of the tracked §12 split: `bin/found-issues` 2,558 → 1,466
+  lines.** `help`/`version`, the deferred-touch nudge, and the ledger
+  read/write commands (`log`, `defer`, `resolve`, `promote-deferred`, `list`,
+  `status`) moved into six new `lib/` files, none over 255 lines. Pure move as
+  before: every extracted line byte-identical to its origin in 2.2.6, the CLI's
+  only remaining change is the six `source` lines, and the function inventory
+  across the affected files is unchanged at 29 definitions.
+
+  One group remains — the shared annotate engine, `annotate-pr`,
+  `annotate-commit`, `sync` and `promote` — which takes the CLI to roughly 330
+  lines and finally clears the 500 signal.
+
+- **`docs/statusline-integration-contract.md` pointed at a line number that no
+  longer existed.** It cited `bin/found-issues` "line ~971" for the segment
+  branch of `cmd_status`; that line had already drifted through several
+  releases, and `cmd_status` now lives in `lib/list-status.sh`. Cited by symbol
+  instead, so it cannot drift again. The same defect in `docs/versioning.md` is
+  tracked in `docs/found-issues.md` rather than fixed here — it is not in this
+  diff's blast radius.
+
 ## [2.2.6] - 2026-08-12
 
 ### Fixed

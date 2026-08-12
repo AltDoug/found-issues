@@ -45,7 +45,9 @@ If a snapshot test fails after a code change, the fix lives in the code change �
 
 ## Related
 
-- `bin/found-issues` line ~971 — segment branch of `cmd_status` (the emit point)
+- `lib/list-status.sh` — segment branch of `cmd_status` (the emit point). Cited
+  by symbol, not line: the old `bin/found-issues` line number had drifted
+  through several releases before `cmd_status` moved out of the CLI entirely.
 - `tests/cli-status.bats` — broader status format tests (label policy, plain/json formats)
 - `tests/cli-statusline.bats` — install-statusline integration tests
 - `commands/setup.md` — orchestrates the splice into user statuslines
