@@ -46,7 +46,13 @@ Function inventories were checked identical each time (74→74, 46→46, 29→29
 
 ## Remaining work
 
-### The final PR (v2.2.8)
+### The final PR (v2.2.9 — renumbered)
+
+> **Shipped 2026-08-12.** This section is kept as the record of what was
+> planned; the numbering moved because the `cmd_sync` tombstone fix took
+> v2.2.8 (PR #149), so the extraction shipped as **v2.2.9**. The ranges below
+> were re-derived against post-fix `origin/main` before use — the fix removed
+> two lines inside `cmd_sync`, so `sync` and `promote` both shifted.
 
 Delete `bin/found-issues` **271–1404** (1,134 lines), one contiguous block. Verify boundaries first — each block ends `}` + blank, each header is preceded by a blank:
 
@@ -88,7 +94,7 @@ What stays in the CLI: header + READ-LOOP GUARD block (1–105), Utilities (106�
      || { echo "GATE FAIL"; exit 1; }
    ```
    Restore a flipped entry with a targeted `perl -i -pe` on that one line — **never** `git checkout docs/found-issues.md` (hazard 2). Logged as `[open]` at `bin/found-issues:2215`, reproduced deterministically on a fixture against both 2.2.4 and 2.2.5, so it is pre-existing.
-   **Operator decision pending:** whether to fix it before the final PR. Recommendation given: yes, narrowly — treat a present-but-shorter file as line drift rather than closure, matching what the rename check and the `awk END{NR}` fix already do for the same false-close family. It changes when entries auto-close, which is product semantics, so it was not folded in silently.
+   **RESOLVED — fixed in v2.2.8 (PR #149), 2026-08-12.** The operator decided to fix it before the final extraction PR, narrowly: a present-but-shorter file is line drift, so the line-count-shortfall branch is gone and the entry stays `[open]`. Closure still fires when the file is genuinely missing or renamed. Two tests pinned the old behavior (`cli-sync.bats:34` and its `awk END{NR}` companion at `:255`) and were inverted in place; a third, new test covers the shrink sequence. The agent-facing surfaces that *taught* the old rule were corrected too — `commands/sync.md` and its generated `codex-skills` twin steer sync's Phase-2 AI verification, so leaving them would have reproduced the same permanent false close through the AI path.
 
 2. **Peer sessions edit this same working tree live.** Not copies — the same files. Tonight a `git add -A` swept a peer's in-progress `docs/audits/prompt-audit-2026-08-12.md` into a commit (fixed via `git rm --cached` + `--amend`; still untracked on disk, theirs to land). **Stage explicit paths, never `-A`.** Carry their ledger entries (shared state), never their work products.
 

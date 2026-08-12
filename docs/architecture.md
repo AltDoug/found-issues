@@ -59,9 +59,9 @@ How the pieces fit together.
                     │    family — log.sh, defer.sh,    │
                     │    resolve.sh, list-status.sh,   │
                     │    doctor.sh, statusline-*.sh,   │
-                    │    … — split out of the CLI per  │
-                    │    §12 (annotate/sync/promote    │
-                    │    still pending)                │
+                    │    annotate*.sh, sync.sh,        │
+                    │    promote.sh — the §12 split,   │
+                    │    complete as of v2.2.9         │
                     └────────────────┬─────────────────┘
                                      │
                                      │ reads/writes
