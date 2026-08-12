@@ -100,7 +100,9 @@ What stays in the CLI: header + READ-LOOP GUARD block (1–105), Utilities (106�
 
 6. **macOS CI runs bash 3.2.** Local dev is 5.x. Guard `set -u` array expansions against empty, use `10#` on ledger-derived numbers entering `(( ))`. Test with `/bin/bash` (3.2.57 here).
 
-7. **Windows bats takes ~20–34 min; PR runs are ubuntu-only.** macOS + Windows run post-merge. **Pin monitors to a run ID** (`gh run view <RID>`), never `--branch main --limit 1`. `cancel-in-progress` is OFF for push-to-main (the #132 fix), so back-to-back merges each get their own complete matrix — they do not clobber each other.
+7. **Do NOT merge a second PR while a post-merge matrix is still running — #132's fix does not cover this.** Windows bats takes ~20–34 min; PR runs are ubuntu-only, so macOS + Windows only run post-merge. `cancel-in-progress` is OFF for push-to-main, which makes a second push *queue* rather than cancel — but **GitHub keeps only one pending run per concurrency group, so a third push displaces and cancels the queued one.**
+   Hit live 2026-08-12: v2.2.7's matrix (run `31567113734`, `4a16a9e`) went pending behind v2.2.6's still-running matrix; the docs-only handoff push (`70fad3f`) then joined the group and cancelled it. The replacement run had `detect changes → code=false`, so **bats skipped on all three OSes and `ci` reported success** — main read green having never tested v2.2.7's code. Same symptom as the ledger entry #132 fixed, reached through pending-run displacement instead of `cancel-in-progress`. Recovered by re-running `31567113734` once the group freed.
+   **Rule:** let each post-merge matrix finish before merging the next PR, and after every merge confirm the run for *that commit SHA* actually executed bats — `gh run view <RID> --json headSha,jobs`. A `skipped` bats with `ci: success` is the failure, not a pass. **Pin monitors to a run ID**, never `--branch main --limit 1`.
 
 8. **The Stop hook requires** a `<!-- found-issues-checked: ... -->` marker on any turn with substantive tool use (`none-noticed` | `logged` | `deferred`).
 
