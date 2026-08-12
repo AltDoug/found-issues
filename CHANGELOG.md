@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.6] - 2026-08-12
+
+### Fixed
+
+- **Second step of the tracked §12 split: `bin/found-issues` 3,443 → 2,558
+  lines.** One contiguous block — `uninstall`, `archive`, `doctor`,
+  `install/uninstall-codex-hooks` and `install/uninstall-fi-alias` — moved into
+  five new `lib/` files, none over 351 lines. Same discipline as v2.2.5: a pure
+  move, every extracted line byte-identical to its origin in 2.2.5, and the
+  CLI's only remaining change is the five `source` lines. Function inventory is
+  unchanged at 46 definitions across the affected files.
+
+  The `loc-override` marker stays until the CLI is actually under 500; two
+  groups remain (help + the ledger read/write commands, then the annotate
+  engine + sync + promote), which take it to roughly 310 lines.
+
 ## [2.2.5] - 2026-08-11
 
 ### Fixed
