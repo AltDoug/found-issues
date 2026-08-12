@@ -4,6 +4,50 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.4] - 2026-08-11
+
+### Fixed
+
+- **`log` rejected the line-range locations the parser had just learned to
+  read.** v2.2.3 taught `fi_parse_entry`, `fi_entry_loc` and `--pick` to
+  round-trip `path:23-49`, but `cmd_log`'s line-spec guard predated range
+  support and kept refusing the same shape. The parser and the writer therefore
+  disagreed about what a valid location is: an agent that spotted a multi-line
+  symptom had to either narrow it to a single line or hand-edit the ledger —
+  and hand-edited entries are exactly the pre-guard shape v2.2.3 had to rescue.
+  Not a regression; the guard had always behaved this way.
+
+  `log` now accepts `^[0-9]+(-[0-9]+)?$`, matching the parser's `re_path_line`.
+  Ranges that are not strictly increasing are rejected at the writer, since
+  both `49-23` (a typo) and `10-10` (a single line wearing range syntax) would
+  otherwise round-trip as valid-looking locations. Comma, alpha-suffixed and
+  multi-dash specs (`10,85`, `42abc`, `10-20-30`) are still rejected, and
+  abstract topics with a non-numeric colon suffix are untouched.
+
+  The range is rejoined only when the entry line is rendered, mirroring
+  `fi_entry_loc`. The **dedup key deliberately keeps the numeric start**,
+  because the dedup scan builds an existing entry's key from `fi_parse_entry`'s
+  `line` — also the numeric start. Rendering the full range into the key
+  instead would have made a re-logged range entry miss its own twin and
+  silently duplicate it on every log.
+
+- **Auto-annotation missed line-range entries whose body overlapped a changed
+  hunk.** `fi_line_matched` tested only a range entry's START line against the
+  diff's old-side hunks, so an entry at `path:23-49` did not match a hunk
+  touching lines 30-40 — the start sits outside it while the body plainly
+  overlaps. Introduced as a deliberate scope limit in v2.2.3, which split
+  `:23-49` into a numeric start plus `line_end` precisely so the three
+  arithmetic consumers of `line` stayed correct without change; overlap was
+  left out as gold-plating.
+
+  It failed SAFE — a missed auto-annotation, never a wrong one — and `--pick`
+  was unaffected, so this was a reachability gap rather than a correctness bug.
+  `fi_line_matched` now takes `line_end` as a fourth argument and tests hunk
+  overlap (`start <= hunk_end && end >= hunk_start`), falling back to the
+  identical single-line comparison when `line_end` is empty. A non-numeric or
+  inverted end degrades to the start-only test rather than feeding garbage to
+  `(( ))`.
+
 ## [2.2.3] - 2026-08-11
 
 ### Fixed
