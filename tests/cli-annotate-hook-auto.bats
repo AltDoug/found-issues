@@ -128,6 +128,63 @@ mk_pr_mocks() {
   [ "$status" -ne 0 ]
 }
 
+# === line-range entries vs hunk overlap (v2.2.4) ===
+#
+# v2.2.3 (#137) split `:23-49` into a numeric start plus line_end, and
+# fi_line_matched kept testing the START alone. A range whose start sits
+# outside every changed hunk while its BODY overlaps one therefore never
+# auto-annotated. Overlap is `start <= hunk_end && end >= hunk_start`.
+
+# Removes old-side line 35 only, so the sole removal range is 35-35.
+mk_mid_hunk_mocks() {
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF='diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -33,5 +33,5 @@\n ctx33\n ctx34\n-old35\n+new35\n ctx36\n ctx37'
+}
+
+@test "hook-auto: range entry whose body overlaps a hunk annotates though its start does not" {
+  mkdir -p docs
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/foo.py:23-49 — handler drops errors\n' >> docs/found-issues.md
+  mk_mid_hunk_mocks
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 0 ]
+  grep -q 'src/foo.py:23-49 .*(PR: org/repo#7)' docs/found-issues.md
+}
+
+@test "hook-auto: range entry ending before every hunk still becomes a candidate, exit 3" {
+  mkdir -p docs
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/foo.py:5-10 — early bug\n' >> docs/found-issues.md
+  mk_mid_hunk_mocks
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"src/foo.py:5-10"* ]]
+  run grep -q '(PR: org/repo#7)' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "hook-auto: range entry starting after every hunk still becomes a candidate, exit 3" {
+  mkdir -p docs
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/foo.py:60-70 — late bug\n' >> docs/found-issues.md
+  mk_mid_hunk_mocks
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"src/foo.py:60-70"* ]]
+  run grep -q '(PR: org/repo#7)' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "hook-auto: range entry whose start is inside a hunk still annotates" {
+  mkdir -p docs
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-08-11 src/foo.py:35-40 — starts on the changed line\n' >> docs/found-issues.md
+  mk_mid_hunk_mocks
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 0 ]
+  grep -q 'src/foo.py:35-40 .*(PR: org/repo#7)' docs/found-issues.md
+}
+
 @test "hook-auto: a deleted '-- comment' before a second same-file hunk annotates the right entry" {
   # Regression for the '^--- ' body misparse: a deleted SQL comment renders
   # as '--- old comment' in the diff and used to be read as a file header,

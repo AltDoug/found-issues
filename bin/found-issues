@@ -35,7 +35,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.2.3"
+readonly FI_VERSION="2.2.4"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -490,21 +490,33 @@ cmd_log() {
     return 2
   fi
 
-  # Parse location: path:line, path, or abstract
-  local path="" line_num=""
-  if [[ "$location" =~ ^([^:[:space:]]+):([0-9]+)$ ]]; then
+  # Parse location: path:line, path:start-end, path, or abstract
+  local path="" line_num="" line_end=""
+  if [[ "$location" =~ ^([^:[:space:]]+):([0-9]+)(-([0-9]+))?$ ]]; then
+    # Charset parity with fi_parse_entry's re_path_line (lib/parse-entries.sh):
+    # the writer must accept exactly the line specs the parser round-trips, or
+    # an agent that spots a multi-line symptom has to hand-edit the ledger —
+    # and hand-edited entries are the pre-guard shape v2.2.3 had to rescue.
     path="${BASH_REMATCH[1]}"
     line_num="${BASH_REMATCH[2]}"
+    line_end="${BASH_REMATCH[4]}"
+    # A range must be strictly increasing. `49-23` is a typo, and `10-10` is a
+    # single line wearing range syntax — both would round-trip through the
+    # parser as a valid-looking location, so reject at the writer instead.
+    if [[ -n "$line_end" ]] && (( 10#$line_end <= 10#$line_num )); then
+      fi_err "found-issues log: invalid line spec '${line_num}-${line_end}' in location — a range must end after it starts (path:23-49)"
+      return 2
+    fi
   elif [[ "$location" =~ ^([^:[:space:]]+):([0-9][^[:space:]]*)$ ]]; then
     # A colon suffix starting with a digit was clearly intended as a line
-    # spec (e.g. 10,85 / 10-20 / 42abc) but isn't a bare integer.
-    # fi_parse_entry (lib/parse-entries.sh) can only round-trip ^[0-9]+$
-    # line specs — anything else silently drops the path, breaking dedup,
+    # spec (e.g. 10,85 / 42abc / 10-20-30) but is neither a bare integer nor a
+    # single range. fi_parse_entry can only round-trip ^[0-9]+(-[0-9]+)?$ line
+    # specs — anything else silently drops the path, breaking dedup,
     # annotate-commit/annotate-pr matching, and tombstone sync. Same
     # charset-alignment class as the v1.5.7 path fix (bin/found-issues:426).
     # Abstract topics with a non-numeric colon suffix (e.g. "workflow:shutdown")
     # don't match this branch and keep their existing behavior below.
-    fi_err "found-issues log: invalid line spec '${BASH_REMATCH[2]}' in location — use a single numeric line (path:42) or an abstract topic without a colon"
+    fi_err "found-issues log: invalid line spec '${BASH_REMATCH[2]}' in location — use a single numeric line (path:42), a range (path:23-49), or an abstract topic without a colon"
     return 2
   elif [[ "$location" == */* || "$location" == *.* ]]; then
     # Looks like a file path
@@ -603,8 +615,15 @@ cmd_log() {
   local crit_flag=""
   [[ "$critical" == "yes" ]] && crit_flag=" [!]"
 
+  # Rejoin the range halves here and ONLY here, mirroring fi_entry_loc — the
+  # dedup key above deliberately keeps the numeric start, because the scan
+  # builds an existing entry's key from fi_parse_entry's `line` (also the
+  # numeric start). Rendering the range into the key instead would make a
+  # re-logged range entry miss its own twin and duplicate it every time.
   local location_str=""
-  if [[ -n "$line_num" ]]; then
+  if [[ -n "$line_num" && -n "$line_end" ]]; then
+    location_str=" $path:$line_num-$line_end"
+  elif [[ -n "$line_num" ]]; then
     location_str=" $path:$line_num"
   elif [[ -n "$path" ]]; then
     location_str=" $path"
@@ -1556,17 +1575,29 @@ fi_diff_old_ranges() {
   '
 }
 
-# fi_line_matched <path> <line> <ranges> — 0 iff <path>:<line> falls inside
-# any old-side range. Path comparison mirrors the entry/touched-file rule
-# used in fi_annotate_auto (exact or suffix match either way).
+# fi_line_matched <path> <line> <ranges> [line_end] — 0 iff <path>'s cited
+# lines OVERLAP any old-side range. Path comparison mirrors the entry/touched-
+# file rule used in fi_annotate_auto (exact or suffix match either way).
+#
+# <line_end> is the parser's line_end for a range entry (`path:23-49`). A range
+# whose START sits outside every hunk can still have its BODY overlap one, so
+# testing the start alone silently missed those. Empty line_end degrades to the
+# single-line test (start == end), which is the identical comparison.
 fi_line_matched() {
-  local p="$1" ln="$2" ranges="$3"
+  local p="$1" ln="$2" ranges="$3" lend="${4:-}"
   [[ -z "$ln" || -z "$ranges" ]] && return 1
+  # Guard the arithmetic: a non-numeric end would make (( )) evaluate garbage.
+  [[ "$lend" =~ ^[0-9]+$ ]] || lend="$ln"
+  (( 10#$lend < 10#$ln )) && lend="$ln"
   local rp rs re
   while IFS=$'\t' read -r rp rs re; do
     [[ -z "$rp" ]] && continue
     if [[ "$rp" == "$p" || "$rp" == */"$p" || "$p" == */"$rp" ]]; then
-      if (( ln >= rs && ln <= re )); then
+      # Overlap: the entry starts at or before the hunk ends AND ends at or
+      # after the hunk starts. `10#` on the entry-side values because they come
+      # from ledger text — a zero-padded `path:08` is a base-8 literal to
+      # (( )) and errors out under bash 3.2 (macOS CI) without it.
+      if (( 10#$ln <= re && 10#$lend >= rs )); then
         return 0
       fi
     fi
@@ -1577,8 +1608,9 @@ fi_line_matched() {
 # --all annotates every candidate.
 # hook_auto (yes|no, $8) gates auto-annotation on a stricter rule for the
 # PostToolUse hook: a candidate must ALSO be unambiguous under the
-# file-contest rule below AND have its cited line fall inside an old_ranges
-# ($9, from fi_diff_old_ranges) hunk range for its path. Line-less entries
+# file-contest rule below AND have its cited lines OVERLAP an old_ranges
+# ($9, from fi_diff_old_ranges) hunk range for its path — for a range entry
+# that means any part of start..line_end, not just the start. Line-less entries
 # never line-match (fi_line_matched short-circuits on empty line), so they
 # never auto-annotate in hook mode. See cmd_annotate_pr/cmd_annotate_commit
 # for how hook_auto/old_ranges are produced.
@@ -1590,7 +1622,7 @@ fi_annotate_auto() {
   # Pass 1: collect candidates with the FULL set of touched files each one
   # matches; already-annotated entries contribute their files to ann_tfs.
   local -a cand_lines=() cand_locs=() cand_syms=() cand_tfs=()
-  local -a cand_paths=() cand_lnums=()
+  local -a cand_paths=() cand_lnums=() cand_lends=()
   local ann_tfs=""
   local line tf
   # Final-partial-line guard (READ-LOOP GUARD, top of file). Scan-only, but a
@@ -1598,7 +1630,7 @@ fi_annotate_auto() {
   # annotation while pass 3 below rewrites the file around it.
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ ^-\ \[open\] ]] || continue
-    local e_data e_path e_line e_symptom
+    local e_data e_path e_line e_line_end e_symptom
     e_data="$(fi_parse_entry "$line")" || continue
     e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
     [[ -z "$e_path" ]] && continue
@@ -1622,12 +1654,13 @@ fi_annotate_auto() {
       continue
     fi
     e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+    e_line_end="$(printf '%s' "$e_data" | grep '^line_end=' | head -1 | cut -d= -f2-)"
     e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
     cand_lines+=("$line")
     # Must render the SAME token fi_entry_loc emits — this list is what the
     # user copies into --pick, which matches by exact string equality. Line
-    # ranges therefore have to be rejoined here too. cand_lnums stays the
-    # numeric start: it feeds fi_line_matched's (( )) hunk comparison.
+    # ranges therefore have to be rejoined here too. cand_lnums/cand_lends stay
+    # the split numeric halves: they feed fi_line_matched's (( )) hunk overlap.
     local loc
     loc="$(fi_entry_loc "$line")" || loc="$e_path"
     cand_locs+=("$loc")
@@ -1635,6 +1668,7 @@ fi_annotate_auto() {
     cand_tfs+=("$matched_tfs")
     cand_paths+=("$e_path")
     cand_lnums+=("$e_line")
+    cand_lends+=("$e_line_end")
   done <"$file"
 
   if (( ${#cand_lines[@]} == 0 )); then
@@ -1669,7 +1703,7 @@ fi_annotate_auto() {
       (( shared == 1 )) && break
     done <<<"${cand_tfs[$i]}"
     if (( shared == 0 )); then
-      if [[ "$hook_auto" == "yes" ]] && ! fi_line_matched "${cand_paths[$i]}" "${cand_lnums[$i]}" "$old_ranges"; then
+      if [[ "$hook_auto" == "yes" ]] && ! fi_line_matched "${cand_paths[$i]}" "${cand_lnums[$i]}" "$old_ranges" "${cand_lends[$i]}"; then
         ambig_indices+=("$i")
       else
         auto_set+="${cand_lines[$i]}"$'\n'

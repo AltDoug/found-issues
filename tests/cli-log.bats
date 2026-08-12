@@ -459,10 +459,68 @@ EOF
   [ ! -f docs/found-issues.md ]
 }
 
-@test "log: rejects dash-range line spec (path:10-20)" {
-  fi_run log "src/foo.py:10-20 — bug"
+# === line-range location specs (v2.2.4) ===
+#
+# fi_parse_entry, fi_entry_loc and --pick round-trip `path:23-49` as of v2.2.3
+# (#137), but cmd_log's guard predated range support and kept rejecting the
+# shape the parser accepts. These lock the writer to the parser's contract.
+
+@test "log: accepts dash-range line spec (path:10-20)" {
+  fi_run log "src/foo.py:10-20 — bug spans the whole block"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Logged:"* ]]
+  [[ "$output" == *"src/foo.py:10-20"* ]]
+  grep -qE '^- \[open\] [0-9-]+ src/foo\.py:10-20 — ' docs/found-issues.md
+}
+
+@test "log: range entry round-trips through the parser into json" {
+  fi_run log "src/foo.py:23-49 — handler drops errors"
+  [ "$status" -eq 0 ]
+  fi_run list --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"line":23'* ]]
+  [[ "$output" == *'"line_end":49'* ]]
+  [[ "$output" != *'"line":-'* ]]
+}
+
+@test "log: range entry renders the rejoined token --pick matches" {
+  fi_run log "src/foo.py:23-49 — handler drops errors"
+  [ "$status" -eq 0 ]
+  fi_run list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"src/foo.py:23-49"* ]]
+}
+
+@test "log: range entry dedups on second log (writer key matches parser key)" {
+  # The dedup scan builds an existing entry's key from the parser's NUMERIC
+  # START, so a range kept verbatim in the writer's key would never match --
+  # silently duplicating the entry on every re-log.
+  fi_run log "src/foo.py:23-49 — handler drops errors"
+  [ "$status" -eq 0 ]
+  fi_run log "src/foo.py:23-49 — handler drops errors"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipped — already logged"* ]]
+  [ "$(grep -c 'src/foo\.py:23-49' docs/found-issues.md)" -eq 1 ]
+}
+
+@test "log: rejects inverted range where end is below start" {
+  fi_run log "src/foo.py:49-23 — bug"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"invalid line spec '10-20'"* ]]
+  [[ "$output" == *"invalid line spec '49-23'"* ]]
+  [ ! -f docs/found-issues.md ]
+}
+
+@test "log: rejects equal-bound range (path:10-10 is a single line)" {
+  fi_run log "src/foo.py:10-10 — bug"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid line spec '10-10'"* ]]
+  [ ! -f docs/found-issues.md ]
+}
+
+@test "log: rejects multi-dash line spec (path:10-20-30)" {
+  fi_run log "src/foo.py:10-20-30 — bug"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid line spec '10-20-30'"* ]]
   [ ! -f docs/found-issues.md ]
 }
 
