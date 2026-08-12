@@ -55,11 +55,13 @@ How the pieces fit together.
                     │    parse + count entries         │
                     │  • detect-mode.sh — mode         │
                     │    auto-detection (1h cache)     │
-                    │  • statusline-*.sh, doctor.sh,   │
-                    │    archive.sh, codex-hooks.sh,   │
-                    │    fi-alias.sh, uninstall.sh —   │
-                    │    subcommand modules split out  │
-                    │    of the CLI (§12; in progress) │
+                    │  • one module per subcommand     │
+                    │    family — log.sh, defer.sh,    │
+                    │    resolve.sh, list-status.sh,   │
+                    │    doctor.sh, statusline-*.sh,   │
+                    │    … — split out of the CLI per  │
+                    │    §12 (annotate/sync/promote    │
+                    │    still pending)                │
                     └────────────────┬─────────────────┘
                                      │
                                      │ reads/writes
