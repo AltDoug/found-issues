@@ -175,16 +175,22 @@ run_hook_raw() { # $1=raw json
 @test "missing harness lib: hook exits 0 and still emits plain text" {
   # Fail-open regression test: harness.sh (and thus fi_emit_post_context)
   # is missing from the resolved lib dir, but the default auto-annotate
-  # path still needs canonicalize.sh/detect-mode.sh/parse-entries.sh (which
-  # bin/found-issues sources for itself) — so this copies the real lib dir
-  # minus harness.sh, rather than pointing at a truly empty directory,
-  # which would also break the found-issues binary the hook shells out to.
+  # path still needs every lib file bin/found-issues sources for itself —
+  # so this copies the real lib dir minus harness.sh, rather than pointing
+  # at a truly empty directory, which would also break the found-issues
+  # binary the hook shells out to.
+  #
+  # Copy-all-then-remove rather than naming the survivors: the CLI's source
+  # list grows as the tracked cmd_* extraction moves groups into lib/, and a
+  # hand-maintained list turns each of those moves into an unrelated failure
+  # here (v2.2.5 statusline extraction was the first).
   fi_run log "src/foo.py:99 — wrong cast"
   export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
   export GH_MOCK_PR_DIFF='diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n ctx40\n ctx41\n-old42\n+new42\n+added\n ctx43\n ctx44\n ctx45'
   local libcopy="$TMP/lib-no-harness"
   mkdir -p "$libcopy"
-  cp "$FI_LIB_DIR/canonicalize.sh" "$FI_LIB_DIR/detect-mode.sh" "$FI_LIB_DIR/parse-entries.sh" "$libcopy"/
+  cp "$FI_LIB_DIR"/*.sh "$libcopy"/
+  rm -f "$libcopy/harness.sh"
   export FOUND_ISSUES_LIB_DIR="$libcopy"
   run run_hook 'gh pr create' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
