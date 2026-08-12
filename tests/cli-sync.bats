@@ -31,12 +31,42 @@ teardown() {
   grep -q 'closure: tombstone' docs/found-issues.md
 }
 
-@test "sync: tombstone closes entry when line is past file end" {
+# === present-but-shorter file is LINE DRIFT, never a closure (2026-08-12) ===
+#
+# A cited line past EOF says nothing about whether the issue was fixed — only
+# that the file changed shape. Tombstoning on it false-closes live entries
+# every time a tracked file shrinks, silently and with no user action, since
+# SessionStart runs sync unattended. Hit for real during the v2.2.5-v2.2.7
+# §12 extraction: bin/found-issues went 5209 -> 3443 lines and the
+# loc-validator entry cited at :4811 flipped to [fixed] while the file was
+# still 3443 lines against a 500 signal. There is no supported way to reopen
+# a [fixed] entry, so a merged false close is permanent.
+#
+# Closure still fires when the file is genuinely GONE or RENAMED - those say
+# something real about the entry. Line count alone does not.
+@test "sync: leaves entry open when the cited line is past the end of a present file" {
   mkdir -p src
   printf 'line1\n' > src/short.py  # 1 line file
-  fi_run log "src/short.py:99 — line 99 doesn't exist"
+  fi_run log "src/short.py:99 — line 99 does not exist"
   fi_run sync
-  grep -q '\[fixed\].*closure: tombstone' docs/found-issues.md
+  grep -q '^- \[open\].*src/short.py:99' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: does not tombstone an entry whose present file merely shrank below it" {
+  mkdir -p src
+  # 10-line file; the entry cites a line that exists when it is logged
+  printf 'l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n' > src/shrink.py
+  fi_run log "src/shrink.py:9 — bug at line 9"
+  grep -q '^- \[open\].*src/shrink.py:9' docs/found-issues.md
+
+  # the file is refactored smaller: line 9 is gone, but the file is still here
+  printf 'l1\nl2\nl3\n' > src/shrink.py
+  fi_run sync
+  [ "$status" -eq 0 ]
+
+  grep -q '^- \[open\].*src/shrink.py:9' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
 }
 
 @test "sync: leaves entries with present file alone" {
@@ -222,13 +252,19 @@ EOF
   ! grep -q 'closure: tombstone' docs/found-issues.md
 }
 
-@test "sync: line-past-end tombstone still fires on file without trailing newline" {
+# Companion to the test above. The pair originally proved the awk END{NR}
+# count distinguished "entry on the unterminated last line" (never a closure)
+# from "entry past EOF" (a closure). Since 2026-08-12 neither closes: a line
+# count says nothing about whether the issue was fixed. Kept as a stays-open
+# assertion so the unterminated-file path stays covered on both sides.
+@test "sync: line past end of a file without trailing newline stays open" {
   mkdir -p src
   printf 'line1\nline2' > src/nonewline2.py  # 2 lines, no trailing \n
   fi_run log "src/nonewline2.py:3 — cites a line past EOF"
   fi_run sync
   [ "$status" -eq 0 ]
-  grep -q '\[fixed\].*closure: tombstone' docs/found-issues.md
+  grep -q '^- \[open\].*src/nonewline2.py:3' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
 }
 
 @test "sync: glob-style location tokens are never tombstone-probed" {

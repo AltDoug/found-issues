@@ -4,6 +4,26 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.8] - 2026-08-12
+
+### Fixed
+
+- **`sync` no longer closes an entry just because its file got shorter.**
+  The tombstone probe treated a cited line past end-of-file as a closure, so
+  any `[open]` entry false-closed as soon as its file shrank below that line —
+  even though a line count says nothing about whether the issue was fixed,
+  only that the file changed shape. Because `SessionStart` runs `sync`
+  unattended and the summary never named the closed entry, the flip happened
+  with no user action and no visible signal; and since no supported command
+  reopens a `[fixed]` entry, a false close that reached the default branch was
+  permanent. Hit repeatedly during the tracked §12 split, where
+  `bin/found-issues` shrinking 5,209 → 3,443 lines closed the loc-validator
+  entry cited at `:4811` while the file still stood at 3,443 lines against a
+  500 signal. A present-but-shorter file is now treated as line drift and the
+  entry stays `[open]`. Closure still fires when the file is genuinely missing
+  or renamed — the rename check is untouched — since those are the only
+  signals that actually relate to the entry.
+
 ## [2.2.7] - 2026-08-12
 
 ### Fixed

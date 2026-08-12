@@ -35,7 +35,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.2.7"
+readonly FI_VERSION="2.2.8"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -981,13 +981,12 @@ cmd_sync() {
   # happened with no user action and no output saying anything was removed.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^-\ \[open\] ]]; then
-      local e_data e_path e_line e_prs e_commits
+      local e_data e_path e_prs e_commits
       local -a demote_pr_refs=()
       local -a demote_commit_refs=()
       local rename_target="" rename_source=""
       e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
       e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
-      e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
       e_prs="$(printf '%s' "$e_data" | grep '^prs=' | head -1 | cut -d= -f2-)"
       e_commits="$(printf '%s' "$e_data" | grep '^commits=' | head -1 | cut -d= -f2-)"
 
@@ -1124,19 +1123,18 @@ cmd_sync() {
               closure_label="(closure: tombstone) (fixed: $today)"
               closed_tomb=$((closed_tomb + 1))
             fi
-          elif [[ -f "$full_path" && -n "$e_line" ]]; then
-            local file_lines
-            # awk END{NR}, not wc -l: wc counts newline characters, so a file
-            # lacking a trailing newline undercounts by one and an entry on
-            # its LAST line was falsely tombstoned.
-            file_lines="$(LC_ALL=C awk 'END { print NR }' <"$full_path" 2>/dev/null || echo 0)"
-            [[ "$file_lines" =~ ^[0-9]+$ ]] || file_lines=0
-            if [[ "$file_lines" -lt "$e_line" ]]; then
-              closure_kind="tombstone"
-              closure_label="(closure: tombstone) (fixed: $today)"
-              closed_tomb=$((closed_tomb + 1))
-            fi
           fi
+          # NO line-count branch here, deliberately. A present file whose line
+          # count fell below the cited line is LINE DRIFT, not a closure: the
+          # entry says nothing about whether the issue was fixed, only that the
+          # file changed shape. Tombstoning on that false-closed live entries
+          # every time a tracked file shrank -- silently, since SessionStart
+          # runs sync unattended, and permanently, since no supported command
+          # reopens a [fixed] entry. Removed 2026-08-12 after it fired four
+          # times during the v2.2.5-v2.2.7 extraction (bin/found-issues
+          # 5209 -> 3443 lines closed the entry cited at :4811). Closure above
+          # still fires on a genuinely missing or renamed file, which is the
+          # only signal that actually relates to the entry.
         fi
       fi
 
