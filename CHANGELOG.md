@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.9] - 2026-08-12
+
+### Fixed
+
+- **Final step of the tracked §12 split: `bin/found-issues` 1,464 → 335
+  lines, and the `loc-override` marker is gone.** The shared annotate engine,
+  the `annotate-pr`/`annotate-commit` subcommands, `sync` and `promote` moved
+  into four new `lib/` files (`annotate.sh` 452, `annotate-commands.sh` 251,
+  `sync.sh` 307, `promote.sh` 181). Pure move as before: every extracted body
+  diffs byte-identical against its origin range, the CLI's own diff is only
+  the added `source` lines, and the function inventory is unchanged at 106.
+  With the CLI under the 500-line signal the marker in its header — which was
+  always labelled "size overage is TRACKED, not justified" — no longer has
+  anything to suppress, so it is deleted rather than re-worded, closing the
+  loc-validator entry the way it was always meant to close.
+
 ## [2.2.8] - 2026-08-12
 
 ### Fixed
