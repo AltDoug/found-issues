@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-08-14
+
+### Added
+
+- **`codex-description:` frontmatter key on `commands/*.md`** — the generator
+  (`scripts/gen-codex-skills.sh`) now prefers it over `description:` when
+  building `codex-skills/`, falling back when absent. The two surfaces have
+  different jobs: a slash command is invoked BY NAME, so its `description:`
+  is a terse picker label; a Codex skill is MODEL-ROUTED, so its description
+  is the only routing text the model chooses from. All 13 commands now carry
+  hand-written when-to-use / when-NOT-to-use routing text naming the
+  confusable siblings (log vs defer vs promote, annotate-pr vs
+  annotate-commit, sync vs the annotate commands) and the hard boundaries
+  (`--pick` never `--all`; never hand-edit the ledger; sync closures are not
+  reversible). Before: 0 of 13 generated descriptions carried any
+  when-to-use text, median 115 chars. The fix is at the generator, so the 13
+  generated files stay regenerable (2026-08-12 prompt-audit finding 1).
+
 ## [2.4.0] - 2026-08-14
 
 ### Added

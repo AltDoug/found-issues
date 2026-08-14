@@ -1,6 +1,6 @@
 ---
 name: fi-promote
-description: Consolidate [open] entries from current branch into the default branch before deletion
+description: Copy [open] entries that exist only on the current branch onto the default branch before the branch is deleted — entries logged mid-branch would otherwise die with it. Run before branch cleanup; the pre-branch-delete hook blocks deletion until it has run. Despite the similar name it is unrelated to $fi-promote-deferred, which flips a single [deferred] entry back to [open] in place.
 ---
 <!-- loc-override: generated 1:1 from commands/promote.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 

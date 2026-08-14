@@ -1,6 +1,6 @@
 ---
 name: fi-archive
-description: Move old [fixed] found-issues entries to an archive file (count threshold 50 OR days threshold 30, whichever first)
+description: Move old [fixed] entries out of docs/found-issues.md into docs/found-issues-archive.md (keeps the newest 50 or 30 days, whichever threshold hits first). Mutating and one-way — the archive file is append-only and entries do not come back, so use --dry-run to preview. Open and deferred entries are never touched. Use when the [fixed] tail is drowning the ledger, not as routine post-sync cleanup.
 ---
 <!-- loc-override: generated 1:1 from commands/archive.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 

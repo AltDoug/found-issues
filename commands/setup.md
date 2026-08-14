@@ -1,5 +1,6 @@
 ---
 description: First-run setup for found-issues — explains the system, surfaces optional config, walks user through statusline integration if desired
+codex-description: First-run orientation — explains the system, surfaces optional config, offers the statusline integration and the /fi alias. Run once after installing; safe to re-run. Logging itself is zero-config and does not need this.
 argument-hint: (no arguments)
 allowed-tools: Bash(found-issues:*), Read, Edit
 ---

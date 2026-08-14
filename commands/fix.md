@@ -1,5 +1,6 @@
 ---
 description: Fix open found-issues entries — verify each against current code, triage into buckets, gate on approval, fix on a branch with tests, ship a PR with precise annotations. Runs when the user asks to "fix the found issues" or work through the open ledger.
+codex-description: Work the open ledger as a batch: re-verify every [open] entry against the CURRENT code, triage into buckets, gate on approval, fix the approved ones on a dedicated branch with tests, and ship a precisely annotated PR. Use when asked to fix the found issues or burn down the ledger. Not for logging new issues (/found-issues:log) and not for closing a single entry an ordinary PR already fixed (/found-issues:annotate-pr covers that).
 argument-hint: [--auto] [--only <path-or-glob>]
 allowed-tools: Bash(found-issues:*), Bash(git:*), Bash(gh:*), Bash(bats:*), Read, Edit, Write, Glob, Grep, Agent
 ---

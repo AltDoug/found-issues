@@ -1,5 +1,6 @@
 ---
 description: Defer a [open] found-issue to [deferred] — suppresses it from the statusline counter, optionally adds reason or mute-until window. Re-defers (after promotion) automatically increment the defer-cycle and escalate the touch threshold for the next nudge.
+codex-description: Park an [open] entry as [deferred] — it stays in the ledger but leaves the statusline counter, optionally with a reason or mute-until window. Use for known-but-consciously-postponed work, NOT to silence an entry someone should fix (real fixes close via the annotate commands plus sync). Re-deferring after a promotion increments the defer-cycle and escalates the next nudge. Inverse of /found-issues:promote-deferred.
 argument-hint: <match> [--reason "<text>"] [--mute-until YYYY-MM-DD]
 allowed-tools: Bash(found-issues:*)
 ---

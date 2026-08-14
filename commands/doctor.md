@@ -1,5 +1,6 @@
 ---
 description: General-purpose health check — CLI version, statusline, gh auth, mode detection, hook opt-outs, issues file state. Read-only diagnostic.
+codex-description: Read-only health check of the found-issues installation — CLI version vs installed plugin, statusline wiring, gh auth, mode detection, hook opt-outs, ledger file state. Run when something looks wrong (counter missing, sync not firing, stale CLI after an update) or after install or upgrade. Diagnoses only and changes nothing — follow its printed advice to fix.
 argument-hint: (no arguments)
 allowed-tools: Bash(found-issues:*)
 ---

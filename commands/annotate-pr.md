@@ -1,5 +1,6 @@
 ---
 description: Annotate matching [open] entries with a (PR: org/repo#N) reference
+codex-description: After opening a PR that addresses an [open] entry, attach the canonical (PR: org/repo#N) reference so sync auto-flips the entry when the PR merges — bare text like 'PR #N' in an entry is invisible to sync; this command writes the only format that closes the loop. When several entries cite one touched file a candidate list appears: re-run with --pick path:line for exactly the entries the PR addresses, never --all as a shortcut. Use /found-issues:annotate-commit instead when the fix is a direct commit with no PR.
 argument-hint: <PR-number>
 allowed-tools: Bash(found-issues:*)
 ---

@@ -1,5 +1,6 @@
 ---
 description: Print the current open / in-PR / critical / stale counts
+codex-description: Print the current open / in-PR / critical / stale counts as one line. Read-only and safe anytime — use for a quick pulse or when debugging the statusline counter. For the full entry list read docs/found-issues.md directly; for an installation health check use /found-issues:doctor instead.
 argument-hint: (no arguments)
 allowed-tools: Bash(found-issues:*)
 ---

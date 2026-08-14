@@ -1,5 +1,6 @@
 ---
 description: Sync found-issues — flip merged PRs/commits to [fixed], verify unannotated entries, surface stale work
+codex-description: Reconcile the ledger with reality: flip [open] entries whose annotated PR merged or whose annotated commit landed on the default branch to [fixed], tombstone entries whose cited file git confirms was removed, and surface stale in-PR work. Run after merges land or when the ledger looks out of date. Mutating and not reversible — no command reopens a closure, so use --dry-run first when unsure. Do NOT use it to link a PR or commit to an entry: /found-issues:annotate-pr and /found-issues:annotate-commit write those references; sync only reads what they wrote.
 argument-hint: (no arguments)
 allowed-tools: Bash(found-issues:*), Read, Glob, Grep
 ---

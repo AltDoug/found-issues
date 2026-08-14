@@ -1,5 +1,6 @@
 ---
 description: Log an out-of-scope issue to docs/found-issues.md
+codex-description: Log an out-of-scope issue noticed mid-task to docs/found-issues.md as a dated [open] entry with path:line, symptom, and optional suggested fix. Use whenever a defect, smell, or dead code is noticed that the current task will NOT fix — logging beats dismissing it as pre-existing. Only for NEW observations: to change an existing entry's state use /found-issues:defer (park it), /found-issues:promote-deferred (revive it), or the annotate commands (link a fix). Never edit the ledger file by hand — this is the only supported way to add an entry.
 argument-hint: [--critical] <path:line> — <symptom> (suggested: <fix>)
 allowed-tools: Bash(found-issues:*)
 ---
