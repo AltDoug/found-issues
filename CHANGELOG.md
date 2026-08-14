@@ -4,6 +4,31 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.2] - 2026-08-14
+
+### Fixed
+
+- **Stale documentation references retargeted** (comment/docs-only; no
+  behavior change):
+  - `docs/versioning.md` cited `FI_VERSION` "(line 9)" — the constant had
+    drifted to line 31 through four releases of header changes. Now cited by
+    symbol (`the readonly FI_VERSION line`), matching the fix already applied
+    to `docs/statusline-integration-contract.md`.
+  - `docs/versioning.md` release-checklist step 8 still instructed a manual
+    post-merge `git tag` + push, although `.github/workflows/release.yml`
+    (PR #113) has auto-cut the tag and GitHub Release ever since. The step is
+    now "verify via `gh release list`", with the manual command kept only as
+    the fallback for a disabled/failed workflow.
+  - Ten comments inside code moved to `lib/` by the v2.2.5–v2.2.9 §12 split
+    still said "at the top of this file" (or "top of file") for the READ-LOOP
+    GUARD block and `fi_script_dir`, both of which stayed in
+    `bin/found-issues` — the ledger entry counted four; the sweep found ten
+    (`lib/annotate.sh` ×4, `lib/resolve.sh` ×2, `lib/sync.sh`, `lib/defer.sh`,
+    `lib/promote.sh`, `lib/codex-hooks.sh`). All now point at
+    `bin/found-issues`. Deferred until after the final extraction PR on
+    purpose: editing comment text mid-split would have broken the
+    byte-identical-move proof the extraction PRs relied on.
+
 ## [2.3.1] - 2026-08-14
 
 ### Fixed

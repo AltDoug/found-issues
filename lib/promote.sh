@@ -149,7 +149,7 @@ cmd_promote() {
   printf 'Entries on %s not yet on %s:\n\n' "$current_branch" "$default_branch"
 
   local line
-  # Final-partial-line guard (READ-LOOP GUARD, top of file). Listing only, but
+  # Final-partial-line guard (READ-LOOP GUARD, bin/found-issues). Listing only, but
   # the entry most likely to need promoting is the one just appended — exactly
   # the one an unguarded loop omits.
   while IFS= read -r line || [[ -n "$line" ]]; do

@@ -93,7 +93,7 @@ fi_annotate_apply_picks() {
 
   # Pass A: per selector, count matching [open] entries and keep their lines.
   local line loc sym i p_loc p_frag
-  # Final-partial-line guard (READ-LOOP GUARD, top of file). This pass only
+  # Final-partial-line guard (READ-LOOP GUARD, bin/found-issues). This pass only
   # scans, but dropping the final entry here makes it unpickable — the pick
   # reports "no [open] entry matches" for an entry that is plainly there.
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -139,7 +139,7 @@ fi_annotate_apply_picks() {
   local tmp matched=0 already=0
   tmp="$(mktemp -t found-issues.XXXXXX)"
   trap "rm -f '$tmp'" EXIT
-  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
+  # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
       if [[ "$line" == *"$annotation"* ]]; then
@@ -301,7 +301,7 @@ fi_annotate_auto() {
   local -a cand_paths=() cand_lnums=() cand_lends=()
   local ann_tfs=""
   local line tf
-  # Final-partial-line guard (READ-LOOP GUARD, top of file). Scan-only, but a
+  # Final-partial-line guard (READ-LOOP GUARD, bin/found-issues). Scan-only, but a
   # dropped final entry never becomes a candidate — it would silently miss
   # annotation while pass 3 below rewrites the file around it.
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -408,7 +408,7 @@ fi_annotate_auto() {
   local tmp matched=0
   tmp="$(mktemp -t found-issues.XXXXXX)"
   trap "rm -f '$tmp'" EXIT
-  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
+  # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
       printf '%s %s\n' "$line" "$annotation" >>"$tmp"

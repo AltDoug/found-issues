@@ -139,7 +139,7 @@ cmd_resolve() {
   tmp="$(mktemp -t fi-resolve.XXXXXX)"
   local found=0
   local line
-  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
+  # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "$target" ]] && (( found == 0 )); then
       found=1
@@ -171,7 +171,7 @@ fi_promote_entry_to_open() {
   tmp="$(mktemp -t fi-promote.XXXXXX)"
   local found=0
   local line
-  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
+  # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "$target" ]] && (( found == 0 )); then
       found=1
