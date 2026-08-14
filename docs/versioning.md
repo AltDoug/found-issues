@@ -4,7 +4,7 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.
 
 Every release commit must update **five places in lockstep**:
 
-1. `FI_VERSION` in `bin/found-issues` (line 9)
+1. `FI_VERSION` in `bin/found-issues` — the `readonly FI_VERSION` line near the top (cited by symbol, not line number: the line number drifted silently through at least four releases)
 2. A new `## [X.Y.Z] — YYYY-MM-DD` section at the top of `CHANGELOG.md` (immediately after `## [Unreleased]`)
 3. `"version"` in `.claude-plugin/plugin.json` — this is the manifest Claude Code reads to advertise the installed version. Drift here silently lies to users about which release they're on.
 4. `"version"` in `.codex-plugin/plugin.json` — the Codex manifest, added in v2.0.0. Must stay in lockstep with the Claude manifest and the CLI (Codex reads it to advertise the installed version).
@@ -87,7 +87,7 @@ When opening a release PR:
 5. [ ] Update the `## Status` section in `README.md`
 6. [ ] Run `bash scripts/check-version.sh` locally — must pass before push
 7. [ ] PR title: `release: vX.Y.Z` (or include the version in a feature-focused title; CI keys off the version files, not the PR title)
-8. [ ] After merge: `git tag -a vX.Y.Z -m "vX.Y.Z" <merge_sha> && git push origin vX.Y.Z`
+8. [ ] After merge: **verify** the tag + GitHub Release were auto-cut by `.github/workflows/release.yml` (`gh release list --limit 1`) — it fires whenever a merged main commit changes `.claude-plugin/plugin.json`, usually within a minute, and is idempotent. Do NOT tag by hand first. Only if the workflow is disabled or failed: `gh release create vX.Y.Z --target <full-merge-sha> --title "vX.Y.Z" --notes-file <changelog-section>` (the full 40-char SHA — `--target` rejects abbreviated ones)
 9. [ ] **Then** (not in parallel) open a PR in `AltDoug/claude-plugins` bumping the `"version"` field in `.claude-plugin/marketplace.json` to match. See [Marketplace ordering](#marketplace-ordering) for why this step is last.
 
 ## Marketplace ordering

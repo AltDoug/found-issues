@@ -85,7 +85,7 @@ cmd_sync() {
   trap "rm -f '$tmp'" EXIT
 
   local line
-  # Final-partial-line guard — see READ-LOOP GUARD at the top of this file.
+  # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   # Worst case of the class: SessionStart runs sync automatically, so the loss
   # happened with no user action and no output saying anything was removed.
   while IFS= read -r line || [[ -n "$line" ]]; do

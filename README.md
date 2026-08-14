@@ -199,7 +199,7 @@ three platforms.
 
 ## Status
 
-**v2.3.1** — actively developed and dogfooded (this repo's own ledger is
+**v2.3.2** — actively developed and dogfooded (this repo's own ledger is
 maintained by the plugin, including a `/found-issues:fix` run that
 closed it to zero). End-to-end runtime probes exercise the generated
 statusline shims against synthetic Claude Code stdin on every CI run.

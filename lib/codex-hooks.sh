@@ -77,7 +77,7 @@ fi_codex_home_default() {
 
 # Absolute path to this checkout/cache copy's hooks/ dir, derived from
 # the CURRENTLY running binary's own location (FI_BIN_DIR is resolved by
-# fi_script_dir at the top of this file, follows symlinks, always
+# fi_script_dir in bin/found-issues, follows symlinks, always
 # absolute). Per Task 11 §3 the plugin cache copies bin/, lib/, hooks/
 # together, so hooks/ is always FI_BIN_DIR's sibling.
 fi_codex_hooks_dir() {
