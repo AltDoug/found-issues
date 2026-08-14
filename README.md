@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**5 lifecycle hooks · 13 slash commands · 762 tests on Linux/macOS/Windows · zero manual bookkeeping**
+**5 lifecycle hooks · 13 slash commands · 763 tests on Linux/macOS/Windows · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -199,7 +199,7 @@ three platforms.
 
 ## Status
 
-**v2.0.0** — actively developed and dogfooded (this repo's own ledger is
+**v2.3.1** — actively developed and dogfooded (this repo's own ledger is
 maintained by the plugin, including a `/found-issues:fix` run that
 closed it to zero). End-to-end runtime probes exercise the generated
 statusline shims against synthetic Claude Code stdin on every CI run.
