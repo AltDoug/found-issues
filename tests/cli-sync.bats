@@ -500,7 +500,77 @@ fi_seed_deletable_entry() {
   fi_seed_deletable_entry
   fi_run sync --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"1"* ]]
+  # Assert the SUMMARY, not a bare "1": cmd_status prints "1 issue" at the end
+  # of every sync, so a substring check on "1" passes even when the dry run
+  # reported nothing at all.
+  [[ "$output" == *"Dry run"* ]]
+  [[ "$output" == *"tombstone"* ]]
   grep -q '^- \[open\].*src/gone.py:1' docs/found-issues.md
   ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: --dry-run does not auto-archive" {
+  # Auto-archive rewrites the ledger and creates the archive file, so a dry run
+  # that skipped only the main write still moved entries once the [fixed]
+  # threshold was crossed.
+  local old
+  old="$(date -v-45d +%Y-%m-%d 2>/dev/null || date -d '45 days ago' +%Y-%m-%d)"
+  mkdir -p docs
+  {
+    printf '# found-issues\n\n'
+    for i in $(seq 1 55); do
+      printf -- '- [fixed] %s src/f%d.py:1 — old bug (PR: org/repo#%d) (fixed: %s)\n' "$old" "$i" "$i" "$old"
+    done
+    printf -- '- [open] 2026-08-14 src/live.py:1 — still open\n'
+  } > docs/found-issues.md
+  local before
+  before="$(wc -l < docs/found-issues.md)"
+
+  fi_run sync --dry-run
+  [ "$status" -eq 0 ]
+  [ ! -f docs/found-issues-archive.md ]
+  [ "$(wc -l < docs/found-issues.md)" -eq "$before" ]
+}
+
+@test "sync: rejects flags hidden behind a -- separator" {
+  fi_seed_deletable_entry
+  fi_run sync -- --help
+  [ "$status" -ne 0 ]
+  grep -q '^- \[open\].*src/gone.py:1' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: corrects a renamed location that contains spaces without garbling it" {
+  # rename_source must be the path actually MATCHED. Using the whitespace-
+  # truncated first token replaced only the prefix and left a corrupted
+  # location behind, with no supported way to repair it by hand.
+  mkdir -p docs/handoff
+  printf 'x\ny\n' > "docs/handoff/HO production env setup.md"
+  git add -A
+  git commit -q -m "add spaced doc"
+  fi_run log "docs/handoff/HO production env setup.md:2 — stale instructions"
+  git mv "docs/handoff/HO production env setup.md" docs/handoff/renamed-setup.md
+  git commit -q -m "rename spaced doc"
+
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*docs/handoff/renamed-setup\.md:2 — stale instructions' docs/found-issues.md
+  ! grep -q 'production env setup\.md:2' docs/found-issues.md
+}
+
+@test "sync: still tombstones a 'path symbol ~range' location whose file was removed" {
+  # Only the FIRST token is a filename here; the recovered location is the whole
+  # descriptor, which git never tracked. Probing only that dropped both
+  # tombstone and rename handling for a documented location form.
+  mkdir -p lib
+  printf 'a\nb\nc\n' > lib/foo.sh
+  git add -A
+  git commit -q -m "add foo.sh"
+  fi_run log "lib/foo.sh fi_helper ~1-3 — helper is broken"
+  git rm -q lib/foo.sh
+  git commit -q -m "delete foo.sh"
+
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q 'closure: tombstone' docs/found-issues.md
 }

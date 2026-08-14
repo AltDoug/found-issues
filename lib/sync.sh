@@ -42,7 +42,10 @@ cmd_sync() {
     case "$1" in
       --dry-run)  dry_run=1; shift ;;
       -h|--help)  fi_sync_usage; return 0 ;;
-      --)         shift; break ;;
+      # No `--` passthrough: sync takes no positional operands, so anything
+      # after it can only be a flag we would then ignore — `sync -- --help`
+      # running a full mutating pass is the same surprise this loop exists to
+      # prevent.
       *)
         fi_err "sync: unknown option '$1'"
         fi_sync_usage >&2
@@ -223,14 +226,36 @@ cmd_sync() {
             # us "docs/handoff/absent", which git has never tracked, so the
             # oracle below would answer "not a removal" for every spaced path.
             # recovered_loc is only non-empty when it actually recovered spaces.
-            local probe_path="${recovered_loc:-$e_path}"
-            # C1: check if file was renamed before declaring tombstone
-            local detected_new_path
-            if detected_new_path="$(cd "$repo_root" && fi_detect_rename "$probe_path")"; then
+            # Two candidates, and BOTH must be tried — they cover different
+            # location shapes and neither subsumes the other:
+            #   "docs/handoff/absent report.md:2"  -> the whole thing is the
+            #      filename, so only recovered_loc names a real path.
+            #   "lib/foo.sh fi_helper ~1-3"        -> only the FIRST token is a
+            #      filename; recovered_loc is the whole descriptor, which git
+            #      has never tracked. This is the very form the first-token
+            #      parser exists to support, so probing recovered_loc alone
+            #      silently dropped both tombstone and rename handling for it.
+            # Try recovered_loc first (it is the more specific claim), then fall
+            # back to e_path. The fallback cannot resurrect the false-close this
+            # change removes: a spaced filename's truncated prefix is itself
+            # never tracked, so the oracle still declines.
+            local detected_new_path="" matched_src=""
+            if [[ -n "$recovered_loc" ]] \
+               && detected_new_path="$(cd "$repo_root" && fi_detect_rename "$recovered_loc")"; then
+              matched_src="$recovered_loc"
+            elif detected_new_path="$(cd "$repo_root" && fi_detect_rename "$e_path")"; then
+              matched_src="$e_path"
+            fi
+            if [[ -n "$matched_src" ]]; then
               rename_target="$detected_new_path"
-              rename_source="$e_path"
+              # Must be the path we actually MATCHED: the substitution downstream
+              # replaces this literal, so using the truncated first token on a
+              # spaced location rewrote only the prefix and garbled the entry.
+              rename_source="$matched_src"
               # don't set closure_kind — entry stays [open] with corrected path
-            elif (cd "$repo_root" && fi_git_confirms_removed "$probe_path"); then
+            elif { [[ -n "$recovered_loc" ]] \
+                   && (cd "$repo_root" && fi_git_confirms_removed "$recovered_loc"); } \
+                 || (cd "$repo_root" && fi_git_confirms_removed "$e_path"); then
               # Absent from disk AND git confirms a committed removal. Anything
               # git cannot confirm — never-tracked abstract locations, gitignored
               # paths, uncommitted deletions — leaves the entry [open]. See
@@ -336,7 +361,13 @@ cmd_sync() {
   # Auto-archive: enforced by default. Users who want pure manual control set
   # FOUND_ISSUES_AUTO_ARCHIVE=off in their shell rc. Without enforcement, users
   # forget /found-issues:archive exists and files balloon to thousands of entries.
-  if [[ "${FOUND_ISSUES_AUTO_ARCHIVE:-on}" != "off" ]]; then
+  # --dry-run must reach here having written NOTHING: auto-archive rewrites the
+  # ledger and creates found-issues-archive.md, so skipping only the `mv` above
+  # left a dry run that still moved entries once the 50-[fixed] threshold was
+  # crossed — the one case the flag exists to let you inspect first.
+  if (( dry_run )); then
+    :
+  elif [[ "${FOUND_ISSUES_AUTO_ARCHIVE:-on}" != "off" ]]; then
     local archive_output
     archive_output="$(cmd_archive 2>&1 || true)"
     # Surface output only when entries actually moved (not on no-op runs)
