@@ -41,6 +41,28 @@ WORKFLOW="$REPO_ROOT/.github/workflows/test.yml"
   [[ "$line" == *"push"* ]]
 }
 
+@test "ci-workflow: push runs get a per-SHA concurrency group so a queued run is never displaced" {
+  # cancel-in-progress: false protects a RUNNING push matrix but not a PENDING
+  # one: GitHub keeps at most ONE queued run per concurrency group, so while
+  # run A is in_progress and run B sits queued behind it, a third push CANCELS
+  # the queued B before it starts (zero jobs ran). Hit for real 2026-08-12:
+  # the docs-only #147 push displaced the queued v2.2.7 matrix outright; the
+  # replacement run then skipped every bats job via the path filter while `ci`
+  # reported success, so main showed green having never run bats on macOS or
+  # Windows for v2.2.7.
+  #
+  # The fix keys push runs by SHA: every push owns its own group, nothing
+  # queues behind anything, and displacement is structurally impossible. The
+  # sha suffix must be CONDITIONAL on push -- an unconditional sha would give
+  # every PR fix-up commit its own group too, and stale PR runs would pile up
+  # instead of cancelling (the waste the PR grouping exists to prevent).
+  local line
+  line="$(grep -E '^[[:space:]]*group:' "$WORKFLOW")"
+  [ -n "$line" ]
+  [[ "$line" == *"github.sha"* ]]
+  [[ "$line" == *"github.event_name == 'push' && github.sha"* ]]
+}
+
 @test "ci-workflow: the ci aggregator still blocks on a cancelled job" {
   # `skipped` is legitimate (the path filter excludes docs-only changes), but
   # `cancelled` must never read as success -- that is the state a cancelled

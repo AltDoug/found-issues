@@ -39,20 +39,30 @@ on:
 #
 # Hit for real 2026-08-11 — a one-line ledger flip (#130) merged two minutes
 # after the v2.2.1 fix (#129) and cancelled its matrix mid-run; caught only by
-# watching the run, recovered by re-running it by hand. This restores the
-# quality floor the OS-matrix comment below already promises: every commit that
-# LANDS runs all three OSes.
+# watching the run, recovered by re-running it by hand.
+#
+# cancel-in-progress: false alone is NOT enough. It protects a RUNNING push
+# matrix, but GitHub also keeps at most ONE *pending* run per group — so while
+# run A is in_progress and run B sits queued behind it, a third push CANCELS
+# the queued B before it starts (shows as 'cancelled' with zero jobs). Hit for
+# real 2026-08-12: the docs-only #147 push displaced the queued v2.2.7 matrix
+# outright; the replacement run then skipped every bats job via the path filter
+# while `ci` reported success — the exact green-but-unverified state the
+# paragraph above describes, reached through the pending path instead. So push
+# runs also get a per-SHA group suffix: every push owns its own group, nothing
+# ever queues behind anything, and displacement is structurally impossible.
+# The cost is concurrent matrices when merges land back-to-back — bounded by
+# how often that happens, and strictly better than voiding one of them.
 #
 # Fixing it at the aggregator instead was considered and rejected: `ci` already
 # treats `cancelled` as blocking (it did report failure here), so the aggregator
 # was never the defect — and failing it on *skipped* bats would break the
 # legitimate docs-only-push skip that the path filter exists to provide.
 #
-# PRs keep cancelling: that is where fix-up commits arrive in quick succession
-# and stale results are pure waste. The added cost is bounded by how often two
-# commits land on main inside one matrix window.
+# PRs keep cancelling AND keep per-ref (not per-SHA) groups: that is where
+# fix-up commits arrive in quick succession and stale results are pure waste.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:

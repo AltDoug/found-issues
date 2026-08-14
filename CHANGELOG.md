@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] - 2026-08-14
+
+### Fixed
+
+- **A queued push-to-main CI matrix can no longer be displaced by a later
+  push.** `cancel-in-progress: false` (the #132 fix) protects a *running*
+  matrix, but GitHub keeps at most one *pending* run per concurrency group —
+  a third push cancelled the queued one before it started. Observed
+  2026-08-12: the docs-only #147 push displaced the queued v2.2.7 matrix with
+  zero jobs run, while the replacement run skipped every bats job via the
+  path filter and `ci` reported success — main showed green having never run
+  bats on macOS or Windows for v2.2.7. Push runs now get a per-SHA
+  concurrency group (`-${{ github.sha }}` suffix), so every push owns its own
+  group and nothing ever queues behind anything. PR runs keep per-ref
+  grouping so fix-up commits still cancel stale PR runs.
+  `tests/ci-workflow.bats` pins the expression.
+
 ## [2.3.0] - 2026-08-14
 
 ### Fixed
