@@ -74,6 +74,67 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
+@test "annotate-commit: rejects a target already on the default branch when run from another branch" {
+  # The false-close trap (reproduced live 2026-08-12 in agent-config): cut a
+  # branch, run annotate-commit BEFORE committing the fix -- HEAD still
+  # resolves to the default branch's tip, and sync's ancestor closer would
+  # flip the entry with a fix that never landed.
+  mkdir -p src
+  echo "x" > src/foo.py
+  fi_run log "src/foo.py:1 — bug"
+  git add -A
+  git commit -q -m "log the entry"
+  git checkout -q -b fix/some-fix
+  fi_run annotate-commit HEAD
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"already on 'main'"* ]]
+  ! grep -q '(commit:' docs/found-issues.md
+}
+
+@test "annotate-commit: --force overrides the already-merged guard" {
+  mkdir -p src
+  echo "x" > src/foo.py
+  fi_run log "src/foo.py:1 — bug"
+  git add -A
+  git commit -q -m "log the entry"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+  git checkout -q -b fix/some-fix
+  fi_run annotate-commit HEAD --force
+  [ "$status" -eq 0 ]
+  grep -q "(commit: $short_sha)" docs/found-issues.md
+}
+
+@test "annotate-commit: fresh commit on a feature branch still annotates without --force" {
+  mkdir -p src
+  echo "x" > src/foo.py
+  fi_run log "src/foo.py:1 — bug"
+  git add -A
+  git commit -q -m "log the entry"
+  git checkout -q -b fix/some-fix
+  echo "fixed" > src/foo.py
+  git add src/foo.py
+  git commit -q -m "the actual fix"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+  fi_run annotate-commit HEAD
+  [ "$status" -eq 0 ]
+  grep -q "(commit: $short_sha)" docs/found-issues.md
+}
+
+@test "annotate-commit: guard does not fire on the default branch itself" {
+  # A fresh commit made directly ON main IS the fix landing -- its being its
+  # own ancestor must not trigger the guard (the post-commit hook-auto path
+  # annotates exactly this shape).
+  mkdir -p src
+  echo "x" > src/foo.py
+  fi_run log "src/foo.py:1 — bug"
+  git add -A
+  git commit -q -m "fix on main"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+  fi_run annotate-commit HEAD
+  [ "$status" -eq 0 ]
+  grep -q "(commit: $short_sha)" docs/found-issues.md
+}
+
 # === annotate-pr ===
 
 @test "annotate-pr: errors gracefully without GitHub remote" {
