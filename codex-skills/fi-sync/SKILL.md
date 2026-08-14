@@ -20,7 +20,13 @@ This handles three closure mechanisms automatically:
 
 - **PR merge** — `[open]` entries with `(PR: org/repo#N)` get checked via `gh pr view`. Merged PRs flip the entry to `[fixed]`.
 - **Commit on default branch** — entries with `(commit: <sha>)` get checked via `git merge-base --is-ancestor`. Commits on main flip the entry to `[fixed]`.
-- **Tombstone** — if an entry's file is GONE (deleted, or renamed with no detectable `git mv`), the entry auto-flips with `(closure: tombstone)`. A file that merely got SHORTER than the cited line is line drift, **not** a closure: the entry stays `[open]`. Never close an entry yourself on that basis in Phase 2 either — a line count says nothing about whether the issue was fixed, and no supported command reopens a `[fixed]` entry.
+- **Tombstone** — the entry auto-flips with `(closure: tombstone)` only when **git confirms the file was removed**: absent from the current `HEAD` tree AND present somewhere in git history. Everything else stays `[open]`, and you must not close those yourself in Phase 2 either:
+  - a file that merely got **SHORTER** than the cited line — that is line drift, not a fix;
+  - a path git **never tracked** — an abstract location (`workflow/release-process`), a typo, or a gitignored path;
+  - a file deleted only in the **dirty worktree** — an uncommitted `rm` is not a closure;
+  - anything at all when there is **no git repo or no commits**.
+
+  A path being absent says nothing about whether the issue was fixed, and no supported command reopens a `[fixed]` entry — so when in doubt, leave it `[open]`.
 
 The CLI prints a one-line summary: `Synced. Closed: N (P PR + C commit + T tombstone).`
 

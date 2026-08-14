@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.2.9"
+readonly FI_VERSION="2.3.0"
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -112,6 +112,34 @@ fi_today() { date +%Y-%m-%d; }
 
 # Print to stderr.
 fi_err() { printf '%s\n' "$@" >&2; }
+
+# Git is the oracle for "this path is really gone" (issue #151, 2026-08-14).
+#
+# Absence from the filesystem is NOT evidence an issue was fixed. A cited path
+# can be absent because it was never a file at all (abstract locations like
+# `workflow/release-process`), because it is gitignored, or because someone
+# deleted it in a dirty worktree and has not committed. Tombstoning on bare
+# absence false-closed live entries in every one of those cases — silently,
+# since SessionStart runs sync unattended, and permanently, since no supported
+# command reopens a [fixed] entry.
+#
+# Returns 0 ONLY when git confirms a committed removal: the path is absent from
+# the current HEAD tree AND git has history for it. Returns 1 (do not close) for
+# every ambiguous case — no repo, no commits, still tracked in HEAD (a
+# working-tree-only deletion), or never tracked at all. Failing closed here
+# costs a stale [open] entry; failing open costs a permanently lost one.
+fi_git_confirms_removed() {
+  local path="$1"
+  [[ -n "$path" ]] || return 1
+  git rev-parse --git-dir >/dev/null 2>&1 || return 1
+  git rev-parse --verify HEAD >/dev/null 2>&1 || return 1
+  # Present in HEAD => not a committed removal (dirty-worktree deletion).
+  if git cat-file -e "HEAD:$path" 2>/dev/null; then
+    return 1
+  fi
+  # Absent from HEAD: only a removal if git ever tracked it.
+  [[ -n "$(git log -1 --pretty=format:%H -- "$path" 2>/dev/null)" ]]
+}
 
 # Detect if a missing file was renamed via git. Returns the final path on
 # stdout if a rename target chain resolves to a file in the working tree;

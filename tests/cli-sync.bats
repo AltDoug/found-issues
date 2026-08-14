@@ -22,8 +22,15 @@ teardown() {
   [[ "$output" == *"Nothing to close"* ]]
 }
 
-@test "sync: tombstone closes entry when file is missing" {
-  fi_run log "src/missing.py:1 — bug in nonexistent file"
+@test "sync: tombstone closes entry when a tracked file is deleted" {
+  mkdir -p src
+  printf 'content\n' > src/missing.py
+  git add src/missing.py
+  git commit -q -m "add missing.py"
+  fi_run log "src/missing.py:1 — bug in a file that later gets deleted"
+  git rm -q src/missing.py
+  git commit -q -m "delete missing.py"
+
   fi_run sync
   [ "$status" -eq 0 ]
   [[ "$output" == *"tombstone"* ]] || [[ "$output" == *"1"* ]]
@@ -97,7 +104,14 @@ teardown() {
 }
 
 @test "sync: appends (fixed: <date>) on closure" {
+  mkdir -p src
+  printf 'x\n' > src/missing.py
+  git add src/missing.py
+  git commit -q -m "add missing.py"
   fi_run log "src/missing.py:1 — bug"
+  git rm -q src/missing.py
+  git commit -q -m "delete missing.py"
+
   fi_run sync
   grep -qE '\(fixed: [0-9]{4}-[0-9]{2}-[0-9]{2}\)' docs/found-issues.md
 }
@@ -323,7 +337,14 @@ EOF
 }
 
 @test "sync: spaced path that is genuinely missing still tombstones" {
-  fi_run log "docs/handoff/absent report file.md:3 — cites a file that does not exist"
+  mkdir -p docs/handoff
+  printf 'x\n' > "docs/handoff/absent report file.md"
+  git add -A
+  git commit -q -m "add spaced report"
+  fi_run log "docs/handoff/absent report file.md:3 — cites a file that later goes away"
+  git rm -q "docs/handoff/absent report file.md"
+  git commit -q -m "delete spaced report"
+
   fi_run sync
   [ "$status" -eq 0 ]
   grep -q 'closure: tombstone' docs/found-issues.md
@@ -376,4 +397,110 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"Nothing to close"* ]]
   fi_assert_both_entries_survived
+}
+
+# === git is the oracle for "the file is really gone" (2026-08-14, issue #151) ===
+#
+# Filesystem absence alone is not evidence an issue was fixed. A path can be
+# absent because it was never a file at all (abstract locations like
+# `workflow/release-process`), because it is gitignored, or because someone
+# deleted it in a dirty worktree and has not committed. Tombstoning on bare
+# absence false-closed live entries in all three cases -- silently, since
+# SessionStart runs sync unattended, and permanently, since nothing reopens a
+# [fixed] entry.
+#
+# The rule now: only tombstone when git confirms the path WAS tracked and is
+# NOT in the current HEAD tree -- a committed removal. Everything else stays
+# [open].
+
+@test "sync: does not tombstone a path git never tracked (abstract location)" {
+  printf 'x\n' > seed.txt
+  git add seed.txt
+  git commit -q -m seed
+  fi_run log "workflow/release-process — the release runbook drifts from reality"
+
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*workflow/release-process' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: does not tombstone a tracked file deleted only in the working tree" {
+  mkdir -p src
+  printf 'x\n' > src/dirty.py
+  git add -A
+  git commit -q -m seed
+  fi_run log "src/dirty.py:1 — bug in a file about to be removed uncommitted"
+  rm src/dirty.py   # deleted on disk, still tracked in HEAD
+
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*src/dirty.py:1' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: does not tombstone a critical entry whose path was never tracked" {
+  printf 'x\n' > seed.txt
+  git add seed.txt
+  git commit -q -m seed
+  fi_run log --critical "src/typo-never-existed.py:1 — critical logged against a mistyped path"
+
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] \[!\].*typo-never-existed' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: does not tombstone a gitignored path that is absent" {
+  printf 'build/\n' > .gitignore
+  git add .gitignore
+  git commit -q -m seed
+  fi_run log "build/artifact.js:1 — generated bundle ships a stale banner"
+
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*build/artifact.js:1' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+# === mutating subcommands must reject unknown flags (2026-08-14, issue #151) ===
+#
+# `found-issues sync --help` ran a full mutating sync and closed entries: the
+# command parsed no arguments at all, so every flag was silently ignored. A
+# user reaching for help instead performed an irreversible closure pass.
+
+fi_seed_deletable_entry() {
+  mkdir -p src
+  printf 'x\n' > src/gone.py
+  git add -A
+  git commit -q -m seed
+  fi_run log "src/gone.py:1 — bug in a file that is then deleted"
+  git rm -q src/gone.py
+  git commit -q -m "delete gone.py"
+}
+
+@test "sync: --help prints usage and does not mutate the ledger" {
+  fi_seed_deletable_entry
+  fi_run sync --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sync"* ]]
+  grep -q '^- \[open\].*src/gone.py:1' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: unknown flag is a hard error and does not mutate the ledger" {
+  fi_seed_deletable_entry
+  fi_run sync --no-such-flag
+  [ "$status" -ne 0 ]
+  grep -q '^- \[open\].*src/gone.py:1' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
+}
+
+@test "sync: --dry-run reports the closure without writing it" {
+  fi_seed_deletable_entry
+  fi_run sync --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1"* ]]
+  grep -q '^- \[open\].*src/gone.py:1' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md
 }

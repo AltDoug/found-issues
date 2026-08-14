@@ -16,7 +16,41 @@
 # Annotation-driven flip + tombstone close.
 # Does NOT do AI verification — that lives in the /fi sync slash command.
 
+# Usage text for `sync`. Kept next to the parser so the two cannot drift.
+fi_sync_usage() {
+  cat <<'EOF'
+Usage: found-issues sync [--dry-run]
+
+Flip [open] entries whose annotations have landed, and tombstone entries whose
+file git confirms was removed. Runs automatically at SessionStart.
+
+  --dry-run   Report what would change; write nothing.
+  -h, --help  Show this help.
+
+Closures are not reversible — there is no command that reopens a [fixed]
+entry. Use --dry-run first when in doubt.
+EOF
+}
+
 cmd_sync() {
+  # Unknown flags used to be ignored entirely: `sync --help` parsed nothing and
+  # ran a full mutating pass, so reaching for help performed irreversible
+  # closures (issue #151). Mutating subcommands must refuse what they do not
+  # understand rather than proceed on a guess.
+  local dry_run=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run)  dry_run=1; shift ;;
+      -h|--help)  fi_sync_usage; return 0 ;;
+      --)         shift; break ;;
+      *)
+        fi_err "sync: unknown option '$1'"
+        fi_sync_usage >&2
+        return 2
+        ;;
+    esac
+  done
+
   local file
   file="$(fi_find_issues_file)" || {
     fi_err "sync: no found-issues.md found"
@@ -184,13 +218,23 @@ cmd_sync() {
             # -e, not -f: an entry may cite a DIRECTORY (.git/worktrees,
             # src/utils) — an existing dir is not a missing file (agent-config
             # 2026-07-27: fresh dir entry false-closed twice within minutes).
+            # Ask git about the FULL location, not the whitespace-truncated
+            # first token: for "docs/handoff/absent report.md" the parser hands
+            # us "docs/handoff/absent", which git has never tracked, so the
+            # oracle below would answer "not a removal" for every spaced path.
+            # recovered_loc is only non-empty when it actually recovered spaces.
+            local probe_path="${recovered_loc:-$e_path}"
             # C1: check if file was renamed before declaring tombstone
             local detected_new_path
-            if detected_new_path="$(cd "$repo_root" && fi_detect_rename "$e_path")"; then
+            if detected_new_path="$(cd "$repo_root" && fi_detect_rename "$probe_path")"; then
               rename_target="$detected_new_path"
               rename_source="$e_path"
               # don't set closure_kind — entry stays [open] with corrected path
-            else
+            elif (cd "$repo_root" && fi_git_confirms_removed "$probe_path"); then
+              # Absent from disk AND git confirms a committed removal. Anything
+              # git cannot confirm — never-tracked abstract locations, gitignored
+              # paths, uncommitted deletions — leaves the entry [open]. See
+              # fi_git_confirms_removed in bin/found-issues (issue #151).
               closure_kind="tombstone"
               closure_label="(closure: tombstone) (fixed: $today)"
               closed_tomb=$((closed_tomb + 1))
@@ -248,13 +292,19 @@ cmd_sync() {
     fi
   done <"$file"
 
-  mv "$tmp" "$file"
-  trap - EXIT
+  if (( dry_run )); then
+    rm -f "$tmp"
+    trap - EXIT
+  else
+    mv "$tmp" "$file"
+    trap - EXIT
+  fi
 
   local total_closed=$((closed_pr + closed_commit + closed_tomb))
   local total_demoted=$((demoted_pr + demoted_commit))
   if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 || "$renamed_count" -gt 0 ]]; then
     local summary="Synced."
+    (( dry_run )) && summary="Dry run — nothing written."
     if (( total_closed > 0 )); then
       summary+="$(printf ' Closed: %d (%d PR + %d commit + %d tombstone).' \
         "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb")"

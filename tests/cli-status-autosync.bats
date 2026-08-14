@@ -138,8 +138,17 @@ _wait_for_marker() {
   mkdir -p "$TMP/spaced dir"
   cp "$FI_BIN" "$TMP/spaced dir/found-issues"
   chmod +x "$TMP/spaced dir/found-issues"
-  # The seeded entry cites src/foo.py which does not exist, so a real sync
-  # tombstones it — observable evidence the background dispatch ran.
+  # Observable evidence the background dispatch ran: the seeded entry cites
+  # src/foo.py, so commit that file and then delete it — a git-confirmed
+  # removal, which is what sync tombstones on since issue #151. (Mere absence
+  # is no longer a closure: it could be an abstract location or a gitignored
+  # path, and closures are irreversible.)
+  mkdir -p src
+  printf 'x\n' > src/foo.py
+  git add -A
+  git commit -q -m "add foo.py"
+  git rm -q src/foo.py
+  git commit -q -m "delete foo.py"
   run "$TMP/spaced dir/found-issues" status --format=segment --cwd "$TMP"
   [ "$status" -eq 0 ]
   for _ in $(seq 1 40); do
