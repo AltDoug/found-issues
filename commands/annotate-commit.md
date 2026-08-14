@@ -1,5 +1,6 @@
 ---
 description: Annotate matching [open] entries with a (commit: <sha>) reference
+codex-description: After committing a fix directly (no PR — push-to-main workflows), attach a (commit: <sha>) reference so sync auto-flips the entry once that commit reaches the default branch. Defaults to HEAD: run it AFTER the fix commit exists, never right after cutting a branch — a target already on the default branch is rejected because it predates the fix and would false-close the entry (--force overrides for genuinely retroactive annotation). Prefer /found-issues:annotate-pr when a PR exists. Same --pick discipline for ambiguous matches, never --all as a shortcut.
 argument-hint: [<sha>]  (defaults to HEAD)
 allowed-tools: Bash(found-issues:*)
 ---

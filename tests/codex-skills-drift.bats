@@ -47,6 +47,47 @@ load 'helpers'
   [ "$status" -ne 0 ]
 }
 
+@test "generator prefers codex-description over description when both are present" {
+  # A slash command is invoked BY NAME, so `description:` is a terse picker
+  # label; a Codex skill is MODEL-ROUTED, so its description is the only
+  # routing text the model sees. The optional `codex-description:` key lets
+  # one source file serve both surfaces without desyncing them.
+  tmp="$(mktemp -d -t fi-gen.XXXXXX)"
+  mkdir -p "$tmp/commands" "$tmp/scripts" "$tmp/lib"
+  cp "$TEST_REPO_ROOT/scripts/gen-codex-skills.sh" "$tmp/scripts/"
+  cp "$TEST_REPO_ROOT/lib/codex-rewrite.sh" "$tmp/lib/"
+  cat > "$tmp/commands/demo.md" <<'EOF'
+---
+description: Terse picker label
+codex-description: Rich model-routed text with when-to-use boundaries
+---
+Body.
+EOF
+  (cd "$tmp" && bash scripts/gen-codex-skills.sh)
+  run grep '^description: Rich model-routed text with when-to-use boundaries$' "$tmp/codex-skills/fi-demo/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep 'Terse picker label' "$tmp/codex-skills/fi-demo/SKILL.md"
+  [ "$status" -ne 0 ]
+  rm -rf "$tmp"
+}
+
+@test "generator falls back to description when codex-description is absent" {
+  tmp="$(mktemp -d -t fi-gen.XXXXXX)"
+  mkdir -p "$tmp/commands" "$tmp/scripts" "$tmp/lib"
+  cp "$TEST_REPO_ROOT/scripts/gen-codex-skills.sh" "$tmp/scripts/"
+  cp "$TEST_REPO_ROOT/lib/codex-rewrite.sh" "$tmp/lib/"
+  cat > "$tmp/commands/demo.md" <<'EOF'
+---
+description: Only label present
+---
+Body.
+EOF
+  (cd "$tmp" && bash scripts/gen-codex-skills.sh)
+  run grep '^description: Only label present$' "$tmp/codex-skills/fi-demo/SKILL.md"
+  [ "$status" -eq 0 ]
+  rm -rf "$tmp"
+}
+
 @test "codex skills use the \$fi- mention sigil for skill references" {
   # Positive control for the rewrite above: /found-issues:<name> becomes
   # $fi-<name> (Codex's own $-mention invocation syntax), not a bare

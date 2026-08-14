@@ -1,6 +1,6 @@
 ---
 name: fi-defer
-description: Defer a [open] found-issue to [deferred] — suppresses it from the statusline counter, optionally adds reason or mute-until window. Re-defers (after promotion) automatically increment the defer-cycle and escalate the touch threshold for the next nudge.
+description: Park an [open] entry as [deferred] — it stays in the ledger but leaves the statusline counter, optionally with a reason or mute-until window. Use for known-but-consciously-postponed work, NOT to silence an entry someone should fix (real fixes close via the annotate commands plus sync). Re-deferring after a promotion increments the defer-cycle and escalates the next nudge. Inverse of $fi-promote-deferred.
 ---
 <!-- loc-override: generated 1:1 from commands/defer.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 

@@ -1,6 +1,6 @@
 ---
 name: fi-fix
-description: Fix open found-issues entries — verify each against current code, triage into buckets, gate on approval, fix on a branch with tests, ship a PR with precise annotations. Runs when the user asks to "fix the found issues" or work through the open ledger.
+description: Work the open ledger as a batch: re-verify every [open] entry against the CURRENT code, triage into buckets, gate on approval, fix the approved ones on a dedicated branch with tests, and ship a precisely annotated PR. Use when asked to fix the found issues or burn down the ledger. Not for logging new issues ($fi-log) and not for closing a single entry an ordinary PR already fixed ($fi-annotate-pr covers that).
 ---
 <!-- loc-override: generated 1:1 from commands/fix.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 

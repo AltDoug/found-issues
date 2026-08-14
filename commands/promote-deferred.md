@@ -1,5 +1,6 @@
 ---
 description: Promote a [deferred] found-issue back to [open] — preserves all annotations (touch history, defer-cycle, reason) as evidence of recurrence and historical context. Inverse of /found-issues:defer.
+codex-description: Revive a [deferred] entry back to [open], preserving every annotation (touch history, defer-cycle, reason) as evidence of recurrence. Use when a parked issue starts biting again or its mute window expired. Inverse of /found-issues:defer. Despite the similar name it is unrelated to /found-issues:promote, which copies branch-only entries onto the default branch before a branch is deleted.
 argument-hint: <match>
 allowed-tools: Bash(found-issues:*)
 ---

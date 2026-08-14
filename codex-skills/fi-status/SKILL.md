@@ -1,6 +1,6 @@
 ---
 name: fi-status
-description: Print the current open / in-PR / critical / stale counts
+description: Print the current open / in-PR / critical / stale counts as one line. Read-only and safe anytime — use for a quick pulse or when debugging the statusline counter. For the full entry list read docs/found-issues.md directly; for an installation health check use $fi-doctor instead.
 ---
 <!-- loc-override: generated 1:1 from commands/status.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 

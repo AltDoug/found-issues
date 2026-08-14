@@ -1,6 +1,6 @@
 ---
 name: fi-promote-deferred
-description: Promote a [deferred] found-issue back to [open] — preserves all annotations (touch history, defer-cycle, reason) as evidence of recurrence and historical context. Inverse of $fi-defer.
+description: Revive a [deferred] entry back to [open], preserving every annotation (touch history, defer-cycle, reason) as evidence of recurrence. Use when a parked issue starts biting again or its mute window expired. Inverse of $fi-defer. Despite the similar name it is unrelated to $fi-promote, which copies branch-only entries onto the default branch before a branch is deleted.
 ---
 <!-- loc-override: generated 1:1 from commands/promote-deferred.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 

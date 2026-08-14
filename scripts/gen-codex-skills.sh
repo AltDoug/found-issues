@@ -41,12 +41,22 @@ mkdir -p codex-skills
 for cmd in commands/*.md; do
   name="$(basename "$cmd" .md)"
 
-  # Frontmatter description — same Claude-only rewrites as the body, plus
-  # two narrow fixes for commands/uninstall.md's description (the only one
-  # that names Claude Code's own `/plugin` command family and the Claude-only
-  # `/fi` alias file). No other description matches these two patterns, so
-  # this is a no-op everywhere else.
-  desc="$(awk '/^description:/ { sub(/^description:[ ]*/, ""); print; exit }' "$cmd" \
+  # Frontmatter description. A slash command is invoked BY NAME, so its
+  # `description:` is a terse picker label; a Codex skill is MODEL-ROUTED,
+  # so its description is the only routing text the model chooses from.
+  # The optional `codex-description:` key carries the rich when-to-use /
+  # when-NOT-to-use text for Codex while the Claude picker label stays
+  # short — prefer it, fall back to `description:` when absent. Both pass
+  # through the same Claude-only rewrites, plus two narrow fixes for
+  # commands/uninstall.md's text (the only one that names Claude Code's own
+  # `/plugin` command family and the Claude-only `/fi` alias file). No other
+  # description matches these two patterns, so this is a no-op everywhere
+  # else.
+  desc_src="$(awk '/^codex-description:/ { sub(/^codex-description:[ ]*/, ""); print; exit }' "$cmd")"
+  if [[ -z "$desc_src" ]]; then
+    desc_src="$(awk '/^description:/ { sub(/^description:[ ]*/, ""); print; exit }' "$cmd")"
+  fi
+  desc="$(printf '%s\n' "$desc_src" \
     | fi_codex_rewrite_core \
     | sed -E \
         -e 's|/plugin uninstall|removing the found-issues plugin|g' \

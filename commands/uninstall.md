@@ -1,5 +1,6 @@
 ---
 description: Clean up plugin-private state (statusline segment, onboarding marker, mode cache, /fi alias) before /plugin uninstall
+codex-description: Wipe plugin-private state — statusline segment, onboarding marker, mode cache, /fi alias — BEFORE removing the found-issues plugin itself. The ledger (docs/found-issues.md) is repo data and stays untouched. Run only when actually removing the plugin, not for troubleshooting (that is /found-issues:doctor).
 argument-hint: (no arguments)
 allowed-tools: Bash(found-issues:*)
 ---

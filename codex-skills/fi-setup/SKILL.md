@@ -1,6 +1,6 @@
 ---
 name: fi-setup
-description: First-run setup for found-issues — explains the system, surfaces optional config, walks user through statusline integration if desired
+description: First-run orientation — explains the system, surfaces optional config, offers the statusline integration and the fi alias. Run once after installing; safe to re-run. Logging itself is zero-config and does not need this.
 ---
 <!-- loc-override: generated 1:1 from commands/setup.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 

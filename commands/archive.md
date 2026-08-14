@@ -1,5 +1,6 @@
 ---
 description: Move old [fixed] found-issues entries to an archive file (count threshold 50 OR days threshold 30, whichever first)
+codex-description: Move old [fixed] entries out of docs/found-issues.md into docs/found-issues-archive.md (keeps the newest 50 or 30 days, whichever threshold hits first). Mutating and one-way — the archive file is append-only and entries do not come back, so use --dry-run to preview. Open and deferred entries are never touched. Use when the [fixed] tail is drowning the ledger, not as routine post-sync cleanup.
 argument-hint: [--dry-run] [--days=N] [--count=N]
 allowed-tools: Bash(found-issues:*)
 ---

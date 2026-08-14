@@ -1,5 +1,6 @@
 ---
 description: Consolidate [open] entries from current branch into the default branch before deletion
+codex-description: Copy [open] entries that exist only on the current branch onto the default branch before the branch is deleted — entries logged mid-branch would otherwise die with it. Run before branch cleanup; the pre-branch-delete hook blocks deletion until it has run. Despite the similar name it is unrelated to /found-issues:promote-deferred, which flips a single [deferred] entry back to [open] in place.
 argument-hint: (no arguments — operates on current branch)
 allowed-tools: Bash(found-issues:*), Bash(git:*), Bash(gh:*), Read
 ---

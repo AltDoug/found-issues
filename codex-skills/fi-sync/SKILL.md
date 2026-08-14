@@ -1,6 +1,6 @@
 ---
 name: fi-sync
-description: Sync found-issues — flip merged PRs/commits to [fixed], verify unannotated entries, surface stale work
+description: Reconcile the ledger with reality: flip [open] entries whose annotated PR merged or whose annotated commit landed on the default branch to [fixed], tombstone entries whose cited file git confirms was removed, and surface stale in-PR work. Run after merges land or when the ledger looks out of date. Mutating and not reversible — no command reopens a closure, so use --dry-run first when unsure. Do NOT use it to link a PR or commit to an entry: $fi-annotate-pr and $fi-annotate-commit write those references; sync only reads what they wrote.
 ---
 <!-- loc-override: generated 1:1 from commands/sync.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
