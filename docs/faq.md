@@ -46,10 +46,12 @@ Three mechanisms, in priority order:
    `(commit: <sha>)` — checked via `git merge-base --is-ancestor` against
    the default branch.
 
-2. **Tombstone.** If the file referenced by the entry no longer exists,
-   the entry auto-closes with `(closure: tombstone)`. A file that is merely
-   shorter than the cited line number is line drift, not a closure — the
-   entry stays `[open]`.
+2. **Tombstone.** If git confirms the referenced file was **removed** — absent
+   from `HEAD` and present in history — the entry auto-closes with
+   `(closure: tombstone)`. Absence alone is never enough: a file that is merely
+   shorter than the cited line, a path git never tracked (abstract locations,
+   typos, gitignored paths), and an uncommitted deletion all leave the entry
+   `[open]`. Closures cannot be undone, so sync fails toward keeping entries.
 
 3. **AI verification** (only when you run `/found-issues:sync` inside
    Claude Code, not the background sync). Claude reads the code at each

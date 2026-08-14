@@ -23,7 +23,7 @@ A hook auto-runs annotation after `gh pr create` and `git commit`: entries whose
 
 ## Sync
 
-On `/found-issues:sync`, for each unannotated `[open]` entry: read the code at `path:line`; decide still-present / fixed / unclear; flip only fixed → `[fixed] (verified: ai) (fixed: <today>)`. Be conservative — a false flip is worse than a stale open. Deleted files auto-close via tombstone; judging rewritten-but-still-present code is YOUR pass.
+On `/found-issues:sync`, for each unannotated `[open]` entry: read the code at `path:line`; decide still-present / fixed / unclear; flip only fixed → `[fixed] (verified: ai) (fixed: <today>)`. Be conservative — a false flip is worse than a stale open. Only git-confirmed removals auto-close; absence alone never does. Judging still-present code is YOUR pass.
 
 ## Branch deletion
 

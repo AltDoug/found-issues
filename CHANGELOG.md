@@ -4,6 +4,34 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-08-14
+
+### Fixed
+
+- **`sync` no longer tombstones a path just because it is absent from disk.**
+  Filesystem absence is not evidence an issue was fixed. An entry's path can be
+  absent because it was never a file at all (abstract locations such as
+  `workflow/release-process`), because it is gitignored, or because someone
+  deleted it in a dirty worktree without committing — and each of those
+  false-closed live entries, including `[!]` criticals. Git is now the oracle:
+  a tombstone fires only when the path is absent from the current `HEAD` tree
+  **and** git has history for it, i.e. a committed removal. Every ambiguous
+  case — no repo, no commits, still tracked in `HEAD`, never tracked at all —
+  leaves the entry `[open]`. Failing closed costs a stale entry; failing open
+  cost a permanently lost one, since nothing reopens a `[fixed]` entry.
+  Reported in #151.
+- **`found-issues sync --help` ran a full mutating sync.** `cmd_sync` parsed no
+  arguments, so every flag was silently ignored and a user reaching for help
+  instead performed an irreversible closure pass. Unknown options are now a
+  hard error (exit 2) that writes nothing, and `--help` prints usage. Reported
+  in #151.
+
+### Added
+
+- **`sync --dry-run`** — report what would be closed, demoted or renamed and
+  write nothing. Sync is irreversible and runs unattended at `SessionStart`, so
+  it needed a way to look before it leaps. Requested in #151.
+
 ## [2.2.9] - 2026-08-12
 
 ### Fixed

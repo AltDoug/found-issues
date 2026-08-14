@@ -16,7 +16,44 @@
 # Annotation-driven flip + tombstone close.
 # Does NOT do AI verification — that lives in the /fi sync slash command.
 
+# Usage text for `sync`. Kept next to the parser so the two cannot drift.
+fi_sync_usage() {
+  cat <<'EOF'
+Usage: found-issues sync [--dry-run]
+
+Flip [open] entries whose annotations have landed, and tombstone entries whose
+file git confirms was removed. Runs automatically at SessionStart.
+
+  --dry-run   Report what would change; write nothing.
+  -h, --help  Show this help.
+
+Closures are not reversible — there is no command that reopens a [fixed]
+entry. Use --dry-run first when in doubt.
+EOF
+}
+
 cmd_sync() {
+  # Unknown flags used to be ignored entirely: `sync --help` parsed nothing and
+  # ran a full mutating pass, so reaching for help performed irreversible
+  # closures (issue #151). Mutating subcommands must refuse what they do not
+  # understand rather than proceed on a guess.
+  local dry_run=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run)  dry_run=1; shift ;;
+      -h|--help)  fi_sync_usage; return 0 ;;
+      # No `--` passthrough: sync takes no positional operands, so anything
+      # after it can only be a flag we would then ignore — `sync -- --help`
+      # running a full mutating pass is the same surprise this loop exists to
+      # prevent.
+      *)
+        fi_err "sync: unknown option '$1'"
+        fi_sync_usage >&2
+        return 2
+        ;;
+    esac
+  done
+
   local file
   file="$(fi_find_issues_file)" || {
     fi_err "sync: no found-issues.md found"
@@ -184,13 +221,45 @@ cmd_sync() {
             # -e, not -f: an entry may cite a DIRECTORY (.git/worktrees,
             # src/utils) — an existing dir is not a missing file (agent-config
             # 2026-07-27: fresh dir entry false-closed twice within minutes).
-            # C1: check if file was renamed before declaring tombstone
-            local detected_new_path
-            if detected_new_path="$(cd "$repo_root" && fi_detect_rename "$e_path")"; then
+            # Ask git about the FULL location, not the whitespace-truncated
+            # first token: for "docs/handoff/absent report.md" the parser hands
+            # us "docs/handoff/absent", which git has never tracked, so the
+            # oracle below would answer "not a removal" for every spaced path.
+            # recovered_loc is only non-empty when it actually recovered spaces.
+            # Two candidates, and BOTH must be tried — they cover different
+            # location shapes and neither subsumes the other:
+            #   "docs/handoff/absent report.md:2"  -> the whole thing is the
+            #      filename, so only recovered_loc names a real path.
+            #   "lib/foo.sh fi_helper ~1-3"        -> only the FIRST token is a
+            #      filename; recovered_loc is the whole descriptor, which git
+            #      has never tracked. This is the very form the first-token
+            #      parser exists to support, so probing recovered_loc alone
+            #      silently dropped both tombstone and rename handling for it.
+            # Try recovered_loc first (it is the more specific claim), then fall
+            # back to e_path. The fallback cannot resurrect the false-close this
+            # change removes: a spaced filename's truncated prefix is itself
+            # never tracked, so the oracle still declines.
+            local detected_new_path="" matched_src=""
+            if [[ -n "$recovered_loc" ]] \
+               && detected_new_path="$(cd "$repo_root" && fi_detect_rename "$recovered_loc")"; then
+              matched_src="$recovered_loc"
+            elif detected_new_path="$(cd "$repo_root" && fi_detect_rename "$e_path")"; then
+              matched_src="$e_path"
+            fi
+            if [[ -n "$matched_src" ]]; then
               rename_target="$detected_new_path"
-              rename_source="$e_path"
+              # Must be the path we actually MATCHED: the substitution downstream
+              # replaces this literal, so using the truncated first token on a
+              # spaced location rewrote only the prefix and garbled the entry.
+              rename_source="$matched_src"
               # don't set closure_kind — entry stays [open] with corrected path
-            else
+            elif { [[ -n "$recovered_loc" ]] \
+                   && (cd "$repo_root" && fi_git_confirms_removed "$recovered_loc"); } \
+                 || (cd "$repo_root" && fi_git_confirms_removed "$e_path"); then
+              # Absent from disk AND git confirms a committed removal. Anything
+              # git cannot confirm — never-tracked abstract locations, gitignored
+              # paths, uncommitted deletions — leaves the entry [open]. See
+              # fi_git_confirms_removed in bin/found-issues (issue #151).
               closure_kind="tombstone"
               closure_label="(closure: tombstone) (fixed: $today)"
               closed_tomb=$((closed_tomb + 1))
@@ -248,13 +317,19 @@ cmd_sync() {
     fi
   done <"$file"
 
-  mv "$tmp" "$file"
-  trap - EXIT
+  if (( dry_run )); then
+    rm -f "$tmp"
+    trap - EXIT
+  else
+    mv "$tmp" "$file"
+    trap - EXIT
+  fi
 
   local total_closed=$((closed_pr + closed_commit + closed_tomb))
   local total_demoted=$((demoted_pr + demoted_commit))
   if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 || "$renamed_count" -gt 0 ]]; then
     local summary="Synced."
+    (( dry_run )) && summary="Dry run — nothing written."
     if (( total_closed > 0 )); then
       summary+="$(printf ' Closed: %d (%d PR + %d commit + %d tombstone).' \
         "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb")"
@@ -286,7 +361,13 @@ cmd_sync() {
   # Auto-archive: enforced by default. Users who want pure manual control set
   # FOUND_ISSUES_AUTO_ARCHIVE=off in their shell rc. Without enforcement, users
   # forget /found-issues:archive exists and files balloon to thousands of entries.
-  if [[ "${FOUND_ISSUES_AUTO_ARCHIVE:-on}" != "off" ]]; then
+  # --dry-run must reach here having written NOTHING: auto-archive rewrites the
+  # ledger and creates found-issues-archive.md, so skipping only the `mv` above
+  # left a dry run that still moved entries once the 50-[fixed] threshold was
+  # crossed — the one case the flag exists to let you inspect first.
+  if (( dry_run )); then
+    :
+  elif [[ "${FOUND_ISSUES_AUTO_ARCHIVE:-on}" != "off" ]]; then
     local archive_output
     archive_output="$(cmd_archive 2>&1 || true)"
     # Surface output only when entries actually moved (not on no-op runs)
