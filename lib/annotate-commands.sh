@@ -158,7 +158,7 @@ cmd_annotate_pr() {
 
 # === Subcommand: annotate-commit ===
 #
-# Usage: found-issues annotate-commit [<sha>]  (default HEAD)
+# Usage: found-issues annotate-commit [<sha>] [--force]  (default HEAD)
 #
 # Scans the commit's diff for files referenced by [open] entries,
 # appends (commit: <short-sha>) to each matching entry.
@@ -167,6 +167,7 @@ cmd_annotate_commit() {
   local target=""
   local annotate_all="no"
   local hook_auto="no"
+  local force="no"
   local picks_nl=""
 
   while [[ $# -gt 0 ]]; do
@@ -176,6 +177,9 @@ cmd_annotate_commit() {
         ;;
       --hook-auto)
         hook_auto="yes"
+        ;;
+      --force)
+        force="yes"
         ;;
       --pick)
         shift
@@ -190,12 +194,12 @@ cmd_annotate_commit() {
         ;;
       -*)
         fi_err "annotate-commit: unknown flag: $1"
-        fi_err "Usage: found-issues annotate-commit [<sha>] [--pick <path:line>[,<path:line>...]] [--all]"
+        fi_err "Usage: found-issues annotate-commit [<sha>] [--pick <path:line>[,<path:line>...]] [--all] [--force]"
         return 2
         ;;
       *)
         if [[ -n "$target" ]]; then
-          fi_err "Usage: found-issues annotate-commit [<sha>] [--pick <path:line>[,<path:line>...]] [--all]"
+          fi_err "Usage: found-issues annotate-commit [<sha>] [--pick <path:line>[,<path:line>...]] [--all] [--force]"
           return 2
         fi
         target="$1"
@@ -212,6 +216,34 @@ cmd_annotate_commit() {
     return 1
   fi
   short_sha="$(git rev-parse --short=7 "$full_sha")"
+
+  # A commit already on the default branch cannot be the fix for a still-open
+  # entry — annotating one arms sync's ancestor closer (lib/sync.sh) with a
+  # SHA that predates the fix, and the entry false-closes on the next sync.
+  # The trap is the branch-then-fix ordering /found-issues:fix itself
+  # prescribes: on a fresh branch cut from the default branch, a bare
+  # `annotate-commit` resolves HEAD to the tip you branched from, which is
+  # trivially an ancestor (reproduced live 2026-08-12 in agent-config — the
+  # annotated commit had merely LOGGED the entry, and it closed as fixed
+  # while the actual fix sat uncommitted). Guard only when the current branch
+  # is NOT the default branch: a fresh commit made directly ON the default
+  # branch is its own ancestor yet genuinely IS the fix landing — rejecting
+  # it would break the direct-to-main flow and the post-commit --hook-auto
+  # path that annotates exactly that shape. --force covers the legitimate
+  # remainder (retroactively annotating an already-merged fix from a branch).
+  if [[ "$force" != "yes" ]]; then
+    local default_branch current_branch
+    default_branch="$(fi_resolve_default_branch)"
+    current_branch="$(git branch --show-current 2>/dev/null || true)"
+    if [[ -n "$default_branch" && "$current_branch" != "$default_branch" ]]; then
+      if git merge-base --is-ancestor "$full_sha" "$default_branch" 2>/dev/null \
+         || git merge-base --is-ancestor "$full_sha" "origin/$default_branch" 2>/dev/null; then
+        fi_err "annotate-commit: $short_sha is already on '$default_branch' — a commit that predates your fix cannot be the fix for a still-open entry."
+        fi_err "Commit the fix first, then annotate THAT commit. If you really are retroactively annotating an already-merged fix, re-run with --force."
+        return 2
+      fi
+    fi
+  fi
 
   local file
   file="$(fi_find_issues_file)" || {

@@ -4,6 +4,32 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-08-14
+
+### Added
+
+- **`annotate-commit --force`** — overrides the new already-merged guard
+  (below) for the rare legitimate case of retroactively annotating an
+  already-merged fix from a branch.
+
+### Fixed
+
+- **`annotate-commit` can no longer arm a false-close with a commit that
+  predates the fix.** The command defaults to `HEAD`, and sync's ancestor
+  closer flips an entry on ANY annotated SHA that reaches the default
+  branch — so running `annotate-commit` on a fresh branch BEFORE committing
+  the fix annotated the tip you branched from, and the entry closed as
+  `[fixed]` while the actual fix sat uncommitted (reproduced live 2026-08-12
+  in agent-config; the branch-then-fix ordering is exactly what
+  `/found-issues:fix` prescribes, and a mis-annotation was unrecoverable
+  through supported means). A target that is already an ancestor of the
+  default branch is now rejected (exit 2) with guidance — but ONLY when the
+  current branch is not the default branch: a fresh commit made directly ON
+  the default branch is its own ancestor yet genuinely is the fix landing,
+  so the direct-to-main flow and the post-commit `--hook-auto` path are
+  unaffected. Four regression tests pin the guard, the `--force` escape,
+  and both non-firing shapes.
+
 ## [2.3.2] - 2026-08-14
 
 ### Fixed

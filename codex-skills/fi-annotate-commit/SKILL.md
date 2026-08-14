@@ -17,11 +17,19 @@ found-issues annotate-commit <the user-provided arguments>
 
 If the user provided no argument, the CLI defaults to `HEAD` — the most
 recent commit. This is the 90% case ("I just committed the fix, mark it").
+Run it AFTER the fix commit exists: on a branch, a target that is already
+an ancestor of the default branch is rejected (exit 2), because a commit
+that predates your fix cannot be the fix — annotating it would false-close
+the entry the moment sync's ancestor closer sees it. `--force` overrides
+for the rare genuinely-retroactive annotation of an already-merged fix.
 
 Pass through the CLI's output:
 
 - `Annotated N entries with (commit: <short>)` — happy path
 - `annotate-commit: no [open] entries match files touched by commit <sha>. No changes.` — commit didn't touch any logged paths
+- `annotate-commit: <sha> is already on '<branch>' ...` (exit 2) — the
+  guard above fired. Commit the fix first, then annotate THAT commit;
+  only pass `--force` if this really is a retroactive annotation.
 - A candidate list ending in a `--pick` instruction — several entries cite
   one touched file, so the CLI annotates none of them (auto-tagging all
   would false-flip the unfixed ones when the commit lands). Compare each
