@@ -69,3 +69,33 @@ HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/hooks/format-enforcer.s
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
 }
+
+
+# === Suggestion tokens (2026-08-17) ===========================================
+# (PR-auto:)/(commit-auto:) are hook SUGGESTIONS: legal on an [open] entry,
+# and deliberately NOT accepted as the verification token a [fixed] entry
+# requires — only a confirmed annotation closes work.
+
+@test "format-enforcer: (commit-auto: ...) passes on an [open] entry" {
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [open] 2026-08-17 src/a.py:1 — bug (commit-auto: abc1234)"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "format-enforcer: (PR-auto: ...) passes on an [open] entry" {
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [open] 2026-08-17 src/a.py:1 — bug (PR-auto: org/repo#7)"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "format-enforcer: (commit-auto: ...) alone does NOT satisfy the [fixed] token rule" {
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [fixed] 2026-08-17 src/a.py:1 — bug (commit-auto: abc1234)"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -ne 0 ]
+}
+
+@test "format-enforcer: (PR-auto: ...) alone does NOT satisfy the [fixed] token rule" {
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [fixed] 2026-08-17 src/a.py:1 — bug (PR-auto: org/repo#7)"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -ne 0 ]
+}

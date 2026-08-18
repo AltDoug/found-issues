@@ -8,7 +8,7 @@ Canonical entry format for `docs/found-issues.md` (or `<cwd>/.found-issues.md` i
 - [STATUS] [!] YYYY-MM-DD [LOCATION] — SYMPTOM [(suggested: FIX)] [ANNOTATION]* [(fixed: YYYY-MM-DD)] [(verified: ai|review)]
 ```
 
-Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract topic without slashes (e.g., `dispatch/shutdown`, `workflow`). `ANNOTATION` is one of the parenthesized forms in the Optional-parts table below — the active link forms `(PR: ORG/REPO#N)` / `(commit: SHA)`, their sync-demoted twins `(PR-closed: ...)` / `(commit-stale: ...)`, the closure trail forms `(closure: tombstone)` / `(renamed-from: PATH)`, and the defer-flow forms `(touched: ...)` / `(defer-cycle: N)` / `(reason: ...)` / `(mute-until: YYYY-MM-DD)`. Multiple annotations are allowed (entry addressed by both a PR and a follow-up commit).
+Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract topic without slashes (e.g., `dispatch/shutdown`, `workflow`). `ANNOTATION` is one of the parenthesized forms in the Optional-parts table below — the active link forms `(PR: ORG/REPO#N)` / `(commit: SHA)`, their hook-suggested twins `(PR-auto: ...)` / `(commit-auto: ...)`, their sync-demoted twins `(PR-closed: ...)` / `(commit-stale: ...)`, the closure trail forms `(closure: tombstone)` / `(renamed-from: PATH)`, and the defer-flow forms `(touched: ...)` / `(defer-cycle: N)` / `(reason: ...)` / `(mute-until: YYYY-MM-DD)`. Multiple annotations are allowed (entry addressed by both a PR and a follow-up commit).
 
 ## Required parts
 
@@ -29,6 +29,8 @@ Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract
 | Line | `:N` (after path, no space) | `:42` | When line is concrete |
 | Suggested fix | `(suggested: ...)` | `(suggested: add zero-check)` | Encouraged but optional |
 | PR annotation | `(PR: ORG/REPO#N)` | `(PR: AltDoug/found-issues#5)` | Added by `/found-issues:annotate-pr` |
+| PR suggestion | `(PR-auto: ORG/REPO#N)` | `(PR-auto: AltDoug/found-issues#5)` | Written by the PostToolUse hook from a diff line-match. **Never closes an entry** — a line-match shows the PR touched the defect's location, not that it fixed the defect. `sync` reports landed ones as awaiting confirmation; `/found-issues:annotate-pr N --pick <loc>` rewrites it in place to the closing `(PR: ...)` form |
+| Commit suggestion | `(commit-auto: SHA)` (7+ hex chars) | `(commit-auto: a1b2c3d)` | Same contract as `(PR-auto: ...)`, for commits |
 | PR-closed annotation | `(PR-closed: ORG/REPO#N)` | `(PR-closed: AltDoug/found-issues#5)` | Added by `/found-issues:sync` when linked PR closed without merge |
 | Commit annotation | `(commit: SHA)` (7+ hex chars) | `(commit: a1b2c3d)` | Added by `/found-issues:annotate-commit` |
 | Commit-stale annotation | `(commit-stale: SHA)` (7+ hex chars) | `(commit-stale: a1b2c3d)` | Added by `/found-issues:sync` when commit SHA no longer reachable |
@@ -112,7 +114,7 @@ Maintained automatically by Claude. See <https://github.com/AltDoug/found-issues
    ↳ Critical flag is a separate token `[!]`, not bundled into status.
 
 ❌ - [fixed] 2026-05-06 src/foo.py:42 — null check missing
-   ↳ `[fixed]` requires a verification token. The legitimate flip path adds one of: `(PR: org/repo#N)`, `(commit: <sha>)`, `(verified: ai|review)`, or `(closure: tombstone)`. Demoted forms (`(PR-closed: …)`, `(commit-stale: …)`) do NOT count — they are weak evidence per the sync spec, not verification. Use `/found-issues:sync` (preceded by `/found-issues:annotate-commit` or `:annotate-pr` if needed) instead of editing the status word by hand.
+   ↳ `[fixed]` requires a verification token. The legitimate flip path adds one of: `(PR: org/repo#N)`, `(commit: <sha>)`, `(verified: ai|review)`, or `(closure: tombstone)`. Demoted forms (`(PR-closed: …)`, `(commit-stale: …)`) do NOT count — they are weak evidence per the sync spec, not verification. Suggestion forms (`(PR-auto: …)`, `(commit-auto: …)`) do NOT count either — they are machine inference awaiting review. Use `/found-issues:sync` (preceded by `/found-issues:annotate-commit` or `:annotate-pr` if needed) instead of editing the status word by hand.
 ```
 
 ## Regex patterns
@@ -125,6 +127,12 @@ For programmatic validation in hooks and CLI:
 
 # Extract PR annotation (active form)
 '\(PR: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)\)'
+
+# Extract PR-auto annotation (hook-suggested form; never flip-driving)
+'\(PR-auto: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)\)'
+
+# Extract commit-auto annotation (hook-suggested form; never flip-driving)
+'\(commit-auto: ([a-f0-9]{7,40})\)'
 
 # Extract PR-closed annotation (demoted form)
 '\(PR-closed: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)\)'

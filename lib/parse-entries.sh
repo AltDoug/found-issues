@@ -59,7 +59,7 @@ fi_has_conflict_markers() {
 # Compatible with bash 3.2 (regex in a variable, no lookbehind).
 fi_annotation_tail() {
   local line="$1" tail=""
-  local re_tail_group='\((PR|PR-closed|commit|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested): [^)]*\)[[:space:]]*$'
+  local re_tail_group='\((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested): [^)]*\)[[:space:]]*$'
   while [[ "$line" =~ $re_tail_group ]]; do
     local grp="${BASH_REMATCH[0]}"
     tail="${grp}${tail}"
@@ -205,6 +205,18 @@ fi_parse_entry() {
     | sed -E 's/^\(PR: //; s/\)$//' \
     | paste -sd , - 2>/dev/null || true)"
 
+  # PR-auto annotations (hook-suggested form; multiple allowed). NOT
+  # flip-driving: sync must never close an entry on one of these. The literal
+  # colon-space in '(PR: ' cannot match '(PR-auto:' (hyphen-a), so the
+  # flip-driving `prs` extraction above naturally excludes them — the same
+  # structural exclusion PR-closed already relies on. Extracted only so sync
+  # and the statusline can REPORT that a suggestion is awaiting confirmation.
+  local prs_auto
+  prs_auto="$(printf '%s' "$ann_tail" \
+    | grep -oE '\(PR-auto: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' \
+    | sed -E 's/^\(PR-auto: //; s/\)$//' \
+    | paste -sd , - 2>/dev/null || true)"
+
   # PR-closed annotations (sync-demoted form; multiple allowed)
   local prs_closed
   prs_closed="$(printf '%s' "$ann_tail" \
@@ -217,6 +229,14 @@ fi_parse_entry() {
   commits="$(printf '%s' "$ann_tail" \
     | grep -oE '\(commit: [a-f0-9]{7,40}\)' \
     | sed -E 's/^\(commit: //; s/\)$//' \
+    | paste -sd , - 2>/dev/null || true)"
+
+  # Commit-auto annotations (hook-suggested form; multiple allowed). Same
+  # non-flip-driving contract as PR-auto above.
+  local commits_auto
+  commits_auto="$(printf '%s' "$ann_tail" \
+    | grep -oE '\(commit-auto: [a-f0-9]{7,40}\)' \
+    | sed -E 's/^\(commit-auto: //; s/\)$//' \
     | paste -sd , - 2>/dev/null || true)"
 
   # Commit-stale annotations (sync-demoted form; multiple allowed)
@@ -258,8 +278,10 @@ fi_parse_entry() {
   printf 'symptom=%s\n' "$symptom"
   printf 'fix=%s\n' "$fix"
   printf 'prs=%s\n' "$prs"
+  printf 'prs_auto=%s\n' "$prs_auto"
   printf 'prs_closed=%s\n' "$prs_closed"
   printf 'commits=%s\n' "$commits"
+  printf 'commits_auto=%s\n' "$commits_auto"
   printf 'commits_stale=%s\n' "$commits_stale"
   printf 'renamed_from=%s\n' "$renamed_from"
   printf 'fixed_date=%s\n' "$fixed_date"
@@ -557,7 +579,7 @@ fi_entry_to_json() {
   parsed="$(fi_parse_entry "$raw")" || return 1
 
   local status="" critical="" date="" path="" line="" line_end="" symptom="" fix=""
-  local prs="" prs_closed="" commits="" commits_stale="" renamed_from=""
+  local prs="" prs_auto="" prs_closed="" commits="" commits_auto="" commits_stale="" renamed_from=""
   local fixed_date="" verified=""
   local kv key val
   while IFS= read -r kv; do
@@ -573,8 +595,10 @@ fi_entry_to_json() {
       symptom)       symptom="$val" ;;
       fix)           fix="$val" ;;
       prs)           prs="$val" ;;
+      prs_auto)      prs_auto="$val" ;;
       prs_closed)    prs_closed="$val" ;;
       commits)       commits="$val" ;;
+      commits_auto)  commits_auto="$val" ;;
       commits_stale) commits_stale="$val" ;;
       renamed_from)  renamed_from="$val" ;;
       fixed_date)    fixed_date="$val" ;;
@@ -596,12 +620,12 @@ fi_entry_to_json() {
   local mute
   mute="$(fi_extract_mute_until "$raw")"
 
-  printf '{"line_no":%s,"status":"%s","critical":%s,"date":%s,"path":%s,"line":%s,"line_end":%s,"symptom":%s,"suggested":%s,"prs":%s,"prs_closed":%s,"commits":%s,"commits_stale":%s,"verified":%s,"fixed_date":%s,"renamed_from":%s,"mute_until":%s,"raw":%s}' \
+  printf '{"line_no":%s,"status":"%s","critical":%s,"date":%s,"path":%s,"line":%s,"line_end":%s,"symptom":%s,"suggested":%s,"prs":%s,"prs_auto":%s,"prs_closed":%s,"commits":%s,"commits_auto":%s,"commits_stale":%s,"verified":%s,"fixed_date":%s,"renamed_from":%s,"mute_until":%s,"raw":%s}' \
     "$line_no" "$status" "$crit_bool" \
     "$(fi_json_str "$date")" "$(fi_json_str "$path")" "$line_json" "$line_end_json" \
     "$(fi_json_str "$symptom")" "$(fi_json_str "$fix")" \
-    "$(fi_json_str "$prs")" "$(fi_json_str "$prs_closed")" \
-    "$(fi_json_str "$commits")" "$(fi_json_str "$commits_stale")" \
+    "$(fi_json_str "$prs")" "$(fi_json_str "$prs_auto")" "$(fi_json_str "$prs_closed")" \
+    "$(fi_json_str "$commits")" "$(fi_json_str "$commits_auto")" "$(fi_json_str "$commits_stale")" \
     "$(fi_json_str "$verified")" "$(fi_json_str "$fixed_date")" \
     "$(fi_json_str "$renamed_from")" "$(fi_json_str "$mute")" \
     "$(fi_json_str "$raw")"

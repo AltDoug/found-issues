@@ -1,5 +1,9 @@
 #!/usr/bin/env bats
 # Tests for annotate-pr/annotate-commit --hook-auto (line-matched gate, cap, exit 3)
+#
+# Hook mode writes the SUGGESTION form ((PR-auto:)/(commit-auto:)), never the
+# closing form — a line-match proves the change touched the defect's location,
+# not that it fixed the defect. See fi_auto_form in lib/annotate.sh.
 
 load 'helpers'
 
@@ -27,7 +31,7 @@ mk_pr_mocks() {
   mk_pr_mocks
   fi_run annotate-pr 7 --hook-auto
   [ "$status" -eq 0 ]
-  grep -q 'src/foo.py:42.*(PR: org/repo#7)' docs/found-issues.md
+  grep -q 'src/foo.py:42.*(PR-auto: org/repo#7)' docs/found-issues.md
 }
 
 @test "hook-auto: file-touched but line outside hunks becomes candidate, exit 3" {
@@ -91,7 +95,7 @@ mk_pr_mocks() {
   short_sha="$(git rev-parse --short=7 HEAD)"
   fi_run annotate-commit HEAD --hook-auto
   [ "$status" -eq 0 ]
-  grep -q "src/foo.py:3.*(commit: $short_sha)" docs/found-issues.md
+  grep -q "src/foo.py:3.*(commit-auto: $short_sha)" docs/found-issues.md
 }
 
 @test "hook-auto: a pure-addition commit adjacent to the cited line does NOT auto-annotate" {
@@ -148,7 +152,7 @@ mk_mid_hunk_mocks() {
   mk_mid_hunk_mocks
   fi_run annotate-pr 7 --hook-auto
   [ "$status" -eq 0 ]
-  grep -q 'src/foo.py:23-49 .*(PR: org/repo#7)' docs/found-issues.md
+  grep -q 'src/foo.py:23-49 .*(PR-auto: org/repo#7)' docs/found-issues.md
 }
 
 @test "hook-auto: range entry ending before every hunk still becomes a candidate, exit 3" {
@@ -182,7 +186,7 @@ mk_mid_hunk_mocks() {
   mk_mid_hunk_mocks
   fi_run annotate-pr 7 --hook-auto
   [ "$status" -eq 0 ]
-  grep -q 'src/foo.py:35-40 .*(PR: org/repo#7)' docs/found-issues.md
+  grep -q 'src/foo.py:35-40 .*(PR-auto: org/repo#7)' docs/found-issues.md
 }
 
 @test "hook-auto: a deleted '-- comment' before a second same-file hunk annotates the right entry" {
@@ -194,5 +198,78 @@ mk_mid_hunk_mocks() {
   export GH_MOCK_PR_DIFF='diff --git a/db/schema.sql b/db/schema.sql\n--- a/db/schema.sql\n+++ b/db/schema.sql\n@@ -10,3 +10,3 @@\n ctx10\n--- old comment\n+-- new comment\n ctx12\n@@ -50,3 +50,3 @@\n ctx50\n-old51\n+new51\n ctx52'
   fi_run annotate-pr 7 --hook-auto
   [ "$status" -eq 0 ]
-  grep -q 'db/schema.sql:51 .*(PR: org/repo#7)' docs/found-issues.md
+  grep -q 'db/schema.sql:51 .*(PR-auto: org/repo#7)' docs/found-issues.md
+}
+
+# === Suggestion contract (2026-08-17) ==========================================
+# Regression cover for the incident that produced it: an entry whose own body
+# said it was being left [open] deliberately was auto-annotated because a
+# commit edited its cited line, and the next sync would have flipped
+# knowingly-unfinished work to [fixed]. The asymmetry these tests encode: a
+# missed annotation costs one command, a wrong flip loses tracked work.
+
+@test "suggestion: hook mode never writes the closing (PR:) form" {
+  fi_run log "src/foo.py:42 — null check missing"
+  mk_pr_mocks
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 0 ]
+  grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
+  run grep -q '(PR: org/repo#7)' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "suggestion: scope-limited entry is skipped even when its cited line IS in a hunk" {
+  fi_run log "src/foo.py:42 — deliberately left \`[open]\` because the sweep covered docs/ only"
+  mk_pr_mocks
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"deliberately left open"* ]]
+  run grep -qE '\(PR(-auto)?: org/repo#7\)' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "suggestion: cross-repo 'fix belongs in' phrasing is also skipped" {
+  fi_run log "src/foo.py:42 — AGENT-CONFIG issue; the fix belongs in agent-config, not this repo"
+  mk_pr_mocks
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 3 ]
+  run grep -qE '\(PR(-auto)?: org/repo#7\)' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "suggestion: a second hook pass does not append a duplicate token" {
+  fi_run log "src/foo.py:42 — null check missing"
+  mk_pr_mocks
+  fi_run annotate-pr 7 --hook-auto
+  fi_run annotate-pr 7 --hook-auto
+  run bash -c "grep -o '(PR-auto: org/repo#7)' docs/found-issues.md | wc -l"
+  [ "$(echo "$output" | tr -d '[:space:]')" = "1" ]
+}
+
+@test "suggestion: explicit --pick REPLACES the pending suggestion with the closing form" {
+  fi_run log "src/foo.py:42 — null check missing"
+  mk_pr_mocks
+  fi_run annotate-pr 7 --hook-auto
+  grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
+  fi_run annotate-pr 7 --pick "src/foo.py:42"
+  [ "$status" -eq 0 ]
+  grep -q '(PR: org/repo#7)' docs/found-issues.md
+  # the suggestion is gone, not sitting alongside
+  run grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "suggestion: the parser reads the auto tokens as annotations, not symptom text" {
+  fi_run log "src/foo.py:42 — null check missing"
+  mk_pr_mocks
+  fi_run annotate-pr 7 --hook-auto
+  local entry
+  entry="$(grep '^- \[open\]' docs/found-issues.md | head -1)"
+  fi_source_lib parse-entries
+  local parsed
+  parsed="$(fi_parse_entry "$entry")"
+  # prs_auto carries the ref; prs (the flip-driving key sync closes on) stays
+  # empty — that structural separation IS the fix.
+  [ "$(printf '%s' "$parsed" | grep '^prs_auto=')" = "prs_auto=org/repo#7" ]
+  [ "$(printf '%s' "$parsed" | grep '^prs=')" = "prs=" ]
 }

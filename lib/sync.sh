@@ -74,6 +74,12 @@ cmd_sync() {
   fi
 
   local closed_pr=0 closed_commit=0 closed_tomb=0
+  # Hook-suggested annotations whose ref HAS landed. These never close an
+  # entry — they are diff-inferred, not confirmed (see fi_auto_form in
+  # lib/annotate.sh). Collected so sync can say so out loud: a suggestion
+  # that is silently ignored forever is as useless as one that silently
+  # closes work.
+  local -a awaiting_confirm=()
   local demoted_pr=0
   local demoted_commit=0
   local renamed_count=0
@@ -98,8 +104,42 @@ cmd_sync() {
       e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
       e_prs="$(printf '%s' "$e_data" | grep '^prs=' | head -1 | cut -d= -f2-)"
       e_commits="$(printf '%s' "$e_data" | grep '^commits=' | head -1 | cut -d= -f2-)"
+      local e_prs_auto e_commits_auto
+      e_prs_auto="$(printf '%s' "$e_data" | grep '^prs_auto=' | head -1 | cut -d= -f2-)"
+      e_commits_auto="$(printf '%s' "$e_data" | grep '^commits_auto=' | head -1 | cut -d= -f2-)"
 
       local closure_kind="" closure_label=""
+
+      # Pending suggestions: report only, never close. A suggestion whose ref
+      # has landed is exactly the case that needs a human/model to compare the
+      # entry's symptom against what the commit did — the judgment the hook
+      # cannot make and must not fake.
+      if [[ -n "$e_commits_auto" && -n "$default_branch" ]]; then
+        local IFS_old="$IFS"
+        IFS=','
+        for sha in $e_commits_auto; do
+          IFS="$IFS_old"
+          if git rev-parse --verify "$sha" >/dev/null 2>&1 \
+             && { git merge-base --is-ancestor "$sha" "$default_branch" 2>/dev/null \
+                  || git merge-base --is-ancestor "$sha" "origin/$default_branch" 2>/dev/null; }; then
+            awaiting_confirm+=("$(fi_entry_loc "$line" 2>/dev/null || printf '%s' "$e_path") — suggested (commit-auto: $sha) has landed")
+          fi
+        done
+        IFS="$IFS_old"
+      fi
+      if [[ -n "$e_prs_auto" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        local IFS_old="$IFS"
+        IFS=','
+        for pr_ref in $e_prs_auto; do
+          IFS="$IFS_old"
+          local a_num="${pr_ref##*#}" a_repo="${pr_ref%#*}" a_state
+          a_state="$(gh pr view "$a_num" --repo "$a_repo" --json state --jq '.state // empty' 2>/dev/null || true)"
+          if [[ "$a_state" == "MERGED" ]]; then
+            awaiting_confirm+=("$(fi_entry_loc "$line" 2>/dev/null || printf '%s' "$e_path") — suggested (PR-auto: $pr_ref) has merged")
+          fi
+        done
+        IFS="$IFS_old"
+      fi
 
       # Check PR annotations (single gh call per PR returning all needed fields)
       if [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
@@ -346,6 +386,21 @@ cmd_sync() {
     printf 'Synced. Nothing to close.\n'
   fi
   cmd_status plain
+
+  # Surface pending suggestions whose ref landed. Deliberately NOT a closure
+  # and deliberately NOT silent: the whole point of the suggestion form is
+  # that a human or model decides, and a decision nobody is told to make
+  # never gets made.
+  if (( ${#awaiting_confirm[@]} > 0 )); then
+    printf '\n%d hook-suggested annotation(s) awaiting confirmation (NOT closed):\n' "${#awaiting_confirm[@]}"
+    local ac
+    for ac in "${awaiting_confirm[@]}"; do
+      printf '  - %s\n' "$ac"
+    done
+    printf 'Compare each entry against what the change actually did, then either:\n'
+    printf '  confirm  — found-issues annotate-commit <sha> --pick "<path:line>"   (rewrites to the closing form)\n'
+    printf '  reject   — delete the (commit-auto:/PR-auto:) token from the entry by hand\n'
+  fi
 
   # Surface gh-empty warnings: PRs that couldn't be fetched.
   # Don't demote — could be transient auth/network/rate-limit.

@@ -2,8 +2,10 @@
 # post-bash-dispatch.sh — the plugin's single PostToolUse(Bash) hook.
 #
 # Routes on the executed command:
-#   gh pr create            → auto-annotate line-matched entries (--hook-auto);
-#                             surface candidates needing model judgment
+#   gh pr create            → record line-matched entries as SUGGESTIONS
+#                             ((PR-auto: ...), never closing — see fi_auto_form
+#                             in lib/annotate.sh); surface candidates needing
+#                             model judgment
 #   git commit               → same, against HEAD (--hook-auto)
 #   gh pr merge|close|reopen → background `found-issues sync` (statusline
 #                             freshness; moved verbatim from post-pr-state.sh)
@@ -230,8 +232,14 @@ if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+create([[:space:]]
       [[ -n "$legacy_out" ]] && ctx+="$legacy_out"$'\n\n'
     else
       out="$("$FI_BIN" annotate-pr "$pr_num" --hook-auto 2>/dev/null)" && rc=0 || rc=$?
-      if [[ "$rc" -eq 0 && "$out" == *"Annotated"* ]]; then
-        ctx+="found-issues: PR #$pr_num auto-annotated — ${out%%$'\n'*} (line-matched by the PR diff). Entries updated in the ledger; no action needed unless one looks wrong."$'\n\n'
+      if [[ "$rc" -eq 0 && "$out" == *"Suggested"* ]]; then
+        ctx+="## found-issues — PR #$pr_num produced annotation SUGGESTIONS
+
+$out
+
+These are (PR-auto: ...) tokens: recorded but NOT closing. A line-match means
+the PR touched the defect's location, not that it fixed the defect. Confirm the
+ones it genuinely fixes with the --pick command above; leave the rest alone."$'\n\n'
       elif [[ "$rc" -eq 3 ]]; then
         ctx+="## found-issues — PR #$pr_num needs annotation judgment
 
@@ -259,8 +267,14 @@ if [[ "$cmd" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]]; then
       [[ -n "$legacy_out" ]] && ctx+="$legacy_out"$'\n\n'
     else
       out="$("$FI_BIN" annotate-commit HEAD --hook-auto 2>/dev/null)" && rc=0 || rc=$?
-      if [[ "$rc" -eq 0 && "$out" == *"Annotated"* ]]; then
-        ctx+="found-issues: ${out%%$'\n'*} (line-matched by the commit diff)."$'\n\n'
+      if [[ "$rc" -eq 0 && "$out" == *"Suggested"* ]]; then
+        ctx+="## found-issues — this commit produced annotation SUGGESTIONS
+
+$out
+
+These are (commit-auto: ...) tokens: recorded but NOT closing. A line-match means
+the commit touched the defect's location, not that it fixed the defect. Confirm
+the ones it genuinely fixes with the --pick command above; leave the rest alone."$'\n\n'
       elif [[ "$rc" -eq 3 ]]; then
         ctx+="## found-issues — commit needs annotation judgment
 
