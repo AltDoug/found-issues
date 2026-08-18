@@ -52,14 +52,14 @@ run_hook_raw() { # $1=raw json
   printf '%s' "$1" | "$HOOK"
 }
 
-@test "pr create: line-matched entry auto-annotates, one-line report" {
+@test "pr create: line-matched entry is SUGGESTED, not annotated" {
   fi_run log "src/foo.py:42 — null check"
   export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
   export GH_MOCK_PR_DIFF='diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n ctx40\n ctx41\n-old42\n+new42\n+added\n ctx43\n ctx44\n ctx45'
   run run_hook 'gh pr create --fill' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
-  grep -q '(PR: org/repo#7)' docs/found-issues.md
-  [[ "$output" == *"auto-annotated"* ]]
+  grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
+  [[ "$output" == *"SUGGESTIONS"* ]]
   [[ "$output" != *"--pick"* ]]
 }
 
@@ -85,7 +85,7 @@ run_hook_raw() { # $1=raw json
   [ "$status" -ne 0 ]
 }
 
-@test "git commit: line-matched entry auto-annotates" {
+@test "git commit: line-matched entry is SUGGESTED, not annotated" {
   mkdir -p src
   printf 'l1\nl2\nl3\n' > src/foo.py
   git add -A && git commit -q -m seed
@@ -94,7 +94,7 @@ run_hook_raw() { # $1=raw json
   git add -A && git commit -q -m fix
   run run_hook 'git commit -m fix' ''
   [ "$status" -eq 0 ]
-  grep -q '(commit:' docs/found-issues.md
+  grep -q '(commit-auto:' docs/found-issues.md
 }
 
 @test "git commit: message mentioning gh pr create still triggers commit route" {
@@ -110,10 +110,10 @@ run_hook_raw() { # $1=raw json
   git add -A && git commit -q -m "add gh pr create hook"
   run run_hook 'git commit -m "add gh pr create hook"' ''
   [ "$status" -eq 0 ]
-  grep -q '(commit:' docs/found-issues.md
+  grep -q '(commit-auto:' docs/found-issues.md
 }
 
-@test "chained git commit and gh pr create: both routes annotate independently" {
+@test "chained git commit and gh pr create: both routes suggest independently" {
   mkdir -p src
   printf 'l1\nl2\nl3\n' > src/foo.py
   git add -A && git commit -q -m seed
@@ -125,7 +125,7 @@ run_hook_raw() { # $1=raw json
   export GH_MOCK_PR_DIFF='diff --git a/src/bar.py b/src/bar.py\n--- a/src/bar.py\n+++ b/src/bar.py\n@@ -40,6 +40,7 @@\n ctx40\n ctx41\n-old42\n+new42\n+added\n ctx43\n ctx44\n ctx45'
   run run_hook 'git commit -m fix && gh pr create' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
-  grep -q 'src/foo.py:2 .*(commit:' docs/found-issues.md
+  grep -q 'src/foo.py:2 .*(commit-auto:' docs/found-issues.md
   grep -q 'src/bar.py:42 .*(PR: org/repo#7)' docs/found-issues.md
 }
 
@@ -146,7 +146,7 @@ run_hook_raw() { # $1=raw json
   export FOUND_ISSUES_AUTOSYNC_CMD="touch '$marker'"
   run run_hook 'git commit -m fix && gh pr merge 7 --squash' ''
   [ "$status" -eq 0 ]
-  grep -q 'src/foo.py:2 .*(commit:' docs/found-issues.md
+  grep -q 'src/foo.py:2 .*(commit-auto:' docs/found-issues.md
   for i in 1 2 3 4 5; do [ -f "$marker" ] && break; sleep 1; done
   [ -f "$marker" ]
 }
@@ -169,7 +169,7 @@ run_hook_raw() { # $1=raw json
   [ "$status" -eq 0 ]
   for i in 1 2 3 4 5; do [ -f "$snap" ] && break; sleep 1; done
   [ -f "$snap" ]
-  grep -q 'src/foo.py:2 .*(commit:' "$snap"
+  grep -q 'src/foo.py:2 .*(commit-auto:' "$snap"
 }
 
 @test "missing harness lib: hook exits 0 and still emits plain text" {

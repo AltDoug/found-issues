@@ -14,6 +14,8 @@
 #   fi_annotate_apply_picks [...]
 #   fi_diff_old_ranges <diff>
 #   fi_line_matched [...]
+#   fi_auto_form <annotation>
+#   fi_scope_limited <entry-line>
 #   fi_annotate_auto [...]
 
 # === Shared annotate engine (annotate-pr / annotate-commit) ===
@@ -82,6 +84,14 @@ fi_split_picks() {
 fi_annotate_apply_picks() {
   local file="$1" annotation="$2" picks_nl="$3" cmd_label="$4" rerun_cmd="$5"
 
+  # The suggestion form of this same ref, if the hook already recorded one.
+  # An explicit pick IS the confirmation, so it REPLACES the suggestion rather
+  # than appending beside it — leaving both would keep reporting the entry as
+  # awaiting review forever, and duplicate the ref in the annotation tail.
+  local auto_annotation
+  auto_annotation="$(fi_auto_form "$annotation")"
+  local promoted=0
+
   local -a pick_arr=() pick_hits=() pick_lines=()
   local pick
   while IFS= read -r pick; do
@@ -145,6 +155,11 @@ fi_annotate_apply_picks() {
       if [[ "$line" == *"$annotation"* ]]; then
         already=$((already + 1))
         printf '%s\n' "$line" >>"$tmp"
+      elif [[ "$auto_annotation" != "$annotation" && "$line" == *"$auto_annotation"* ]]; then
+        # Confirm a pending suggestion in place: substitute, never append.
+        printf '%s\n' "${line//"$auto_annotation"/"$annotation"}" >>"$tmp"
+        matched=$((matched + 1))
+        promoted=$((promoted + 1))
       else
         printf '%s %s\n' "$line" "$annotation" >>"$tmp"
         matched=$((matched + 1))
@@ -158,6 +173,9 @@ fi_annotate_apply_picks() {
     mv "$tmp" "$file"
     trap - EXIT
     printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
+    if (( promoted > 0 )); then
+      printf '  (%d confirmed from a pending %s suggestion)\n' "$promoted" "$auto_annotation"
+    fi
   else
     rm -f "$tmp"
     trap - EXIT
@@ -281,6 +299,66 @@ fi_line_matched() {
   return 1
 }
 
+# fi_auto_form <annotation> — the SUGGESTION form of a canonical annotation:
+#   (PR: org/repo#7) -> (PR-auto: org/repo#7)
+#   (commit: ab12cd3) -> (commit-auto: ab12cd3)
+#
+# Why a distinct token rather than the canonical one. The PostToolUse hook
+# infers annotations from the diff — a cited line overlapping a removed-line
+# hunk in a file the entry names. That is evidence the commit TOUCHED the
+# defect's location, never evidence it FIXED the defect, and sync closes
+# entries on canonical annotations without asking. On 2026-08-16 an entry
+# whose own body said it was being left [open] deliberately was auto-annotated
+# because a commit edited its cited line; the next sync would have flipped
+# knowingly-unfinished work to [fixed], silently. The asymmetry is the whole
+# argument: a missed annotation costs one command, a wrong flip loses tracked
+# work. So hook-inferred annotations are SUGGESTIONS — they are recorded,
+# reported, and never closed on. Confirming one (an explicit --pick/--all)
+# rewrites it to the canonical form, which is what arms sync.
+#
+# The hyphen-key shape is the same structural trick (PR-closed:)/(commit-stale:)
+# already rely on: the literal colon-space in '(PR: ' / '(commit: ' cannot
+# match '(PR-auto:' / '(commit-auto:', so every flip-driving regex in the
+# codebase excludes these by construction rather than by an added guard.
+fi_auto_form() {
+  local a="$1"
+  case "$a" in
+    "(PR: "*)     printf '(PR-auto: %s' "${a#\(PR: }" ;;
+    "(commit: "*) printf '(commit-auto: %s' "${a#\(commit: }" ;;
+    *)            printf '%s' "$a" ;;
+  esac
+}
+
+# fi_scope_limited <entry-line> — 0 when the entry's own body says it is
+# deliberately being left open, so no diff-inferred evidence may annotate it.
+#
+# These phrases are how this ledger records "the fix for this lives somewhere
+# else" or "this half was knowingly not done" — exactly the entries where a
+# commit touching the cited file is most likely and least meaningful. The
+# 2026-08-16 incident entry read "left `[open]` because the sweep covered
+# docs/ and scripts/ in THIS repo only"; the cross-repo entries in the same
+# ledger read "the fix belongs in agent-config, not this repo".
+#
+# Deliberately over-suppressing: per the asymmetry above, a false skip here
+# costs one `--pick` command, while a false annotation can close real work.
+# Explicit --pick/--all are unaffected — a human/model that has read the
+# entry may still annotate it.
+fi_scope_limited() {
+  local l
+  l="$(printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  case "$l" in
+    *"left [open]"*|*"left \`[open]\`"*|*"leave [open]"*|*"leave \`[open]\`"*) return 0 ;;
+    *"stays open"*|*"stays [open]"*|*"stay open"*|*"remains open"*|*"remain open"*) return 0 ;;
+    *"deliberately open"*|*"deliberately left"*|*"knowingly open"*) return 0 ;;
+    *"this entry stays"*|*"entry stays open"*) return 0 ;;
+    *"fix belongs in"*|*"fix belongs there"*|*"fix belongs to"*) return 0 ;;
+    *"this repo only"*|*"in this repo only"*|*"repo in play"*) return 0 ;;
+    *"out of scope"*|*"outside this task"*|*"not fixed here"*|*"not fixed in this"*) return 0 ;;
+    *"tracked separately"*|*"tracked elsewhere"*|*"cross-repo:"*) return 0 ;;
+  esac
+  return 1
+}
+
 # --all annotates every candidate.
 # hook_auto (yes|no, $8) gates auto-annotation on a stricter rule for the
 # PostToolUse hook: a candidate must ALSO be unambiguous under the
@@ -294,6 +372,15 @@ fi_annotate_auto() {
   local file="$1" annotation="$2" touched_files="$3" annotate_all="$4"
   local cmd_label="$5" rerun_cmd="$6" ref_desc="$7"
   local hook_auto="${8:-no}" old_ranges="${9:-}"
+
+  # In hook mode the token actually WRITTEN is the suggestion form. Everything
+  # downstream (the already-annotated test, the rewrite pass, the summary
+  # line) uses write_annotation; `annotation` stays the canonical form so the
+  # confirm command printed for the operator is the one that arms sync.
+  local write_annotation="$annotation"
+  if [[ "$hook_auto" == "yes" ]]; then
+    write_annotation="$(fi_auto_form "$annotation")"
+  fi
 
   # Pass 1: collect candidates with the FULL set of touched files each one
   # matches; already-annotated entries contribute their files to ann_tfs.
@@ -325,7 +412,10 @@ fi_annotate_auto() {
       fi
     done <<<"$touched_files"
     [[ -z "$matched_tfs" ]] && continue
-    if [[ "$line" == *"$annotation"* ]]; then
+    # Both forms count as "already annotated": a canonical token means this
+    # ref is confirmed, a suggestion token means it is already pending review.
+    # Testing only one form made every later commit re-append a duplicate.
+    if [[ "$line" == *"$annotation"* || "$line" == *"$write_annotation"* ]]; then
       ann_tfs+="$matched_tfs"
       continue
     fi
@@ -356,6 +446,11 @@ fi_annotate_auto() {
   # files is contested by another candidate or an already-annotated entry.
   local auto_set=""
   local -a ambig_indices=()
+  # Parallel to ambig_indices: WHY each candidate was skipped. One message for
+  # all skips misreported the scope-limited case as a file-contest, which is
+  # the opposite of actionable — a contested entry wants --pick, a
+  # scope-limited one wants leaving alone.
+  local -a ambig_reasons=()
   local i j shared
   for (( i = 0; i < ${#cand_lines[@]}; i++ )); do
     if [[ "$annotate_all" == "yes" ]]; then
@@ -379,13 +474,19 @@ fi_annotate_auto() {
       (( shared == 1 )) && break
     done <<<"${cand_tfs[$i]}"
     if (( shared == 0 )); then
-      if [[ "$hook_auto" == "yes" ]] && ! fi_line_matched "${cand_paths[$i]}" "${cand_lnums[$i]}" "$old_ranges" "${cand_lends[$i]}"; then
+      if [[ "$hook_auto" == "yes" ]] \
+         && ! fi_line_matched "${cand_paths[$i]}" "${cand_lnums[$i]}" "$old_ranges" "${cand_lends[$i]}"; then
         ambig_indices+=("$i")
+        ambig_reasons+=("cited line not touched by this change")
+      elif [[ "$hook_auto" == "yes" ]] && fi_scope_limited "${cand_lines[$i]}"; then
+        ambig_indices+=("$i")
+        ambig_reasons+=("entry says it is deliberately left open — annotate only if you have read it")
       else
         auto_set+="${cand_lines[$i]}"$'\n'
       fi
     else
       ambig_indices+=("$i")
+      ambig_reasons+=("shares a touched file with another entry")
     fi
   done
 
@@ -398,8 +499,10 @@ fi_annotate_auto() {
       # incident shape). Annotate nothing; surface all as candidates.
       auto_set=""
       ambig_indices=()
+      ambig_reasons=()
       for (( i = 0; i < ${#cand_lines[@]}; i++ )); do
         ambig_indices+=("$i")
+        ambig_reasons+=("change touches more than $max_auto candidates — mass-touch guard")
       done
     fi
   fi
@@ -411,7 +514,7 @@ fi_annotate_auto() {
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
-      printf '%s %s\n' "$line" "$annotation" >>"$tmp"
+      printf '%s %s\n' "$line" "$write_annotation" >>"$tmp"
       matched=$((matched + 1))
     else
       printf '%s\n' "$line" >>"$tmp"
@@ -421,18 +524,31 @@ fi_annotate_auto() {
   if (( matched > 0 )); then
     mv "$tmp" "$file"
     trap - EXIT
-    printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
+    if [[ "$hook_auto" == "yes" ]]; then
+      # "Suggested", not "Annotated": this token does not close anything, and
+      # the caller's context line is built from this first output line.
+      printf 'Suggested %d entr%s with %s — pending review, will NOT close on sync\n' \
+        "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$write_annotation"
+      printf 'Confirm the ones %s actually fixes (rewrites the suggestion to %s, which does close):\n' \
+        "$ref_desc" "$annotation"
+      printf '  %s --pick <path:line>[,<path:line>...]\n' "$rerun_cmd"
+    else
+      printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
+    fi
   else
     rm -f "$tmp"
     trap - EXIT
   fi
 
   if (( ${#ambig_indices[@]} > 0 )); then
-    printf '%s: %d [open] entries share touched files with other entries — skipped (file-level match is ambiguous):\n' "$cmd_label" "${#ambig_indices[@]}"
-    for i in "${ambig_indices[@]}"; do
+    printf '%s: %d [open] entr%s not annotated — each needs judgment:\n' \
+      "$cmd_label" "${#ambig_indices[@]}" "$([[ ${#ambig_indices[@]} -eq 1 ]] && echo y || echo ies)"
+    local k
+    for (( k = 0; k < ${#ambig_indices[@]}; k++ )); do
+      i="${ambig_indices[$k]}"
       local sym="${cand_syms[$i]}"
       (( ${#sym} > 70 )) && sym="${sym:0:70}..."
-      printf '  %s — %s\n' "${cand_locs[$i]}" "$sym"
+      printf '  %s [%s] — %s\n' "${cand_locs[$i]}" "${ambig_reasons[$k]:-ambiguous}" "$sym"
     done
     printf 'Review which of these %s actually addresses, then annotate them explicitly:\n' "$ref_desc"
     printf '  %s --pick <path:line>[,<path:line>...]\n' "$rerun_cmd"

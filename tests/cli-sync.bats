@@ -574,3 +574,59 @@ fi_seed_deletable_entry() {
   [ "$status" -eq 0 ]
   grep -q 'closure: tombstone' docs/found-issues.md
 }
+
+# === Suggestion tokens never close (2026-08-17) ===============================
+# The incident this guards: an entry deliberately left [open] was auto-annotated
+# because a commit touched its cited line; the next sync would have flipped it
+# to [fixed], silently closing work nobody did. Suggestions are recorded and
+# REPORTED, never closed on.
+
+@test "sync: (commit-auto:) on a landed commit does NOT flip the entry" {
+  mkdir -p src
+  echo "x" > src/foo.py
+  git add src/foo.py
+  git commit -q -m "add foo"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+
+  fi_run log "src/foo.py:1 — bug"
+  sed -i.bak "s|src/foo.py:1 — bug|src/foo.py:1 — bug (commit-auto: $short_sha)|" docs/found-issues.md
+  rm -f docs/found-issues.md.bak
+
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\]' docs/found-issues.md
+  run grep -q '\[fixed\]' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "sync: reports a landed suggestion as awaiting confirmation" {
+  mkdir -p src
+  echo "x" > src/foo.py
+  git add src/foo.py
+  git commit -q -m "add foo"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+
+  fi_run log "src/foo.py:1 — bug"
+  sed -i.bak "s|src/foo.py:1 — bug|src/foo.py:1 — bug (commit-auto: $short_sha)|" docs/found-issues.md
+  rm -f docs/found-issues.md.bak
+
+  fi_run sync
+  [[ "$output" == *"awaiting confirmation"* ]]
+  [[ "$output" == *"NOT closed"* ]]
+  [[ "$output" == *"src/foo.py:1"* ]]
+}
+
+@test "sync: an UNLANDED suggestion is silent (nothing to confirm yet)" {
+  mkdir -p src
+  echo "x" > src/foo.py
+  git add src/foo.py
+  git commit -q -m "add foo"
+
+  fi_run log "src/foo.py:1 — bug"
+  sed -i.bak "s|src/foo.py:1 — bug|src/foo.py:1 — bug (commit-auto: deadbee)|" docs/found-issues.md
+  rm -f docs/found-issues.md.bak
+
+  fi_run sync
+  [[ "$output" != *"awaiting confirmation"* ]]
+  grep -q '^- \[open\]' docs/found-issues.md
+}

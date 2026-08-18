@@ -4,6 +4,44 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-08-17
+
+### Added
+
+- Hook-inferred annotations are now recorded as **suggestions** —
+  `(PR-auto: org/repo#N)` and `(commit-auto: <sha>)` — instead of the closing
+  `(PR:)`/`(commit:)` forms. `sync` never flips an entry to `[fixed]` on a
+  suggestion; it reports landed ones as awaiting confirmation and names both
+  routes (confirm with `--pick`, or delete the token). An explicit
+  `--pick`/`--all` rewrites the suggestion in place to the closing form —
+  that rewrite *is* the confirmation.
+- `annotate-*` in `--hook-auto` mode now refuses to annotate an entry whose
+  own body says it is deliberately being left open ("left `[open]`",
+  "stays open", "the fix belongs in …", "out of scope", "this repo only", …).
+
+### Changed
+
+- The skipped-candidate report names a per-entry *reason* (`cited line not
+  touched`, `entry says it is deliberately left open`, `shares a touched file`,
+  `mass-touch guard`) instead of reporting every skip as a file contest.
+- The PostToolUse hook's context text no longer says "no action needed" about
+  auto-annotations; it states the suggestion semantics and the confirm command.
+
+### Why
+
+A `--hook-auto` line-match proves a change *touched* the defect's location; it
+was never evidence the change *fixed* the defect, and `sync` closed entries on
+those annotations without asking. On 2026-08-16 an entry whose body explicitly
+said it was being left `[open]` (the sweep that produced it covered one repo
+only) was auto-annotated because a commit edited its cited line — the next
+`sync` would have flipped knowingly-unfinished work to `[fixed]`, silently. It
+was caught and reverted by hand; a second, substantively-correct false
+annotation the same evening had already gone unnoticed for the same reason.
+
+The asymmetry that drives the design: a missed annotation costs one command, a
+wrong flip loses tracked work. So inference now suggests, and only a human or a
+model that has read the entry closes.
+
 ## [2.5.0] - 2026-08-14
 
 ### Added
