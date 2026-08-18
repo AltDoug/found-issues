@@ -60,7 +60,11 @@ run_hook_raw() { # $1=raw json
   [ "$status" -eq 0 ]
   grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
   [[ "$output" == *"SUGGESTIONS"* ]]
-  [[ "$output" != *"--pick"* ]]
+  # The confirm command MUST travel with the suggestion — a suggestion with no
+  # stated way to confirm it is just an annotation nobody audits. (This replaces
+  # the old "one-line report, no --pick" contract, which belonged to the era
+  # when the hook wrote the closing form directly.)
+  [[ "$output" == *"--pick"* ]]
 }
 
 @test "pr create: unmatched-line candidates surface with pick instruction" {
@@ -126,7 +130,7 @@ run_hook_raw() { # $1=raw json
   run run_hook 'git commit -m fix && gh pr create' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
   grep -q 'src/foo.py:2 .*(commit-auto:' docs/found-issues.md
-  grep -q 'src/bar.py:42 .*(PR: org/repo#7)' docs/found-issues.md
+  grep -q 'src/bar.py:42 .*(PR-auto: org/repo#7)' docs/found-issues.md
 }
 
 @test "merge route non-exclusive: chained git commit and gh pr merge both fire" {
