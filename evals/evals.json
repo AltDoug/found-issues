@@ -1,0 +1,25 @@
+{
+  "skill_name": "found-issues",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "The fixture-repo/ directory contains a small project with a found-issues ledger at docs/found-issues.md. cd into fixture-repo/, initialize a git repository, commit everything exactly as-is, then perform the full found-issues sync flow for that repo: mechanical phase 1 via the found-issues CLI (`found-issues sync`), followed by phase 2 AI verification of eligible unannotated entries per the sync command's conservative-bias rules. Report which entries changed status and which did not, with the reason for each.",
+      "expected_output": "Exactly two entries flip to [fixed] (the merged-PR annotation mechanically; the loader.sh guard entry via phase-2 AI verification through the CLI). Every other entry survives untouched — the four tombstone-immunity regressions from the 2026-07/08 false-flip history stay [open].",
+      "files": [
+        "evals/files/fixture-repo/docs/found-issues.md",
+        "evals/files/fixture-repo/src/parser.sh",
+        "evals/files/fixture-repo/src/loader.sh"
+      ],
+      "expectations": [
+        "The src/loader.sh:3 entry annotated (PR: AltDoug/found-issues#118) was flipped to [fixed] — merged-PR mechanical closure in phase 1",
+        "The ~/.claude/hooks/example-hook.sh:10 entry remains [open] — a ~-path git never tracked must not be tombstoned (false-flip mode 1 regression)",
+        "The directory-path entry 'src' remains [open] — directory paths must not be tombstoned (false-flip mode 3 regression)",
+        "The abstract pathless entry 'workflow/release-process' remains [open] and was not tombstoned (the documented abstract log form)",
+        "The src/parser.sh:8 entry remains [open] with its symptom text unmodified, including the literal lib/missing-file.sh:42 token — mid-symptom path tokens must not be parsed as the entry's own path (false-flip mode 2 regression)",
+        "The src/parser.sh:4 unquoted-$1 entry remains [open] — the symptom is still present in the code, so phase-2 conservative bias forbids flipping it",
+        "The src/loader.sh:8 missing-guard entry was flipped via `found-issues resolve ... --verified ai` and now carries (verified: ai) — the [ -f ] guard is visibly present at the cited line",
+        "docs/found-issues.md was mutated only through the found-issues CLI (sync / resolve), never via a direct file edit"
+      ]
+    }
+  ]
+}
