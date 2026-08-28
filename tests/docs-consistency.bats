@@ -89,12 +89,12 @@ fi_first_line() {
   done
 
   local stated
-  stated="$(grep -oE '[0-9]+ tests on Linux/macOS/Windows' "$README" | grep -oE '^[0-9]+')"
+  stated="$(grep -oE '[0-9]+ tests on Linux/macOS' "$README" | grep -oE '^[0-9]+')"
   [ -n "$stated" ]
 
   echo "README states \"$stated tests\"; tests/*.bats actually defines $actual @test cases."
   if [ "$stated" -ne "$actual" ]; then
-    echo "FIX: update the '... tests on Linux/macOS/Windows' stat-strip line near the top of README.md to say \"$actual tests\"."
+    echo "FIX: update the '... tests on Linux/macOS' stat-strip line near the top of README.md to say \"$actual tests\"."
   fi
   [ "$stated" -eq "$actual" ]
 }
