@@ -23,7 +23,7 @@ on:
   workflow_dispatch:
 
 # Cancel in-progress runs when a new commit lands on the same PR / branch.
-# Saves CI minutes (especially on Windows, ~7 min) and stops stale results
+# Saves CI minutes (especially on macOS, ~10x rate) and stops stale results
 # from clobbering fresh ones when fix-up commits arrive in quick succession.
 # event_name is part of the group so the Monday canary (schedule) and manual
 # dispatch runs never share a group with push-to-main — without it, a push
@@ -35,7 +35,7 @@ on:
 # testing: the cancelled run's `ci` correctly reports failure, but the NEWER run
 # is the one whose status attaches to the branch head — and when that newer push
 # is docs-only, every job skips and `ci` reports success. Net effect: main reads
-# green having never run bats on macOS or Windows.
+# green having never run bats on macOS.
 #
 # Hit for real 2026-08-11 — a one-line ledger flip (#130) merged two minutes
 # after the v2.2.1 fix (#129) and cancelled its matrix mid-run; caught only by
@@ -85,12 +85,18 @@ jobs:
       # the job built to validate it.
       meta: ${{ steps.filter.outputs.meta || steps.force.outputs.meta }}
       # Two-tier OS matrix (2026-07-20 CI-cost work): PR iterations run the
-      # suite on ubuntu only (1x rate); the full macos+windows+ubuntu matrix
-      # runs on push-to-main, the weekly canary, and manual dispatch. macOS
-      # bills ~10x and Windows ~1.67x per minute — most of the month's spend
-      # was PR iterations re-proving OS parity the suite already proves on
-      # every merge. Quality floor: every commit that LANDS still runs all
-      # three OSes; only not-yet-merged iterations are trimmed.
+      # suite on ubuntu only (1x rate); the full macos+ubuntu matrix runs on
+      # push-to-main, the weekly canary, and manual dispatch. macOS bills
+      # ~10x per minute — most of the month's spend was PR iterations
+      # re-proving OS parity the suite already proves on every merge.
+      # windows-latest RETIRED 2026-08-28 (operator decision, same day as
+      # agent-config#401): no Windows Claude Code host exists — Windows is
+      # driven over SSH from the Mac — and the leg cost 148 billed min in
+      # the first 12 days of the cycle that tripped the account spend cap.
+      # The Git-Bash install branch, ASCII-name guard and Windows-compat
+      # code stay; re-add = put "windows-latest" back in the list below.
+      # Quality floor: every commit that LANDS still runs both remaining
+      # OSes; only not-yet-merged iterations are trimmed.
       os-matrix: ${{ steps.osmat.outputs.os }}
     steps:
       - id: osmat
@@ -98,7 +104,7 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             echo 'os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           else
-            echo 'os=["ubuntu-latest", "macos-latest", "windows-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'os=["ubuntu-latest", "macos-latest"]' >> "$GITHUB_OUTPUT"
           fi
       - id: force
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
