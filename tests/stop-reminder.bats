@@ -185,14 +185,89 @@ TRANSCRIPT
   TR="$(mktemp)"
   cat > "$TR" <<'TRANSCRIPT'
 {"parentUuid":"u-1","isSidechain":false,"type":"user","message":{"role":"user","content":[{"type":"text","text":"please run git status"}]},"uuid":"user-1","timestamp":"2026-05-12T00:00:00Z","sessionId":"s-1","cwd":"/x","version":"2.1.139"}
-{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"git status"}}]},"uuid":"asst-1","timestamp":"2026-05-12T00:00:01Z","sessionId":"s-1"}
-{"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01","type":"tool_result","content":"On branch main","is_error":false}]},"uuid":"toolres-1","timestamp":"2026-05-12T00:00:02Z","toolUseResult":{"stdout":"On branch main","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false},"sourceToolAssistantUUID":"asst-1","sessionId":"s-1"}
-{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"You are on main."}]},"uuid":"asst-2","timestamp":"2026-05-12T00:00:03Z","sessionId":"s-1"}
+{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"sed -i '' s/main/master/ README.md"}}]},"uuid":"asst-1","timestamp":"2026-05-12T00:00:01Z","sessionId":"s-1"}
+{"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01","type":"tool_result","content":"","is_error":false}]},"uuid":"toolres-1","timestamp":"2026-05-12T00:00:02Z","toolUseResult":{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false},"sourceToolAssistantUUID":"asst-1","sessionId":"s-1"}
+{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Edited README in place."}]},"uuid":"asst-2","timestamp":"2026-05-12T00:00:03Z","sessionId":"s-1"}
 TRANSCRIPT
   input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
   run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=full echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
   [ "$status" -eq 2 ]
   [[ "$output" == *"acknowledgment"* ]]
+  rm -f "$TR"
+}
+
+# --- smart-fire: Bash counts only when it mutates (2.7.0, 2026-08-28 audit F5) ---
+
+# realistic_bash_transcript <file> <command-json-escaped> — one user prompt,
+# one Bash tool_use with that command, its tool_result envelope, and a final
+# assistant text WITHOUT the marker.
+realistic_bash_transcript() {
+  cat > "$1" <<TRANSCRIPT
+{"parentUuid":"u-1","isSidechain":false,"type":"user","message":{"role":"user","content":[{"type":"text","text":"do the thing"}]},"uuid":"user-1","timestamp":"2026-08-28T00:00:00Z","sessionId":"s-1","cwd":"/x","version":"2.1.250"}
+{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"$2","description":"run it"}}]},"uuid":"asst-1","timestamp":"2026-08-28T00:00:01Z","sessionId":"s-1"}
+{"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01","type":"tool_result","content":"","is_error":false}]},"uuid":"toolres-1","timestamp":"2026-08-28T00:00:02Z","toolUseResult":{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false},"sourceToolAssistantUUID":"asst-1","sessionId":"s-1"}
+{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done, no marker here."}]},"uuid":"asst-2","timestamp":"2026-08-28T00:00:03Z","sessionId":"s-1"}
+TRANSCRIPT
+}
+
+run_stop_on() { # $1 = transcript path
+  local input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$1\"}"
+  run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=terse echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=terse '$HOOK'"
+}
+
+@test "stop-reminder: read-only Bash turns (open a folder, git status, cat, rg) do not require the marker" {
+  TR="$(mktemp)"
+  for cmd in 'open \"/x/READY-TO-SEND\"' 'git status --short && git branch --show-current' 'cat docs/plan.md | head -40' 'rg -n TODO src/' 'gh pr view 12 --json state 2>/dev/null' 'ls -la ~/Downloads 2>&1 | tail -5'; do
+    realistic_bash_transcript "$TR" "$cmd"
+    run_stop_on "$TR"
+    [ "$status" -eq 0 ] || { echo "expected allow for: $cmd — got $status: $output"; false; }
+  done
+  rm -f "$TR"
+}
+
+@test "stop-reminder: mutating Bash turns (sed -i, redirect, rm, git commit, heredoc-fed python, pnpm add) still require the marker" {
+  TR="$(mktemp)"
+  for cmd in "sed -i '' s/a/b/ foo.py" 'echo x > out.txt' 'rm -f page-1.png' 'git commit -m \"fix: thing\"' 'git -C /x push -u origin fix/x' 'python3 - <<PY\nprint(1)\nPY' 'pnpm add -D vitest' 'mkdir -p dist && cp a dist/' 'cat report.md | tee summary.md'; do
+    realistic_bash_transcript "$TR" "$cmd"
+    run_stop_on "$TR"
+    [ "$status" -eq 2 ] || { echo "expected block for: $cmd — got $status: $output"; false; }
+    [[ "$output" == *"Stop blocked"* ]]
+  done
+  rm -f "$TR"
+}
+
+@test "stop-reminder: a > inside quotes, 2>&1 and >/dev/null are not mutations" {
+  TR="$(mktemp)"
+  for cmd in 'echo \"a -> b\"' "printf '%s' 'x > y'" 'git log --oneline 2>&1 | head' 'command -v jq >/dev/null 2>&1 && echo yes' 'gh api repos/o/r 2>/dev/null'; do
+    realistic_bash_transcript "$TR" "$cmd"
+    run_stop_on "$TR"
+    [ "$status" -eq 0 ] || { echo "expected allow for: $cmd — got $status: $output"; false; }
+  done
+  rm -f "$TR"
+}
+
+@test "stop-reminder: Write and the flat fixture shape with a mutating Bash still block" {
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"parentUuid":"u-1","type":"user","message":{"role":"user","content":[{"type":"text","text":"write it"}]},"uuid":"user-1","sessionId":"s-1"}
+{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"Write","input":{"file_path":"/x/new.md","content":"hi"}}]},"uuid":"asst-1","sessionId":"s-1"}
+{"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_02","type":"tool_result","content":"ok","is_error":false}]},"uuid":"toolres-1","sessionId":"s-1"}
+{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Written."}]},"uuid":"asst-2","sessionId":"s-1"}
+TRANSCRIPT
+  run_stop_on "$TR"
+  [ "$status" -eq 2 ]
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure","tool_uses":[{"name":"Bash","input":{"command":"mv old.py new.py"}}]}
+TRANSCRIPT
+  run_stop_on "$TR"
+  [ "$status" -eq 2 ]
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"where are we"}
+{"type":"assistant","message":"checking","tool_uses":[{"name":"Bash","input":{"command":"git status"}}]}
+TRANSCRIPT
+  run_stop_on "$TR"
+  [ "$status" -eq 0 ]
   rm -f "$TR"
 }
 

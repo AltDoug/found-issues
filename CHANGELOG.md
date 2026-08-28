@@ -4,6 +4,26 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-08-28
+
+### Changed
+
+- **Smart-fire counts `Bash` as substantive only when the command mutates
+  something** — a redirect (`>`/`>>`, not `2>&1` or `>/dev/null`), `sed -i`
+  / `perl -i`, a file verb (`mv cp rm rmdir mkdir touch ln tee chmod chown
+  install rsync patch`), a `git` write verb (`commit push merge rebase
+  cherry-pick revert apply am add rm mv checkout switch restore reset stash
+  tag worktree`), a `gh` write verb (`pr create|merge|edit|…`, issue /
+  release / repo writes, `api -X POST|PATCH|PUT|DELETE`), a package-manager
+  install/remove, or an interpreter fed a heredoc (`python3 - <<`). Quoted
+  strings are dropped before matching, so a `>` inside a commit message is
+  text. `Edit`/`Write`/`MultiEdit`/`NotebookEdit` are substantive as before.
+  Before: under bypass-permissions mode every turn carries a Bash call, so a
+  bare `open <folder>` reply was blocked for a marker — 54 of the 86 stop
+  blocks in a 60-session Work audit (2026-08-28) landed on turns with zero
+  Write/Edit, costing ~109k output tokens and 17.6 min of recovery turns.
+  Without `jq` the hook keeps the old any-Bash behaviour (fail-closed).
+
 ## [2.6.0] - 2026-08-17
 
 ### Added
