@@ -1,6 +1,6 @@
 {
   "name": "found-issues",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "description": "Markdown-based issue tracker for AI agents. The agent logs out-of-scope issues it spots while working; entries auto-flip to fixed on PR merge or commit-fix.",
   "author": {
     "name": "AltDoug",

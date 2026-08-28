@@ -94,9 +94,48 @@ if [[ -z "$transcript_path" || ! -f "$transcript_path" ]]; then
 fi
 
 # Smart-fire: only block when the most recent assistant turn included a
-# substantive tool use (Edit/Write/MultiEdit/Bash). Pure-conversation turns
-# (greetings, Q&A, brainstorm) skip the marker requirement — those don't
-# create code-change opportunities to notice issues against.
+# substantive tool use — Edit/Write/MultiEdit/NotebookEdit, or a Bash command
+# that MUTATES something. Pure-conversation turns (greetings, Q&A,
+# brainstorm) and read-only Bash turns (`open <folder>`, `git status`,
+# `cat`, `rg`) skip the marker requirement — those don't create code-change
+# opportunities to notice issues against. Under bypass-permissions mode every
+# turn carries a Bash call, so counting ANY Bash blocked a bare "opened the
+# folder for you" reply: 54 of the 86 stop blocks in a 60-session audit
+# (2026-08-28, F5) were on turns with zero Write/Edit.
+#
+# "Mutating" = a redirect (`>`/`>>`, not `2>&1` / `>/dev/null`), `sed -i` /
+# `perl -i`, a file verb (mv cp rm mkdir rmdir touch ln tee chmod chown
+# install rsync patch), a git write verb (commit push merge rebase
+# cherry-pick revert apply am add rm mv checkout switch restore reset stash
+# tag worktree), a gh write verb (pr create/merge/edit/…, issue/release/repo
+# writes, `api -X POST|PATCH|PUT|DELETE`), a package-manager
+# install/remove, or an interpreter fed a heredoc (`python3 - <<`). Quoted
+# strings are dropped first so a `>` inside a commit message is text.
+# Without jq the commands cannot be read out of the transcript, so any Bash
+# counts — the pre-2.7.0 behaviour, fail-closed.
+MUTATING_RE='(^|[[:space:];&|(])(mv|cp|rm|rmdir|mkdir|touch|ln|tee|chmod|chown|install|rsync|patch)([[:space:]]|$)'
+MUTATING_RE="$MUTATING_RE"'|(^|[[:space:];&|(])(sed|perl)[[:space:]]+(-[A-Za-z]*i|--in-place)'
+MUTATING_RE="$MUTATING_RE"'|(^|[[:space:];&|(])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+(commit|push|merge|rebase|cherry-pick|revert|apply|am|add|rm|mv|checkout|switch|restore|reset|stash|tag|worktree)([[:space:]]|$)'
+MUTATING_RE="$MUTATING_RE"'|(^|[[:space:];&|(])gh[[:space:]]+(pr[[:space:]]+(create|merge|edit|close|reopen|ready|review|comment|checkout)|issue[[:space:]]+(create|edit|close|reopen|comment|delete|transfer|pin|unpin)|release[[:space:]]+(create|delete|edit|upload)|repo[[:space:]]+(create|delete|edit|archive|unarchive|rename|sync|fork|clone))([[:space:]]|$)'
+MUTATING_RE="$MUTATING_RE"'|(^|[[:space:];&|(])gh[[:space:]]+api[[:space:]].*(-X|--method)[[:space:]]*(POST|PATCH|PUT|DELETE)'
+MUTATING_RE="$MUTATING_RE"'|(^|[[:space:];&|(])(npm|pnpm|yarn|bun|uv|pip|pip3|cargo|brew)[[:space:]]+(install|add|remove|uninstall|update|upgrade|i)([[:space:]]|$)'
+MUTATING_RE="$MUTATING_RE"'|(^|[[:space:]])(python3?|node|bun|ruby|perl|bash|sh|zsh)[[:space:]]+-[[:space:]]*<<'
+MUTATING_RE="$MUTATING_RE"'|>'
+
+bash_turn_mutates() { # $1 = the turn's transcript lines
+  local cmds
+  command -v jq >/dev/null 2>&1 || { printf '%s' "$1" | grep -q '"name":"Bash"'; return; }
+  # Real transcripts: assistant message.content[] tool_use blocks. Also the
+  # flat {"tool_uses":[…]} shape the fixtures use.
+  cmds="$(printf '%s' "$1" | jq -R -r 'fromjson? | select(.type=="assistant")
+      | ((.message | objects | .content[]?), (.tool_uses[]?)) | objects
+      | select(.name=="Bash") | .input.command? // empty' 2>/dev/null || true)"
+  [[ -n "$cmds" ]] || return 1
+  printf '%s\n' "$cmds" \
+    | sed "s/'[^']*'//g" \
+    | sed -E 's/"([^"\\]|\\.)*"//g; s/[0-9]*>&[0-9]//g; s/[0-9&]*>>?[[:space:]]*\/dev\/null//g' \
+    | grep -qE "$MUTATING_RE"
+}
 #
 # Logic: walk back through the last ~16KB of transcript, find the most
 # recent user message boundary, then check if any tool_use of a
@@ -126,7 +165,8 @@ if [[ -n "$recent_tail" ]]; then
   ')"
   # If no substantive tool use in the most recent assistant turn, allow stop
   if ! printf '%s' "$last_turn" \
-     | grep -qE '"name":"(Edit|Write|MultiEdit|Bash|NotebookEdit)"'; then
+     | grep -qE '"name":"(Edit|Write|MultiEdit|NotebookEdit)"' \
+     && ! bash_turn_mutates "$last_turn"; then
     exit 0
   fi
 fi
