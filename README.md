@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**5 lifecycle hooks · 13 slash commands · 782 tests on Linux/macOS/Windows · zero manual bookkeeping**
+**5 lifecycle hooks · 13 slash commands · 782 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -190,12 +190,15 @@ Auto-detects 4 modes per repo: `local`, `git`, `github-direct`, `github-pr`. Mix
 |---|---|---|
 | Linux (Ubuntu) | bash | ✅ Supported |
 | macOS | bash | ✅ Supported |
-| Windows | Git Bash | ✅ Supported |
+| Windows | Git Bash | ⚠️ Best effort — works, not CI-tested since 2026-08-28 |
 
 The CLI and hooks are bash-based, so on Windows you need a bash
 interpreter — that's what [Git for Windows](https://gitforwindows.org/)
-(Git Bash) provides. WSL works too. CI runs the full test suite on all
-three platforms.
+(Git Bash) provides. WSL works too. CI runs the full test suite on Linux
+and macOS; the Windows leg was retired 2026-08-28 (no Windows Claude Code
+host in use by the maintainer, and it was the costliest runner) — the
+Windows-compat code and the ASCII test-name guard remain, and a Windows
+regression report is welcome.
 
 ## Status
 
