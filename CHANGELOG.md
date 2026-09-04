@@ -4,6 +4,34 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.1] - 2026-09-03
+
+### Fixed
+
+- **`hooks/pre-branch-delete.sh` no longer false-positive-blocks three
+  ways**, all observed 2026-08-28 while pruning 26 fully-merged branches:
+  - The guard now also reads the default branch's `found-issues-archive.md`
+    (sibling of the tracked issues file) when building the "promoted"
+    dedup-key set. `cmd_archive` (lib/archive.sh) moves closed `[fixed]`
+    entries out of the working ledger to keep it lean; a branch's `[open]`
+    entry that was merged, flipped to `[fixed]`, and later archived
+    disappeared from the guard's view entirely and read as "not yet
+    promoted."
+  - Quoted string content is now stripped from the command before
+    pattern-matching (same technique as `stop-reminder.sh`'s
+    `bash_turn_mutates()`), so a deletion command that only exists as a
+    string literal — e.g. `printf 'git branch -D old' | pbcopy` for an
+    operator handoff — reads as inert text instead of a command being
+    executed. This also stopped that same false match from collaterally
+    blocking unrelated steps chained in the same Bash tool call. A real,
+    unquoted delete is still caught.
+  - The greps that read parsed entry content (`fi_dedup_key_for_line`'s
+    field extraction, the dedup-key set-membership check) now run under
+    `LC_ALL=C`. Ledger entries routinely contain em-dashes
+    (CONTRIBUTING.md's own house style for the separator), and under a
+    UTF-8 locale that multi-byte content made grep die with `illegal byte
+    sequence` on every run.
+
 ## [2.7.0] - 2026-08-28
 
 ### Changed
