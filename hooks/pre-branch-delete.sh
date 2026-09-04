@@ -62,6 +62,18 @@ fi
 
 branches=()
 
+# Strip quoted string content from the command before pattern-matching, so
+# a deletion verb that appears only INSIDE a string literal — e.g. `printf
+# 'git branch -D old' | pbcopy` for an operator handoff — reads as inert
+# text, not a command actually being executed. Also stops that same false
+# match from collaterally blocking unrelated steps chained in the same
+# Bash tool call. Same technique as hooks/stop-reminder.sh's
+# bash_turn_mutates(): drop single-quoted spans first, then double-quoted
+# spans (respecting backslash-escaped inner quotes).
+_fi_command_unquoted="$(printf '%s' "$command" \
+  | sed "s/'[^']*'//g" \
+  | sed -E 's/"([^"\\]|\\.)*"//g')"
+
 # Patterns 1+2 tokenize each simple-command segment instead of position-
 # matching the whole string. Three reasons, all observed bypasses:
 #   - git accepts the delete flag anywhere relative to the other args
@@ -73,7 +85,7 @@ branches=()
 # the command can't expand against the cwd. Tokens are trimmed to the
 # branch-name charset so shell syntax fragments ("foo)") don't obscure the
 # real name.
-_fi_segments="$(printf '%s' "$command" | tr '|;&' '\n')"
+_fi_segments="$(printf '%s' "$_fi_command_unquoted" | tr '|;&' '\n')"
 while IFS= read -r seg_cmd; do
   [[ -z "${seg_cmd//[[:space:]]/}" ]] && continue
 
@@ -128,12 +140,12 @@ while IFS= read -r seg_cmd; do
 done <<<"$_fi_segments"
 
 # Pattern 3: git push <remote> :<name>  (old-style delete)
-if [[ "$command" =~ git[[:space:]]+push[[:space:]]+[A-Za-z0-9._/-]+[[:space:]]+:([A-Za-z0-9._/-]+) ]]; then
+if [[ "$_fi_command_unquoted" =~ git[[:space:]]+push[[:space:]]+[A-Za-z0-9._/-]+[[:space:]]+:([A-Za-z0-9._/-]+) ]]; then
   branches+=("${BASH_REMATCH[1]}")
 fi
 
 # Pattern 4: gh api ... DELETE ... refs/heads/<name>
-if [[ "$command" =~ gh[[:space:]]+api[[:space:]].*DELETE.*refs/heads/([A-Za-z0-9._/-]+) ]]; then
+if [[ "$_fi_command_unquoted" =~ gh[[:space:]]+api[[:space:]].*DELETE.*refs/heads/([A-Za-z0-9._/-]+) ]]; then
   branches+=("${BASH_REMATCH[1]}")
 fi
 
@@ -199,10 +211,18 @@ fi
 fi_dedup_key_for_line() {
   local line="$1"
   local data path line_num symptom
+  # LC_ALL=C: $data's symptom= line carries the entry's raw symptom text,
+  # which routinely contains em-dashes (CONTRIBUTING.md's own house style).
+  # Under a UTF-8 locale, BSD grep on macOS dies with "illegal byte
+  # sequence" scanning that multi-byte content even when matching an
+  # ASCII-only anchor like ^path=; GNU grep on Linux is exposed to the
+  # equivalent multibyte failure. Byte-mode grep is safe here since every
+  # pattern below is plain ASCII. Same fix as elsewhere in hooks/ + lib/
+  # (see CHANGELOG's stop-reminder/session-start LC_ALL=C entries).
   data="$(fi_parse_entry "$line" 2>/dev/null)" || return 1
-  path="$(printf '%s' "$data" | grep '^path=' | head -1 | cut -d= -f2-)"
-  line_num="$(printf '%s' "$data" | grep '^line=' | head -1 | cut -d= -f2-)"
-  symptom="$(printf '%s' "$data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
+  path="$(printf '%s' "$data" | LC_ALL=C grep '^path=' | head -1 | cut -d= -f2-)"
+  line_num="$(printf '%s' "$data" | LC_ALL=C grep '^line=' | head -1 | cut -d= -f2-)"
+  symptom="$(printf '%s' "$data" | LC_ALL=C grep '^symptom=' | head -1 | cut -d= -f2-)"
   if [[ -n "$line_num" ]]; then
     fi_dedup_key "$path" "$line_num" "$symptom"
   elif [[ "$path" == */* || "$path" == *.* ]]; then
@@ -231,18 +251,41 @@ for branch in "${branches[@]}"; do
     || git show "$default_branch:$rel_path" 2>/dev/null \
     || true)"
 
-  # Build a newline-delimited set of dedup keys from main's entries across
-  # ALL statuses (open / deferred / fixed). The key insight: a branch entry
-  # that was promoted is findable in main regardless of whether main has
-  # since flipped its status or appended (PR:..)/(fixed:..) annotations.
+  # Also read the archive file on the default branch. cmd_archive
+  # (lib/archive.sh) moves closed [fixed] entries out of the working
+  # ledger into found-issues-archive.md (sibling of $rel_path) to keep it
+  # lean — an entry that was promoted via PR, flipped to [fixed], and later
+  # archived disappears from main_content entirely even though it was
+  # genuinely promoted. Without unioning the archive in, its dedup key
+  # vanishes from main_keyset and a fully-merged branch reads as "not yet
+  # promoted". Mirrors archive.sh's own path derivation: same directory as
+  # the tracked issues file, basename always "found-issues-archive.md"
+  # (non-dot-prefixed even when the source is the ".found-issues.md"
+  # fallback — archive.sh never dot-prefixes the archive file).
+  archive_rel_dir="${rel_path%/*}"
+  if [[ "$archive_rel_dir" == "$rel_path" ]]; then
+    archive_rel_path="found-issues-archive.md"
+  else
+    archive_rel_path="$archive_rel_dir/found-issues-archive.md"
+  fi
+  archive_content="$(git show "origin/$default_branch:$archive_rel_path" 2>/dev/null \
+    || git show "$default_branch:$archive_rel_path" 2>/dev/null \
+    || true)"
+
+  # Build a newline-delimited set of dedup keys from main's entries (working
+  # ledger + archive) across ALL statuses (open / deferred / fixed). The key
+  # insight: a branch entry that was promoted is findable on main regardless
+  # of whether main has since flipped its status, appended
+  # (PR:..)/(fixed:..) annotations, or archived it out of the working file.
   main_keyset=""
-  if [[ -n "$main_content" ]]; then
+  _fi_main_and_archive="$main_content"$'\n'"$archive_content"
+  if [[ -n "$_fi_main_and_archive" ]]; then
     while IFS= read -r m_line; do
       if [[ "$m_line" =~ ^-[[:space:]]+\[(open|deferred|fixed)\] ]]; then
         m_key="$(fi_dedup_key_for_line "$m_line" 2>/dev/null || true)"
         [[ -n "$m_key" ]] && main_keyset+="${m_key}"$'\n'
       fi
-    done <<< "$main_content"
+    done <<< "$_fi_main_and_archive"
   fi
 
   # Find branch [open] entries whose dedup key is not in main's keyset.
@@ -253,7 +296,11 @@ for branch in "${branches[@]}"; do
       if [[ -z "$b_key" ]]; then
         # Parse failed — treat as unpromoted (safer than silently allowing).
         branch_unpromoted+="$line"$'\n'
-      elif ! printf '%s' "$main_keyset" | grep -Fxq -- "$b_key"; then
+      # LC_ALL=C: dedup keys retain the symptom's raw bytes (canonicalize.sh
+      # lowercases/collapses whitespace but never strips non-ASCII), so an
+      # em-dash-bearing key hits the same BSD/GNU grep multibyte failure as
+      # above.
+      elif ! printf '%s' "$main_keyset" | LC_ALL=C grep -Fxq -- "$b_key"; then
         branch_unpromoted+="$line"$'\n'
       fi
     fi

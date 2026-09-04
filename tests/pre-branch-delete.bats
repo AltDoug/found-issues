@@ -283,3 +283,90 @@ _seed_unpromoted_branch() {
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 2 ]
 }
+
+# === v2.7.1: archive union, quoted-command false positive, em-dash locale ===
+
+@test "pre-branch-delete: allows delete when branch [open] was promoted then ARCHIVED off main (docs/found-issues-archive.md)" {
+  # Defect 1 (tere-shop-ops docs/found-issues.md, 2026-08-28 entry, line 73):
+  # cmd_archive (lib/archive.sh) moves closed [fixed] entries out of the
+  # working docs/found-issues.md into docs/found-issues-archive.md to keep
+  # the active file lean. A branch's [open] entry that got merged via PR,
+  # flipped to [fixed] on main, and later archived should still read as
+  # "promoted" — its dedup key just moved files, main's WORKING ledger no
+  # longer has it at all. Before the fix, the guard only ever read main's
+  # working docs/found-issues.md and false-positive-blocked this delete.
+  git commit -q --allow-empty -m "init"
+
+  git checkout -q -b feat/work
+  fi_run log "src/foo.py:42 — null check missing"
+  git add -A; git commit -q -m "log entry"
+
+  git checkout -q main
+  mkdir -p docs
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+
+Test fixture.
+EOF
+  cat > docs/found-issues-archive.md <<'EOF'
+# found-issues archive
+
+Closed entries moved out of found-issues.md to keep the active file lean.
+
+- [fixed] 2026-05-08 src/foo.py:42 — null check missing (PR: org/repo#5) (fixed: 2026-05-10)
+EOF
+  git add -A; git commit -q -m "sync flip + archive"
+
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/work"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-branch-delete: does not block a deletion command only STAGED inside a quoted string, but still blocks a real delete" {
+  # Defect 2: the guard matched on command TEXT, so a call that merely
+  # stages a deletion command as a string literal — e.g. `printf 'git
+  # branch -D x' | pbcopy` for an operator handoff — was blocked even
+  # though no git command actually runs. That also collaterally blocked
+  # unrelated steps chained in the same Bash tool call. Quoted spans must
+  # be stripped before pattern-matching (same technique as
+  # hooks/stop-reminder.sh's bash_turn_mutates()).
+  _seed_unpromoted_branch
+
+  # The whole "git branch -D feat/test" text is a single-quoted STRING
+  # ARGUMENT to printf — never executed as a command — so this must pass.
+  input=$'{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"printf \'git branch -D feat/test\' | pbcopy"}}'
+  run bash -c 'printf "%s" "$1" | "$2"' _ "$input" "$HOOK"
+  [ "$status" -eq 0 ]
+
+  # Sibling real delete (unquoted, actually executed) must still block —
+  # confirms the quote-stripping fix didn't blind the guard entirely.
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -D feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "pre-branch-delete: em-dash entries do not produce 'grep: illegal byte sequence' on stderr" {
+  # Defect 3: every run emitted "grep: illegal byte sequence" (BSD grep on
+  # macOS, and likely a GNU-grep multibyte error on Linux) when a ledger
+  # entry's symptom text contains em-dashes — the project's own house
+  # style (CONTRIBUTING.md mandates em-dash separators), so this fires on
+  # nearly every real entry. Fix: LC_ALL=C on the greps that read parsed
+  # entry content, matching the established pattern elsewhere in hooks/
+  # and lib/ (see CHANGELOG's stop-reminder/session-start LC_ALL=C fix).
+  fi_run log "src/foo.py:1 — main entry"
+  git add -A; git commit -q -m "init"
+  git checkout -q -b feat/test
+  cat >> docs/found-issues.md <<'EOF'
+- [open] 2026-08-28 src/x.py:1 — symptom with an em dash — and another em dash — tail (suggested: fix it — somehow)
+EOF
+  git add -A; git commit -q -m "em-dash entry"
+  git checkout -q main
+
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/test"}}'
+  LC_ALL=en_US.UTF-8 run bash -c "echo '$input' | '$HOOK'"
+  [[ "$output" != *"illegal byte sequence"* ]] || { echo "FAIL: grep illegal byte sequence leaked. Full output:"; echo "$output"; false; }
+  [[ "$output" != *"multibyte"* ]] || { echo "FAIL: multibyte conversion error leaked. Full output:"; echo "$output"; false; }
+  # Still correctly blocks (entry is genuinely unpromoted) — the fix must
+  # be locale-safety only, not a behavior change.
+  [ "$status" -eq 2 ]
+}
