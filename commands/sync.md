@@ -31,6 +31,8 @@ This handles three closure mechanisms automatically:
 
 The CLI prints a one-line summary: `Synced. Closed: N (P PR + C commit + T tombstone).`
 
+Entries flagged `[!]` CRITICAL are **never closed by any of the three mechanisms above**, including under `--dry-run`: a closure of a critical entry is held for human verification, so the entry stays `[open]`, gains `(needs human verify)`, is excluded from the `Closed:` count, and `sync` reports `Held: N critical entr[y|ies] left [open]`. Close one deliberately with `found-issues resolve "<distinctive text>" --verified <who>` after re-checking the code yourself — that is phase 2's job, not phase 1's.
+
 ## Phase 2 — AI verification of unannotated entries
 
 This is your job — the CLI cannot do it without invoking you.

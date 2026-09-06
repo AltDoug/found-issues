@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`sync` no longer auto-closes `[!]` CRITICAL entries.** Severity is parsed
+  in `lib/parse-entries.sh` (`critical=yes|no`) and was then discarded by
+  `sync`, so a critical entry was closed by the same inferred signals as any
+  other: a tombstone (git confirms the file is gone) or a landed annotation
+  (a ref touched the location). Neither says the defect was fixed. Because
+  SessionStart runs `sync` unattended and no supported command reopens a
+  `[fixed]` entry, a blind closure of a critical is both silent and permanent.
+  A closure of a `[!]` entry is now HELD: the entry stays `[open]`, gains
+  `(needs human verify)` once, is not counted in `Closed:`, and `sync` prints
+  `Held: N critical entr[y|ies] left [open]`. Close it deliberately with
+  `found-issues resolve "<text>" --verified <who>`. Same conservative bias as
+  the `#151` tombstone rule. (#161)
+
 ## [2.7.1] - 2026-09-03
 
 ### Fixed
