@@ -74,6 +74,7 @@ cmd_sync() {
   fi
 
   local closed_pr=0 closed_commit=0 closed_tomb=0
+  local held_critical=0
   # Hook-suggested annotations whose ref HAS landed. These never close an
   # entry — they are diff-inferred, not confirmed (see fi_auto_form in
   # lib/annotate.sh). Collected so sync can say so out loud: a suggestion
@@ -319,6 +320,37 @@ cmd_sync() {
         fi
       fi
 
+      # --- severity hold (#161) ---
+      # Severity is parsed in lib/parse-entries.sh (`critical=yes|no`) and then
+      # discarded here, so every closure mechanism treats a `[!]` CRITICAL
+      # exactly like an ordinary entry. Two of the three are INFERRED signals:
+      # a tombstone means git confirms the file is gone, and a landed
+      # annotation means a ref touched the location -- neither says the defect
+      # was fixed. Closing a critical on an inferred signal is a blind closure,
+      # it happens unattended because SessionStart runs sync, and no supported
+      # command reopens a `[fixed]` entry, so it is permanent.
+      #
+      # Hold the closure instead of taking it: walk back the counter that was
+      # already incremented, leave the entry `[open]`, and mark it so a human
+      # closes it deliberately with `found-issues resolve ... --verified <who>`.
+      # Same conservative bias as the #151 tombstone rule directly above -- when
+      # the signal is inferred rather than verified, leave the entry open.
+      if [[ -n "$closure_kind" ]]; then
+        local e_critical
+        e_critical="$(printf '%s' "$e_data" | grep '^critical=' | head -1 | cut -d= -f2-)"
+        if [[ "$e_critical" == "yes" ]]; then
+          case "$closure_kind" in
+            pr)        closed_pr=$((closed_pr - 1)) ;;
+            commit)    closed_commit=$((closed_commit - 1)) ;;
+            tombstone) closed_tomb=$((closed_tomb - 1)) ;;
+          esac
+          closure_kind=""
+          closure_label=""
+          held_critical=$((held_critical + 1))
+          [[ "$line" == *"(needs human verify)"* ]] || line="$line (needs human verify)"
+        fi
+      fi
+      # --- end severity hold (#161) ---
       if [[ -n "$closure_kind" ]]; then
         # Flip [open] -> [fixed], append closure_label
         local fixed_line="${line/\[open\]/[fixed]}"
@@ -384,6 +416,13 @@ cmd_sync() {
     printf '%s\n' "$summary"
   else
     printf 'Synced. Nothing to close.\n'
+  fi
+  # A held closure nobody is told about is as useless as one that silently
+  # closes work: the whole point is that a human decides, and a decision
+  # nobody is told to make never gets made.
+  if (( held_critical > 0 )); then
+    printf 'Held: %d critical entr%s left [open] (needs human verify) — [!] is never auto-closed.\n' \
+      "$held_critical" "$( (( held_critical == 1 )) && printf 'y' || printf 'ies' )"
   fi
   cmd_status plain
 
