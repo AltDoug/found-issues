@@ -75,6 +75,33 @@ if [[ "$stop_hook_active" == "true" ]]; then
   exit 0
 fi
 
+# Once per session (2.8.0). A 30-day harness audit (2026-09-13) counted 444
+# of 669 Stop blocks as this marker check, and every block forces one more
+# full-context request whose only content is the marker. The habit the block
+# teaches is per SESSION, not per turn: the first missing marker in a session
+# still blocks and asks for it; from then on this session's Stops pass, and
+# the SessionStart injection of open entries keeps the ledger in view. State:
+# one empty file per session under ~/.claude/found-issues/reminded/, written
+# at block time, reaped after 7 days. FOUND_ISSUES_STOP_REMINDER_EVERY_TURN=on
+# restores the pre-2.8.0 per-turn block. No session_id in the payload = no
+# state, so a bare local invocation still blocks every time.
+session_id=""
+if command -v jq >/dev/null 2>&1; then
+  session_id="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)"
+fi
+if [[ -z "$session_id" ]]; then
+  session_id="$(printf '%s' "$input" \
+    | grep -oE '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    | sed -E 's/.*:[[:space:]]*"([^"]*)".*/\1/' \
+    | head -1 || true)"   # no session_id at all: grep's 1 must not trip pipefail
+fi
+case "$session_id" in *[!A-Za-z0-9._-]*) session_id="" ;; esac   # a file name, nothing else
+REMINDED_DIR="$HOME/.claude/found-issues/reminded"
+if [[ "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" != "on" \
+      && -n "$session_id" && -f "$REMINDED_DIR/$session_id" ]]; then
+  exit 0
+fi
+
 # Extract transcript_path
 transcript_path=""
 if command -v jq >/dev/null 2>&1; then
@@ -186,6 +213,15 @@ for attempt in 1 2; do
   fi
   [[ $attempt -eq 1 ]] && sleep 0.3
 done
+
+# Remember that this session has been asked once (see the once-per-session
+# note above), and reap week-old state so the dir never grows unbounded.
+if [[ -n "$session_id" ]]; then
+  if mkdir -p "$REMINDED_DIR" 2>/dev/null; then
+    : > "$REMINDED_DIR/$session_id" 2>/dev/null || true
+    find "$REMINDED_DIR" -type f -mtime +7 -delete 2>/dev/null || true
+  fi
+fi
 
 # Block with an adaptive message. Verbosity:
 #   FOUND_ISSUES_REMINDER_VERBOSITY=full  → 8-line educational form (default for new installs)

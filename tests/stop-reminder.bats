@@ -409,6 +409,77 @@ TRANSCRIPT
   rm -f "$TR"
 }
 
+# --- once per session (2.8.0) ------------------------------------------------
+# 444 of 669 Stop blocks in a 30-day audit were this marker check, each one a
+# full extra request. The first missing marker in a session blocks as before;
+# later Stops of the SAME session pass; another session still gets its one.
+
+once_tr() {  # a substantive turn with no marker
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"type":"user","message":"please fix the bug"}
+{"type":"assistant","message":"sure, editing now","tool_uses":[{"name":"Edit","input":{"file_path":"foo.py"}}]}
+TRANSCRIPT
+}
+
+@test "stop-reminder: blocks once per session — the second marker-less Stop of the same session passes" {
+  once_tr
+  FAKE_HOME="$(mktemp -d)"
+  input="{\"hook_event_name\":\"Stop\",\"session_id\":\"sess-once-1\",\"transcript_path\":\"$TR\"}"
+  run bash -c "echo '$input' | HOME='$FAKE_HOME' '$HOOK'"
+  [ "$status" -eq 2 ]
+  [ -f "$FAKE_HOME/.claude/found-issues/reminded/sess-once-1" ]
+  run bash -c "echo '$input' | HOME='$FAKE_HOME' '$HOOK'"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  rm -rf "$TR" "$FAKE_HOME"
+}
+
+@test "stop-reminder: a different session still gets its own first block" {
+  once_tr
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude/found-issues/reminded"
+  touch "$FAKE_HOME/.claude/found-issues/reminded/sess-other"
+  input="{\"hook_event_name\":\"Stop\",\"session_id\":\"sess-once-2\",\"transcript_path\":\"$TR\"}"
+  run bash -c "echo '$input' | HOME='$FAKE_HOME' '$HOOK'"
+  [ "$status" -eq 2 ]
+  rm -rf "$TR" "$FAKE_HOME"
+}
+
+@test "stop-reminder: FOUND_ISSUES_STOP_REMINDER_EVERY_TURN=on restores the per-turn block" {
+  once_tr
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude/found-issues/reminded"
+  touch "$FAKE_HOME/.claude/found-issues/reminded/sess-once-3"
+  input="{\"hook_event_name\":\"Stop\",\"session_id\":\"sess-once-3\",\"transcript_path\":\"$TR\"}"
+  run bash -c "echo '$input' | HOME='$FAKE_HOME' FOUND_ISSUES_STOP_REMINDER_EVERY_TURN=on '$HOOK'"
+  [ "$status" -eq 2 ]
+  rm -rf "$TR" "$FAKE_HOME"
+}
+
+@test "stop-reminder: no session_id in the payload means no state — every marker-less Stop blocks" {
+  once_tr
+  FAKE_HOME="$(mktemp -d)"
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "echo '$input' | HOME='$FAKE_HOME' '$HOOK'"
+  [ "$status" -eq 2 ]
+  run bash -c "echo '$input' | HOME='$FAKE_HOME' '$HOOK'"
+  [ "$status" -eq 2 ]
+  [ ! -d "$FAKE_HOME/.claude/found-issues/reminded" ]
+  rm -rf "$TR" "$FAKE_HOME"
+}
+
+@test "stop-reminder: a session_id that is not a plain file name is ignored, not used as a path" {
+  once_tr
+  FAKE_HOME="$(mktemp -d)"
+  input="{\"hook_event_name\":\"Stop\",\"session_id\":\"../../escape\",\"transcript_path\":\"$TR\"}"
+  run bash -c "echo '$input' | HOME='$FAKE_HOME' '$HOOK'"
+  [ "$status" -eq 2 ]
+  [ ! -e "$FAKE_HOME/.claude/escape" ]
+  [ ! -d "$FAKE_HOME/.claude/found-issues/reminded" ]
+  rm -rf "$TR" "$FAKE_HOME"
+}
+
 @test "stop-reminder: codex harness exits 0 without reading stdin transcript" {
   unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
   TR="$(mktemp)"
