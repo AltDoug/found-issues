@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-09-14
+
+### Added
+
+- **`hooks/stop-reminder.sh` blocks at most ONCE per session.** A 30-day
+  harness audit (2026-09-13) counted 444 of 669 Stop blocks as this marker
+  check, and every block forces one more full-context request whose only
+  content is the `<!-- found-issues-checked: ... -->` marker. The habit the
+  block teaches is per session, not per turn: the first marker-less
+  substantive Stop in a session still blocks and asks for the marker; every
+  later Stop of that session passes, while the SessionStart injection of
+  open entries keeps the ledger in view. State is one empty file per
+  session under `~/.claude/found-issues/reminded/`, written at block time
+  and reaped after 7 days. `FOUND_ISSUES_STOP_REMINDER_EVERY_TURN=on`
+  restores the per-turn block. A payload without `session_id` (bare local
+  invocations) keeps no state and blocks every time; a `session_id` that is
+  not a plain file name is ignored rather than used as a path. Five new
+  bats cases.
+
 ## [2.7.1] - 2026-09-03
 
 ### Fixed
