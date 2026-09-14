@@ -422,7 +422,7 @@ once_tr() {  # a substantive turn with no marker
 TRANSCRIPT
 }
 
-@test "stop-reminder: blocks once per session — the second marker-less Stop of the same session passes" {
+@test "stop-reminder: blocks once per session, the second marker-less Stop of the same session passes" {
   once_tr
   FAKE_HOME="$(mktemp -d)"
   input="{\"hook_event_name\":\"Stop\",\"session_id\":\"sess-once-1\",\"transcript_path\":\"$TR\"}"
@@ -457,7 +457,7 @@ TRANSCRIPT
   rm -rf "$TR" "$FAKE_HOME"
 }
 
-@test "stop-reminder: no session_id in the payload means no state — every marker-less Stop blocks" {
+@test "stop-reminder: no session_id in the payload means no state, every marker-less Stop blocks" {
   once_tr
   FAKE_HOME="$(mktemp -d)"
   input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
