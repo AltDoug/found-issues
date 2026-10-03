@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.3] - 2026-10-03
+
+### Fixed
+
+- **Codex hooks survive plugin updates.** `install-codex-hooks` wrote
+  `hooks.json` entries pointing into Codex's plugin cache, whose path embeds
+  the version (`…/found-issues/2.10.0/hooks/…`); Codex deletes the old
+  version's directory on update, so every update left the hooks pointing at
+  nothing until re-installed — and re-installing changed the entry text,
+  which voids the trust Codex pins to it, so every release also needed a new
+  `/hooks` review. Entries now run stable shims under
+  `$CODEX_HOME/found-issues/hooks/` that resolve the newest cached
+  found-issues at run time (numeric version order, not lexical). The entries
+  are byte-identical across updates: install and trust once. Installed from a
+  checkout outside the cache, a shim runs that checkout. `doctor` reports a
+  shim that no longer resolves as stale; `uninstall-codex-hooks` removes the
+  shims. One-time migration: re-run `found-issues install-codex-hooks`, then
+  `/hooks` in Codex.
+
 ## [2.10.2] - 2026-10-03
 
 Fix batch 4 of the 2026-10-03 audit: process creations. On Git Bash every

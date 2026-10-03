@@ -106,12 +106,15 @@ found-issues install-codex-hooks
 ```
 
 This installs SessionStart (rules + ledger injection), the format
-enforcer, the branch-delete guard, and the PostToolUse annotator into
-`$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`; override with
-`--codex-home <path>` or `FOUND_ISSUES_CODEX_HOME`). It's idempotent —
-safe to re-run — and **must be re-run after every `codex plugin
-update`**: the plugin cache path changes on update, and the installer
-self-heals any stale path left behind.
+enforcer, the branch-delete guard, the PostToolUse annotator and the Stop
+nudge into `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`;
+override with `--codex-home <path>` or `FOUND_ISSUES_CODEX_HOME`). It's
+idempotent — safe to re-run. Since 2.10.3 each entry runs a stable shim
+under `$CODEX_HOME/found-issues/hooks/` that picks the newest found-issues
+in Codex's plugin cache at run time, so the entries stay byte-identical
+across `codex plugin` updates: no re-run, and no new `/hooks` review, per
+release. (Before 2.10.3 the entries pointed into the versioned cache dir
+and had to be re-installed — and re-trusted — after every update.)
 
 Then start a new Codex session. The SessionStart hook injects the agent
 rules and any open ledger entries; skills are available as `fi-log`,

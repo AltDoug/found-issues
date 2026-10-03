@@ -47,7 +47,9 @@ teardown() { fi_teardown_tmp; }
 }
 
 @test "install-codex-hooks: generated commands are space-safe (checkout copied under a path with a space)" {
-  CODEX_HOME="$TMP/codex-home"
+  # Spaces on both sides since 2.10.3: the command names the stable shim
+  # under CODEX_HOME, and the shim bakes in the checkout root.
+  CODEX_HOME="$TMP/codex home"
   copy_root="$TMP/with space/root"
   mkdir -p "$copy_root"
   cp -R "$TEST_REPO_ROOT/bin" "$TEST_REPO_ROOT/lib" "$TEST_REPO_ROOT/hooks" "$copy_root/"
@@ -58,7 +60,9 @@ teardown() { fi_teardown_tmp; }
 
   # Quoted form present, and the space-bearing segment sits inside the
   # quotes (not split into a bare unquoted path).
-  jq -e '.hooks.SessionStart[0].hooks[0].command | test("'\''.*/with space/root/hooks/session-start\\.sh'\''$")' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.SessionStart[0].hooks[0].command | test("'\''.*/codex home/found-issues/hooks/session-start\\.sh'\''$")' "$CODEX_HOME/hooks.json"
+  run env FOUND_ISSUES_SHIM_RESOLVE=1 bash "$CODEX_HOME/found-issues/hooks/session-start.sh"
+  [ "$output" = "$(cd "$copy_root" && pwd -P)" ]
 
   # Full e2e: each generated command string round-trips through `bash -c`
   # as one correctly-split invocation. An unquoted space would word-split
