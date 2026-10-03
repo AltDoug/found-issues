@@ -42,9 +42,9 @@ found-issues install-codex-hooks
 This wires SessionStart, the format enforcer (Write/Edit and apply_patch),
 the branch-delete guard, the PostToolUse annotator and the Stop nudge into
 Codex's own `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`). It's
-idempotent — safe to re-run — and **must be re-run after every `codex
-plugin update`** (the plugin cache path changes on update, and the
-installer self-heals stale paths on re-run).
+idempotent — safe to re-run. Each entry runs a stable shim that follows
+`codex plugin` updates on its own, so it never needs re-running per
+release.
 
 Then tell the user to open an interactive Codex session and run `/hooks`
 once: Codex skips new hook entries until they are trusted. Confirm with

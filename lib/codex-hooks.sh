@@ -96,6 +96,70 @@ fi_shell_quote() {
   printf "'%s'" "${s//\'/\'\\\'\'}"
 }
 
+# === Stable shims (2.10.3) ===
+#
+# hooks.json entries point at $CODEX_HOME/found-issues/hooks/<hook>.sh, never
+# into the plugin cache. Codex's cache path embeds the version and the old
+# version's dir is deleted on update, and Codex pins hook TRUST to the entry
+# text — so cache paths went stale on every update and re-wiring them voided
+# trust (a /hooks review per release). The shim resolves the newest cached
+# found-issues at run time, so the entries never change.
+fi_codex_shim_dir() { printf '%s/found-issues/hooks' "$1"; }
+
+# fi_codex_write_shims <codex_home> — (re)write the five shims. Content may
+# change freely: trust pins the hooks.json entry, not the script it runs.
+fi_codex_write_shims() {
+  local home="$1" dir root h q_home q_root
+  dir="$(fi_codex_shim_dir "$home")"
+  mkdir -p "$dir" || return 1
+  # Physical paths on both sides: the "installed from the cache?" test below
+  # compares them, and /var vs /private/var (macOS) would never match.
+  home="$(cd "$home" && pwd -P)"
+  root="$(cd "$FI_BIN_DIR/.." && pwd -P)"
+  q_home="$(fi_shell_quote "$home")"
+  q_root="$(fi_shell_quote "$root")"
+  for h in session-start format-enforcer pre-branch-delete post-bash-dispatch stop-reminder; do
+    cat > "$dir/$h.sh.tmp" <<EOF || return 1
+#!/usr/bin/env bash
+# found-issues stable Codex hook shim — written by \`found-issues install-codex-hooks\`.
+# hooks.json points HERE, so its entries (and Codex's trust in them) survive
+# plugin updates. Runs the newest found-issues in Codex's plugin cache when it
+# was installed from there, otherwise the checkout it was installed from.
+fi_hook=$h.sh
+fi_codex_home=$q_home
+fi_baked=$q_root
+fi_root=""
+case "\$fi_baked" in
+  "\$fi_codex_home"/plugins/cache/*)
+    fi_best=""
+    for d in "\$fi_codex_home"/plugins/cache/*/found-issues/*/; do
+      [ -f "\${d}hooks/\$fi_hook" ] || continue
+      v="\${d%/}"; v="\${v##*/}"
+      if [ -z "\$fi_best" ]; then fi_best="\$v"; fi_root="\${d%/}"; continue; fi
+      # numeric dotted-version compare: 2.10.0 > 2.9.3
+      a="\$v." b="\$fi_best." newer=0
+      while [ -n "\$a\$b" ]; do
+        x="\${a%%.*}"; y="\${b%%.*}"; a="\${a#*.}"; b="\${b#*.}"
+        case "\$x\$y" in *[!0-9]*) break ;; esac
+        if [ "\${x:-0}" -gt "\${y:-0}" ]; then newer=1; break; fi
+        if [ "\${x:-0}" -lt "\${y:-0}" ]; then break; fi
+      done
+      if [ "\$newer" = 1 ]; then fi_best="\$v"; fi_root="\${d%/}"; fi
+    done
+    ;;
+esac
+[ -n "\$fi_root" ] || fi_root="\$fi_baked"
+if [ "\${FOUND_ISSUES_SHIM_RESOLVE:-}" = 1 ]; then printf '%s\n' "\$fi_root"; exit 0; fi
+if [ ! -f "\$fi_root/hooks/\$fi_hook" ]; then
+  echo "found-issues: \$fi_hook not found under \$fi_codex_home/plugins/cache or \$fi_baked — run found-issues install-codex-hooks" >&2
+  exit 0
+fi
+exec bash "\$fi_root/hooks/\$fi_hook"
+EOF
+    chmod +x "$dir/$h.sh.tmp" && mv "$dir/$h.sh.tmp" "$dir/$h.sh" || return 1
+  done
+}
+
 # Build the JSON object of found-issues' own hook entries (4 events, 5
 # command entries), commands resolved to the current install
 # root. Each script path is single-quoted (fi_shell_quote) so the
@@ -103,7 +167,7 @@ fi_shell_quote() {
 # space or other shell-special character.
 fi_codex_hooks_new_entries_json() {
   local hooks_dir
-  hooks_dir="$(fi_codex_hooks_dir)"
+  hooks_dir="$(fi_codex_shim_dir "$1")"
   local q_session q_fmt q_preb q_postb q_stop
   q_session="$(fi_shell_quote "$hooks_dir/session-start.sh")"
   q_fmt="$(fi_shell_quote "$hooks_dir/format-enforcer.sh")"
@@ -206,8 +270,13 @@ cmd_install_codex_hooks() {
     }
   fi
 
+  fi_codex_write_shims "$codex_home" || {
+    fi_err "install-codex-hooks: could not write the hook shims under $(fi_codex_shim_dir "$codex_home")."
+    return 5
+  }
+
   local new_entries merged
-  new_entries="$(fi_codex_hooks_new_entries_json)"
+  new_entries="$(fi_codex_hooks_new_entries_json "$codex_home")"
   merged="$(jq --argjson new "$new_entries" --arg sentinel "$FI_CODEX_HOOKS_SENTINEL" "
     ${FI_CODEX_HOOKS_STRIP_JQ}
     | .hooks.SessionStart = ((.hooks.SessionStart // []) + (\$new.SessionStart // []))
@@ -230,9 +299,11 @@ cmd_install_codex_hooks() {
   }
 
   local hooks_dir
-  hooks_dir="$(fi_codex_hooks_dir)"
+  hooks_dir="$(fi_codex_shim_dir "$codex_home")"
   cat <<EOF
 install-codex-hooks: wrote $hooks_file
+(each entry runs a stable shim that resolves the current found-issues from
+$(cd "$FI_BIN_DIR/.." && pwd) — or the newest version in Codex's plugin cache)
 
   SessionStart                                   -> $hooks_dir/session-start.sh
   PreToolUse  (Write|Edit|MultiEdit|apply_patch) -> $hooks_dir/format-enforcer.sh
@@ -242,12 +313,8 @@ install-codex-hooks: wrote $hooks_file
 
 NEXT: Codex skips new hook entries until you trust them. Open an
 interactive Codex session and run /hooks once to review and trust them.
-\`found-issues doctor\` shows whether they are trusted.
-
-Re-run \`found-issues install-codex-hooks\` after every \`codex plugin
-update\` — the plugin cache path changes on update, and stale entries
-would otherwise keep pointing at a removed directory (this command
-self-heals that on re-run).
+\`found-issues doctor\` shows whether they are trusted. The entries stay
+byte-identical across \`codex plugin\` updates, so this is a one-time step.
 EOF
 }
 
@@ -286,7 +353,9 @@ cmd_uninstall_codex_hooks() {
     return 5
   }
 
-  printf 'uninstall-codex-hooks: removed hook entries whose command starts with the found-issues sentinel prefix (%s...) from %s\n' \
+  rm -rf "$(fi_codex_shim_dir "$codex_home")" 2>/dev/null || true
+  rmdir "$codex_home/found-issues" 2>/dev/null || true
+  printf 'uninstall-codex-hooks: removed hook entries whose command starts with the found-issues sentinel prefix (%s...) from %s, and the shims\n' \
     "$FI_CODEX_HOOKS_SENTINEL" "$hooks_file"
 }
 
@@ -336,9 +405,15 @@ fi_codex_wiring_state() {
     | select((.value.command // "") | startswith($s))
     | "\($f):\($snake):\($g):\(.key)\t\(.value.command | capture("'"'"'(?<p>.*)'"'"'$").p // "")"
   ' "$hooks_file" 2>/dev/null || true)"
+  local target
   while IFS=$'\t' read -r key script; do
     [[ -z "$key" ]] && continue
     [[ -n "$script" && ! -f "$script" ]] && stale=1
+    # A stable shim: stale when it no longer resolves to a real hook.
+    if [[ -f "$script" && "$script" == "$(fi_codex_shim_dir "$home")"/* ]]; then
+      target="$(FOUND_ISSUES_SHIM_RESOLVE=1 bash "$script" 2>/dev/null || true)"
+      [[ -f "$target/hooks/${script##*/}" ]] || stale=1
+    fi
     grep -Fq "[hooks.state.\"$key\"]" "$home/config.toml" 2>/dev/null || missing=$((missing + 1))
   done <<<"$rows"
   if (( stale )); then printf 'stale'
