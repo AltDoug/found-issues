@@ -22,7 +22,10 @@ fi_sync_usage() {
 Usage: found-issues sync [--dry-run]
 
 Flip [open] entries whose annotations have landed, and tombstone entries whose
-file git confirms was removed. Runs automatically at SessionStart.
+file git confirms was removed, then auto-archive old [fixed] entries
+(FOUND_ISSUES_AUTO_ARCHIVE=off skips that). Also runs automatically at
+SessionStart, on statusline refresh and after `gh pr merge`; those unattended
+runs never archive.
 
   --dry-run   Report what would change; write nothing.
   -h, --help  Show this help.

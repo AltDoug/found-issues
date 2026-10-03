@@ -463,3 +463,18 @@ run_session_start_hook() {
   unset FOUND_ISSUES_BIN
   rm -rf "$FAKE_HOME"
 }
+
+@test "session-start: unattended sync closes entries but never auto-archives" {
+  # SessionStart syncs with no user action, in whatever checkout the session
+  # opened. An archive pass there left an uncommitted rewrite of the tracked
+  # ledger + archive in shared checkouts (v2.9.1). The explicit sync keeps
+  # archiving (tests/cli-sync.bats).
+  fi_init_git
+  fi_seed_archive_bait
+  FAKE_HOME="$(mktemp -d)"
+  HOME="$FAKE_HOME" FOUND_ISSUES_BIN="$FI_BIN" \
+    run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  rm -rf "$FAKE_HOME"
+  [ "$status" -eq 0 ]
+  fi_assert_synced_not_archived
+}

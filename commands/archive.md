@@ -10,8 +10,11 @@ active `docs/found-issues.md` to `docs/found-issues-archive.md`.
 
 ## When to run this
 
-**Usually you don't need to.** Auto-archive runs after every `/found-issues:sync`
-by default, so old fixed entries get moved without you thinking about it. Run
+**Usually you don't need to.** Auto-archive runs after every explicit
+`/found-issues:sync` by default, so old fixed entries get moved without you
+thinking about it. The syncs that fire on their own (SessionStart, the
+statusline refresh, after `gh pr merge`) never archive, so they don't leave
+an archive diff in a checkout nobody is working in. Run
 this command manually when you want to:
 
 - Use custom thresholds: `/found-issues:archive --days=14 --count=20`

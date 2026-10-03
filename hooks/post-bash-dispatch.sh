@@ -325,7 +325,8 @@ if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+(merge|close|reope
     if [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
       ( bash -c "$FOUND_ISSUES_AUTOSYNC_CMD" >/dev/null 2>&1 & ) >/dev/null 2>&1
     else
-      ( "$FI_BIN" sync >/dev/null 2>&1 & ) >/dev/null 2>&1
+      # No auto-archive in an unattended sync — see hooks/session-start.sh.
+      ( FOUND_ISSUES_AUTO_ARCHIVE=off "$FI_BIN" sync >/dev/null 2>&1 & ) >/dev/null 2>&1
     fi
   fi
 fi

@@ -158,3 +158,43 @@ fi_synthetic_stdin() {
   local dir="$1"
   printf '{"model":{"display_name":"Test"},"workspace":{"current_dir":"%s"},"session_id":"t","context_window":{"remaining_percentage":50}}' "$dir"
 }
+
+# Seed a ledger that an archive pass WOULD rewrite, plus a positive signal
+# that sync itself ran: a [fixed] entry 45 days old (past the 30-day archive
+# threshold) and an [open] entry citing a file git confirms was removed, which
+# sync tombstones. Unattended syncs (SessionStart, segment autosync, the
+# post-merge route) must flip the second entry yet leave the first in place —
+# an archive pass there rewrites a tracked file in whatever checkout the
+# session happens to sit in (v2.9.1). Caller must have run fi_init_git.
+fi_seed_archive_bait() {
+  FI_ARCHIVE_BAIT_OLD="$(date -v-45d +%Y-%m-%d 2>/dev/null || date -d '45 days ago' +%Y-%m-%d)"
+  mkdir -p docs src
+  printf 'x\n' > src/gone.py
+  git add src/gone.py
+  git commit -q -m "add gone.py"
+  git rm -q src/gone.py
+  git commit -q -m "delete gone.py"
+  cat > docs/found-issues.md <<EOF2
+# found-issues
+
+- [fixed] $FI_ARCHIVE_BAIT_OLD src/old.py:1 — old bug (PR: org/repo#1) (fixed: $FI_ARCHIVE_BAIT_OLD)
+- [open] $(date +%Y-%m-%d) src/gone.py — cites a deleted file
+EOF2
+}
+
+# Wait (bounded) for a background sync to tombstone the bait entry.
+fi_wait_for_bait_tombstone() {
+  local _
+  for _ in $(seq 1 40); do
+    grep -q 'closure: tombstone' docs/found-issues.md 2>/dev/null && return 0
+    sleep 0.25
+  done
+  return 1
+}
+
+# Sync ran (tombstone landed) and archived nothing.
+fi_assert_synced_not_archived() {
+  grep -q 'closure: tombstone' docs/found-issues.md
+  grep -Fq "$FI_ARCHIVE_BAIT_OLD src/old.py:1" docs/found-issues.md
+  [ ! -f docs/found-issues-archive.md ]
+}

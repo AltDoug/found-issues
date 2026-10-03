@@ -157,3 +157,17 @@ _wait_for_marker() {
   done
   grep -q 'closure: tombstone' docs/found-issues.md
 }
+
+@test "segment-autosync: background sync closes entries but never auto-archives" {
+  # The statusline fires this sync every 600s with no user action; an archive
+  # pass there rewrote tracked files in shared checkouts (v2.9.1).
+  unset FOUND_ISSUES_AUTOSYNC_CMD
+  fi_seed_archive_bait
+  fi_run status --format=segment --cwd "$TMP"
+  [ "$status" -eq 0 ]
+  fi_wait_for_bait_tombstone
+  # The tombstone write and the archive pass are separate rewrites; give an
+  # archive pass that follows the closure time to land before asserting.
+  sleep 1
+  fi_assert_synced_not_archived
+}
