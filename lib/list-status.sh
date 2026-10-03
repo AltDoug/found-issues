@@ -173,7 +173,8 @@ cmd_status() {
         # Default: invoke ourselves as argv, never through a bash -c string —
         # an install path containing a space (e.g. C:/Users/John Doe/...)
         # word-splits inside the string and exits 127 silently.
-        ( "$0" sync >/dev/null 2>&1 & ) >/dev/null 2>&1
+        # No auto-archive in an unattended sync — see hooks/session-start.sh.
+        ( FOUND_ISSUES_AUTO_ARCHIVE=off "$0" sync >/dev/null 2>&1 & ) >/dev/null 2>&1
       fi
     fi
   fi

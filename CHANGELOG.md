@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.1] - 2026-10-03
+
+### Fixed
+
+- **Unattended syncs no longer auto-archive.** Sync fires with no user action
+  from three places: SessionStart, the statusline segment autosync (every
+  600 s) and the post-merge hook route (`gh pr merge|close|reopen`). Each one
+  ended in the auto-archive pass, so once a `[fixed]` entry passed 30 days
+  (or more than 50 were fixed) the first session to render moved entries into
+  `docs/found-issues-archive.md` and left an uncommitted rewrite of two
+  tracked files in whatever checkout it sat in, shared and merged worktrees
+  included. Those three callers now run sync with
+  `FOUND_ISSUES_AUTO_ARCHIVE=off`; an explicit `/found-issues:sync` (or
+  `found-issues sync`) still archives. Closures (`[open]` → `[fixed]`) are
+  unchanged. An env var rather than a new sync flag because SessionStart
+  resolves the CLI via `PATH`, which can be an older CLI that would reject
+  an unknown flag and skip the sync entirely; every CLI since v0.1.9 honors
+  the variable. Codex hooks run the same scripts and get the fix too.
+
 ## [2.9.0] - 2026-10-03
 
 ### Changed

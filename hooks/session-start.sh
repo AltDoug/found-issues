@@ -356,8 +356,14 @@ if [[ -z "$issues_file" || ! -f "$issues_file" ]]; then
   fi_flush_codex_exit
 fi
 
-# Run sync silently (catches up on PR merges, tombstone closures)
-"$FI_BIN" sync >/dev/null 2>&1 || true
+# Run sync silently (catches up on PR merges, tombstone closures). No
+# auto-archive: this sync runs with no user action in whatever checkout the
+# session opened, and an archive pass rewrites the TRACKED ledger + archive
+# there, leaving an uncommitted diff nobody asked for (v2.9.1). The explicit
+# `found-issues sync` keeps archiving. An env var rather than a sync flag:
+# FI_BIN resolves via PATH and may be an older CLI, which would reject an
+# unknown flag and skip the sync entirely; every CLI since v0.1.9 honors this.
+FOUND_ISSUES_AUTO_ARCHIVE=off "$FI_BIN" sync >/dev/null 2>&1 || true
 
 # Re-read [open] entries after sync
 open_entries=""

@@ -333,3 +333,15 @@ MOCK
   for i in 1 2 3 4 5; do [ -f "$marker" ] && break; sleep 1; done
   [ -f "$marker" ]
 }
+
+@test "pr merge: background sync closes entries but never auto-archives" {
+  # `gh pr merge` from an agent is not a request to archive; the background
+  # sync it triggers must not rewrite the tracked archive (v2.9.1).
+  unset FOUND_ISSUES_AUTOSYNC_CMD
+  fi_seed_archive_bait
+  run run_hook 'gh pr merge 7 --squash' ''
+  [ "$status" -eq 0 ]
+  fi_wait_for_bait_tombstone
+  sleep 1
+  fi_assert_synced_not_archived
+}
