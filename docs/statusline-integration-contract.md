@@ -48,6 +48,9 @@ If a snapshot test fails after a code change, the fix lives in the code change �
 - `lib/list-status.sh` — segment branch of `cmd_status` (the emit point). Cited
   by symbol, not line: the old `bin/found-issues` line number had drifted
   through several releases before `cmd_status` moved out of the CLI entirely.
+- `lib/segment-cache.sh` — the builtin-only fast path that serves a cached segment
+  (v2.9.0). It prints exactly the bytes the emit point produced for the same ledger
+  bytes, version, stale-days, locale and date; `tests/cli-status-segment-cache.bats`.
 - `tests/cli-status.bats` — broader status format tests (label policy, plain/json formats)
 - `tests/cli-statusline.bats` — install-statusline integration tests
 - `commands/setup.md` — orchestrates the splice into user statuslines

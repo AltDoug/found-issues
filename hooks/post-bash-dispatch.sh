@@ -37,7 +37,22 @@
 
 set -euo pipefail
 
-input="$(cat)"
+IFS= read -r -d '' input || true
+
+# Zero-fork relevance gate (lib/hook-gate.sh): every route below needs
+# "commit", or "gh" plus one of its four verbs, in the command. Anything else
+# exits here, before any jq/$(...). A missing lib or an untrustworthy gate
+# falls through to the full path.
+__fi_hook_dir="${BASH_SOURCE[0]%/*}"
+[[ "$__fi_hook_dir" == "${BASH_SOURCE[0]}" ]] && __fi_hook_dir=.
+# shellcheck source=../lib/hook-gate.sh
+if [[ -f "$__fi_hook_dir/../lib/hook-gate.sh" ]] \
+    && source "$__fi_hook_dir/../lib/hook-gate.sh" && fi_gate_text "$input"; then
+  fi_gate_has commit \
+    || { fi_gate_has gh && fi_gate_has create merge close reopen; } \
+    || exit 0
+fi
+
 command -v jq >/dev/null 2>&1 || exit 0
 
 get_field() {

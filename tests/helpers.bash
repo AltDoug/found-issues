@@ -20,6 +20,10 @@ export FOUND_ISSUES_LIB_DIR="$FI_LIB_DIR"
 # setup() (see tests/cli-status-autosync.bats).
 export FOUND_ISSUES_SEGMENT_AUTOSYNC=off
 
+# Segment renders write a cache (lib/segment-cache.sh) under the cache dir;
+# keep it out of the real ~/.cache. Tests that inspect it set their own.
+export FOUND_ISSUES_CACHE_DIR="${BATS_RUN_TMPDIR:-${TMPDIR:-/tmp}}/fi-test-cache"
+
 # Ensure the CLI is executable (bats clones into a tempdir, may lose +x)
 chmod +x "$FI_BIN" 2>/dev/null || true
 

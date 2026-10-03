@@ -101,6 +101,15 @@ cmd_status() {
   local file
   file="$(fi_find_issues_file "$search_root")" || true
 
+  # Segment cache (lib/segment-cache.sh): key and ledger bytes are taken
+  # BEFORE counting, so a write that lands mid-render leaves a cache that no
+  # longer matches the file instead of one that hides the write.
+  local _seg_cacheable=0
+  if [[ "$format" == "segment" && -n "$file" && -f "$file" ]] \
+      && fi_segment_cache_key "$file" && fi_segment_read_ledger "$file"; then
+    _seg_cacheable=1
+  fi
+
   local critical=0 issues=0 in_pr=0 stale=0 total_open=0
   if [[ -n "$file" && -f "$file" ]]; then
     critical="$(fi_count_critical "$file")"
@@ -154,7 +163,9 @@ cmd_status() {
     [[ "$_autosync_last" =~ ^[0-9]+$ ]] || _autosync_last=0
     _autosync_age=$(( _autosync_now - _autosync_last ))
     if (( _autosync_age >= _autosync_interval )); then
-      : >"$_autosync_ts" 2>/dev/null || true
+      # The epoch goes INTO the stamp too: the segment fast path reads it with
+      # a builtin instead of stat'ing the mtime. Readers here keep the mtime.
+      printf '%s\n' "$_autosync_now" >"$_autosync_ts" 2>/dev/null || true
       if [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
         # Testing knob: a self-contained command STRING, dispatched via bash -c.
         ( bash -c "$FOUND_ISSUES_AUTOSYNC_CMD" >/dev/null 2>&1 & ) >/dev/null 2>&1
@@ -233,6 +244,7 @@ cmd_status() {
       [[ "$issues" -gt 0 ]] && parts+=($'\033[31m'"$issues $issues_word"$'\033[0m')
       [[ "$in_pr" -gt 0 ]] && parts+=($'\033[33m'"$in_pr in PR"$'\033[0m')
       [[ "$stale" -gt 0 ]] && parts+=($'\033[2m'"$stale stale"$'\033[0m')
+      local seg=""
       if [[ ${#parts[@]} -gt 0 ]]; then
         local out=""
         local first=1
@@ -243,8 +255,10 @@ cmd_status() {
             out="$out"$' · '"$p"
           fi
         done
-        printf ' | %s' "$out"
+        printf -v seg ' | %s' "$out"
       fi
+      (( _seg_cacheable )) && fi_segment_cache_put "$seg"
+      printf '%s' "$seg"
       ;;
     *)
       fi_err "Unknown format: $format (expected segment|plain|json)"

@@ -388,11 +388,28 @@ fi_annotate_auto() {
   local -a cand_paths=() cand_lnums=() cand_lends=()
   local ann_tfs=""
   local line tf
+  # Builtin pre-filter (2026-10-03, Windows token leak): fi_parse_entry and
+  # the field greps below cost ~30 process creations per [open] entry, and the
+  # post-commit hook runs this on every commit. e_path is a verbatim substring
+  # of the line, and each of the three match forms below needs the touched
+  # file's basename inside e_path — so a line containing no touched basename
+  # can never match and is skipped before any fork.
+  local -a tf_bases=()
+  while IFS= read -r tf; do
+    [[ -z "$tf" ]] && continue
+    tf_bases+=("${tf##*/}")
+  done <<<"$touched_files"
+  local b may_match
   # Final-partial-line guard (READ-LOOP GUARD, bin/found-issues). Scan-only, but a
   # dropped final entry never becomes a candidate — it would silently miss
   # annotation while pass 3 below rewrites the file around it.
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ ^-\ \[open\] ]] || continue
+    may_match=0
+    for b in ${tf_bases[@]+"${tf_bases[@]}"}; do
+      if [[ "$line" == *"$b"* ]]; then may_match=1; break; fi
+    done
+    (( may_match )) || continue
     local e_data e_path e_line e_line_end e_symptom
     e_data="$(fi_parse_entry "$line")" || continue
     e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"

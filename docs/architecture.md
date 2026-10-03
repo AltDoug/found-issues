@@ -55,6 +55,10 @@ How the pieces fit together.
                     │    parse + count entries         │
                     │  • detect-mode.sh — mode         │
                     │    auto-detection (1h cache)     │
+                    │  • hook-gate.sh — zero-fork      │
+                    │    relevance gates (Bash hooks)  │
+                    │  • segment-cache.sh — builtin    │
+                    │    statusline fast path          │
                     │  • one module per subcommand     │
                     │    family — log.sh, defer.sh,    │
                     │    resolve.sh, list-status.sh,   │
