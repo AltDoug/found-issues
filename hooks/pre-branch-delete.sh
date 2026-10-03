@@ -289,32 +289,6 @@ source "$lib_dir/parse-entries.sh"
 # shellcheck source=../lib/canonicalize.sh
 source "$lib_dir/canonicalize.sh"
 
-# Compute the dedup key for a single entry line. Mirrors cmd_log's branching
-# (path:line, path-only, or abstract). Echoes empty on parse failure.
-fi_dedup_key_for_line() {
-  local line="$1"
-  local data path line_num symptom
-  # LC_ALL=C: $data's symptom= line carries the entry's raw symptom text,
-  # which routinely contains em-dashes (CONTRIBUTING.md's own house style).
-  # Under a UTF-8 locale, BSD grep on macOS dies with "illegal byte
-  # sequence" scanning that multi-byte content even when matching an
-  # ASCII-only anchor like ^path=; GNU grep on Linux is exposed to the
-  # equivalent multibyte failure. Byte-mode grep is safe here since every
-  # pattern below is plain ASCII. Same fix as elsewhere in hooks/ + lib/
-  # (see CHANGELOG's stop-reminder/session-start LC_ALL=C entries).
-  data="$(fi_parse_entry "$line" 2>/dev/null)" || return 1
-  path="$(printf '%s' "$data" | LC_ALL=C grep '^path=' | head -1 | cut -d= -f2-)"
-  line_num="$(printf '%s' "$data" | LC_ALL=C grep '^line=' | head -1 | cut -d= -f2-)"
-  symptom="$(printf '%s' "$data" | LC_ALL=C grep '^symptom=' | head -1 | cut -d= -f2-)"
-  if [[ -n "$line_num" ]]; then
-    fi_dedup_key "$path" "$line_num" "$symptom"
-  elif [[ "$path" == */* || "$path" == *.* ]]; then
-    fi_dedup_key "$path" "" "$symptom"
-  else
-    fi_dedup_key_abstract "$symptom"
-  fi
-}
-
 # Check each target, grouped by the directory git runs in (`git -C dir`).
 problems=()
 _fi_orig_dir="$PWD"
@@ -353,6 +327,11 @@ while IFS= read -r _fi_dir; do
     continue
   fi
 
+  # Main's dedup keys (ledger + archive) are the same for every branch in
+  # this repo: built lazily, once, the first time a branch needs them. The
+  # per-branch rebuild cost ~25 processes per main ledger line per branch
+  # (audit hook-12); keys are now builtin (fi_entry_dedup_key_v).
+  main_keyset="" _fi_keyset_built=0
   for rec in "${branches[@]}"; do
     [[ "${rec%%$'\t'*}" == "$_fi_dir" ]] || continue
     branch="${rec#*$'\t'}"
@@ -372,7 +351,12 @@ while IFS= read -r _fi_dir; do
       || git show "origin/$branch:$rel_path" 2>/dev/null \
       || true)"
     [[ -z "$branch_content" ]] && continue
+    # Nothing [open] on the branch = nothing to lose.
+    _fi_re_open=$'(^|\n)-[[:space:]]+\\[open\\]'
+    [[ "$branch_content" =~ $_fi_re_open ]] || continue
 
+    if (( ! _fi_keyset_built )); then
+    _fi_keyset_built=1
     # Get default branch's version
     main_content="$(git show "origin/$default_branch:$rel_path" 2>/dev/null \
       || git show "$default_branch:$rel_path" 2>/dev/null \
@@ -404,30 +388,24 @@ while IFS= read -r _fi_dir; do
     # insight: a branch entry that was promoted is findable on main regardless
     # of whether main has since flipped its status, appended
     # (PR:..)/(fixed:..) annotations, or archived it out of the working file.
-    main_keyset=""
     _fi_main_and_archive="$main_content"$'\n'"$archive_content"
     if [[ -n "$_fi_main_and_archive" ]]; then
       while IFS= read -r m_line; do
         if [[ "$m_line" =~ ^-[[:space:]]+\[(open|deferred|fixed)\] ]]; then
-          m_key="$(fi_dedup_key_for_line "$m_line" 2>/dev/null || true)"
-          [[ -n "$m_key" ]] && main_keyset+="${m_key}"$'\n'
+          fi_entry_dedup_key_v "$m_line" "$repo_root" && main_keyset+="$FI_KEY"$'\n'
         fi
       done <<< "$_fi_main_and_archive"
+    fi
     fi
 
     # Find branch [open] entries whose dedup key is not in main's keyset.
     branch_unpromoted=""
     while IFS= read -r line; do
       if [[ "$line" =~ ^-[[:space:]]+\[open\] ]]; then
-        b_key="$(fi_dedup_key_for_line "$line" 2>/dev/null || true)"
-        if [[ -z "$b_key" ]]; then
+        if ! fi_entry_dedup_key_v "$line" "$repo_root"; then
           # Parse failed — treat as unpromoted (safer than silently allowing).
           branch_unpromoted+="$line"$'\n'
-        # LC_ALL=C: dedup keys retain the symptom's raw bytes (canonicalize.sh
-        # lowercases/collapses whitespace but never strips non-ASCII), so an
-        # em-dash-bearing key hits the same BSD/GNU grep multibyte failure as
-        # above.
-        elif ! printf '%s' "$main_keyset" | LC_ALL=C grep -Fxq -- "$b_key"; then
+        elif [[ $'\n'"$main_keyset" != *$'\n'"$FI_KEY"$'\n'* ]]; then
           branch_unpromoted+="$line"$'\n'
         fi
       fi

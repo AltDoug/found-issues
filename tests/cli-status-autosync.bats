@@ -54,7 +54,7 @@ _wait_for_marker() {
   _wait_for_marker
   [ -e "$MARKER" ]
   # Timestamp file was created
-  [ -f "$FOUND_ISSUES_CACHE_DIR/segment-autosync-ts" ]
+  [ -f "$(fi_autosync_ts "$FOUND_ISSUES_CACHE_DIR")" ]
 }
 
 @test "segment-autosync: skips re-trigger when within interval" {
@@ -93,7 +93,7 @@ _wait_for_marker() {
   [ "$status" -eq 0 ]
   sleep 0.4
   [ ! -e "$MARKER" ]
-  [ ! -f "$FOUND_ISSUES_CACHE_DIR/segment-autosync-ts" ]
+  [ ! -f "$(fi_autosync_ts "$FOUND_ISSUES_CACHE_DIR")" ]
 }
 
 @test "segment-autosync: only fires for segment format, not plain or json" {
@@ -102,7 +102,7 @@ _wait_for_marker() {
   [ "$status" -eq 0 ]
   sleep 0.4
   [ ! -e "$MARKER" ]
-  [ ! -f "$FOUND_ISSUES_CACHE_DIR/segment-autosync-ts" ]
+  [ ! -f "$(fi_autosync_ts "$FOUND_ISSUES_CACHE_DIR")" ]
 
   # json
   fi_run status --format=json --cwd "$TMP"

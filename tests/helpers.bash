@@ -208,3 +208,11 @@ fi_seed_entry() {
   mkdir -p docs
   printf -- '- [open] %s %s\n' "$(date +%Y-%m-%d)" "$1" >> docs/found-issues.md
 }
+
+# Per-ledger segment-autosync stamp (2.10.2+, lib/segment-cache.sh
+# fi_autosync_stamp_path). Args: $1 = cache dir, $2 = ledger path (default
+# $TMP/docs/found-issues.md, the path cmd_status resolves for --cwd "$TMP").
+fi_autosync_ts() {
+  local ledger="${2:-$(cd "$TMP" && pwd)/docs/found-issues.md}"
+  printf '%s/segment-autosync/%s' "$1" "${ledger//[^A-Za-z0-9._-]/_}"
+}

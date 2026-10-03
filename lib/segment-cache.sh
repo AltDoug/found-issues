@@ -32,6 +32,18 @@
 #   fi_segment_cache_get                    sets FI_SEG_OUT on a hit
 #   fi_segment_cache_put <segment>          best effort, never fails
 
+# fi_autosync_stamp_path <cache dir> <ledger> — the per-ledger autosync
+# stamp (shared by this fast path and cmd_status). A name too long for one
+# path component falls back to the pre-2.10.2 global stamp.
+fi_autosync_stamp_path() {
+  local name="${2//[^A-Za-z0-9._-]/_}"
+  if (( ${#name} <= 200 )); then
+    printf '%s' "$1/segment-autosync/$name"
+  else
+    printf '%s' "$1/segment-autosync-ts"
+  fi
+}
+
 fi_segment_clock_ok() {
   (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) ))
 }
@@ -85,7 +97,7 @@ fi_segment_cache_put() {
 # (fi_find_issues_file: cd + logical pwd, then walk up checking
 # docs/found-issues.md before .found-issues.md, never checking "/").
 fi_segment_fast_path() {
-  local format="segment" cwd="" search_root saved dir file="" ts last now interval
+  local format="segment" cwd="" search_root saved dir file="" ts last now interval name
   fi_segment_clock_ok || return 1
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -120,7 +132,9 @@ fi_segment_fast_path() {
     interval="${FOUND_ISSUES_SEGMENT_AUTOSYNC_INTERVAL:-600}"
     [[ "$interval" =~ ^[0-9]+$ ]] || return 1
     [[ -n "${FOUND_ISSUES_CACHE_DIR:-}" || -n "${HOME:-}" ]] || return 1
-    ts="${FOUND_ISSUES_CACHE_DIR:-$HOME/.cache/found-issues}/segment-autosync-ts"
+    ts="${FOUND_ISSUES_CACHE_DIR:-$HOME/.cache/found-issues}"
+    name="${file//[^A-Za-z0-9._-]/_}"
+    if (( ${#name} <= 200 )); then ts+="/segment-autosync/$name"; else ts+="/segment-autosync-ts"; fi
     [[ -f "$ts" ]] || return 1
     last=""
     IFS= read -r last <"$ts" || true

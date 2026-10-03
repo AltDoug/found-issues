@@ -113,23 +113,44 @@ cmd_sync() {
   local shallow_repo=0
   [[ "$(git rev-parse --is-shallow-repository 2>/dev/null || true)" == "true" ]] && shallow_repo=1
 
+  # Loop-invariant; was one `git rev-parse` per path entry (audit ledger-5).
+  local repo_root
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+  # One gh call per distinct PR per run, answered as "state<TAB>base<TAB>
+  # mergedAt" by gh's built-in --jq — no jq binary needed, so a machine with
+  # gh but no jq closes merged PRs too (audit ledger-7, ledger-8b). Fields are
+  # \x1f-separated (tab is IFS whitespace: an empty field would collapse).
+  # Memo lines: "\n<repo#N>\x1e<answer>"; an empty answer means gh failed.
+  local _fi_pr_memo=$'\n'
+  _fi_pr_info() {
+    local ref="$1" key=$'\n'"$1"$'\x1e'
+    if [[ "$_fi_pr_memo" == *"$key"* ]]; then
+      _fi_pr_ans="${_fi_pr_memo#*"$key"}"
+      _fi_pr_ans="${_fi_pr_ans%%$'\n'*}"
+      return 0
+    fi
+    _fi_pr_ans="$(gh pr view "${ref##*#}" --repo "${ref%#*}" \
+      --json state,baseRefName,mergedAt \
+      --jq '[.state, .baseRefName, (.mergedAt // "")] | join("\u001f")' 2>/dev/null || true)"
+    _fi_pr_memo+="$ref"$'\x1e'"$_fi_pr_ans"$'\n'
+  }
+
   local line
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   # Worst case of the class: SessionStart runs sync automatically, so the loss
   # happened with no user action and no output saying anything was removed.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^-\ \[open\] ]]; then
-      local e_data e_path e_prs e_commits
+      local e_path e_prs e_commits
       local -a demote_pr_refs=()
       local -a demote_commit_refs=()
       local rename_target="" rename_source=""
-      e_data="$(fi_parse_entry "$line")" || { printf '%s\n' "$line" >>"$tmp"; continue; }
-      e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
-      e_prs="$(printf '%s' "$e_data" | grep '^prs=' | head -1 | cut -d= -f2-)"
-      e_commits="$(printf '%s' "$e_data" | grep '^commits=' | head -1 | cut -d= -f2-)"
-      local e_prs_auto e_commits_auto
-      e_prs_auto="$(printf '%s' "$e_data" | grep '^prs_auto=' | head -1 | cut -d= -f2-)"
-      e_commits_auto="$(printf '%s' "$e_data" | grep '^commits_auto=' | head -1 | cut -d= -f2-)"
+      fi_parse_entry_vars "$line" || { printf '%s\n' "$line" >>"$tmp"; continue; }
+      e_path="$FE_path"
+      e_prs="$FE_prs"
+      e_commits="$FE_commits"
+      local e_prs_auto="$FE_prs_auto" e_commits_auto="$FE_commits_auto"
 
       local closure_kind="" closure_label=""
 
@@ -150,14 +171,13 @@ cmd_sync() {
         done
         IFS="$IFS_old"
       fi
-      if [[ -n "$e_prs_auto" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+      if [[ -n "$e_prs_auto" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1; then
         local IFS_old="$IFS"
         IFS=','
         for pr_ref in $e_prs_auto; do
           IFS="$IFS_old"
-          local a_num="${pr_ref##*#}" a_repo="${pr_ref%#*}" a_state
-          a_state="$(gh pr view "$a_num" --repo "$a_repo" --json state --jq '.state // empty' 2>/dev/null || true)"
-          if [[ "$a_state" == "MERGED" ]]; then
+          _fi_pr_info "$pr_ref"
+          if [[ "${_fi_pr_ans%%$'\x1f'*}" == "MERGED" ]]; then
             awaiting_confirm+=("$(fi_entry_loc "$line" 2>/dev/null || printf '%s' "$e_path") — suggested (PR-auto: $pr_ref) has merged")
           fi
         done
@@ -165,24 +185,19 @@ cmd_sync() {
       fi
 
       # Check PR annotations (single gh call per PR returning all needed fields)
-      if [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+      if [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1; then
         local IFS_old="$IFS"
         IFS=','
         for pr_ref in $e_prs; do
           IFS="$IFS_old"
-          local pr_num="${pr_ref##*#}"
-          local pr_repo="${pr_ref%#*}"
-          local pr_json
-          pr_json="$(gh pr view "$pr_num" --repo "$pr_repo" \
-            --json state,baseRefName,mergedAt,isDraft 2>/dev/null || true)"
-          if [[ -z "$pr_json" ]]; then
+          _fi_pr_info "$pr_ref"
+          if [[ -z "$_fi_pr_ans" ]]; then
             # gh empty: warn at end of sync (don't demote — could be transient)
             gh_empty_warnings+=("$pr_ref")
             continue
           fi
-          local pr_state pr_branch
-          pr_state="$(printf '%s' "$pr_json" | jq -r '.state // empty')"
-          pr_branch="$(printf '%s' "$pr_json" | jq -r '.baseRefName // empty')"
+          local pr_state pr_branch pr_merged_at
+          IFS=$'\x1f' read -r pr_state pr_branch pr_merged_at <<<"$_fi_pr_ans"
           if [[ "$pr_state" == "MERGED" && ( -z "$default_branch" || "$pr_branch" == "$default_branch" ) ]]; then
             closure_kind="pr"
             closure_label="(fixed: $today)"
@@ -191,8 +206,6 @@ cmd_sync() {
           fi
 
           # A1: CLOSED-without-merge → mark for demotion (don't break — another PR may have merged)
-          local pr_merged_at
-          pr_merged_at="$(printf '%s' "$pr_json" | jq -r '.mergedAt // empty')"
           if [[ "$pr_state" == "CLOSED" && -z "$pr_merged_at" ]]; then
             demote_pr_refs+=("$pr_ref")
           fi
@@ -259,8 +272,6 @@ cmd_sync() {
           # it), so this only catches the legacy multi-repo shape.
           :
         elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
-          local repo_root
-          repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           local full_path="$repo_root/$e_path"
           # fi_parse_entry takes the first whitespace-delimited token as the
           # path (lib/parse-entries.sh) — it has to, since the location field
@@ -274,9 +285,15 @@ cmd_sync() {
           # before declaring a closure. Deliberately does NOT widen the parser:
           # that would shift dedup keys and break the `path symbol ~range`
           # forms first_token exists to support.
+          # Only consulted when the parsed path is missing (both branches below
+          # are no-ops for a present file), so only computed then — it was a
+          # sed per path entry per sync (audit ledger-5). Builtin strip, same
+          # anchored prefix the parser uses.
           local recovered_loc=""
-          if [[ "$e_path" != *[[:space:]]* ]]; then
-            recovered_loc="$(printf '%s' "$line" | sed -E 's/^- \[(open|deferred|fixed)\]( \[!\])? [0-9]{4}-[0-9]{2}-[0-9]{2} //')"
+          if [[ ! -e "$full_path" && "$e_path" != *[[:space:]]* ]]; then
+            local re_entry_prefix='^- \[(open|deferred|fixed)\]( \[!\])? [0-9]{4}-[0-9]{2}-[0-9]{2} '
+            recovered_loc="$line"
+            [[ "$line" =~ $re_entry_prefix ]] && recovered_loc="${line#"${BASH_REMATCH[0]}"}"
             recovered_loc="${recovered_loc%% — *}"
             recovered_loc="${recovered_loc%:[0-9]*}"
             # only meaningful when the raw location actually contained spaces
@@ -307,7 +324,15 @@ cmd_sync() {
             # change removes: a spaced filename's truncated prefix is itself
             # never tracked, so the oracle still declines.
             local detected_new_path="" matched_src=""
-            if [[ -n "$recovered_loc" ]] \
+            # A rename source and a git-confirmed removal both need the path
+            # in history. A never-tracked location (abstract topic, typo,
+            # gitignored file) can be neither, so skip the whole-history
+            # rename scan it used to pay on every sync (audit ledger-6).
+            if [[ -z "$(cd "$repo_root" && git log -1 --format=%H -- "$e_path" 2>/dev/null)" ]] \
+               && { [[ -z "$recovered_loc" ]] \
+                    || [[ -z "$(cd "$repo_root" && git log -1 --format=%H -- "$recovered_loc" 2>/dev/null)" ]]; }; then
+              : # never tracked — leave the entry [open]
+            elif [[ -n "$recovered_loc" ]] \
                && detected_new_path="$(cd "$repo_root" && fi_detect_rename "$recovered_loc")"; then
               matched_src="$recovered_loc"
             elif detected_new_path="$(cd "$repo_root" && fi_detect_rename "$e_path")"; then

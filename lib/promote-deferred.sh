@@ -57,10 +57,7 @@ cmd_promote_deferred() {
   local matches=()
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue
-    local lower_entry lower_match
-    lower_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
-    lower_match="$(printf '%s' "$match" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$lower_entry" == *"$lower_match"* ]]; then
+    if fi_icontains "$entry" "$match"; then
       matches+=("$entry")
     fi
   done < <(fi_entries "$file" deferred 2>/dev/null || true)
@@ -70,10 +67,7 @@ cmd_promote_deferred() {
     local open_matches=()
     while IFS= read -r entry; do
       [[ -z "$entry" ]] && continue
-      local lower_entry lower_match
-      lower_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
-      lower_match="$(printf '%s' "$match" | tr '[:upper:]' '[:lower:]')"
-      if [[ "$lower_entry" == *"$lower_match"* ]]; then
+      if fi_icontains "$entry" "$match"; then
         open_matches+=("$entry")
       fi
     done < <(fi_entries "$file" open 2>/dev/null || true)

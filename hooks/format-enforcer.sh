@@ -27,7 +27,14 @@ if [[ "${FOUND_ISSUES_FORMAT_ENFORCER:-on}" == "off" ]]; then
   exit 0
 fi
 
-input="$(cat)"
+IFS= read -r -d '' input || true
+
+# Zero-fork gate (audit hook-6): every Write/Edit/MultiEdit/apply_patch runs
+# this hook, and it used to fork cat + two jq before learning the file was
+# not a ledger. Both accepted targets end in "found-issues.md", which JSON
+# escaping cannot hide except through \u — so a payload without either
+# substring cannot be a ledger edit.
+[[ "$input" == *found-issues.md* || "$input" == *'\u'* ]] || exit 0
 
 # Extract fields via jq (with grep fallback)
 get_field() {

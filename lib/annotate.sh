@@ -30,23 +30,32 @@
 # list prints and --pick matches.
 # Returns 1 when the line does not parse as an entry with a path.
 fi_entry_loc() {
-  local line="$1"
-  local e_data e_path e_line e_line_end
-  e_data="$(fi_parse_entry "$line")" || return 1
-  e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
-  e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
+  fi_entry_loc_v "$1" || return 1
+  printf '%s' "$FE_loc"
+}
+
+# Same token in $FE_loc, with every other FE_* field of the entry set too
+# (fi_parse_entry_vars) — no subshell, for in-process callers.
+fi_entry_loc_v() {
+  fi_parse_entry_vars "$1" || return 1
+  [[ -z "$FE_path" ]] && return 1
   # The parser splits `:23-49` into a numeric start plus line_end so the three
   # arithmetic consumers of `line` stay correct; rejoining is this function's
   # job, since --pick matches the location token by exact string equality.
-  e_line_end="$(printf '%s' "$e_data" | grep '^line_end=' | head -1 | cut -d= -f2-)"
-  [[ -z "$e_path" ]] && return 1
-  if [[ -n "$e_line" && -n "$e_line_end" ]]; then
-    printf '%s:%s-%s' "$e_path" "$e_line" "$e_line_end"
-  elif [[ -n "$e_line" ]]; then
-    printf '%s:%s' "$e_path" "$e_line"
+  if [[ -n "$FE_line" && -n "$FE_line_end" ]]; then
+    FE_loc="$FE_path:$FE_line-$FE_line_end"
+  elif [[ -n "$FE_line" ]]; then
+    FE_loc="$FE_path:$FE_line"
   else
-    printf '%s' "$e_path"
+    FE_loc="$FE_path"
   fi
+}
+
+# fi_nl_has <newline-terminated list> <item> — exact whole-line membership,
+# builtin. Replaces `printf | grep -Fxq`, a pipeline per ledger line that cost
+# ~3,000 process creations per --pick on a 1,500-line ledger (audit annot-1).
+fi_nl_has() {
+  [[ $'\n'"$1" == *$'\n'"$2"$'\n'* ]]
 }
 
 # Split one --pick flag value into newline-separated selectors. A value
@@ -108,17 +117,15 @@ fi_annotate_apply_picks() {
   # reports "no [open] entry matches" for an entry that is plainly there.
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ ^-\ \[open\] ]] || continue
-    loc="$(fi_entry_loc "$line")" || continue
-    sym=""
+    fi_entry_loc_v "$line" || continue
+    loc="$FE_loc"
+    sym="$FE_symptom"
     for (( i = 0; i < ${#pick_arr[@]}; i++ )); do
       pick="${pick_arr[$i]}"
       if [[ "$pick" == *" — "* ]]; then
         p_loc="${pick%% — *}"
         p_frag="${pick#* — }"
         [[ "$loc" == "$p_loc" ]] || continue
-        if [[ -z "$sym" ]]; then
-          sym="$(fi_parse_entry "$line" | grep '^symptom=' | head -1 | cut -d= -f2-)"
-        fi
         [[ "$sym" == *"$p_frag"* ]] || continue
       else
         [[ "$loc" == "$pick" ]] || continue
@@ -151,7 +158,7 @@ fi_annotate_apply_picks() {
   trap "rm -f '$tmp'" EXIT
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
+    if [[ -n "$auto_set" ]] && fi_nl_has "$auto_set" "$line"; then
       if [[ "$line" == *"$annotation"* ]]; then
         already=$((already + 1))
         printf '%s\n' "$line" >>"$tmp"
@@ -417,9 +424,9 @@ fi_annotate_auto() {
       if [[ "$line" == *"$b"* ]]; then may_match=1; break; fi
     done
     (( may_match )) || continue
-    local e_data e_path e_line e_line_end e_symptom
-    e_data="$(fi_parse_entry "$line")" || continue
-    e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+    local e_path e_line e_line_end e_symptom
+    fi_entry_loc_v "$line" || continue
+    e_path="$FE_path"
     [[ -z "$e_path" ]] && continue
     # Repo-prefixed locations (`LendMatrix-svc:src/foo.ts`, #123) name another
     # repo's file. The comparison below matches with glob suffix tolerance, so
@@ -443,16 +450,16 @@ fi_annotate_auto() {
       ann_tfs+="$matched_tfs"
       continue
     fi
-    e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
-    e_line_end="$(printf '%s' "$e_data" | grep '^line_end=' | head -1 | cut -d= -f2-)"
-    e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
+    e_line="$FE_line"
+    e_line_end="$FE_line_end"
+    e_symptom="$FE_symptom"
     cand_lines+=("$line")
     # Must render the SAME token fi_entry_loc emits — this list is what the
     # user copies into --pick, which matches by exact string equality. Line
     # ranges therefore have to be rejoined here too. cand_lnums/cand_lends stay
     # the split numeric halves: they feed fi_line_matched's (( )) hunk overlap.
     local loc
-    loc="$(fi_entry_loc "$line")" || loc="$e_path"
+    loc="$FE_loc"   # set by fi_entry_loc_v above
     cand_locs+=("$loc")
     cand_syms+=("$e_symptom")
     cand_tfs+=("$matched_tfs")
@@ -486,13 +493,13 @@ fi_annotate_auto() {
       [[ -z "$tf" ]] && continue
       for (( j = 0; j < ${#cand_lines[@]}; j++ )); do
         (( j == i )) && continue
-        if printf '%s' "${cand_tfs[$j]}" | grep -Fxq -- "$tf"; then
+        if fi_nl_has "${cand_tfs[$j]}" "$tf"; then
           shared=1
           break
         fi
       done
       if (( shared == 0 )) && [[ -n "$ann_tfs" ]] \
-         && printf '%s' "$ann_tfs" | grep -Fxq -- "$tf"; then
+         && fi_nl_has "$ann_tfs" "$tf"; then
         shared=1
       fi
       (( shared == 1 )) && break
@@ -537,7 +544,7 @@ fi_annotate_auto() {
   trap "rm -f '$tmp'" EXIT
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ -n "$auto_set" ]] && printf '%s' "$auto_set" | grep -Fxq -- "$line"; then
+    if [[ -n "$auto_set" ]] && fi_nl_has "$auto_set" "$line"; then
       printf '%s %s\n' "$line" "$write_annotation" >>"$tmp"
       matched=$((matched + 1))
     else
