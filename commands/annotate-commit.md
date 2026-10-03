@@ -26,7 +26,12 @@ for the rare genuinely-retroactive annotation of an already-merged fix.
 
 Pass through the CLI's output:
 
-- `Annotated N entries with (commit: <short>)` — happy path
+- `Annotated N entries with (commit: <short>)` — a `--pick`/`--all` run;
+  these close when the commit reaches the default branch
+- `Suggested N entries with (commit-auto: <short>) — pending review, will NOT
+  close on sync` — a bare run only suggests (a touched file is not a fixed
+  entry). Confirm the entries the commit actually fixes with the printed
+  `found-issues annotate-commit <short> --pick <path:line>` command
 - `annotate-commit: no [open] entries match files touched by commit <sha>. No changes.` — commit didn't touch any logged paths
 - `annotate-commit: <sha> is already on '<branch>' ...` (exit 2) — the
   guard above fired. Commit the fix first, then annotate THAT commit;

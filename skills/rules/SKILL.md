@@ -19,7 +19,7 @@ disable-model-invocation: true
 
 ## Annotation after PR / commit
 
-A hook auto-runs annotation after `gh pr create` and `git commit`: entries whose cited line the diff modifies are annotated automatically and reported in one line. Your job is ONLY the judgment cases the hook surfaces — a candidate list means the CLI could not decide. Compare each candidate's symptom against what the PR/commit actually changes, then run the printed `found-issues annotate-pr <N> --pick <loc>,...` (`--all` only when it genuinely addresses every candidate). Never annotate entries the PR does not fix — they false-flip to `[fixed]` on merge. Do not defer; unannotated entries can never auto-close. Hook didn't fire (web-UI PR)? Run `/found-issues:annotate-pr <N>` manually. The same flow covers `git commit`; manual fallback `/found-issues:annotate-commit [sha]` (default HEAD).
+A hook auto-runs annotation after `gh pr create` and `git commit`: entries whose cited line the diff modifies are annotated automatically and reported in one line. Your job is ONLY the judgment cases the hook surfaces — a candidate list means the CLI could not decide. Compare each candidate's symptom against what the PR/commit actually changes, then run the printed `found-issues annotate-pr <N> --pick <loc>,...` (`--all` only when it genuinely addresses every candidate). Never annotate entries the PR does not fix — they false-flip to `[fixed]` on merge. Do not defer; unannotated entries can never auto-close. No hook (web-UI PR)? `/found-issues:annotate-pr <N> --pick <loc>`; commits: `annotate-commit <sha> --pick <loc>`. Without `--pick` it only suggests (never closes).
 
 ## Sync
 

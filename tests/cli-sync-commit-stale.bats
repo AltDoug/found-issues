@@ -16,7 +16,7 @@ teardown() {
   git add src/foo.py
   git commit -q -m "init"
 
-  fi_run log "src/foo.py:1 — bug (commit: deadbeef)"
+  fi_seed_entry "src/foo.py:1 — bug (commit: deadbeef)"
   fi_run sync
   [ "$status" -eq 0 ]
   grep -q '^- \[open\].*\(commit-stale: deadbeef\)' docs/found-issues.md
@@ -29,7 +29,7 @@ teardown() {
   git add src/foo.py
   git commit -q -m "init"
 
-  fi_run log "src/foo.py:1 — bug (commit: deadbeef)"
+  fi_seed_entry "src/foo.py:1 — bug (commit: deadbeef)"
   fi_run sync
   local snapshot
   snapshot="$(cat docs/found-issues.md)"
@@ -45,7 +45,7 @@ teardown() {
   local sha
   sha="$(git rev-parse --short=7 HEAD)"
 
-  fi_run log "src/foo.py:1 — bug (commit: $sha)"
+  fi_seed_entry "src/foo.py:1 — bug (commit: $sha)"
   fi_run sync
   grep -q '\[fixed\].*\(commit: '"$sha"'\)' docs/found-issues.md
 }

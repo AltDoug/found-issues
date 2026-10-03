@@ -4,6 +4,49 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.2] - 2026-10-03
+
+Fix batch 1 of the 2026-10-03 audit (`docs/audits/2026-10-03-audit/`): data
+loss and false closes.
+
+### Fixed
+
+- **Sync no longer reverts writes that land while it runs.** Sync reads the
+  ledger, spends seconds per annotated PR asking `gh`, then moved its copy
+  over the file, so a `defer`, `resolve` or hook annotation made in that
+  window printed success and vanished. Sync now snapshots the ledger first,
+  refuses to write if it changed (retrying its pass once), and skips the
+  write entirely when nothing changed. (audit ledger-1)
+- **Ledger rewrites stay on the ledger's filesystem and keep its mode.**
+  Temp files were made in `$TMPDIR`, so the final `mv` could degrade to a
+  non-atomic copy and always left the ledger `0600`. (ledger-2)
+- **`archive` deletes by line number.** It removed archived entries with
+  `grep -F -x -v`; one invalid UTF-8 byte made grep treat the ledger as
+  binary and the rewrite dropped every `[open]` entry. It also removed every
+  identical copy when the count rule picked one, and re-archived a line
+  ending in a tab on every run. The active file is now rebuilt and
+  line-count-checked before the archive is appended. Old-mawk-safe date
+  regexes. (ledger-3, ledger-15, ledger-4)
+- **A bare `annotate-pr N` / `annotate-commit` only suggests.** Without
+  `--pick`/`--all` the CLI matched entries by touched FILE alone and wrote the
+  closing `(PR:)`/`(commit:)` token, so an unrelated entry citing a touched
+  file was closed for good on merge. A bare run now writes the non-closing
+  `(PR-auto:)`/`(commit-auto:)` suggestion and prints the `--pick` command to
+  confirm; SessionStart, the rules and the command docs now say `--pick`.
+  (prompt-2)
+- **The printed confirm command names the resolved commit, not `HEAD`.**
+  Running it after another commit annotated the wrong SHA. (annot-10)
+- **`log` refuses a symptom ending in an annotation.** "broke in
+  (commit: abc1234)" was parsed as a fix reference and closed by the next
+  unattended sync. Only `(suggested: ...)` is accepted. (cli-4)
+- **Renames of non-ASCII files are followed**, not tombstoned (`git log` now
+  runs with `core.quotepath=off`). (ledger-12)
+- **No `(commit-stale:)` demotion in shallow clones** or for ambiguous short
+  SHAs, where git simply cannot see the commit. (ledger-11)
+- **Sync and archive skip a ledger with merge-conflict markers.** (ledger-17)
+- **Stop hook fails open when `transcript_path` is missing** instead of
+  exiting 1. (hook-8)
+
 ## [2.9.1] - 2026-10-03
 
 ### Fixed

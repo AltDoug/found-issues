@@ -54,7 +54,7 @@ fi_promote_apply() {
   fi
 
   local tmp added=0 line
-  tmp="$(mktemp -t fi-promote.XXXXXX)"
+  tmp="$(fi_ledger_tmp "$file")"
   cat "$file" > "$tmp"
   while IFS= read -r line; do
     # [open] only: [fixed] entries are already resolved history, and a
@@ -70,7 +70,7 @@ fi_promote_apply() {
     printf '%s\n' "$line" >> "$tmp"
     added=$(( added + 1 ))
   done <<< "$source_content"
-  mv "$tmp" "$file"
+  fi_ledger_replace "$file" "$tmp"
 
   if (( added == 0 )); then
     printf 'promote: nothing to apply — every [open] entry on %s is already here.\n' "$from_branch"

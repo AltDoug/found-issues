@@ -214,8 +214,9 @@ legacy_commit_prompt() {
   printf '%s' "## found-issues — commit $short_sha touches files referenced by [open] entries
 
 $matching
-If your commit addresses any of these, run \`/found-issues:annotate-commit\` now
-(defaults to HEAD; pass a different SHA if needed).
+If your commit fixes any of these, run
+\`/found-issues:annotate-commit $short_sha --pick <path:line>\` now for exactly
+those entries (without --pick it only writes a non-closing suggestion).
 
 When the commit lands on the default branch (or already has, for direct
 pushes), \`/found-issues:sync\` will auto-flip these to [fixed]."

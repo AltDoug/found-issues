@@ -24,7 +24,7 @@ teardown() {
   export FOUND_ISSUES_MODE=github-pr
 
   mkdir -p src && printf 'x\n' > src/foo.py
-  fi_run log "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
   fi_run sync
   [ "$status" -eq 0 ]
   grep -q '\[fixed\].*\(PR: foo/bar#42\)' docs/found-issues.md

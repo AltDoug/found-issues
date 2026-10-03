@@ -112,7 +112,7 @@ if [[ -z "$transcript_path" ]]; then
   transcript_path="$(printf '%s' "$input" \
     | grep -oE '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' \
     | sed -E 's/.*:[[:space:]]*"([^"]*)".*/\1/' \
-    | head -1)"
+    | head -1 || true)"
 fi
 
 # If we can't find the transcript, don't block — fail open.

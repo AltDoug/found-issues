@@ -143,7 +143,7 @@ cmd_defer() {
   # First: flip [open] → [deferred] and replace any existing (reason: ...)
   # and (mute-until: ...) annotations.
   local tmp
-  tmp="$(mktemp -t fi-defer.XXXXXX)"
+  tmp="$(fi_ledger_tmp "$file")"
   local found=0
   local flipped_entry=""
   local line
@@ -169,7 +169,7 @@ cmd_defer() {
       printf '%s\n' "$line" >> "$tmp"
     fi
   done < "$file"
-  mv "$tmp" "$file"
+  fi_ledger_replace "$file" "$tmp"
 
   # Second: if this is a re-defer, increment cycle + append ';' to touched
   local current_cycle=1

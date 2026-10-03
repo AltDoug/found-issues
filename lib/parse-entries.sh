@@ -51,6 +51,51 @@ fi_has_conflict_markers() {
   LC_ALL=C grep -qE '^(<<<<<<< |=======$|>>>>>>> )' "$file"
 }
 
+# === Ledger rewrites ===
+#
+# Every mutator builds the new ledger in a temp file and moves it over the
+# old one. Two helpers own that pattern (2026-10-03 audit, ledger-1/ledger-2):
+#
+#   fi_ledger_tmp <file>
+#     Create the temp file BESIDE the ledger. `mktemp -t` put it in $TMPDIR,
+#     so on a tmpfs /tmp (or TEMP on another Windows drive) the mv degraded to
+#     a non-atomic copy, and the ledger always came out mode 0600.
+#
+#   fi_ledger_replace <file> <tmp> [<snapshot>]
+#     Move tmp over file, but: skip the write entirely when nothing changed
+#     (a no-op pass must not replace the inode under a concurrent writer),
+#     and when a snapshot from fi_ledger_snapshot is given, refuse with exit 3
+#     if the ledger changed since it was taken — someone else wrote it while
+#     we were working from the old copy, and moving ours over theirs would
+#     silently revert their write. tmp is always consumed.
+fi_ledger_tmp() {
+  local file="$1" dir="."
+  [[ "$file" == */* ]] && dir="${file%/*}"
+  mktemp "$dir/.found-issues.tmp.XXXXXX"
+}
+
+fi_ledger_snapshot() {
+  cksum <"$1" 2>/dev/null || true
+}
+
+fi_ledger_replace() {
+  local file="$1" tmp="$2" snapshot="${3:-}"
+  if cmp -s "$tmp" "$file"; then
+    rm -f "$tmp"
+    return 0
+  fi
+  if [[ -n "$snapshot" && "$(fi_ledger_snapshot "$file")" != "$snapshot" ]]; then
+    rm -f "$tmp"
+    return 3
+  fi
+  if [[ -f "$file" ]]; then
+    local mode
+    mode="$(stat -c %a "$file" 2>/dev/null || stat -f %Lp "$file" 2>/dev/null || true)"
+    [[ "$mode" =~ ^[0-7]+$ ]] && { chmod "$mode" "$tmp" 2>/dev/null || true; }
+  fi
+  mv "$tmp" "$file"
+}
+
 # Return the trailing run of recognized "(key: ...)" annotation groups —
 # the annotation tail. Walks backward from end-of-line consuming groups
 # whose key is in the recognized set; stops at the first thing that is not
@@ -681,7 +726,7 @@ fi_append_touch() {
   fi
 
   local tmp
-  tmp="$(mktemp -t fi-touch.XXXXXX)"
+  tmp="$(fi_ledger_tmp "$file")"
 
   local found=0
   local re_touched='\(touched: ([^)]+)\)'
@@ -735,7 +780,7 @@ fi_append_touch() {
     return 2
   fi
 
-  mv "$tmp" "$file"
+  fi_ledger_replace "$file" "$tmp"
 }
 
 # Count the number of well-formed YYYY-MM-DD dates in the CURRENT cycle's
@@ -782,7 +827,7 @@ fi_increment_defer_cycle() {
   fi
 
   local tmp
-  tmp="$(mktemp -t fi-defercycle.XXXXXX)"
+  tmp="$(fi_ledger_tmp "$file")"
 
   local found=0
   local line
@@ -836,5 +881,5 @@ fi_increment_defer_cycle() {
     return 2
   fi
 
-  mv "$tmp" "$file"
+  fi_ledger_replace "$file" "$tmp"
 }

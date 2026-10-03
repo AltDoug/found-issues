@@ -136,7 +136,7 @@ cmd_resolve() {
   today="$(fi_today)"
 
   local tmp
-  tmp="$(mktemp -t fi-resolve.XXXXXX)"
+  tmp="$(fi_ledger_tmp "$file")"
   local found=0
   local line
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
@@ -150,7 +150,7 @@ cmd_resolve() {
       printf '%s\n' "$line" >> "$tmp"
     fi
   done < "$file"
-  mv "$tmp" "$file"
+  fi_ledger_replace "$file" "$tmp"
 
   printf 'Resolved 1 entry. (verified: %s, fixed: %s)\n' "$verified" "$today"
   cmd_status plain
@@ -168,7 +168,7 @@ fi_promote_entry_to_open() {
   local file="$1"
   local target="$2"
   local tmp
-  tmp="$(mktemp -t fi-promote.XXXXXX)"
+  tmp="$(fi_ledger_tmp "$file")"
   local found=0
   local line
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
@@ -186,7 +186,7 @@ fi_promote_entry_to_open() {
     rm -f "$tmp"
     return 1
   fi
-  mv "$tmp" "$file"
+  fi_ledger_replace "$file" "$tmp"
   return 0
 }
 

@@ -461,9 +461,10 @@ EOF
   fi
   cat <<EOF
 
-These entries are tracked in \`$display_path\`. If your work addresses any of
-them, run \`$fi_annotate_pr_ref <N>\` after opening a PR or \`$fi_annotate_commit_ref\`
-after a direct commit. Sync will auto-flip them when the PR merges or the
+These entries are tracked in \`$display_path\`. If your work fixes any of
+them, run \`$fi_annotate_pr_ref <N> --pick <path:line>\` after opening a PR, or
+\`$fi_annotate_commit_ref <sha> --pick <path:line>\` after a direct commit, naming
+only the entries it fixes. Sync will auto-flip them when the PR merges or the
 commit lands on the default branch.
 EOF
 }

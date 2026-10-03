@@ -58,6 +58,24 @@ cmd_log() {
     return 2
   fi
 
+  # The parser reads a trailing "(key: ...)" run as annotations, and sync
+  # closes on (commit:)/(PR:) — so a symptom that merely CITES the regressing
+  # commit ("broke in (commit: abc1234)") was closed by the next unattended
+  # sync (audit cli-4). Only (suggested: ...) belongs in what log writes;
+  # everything else has a command that writes it with its guards.
+  local tail_ann tail_rest re_suggested='^\(suggested: [^)]*\)[[:space:]]*'
+  tail_ann="$(fi_annotation_tail "$symptom")"
+  tail_rest="$tail_ann"
+  while [[ "$tail_rest" =~ $re_suggested ]]; do
+    tail_rest="${tail_rest#"${BASH_REMATCH[0]}"}"
+  done
+  if [[ -n "$tail_rest" ]]; then
+    fi_err "found-issues log: the symptom ends in an annotation-shaped group: $tail_ann"
+    fi_err "  log writes only (suggested: ...). Reword the reference (e.g. 'since commit abc1234'),"
+    fi_err "  or attach a fix reference with annotate-pr / annotate-commit after logging."
+    return 2
+  fi
+
   # Parse location: path:line, path:start-end, path, or abstract
   local path="" line_num="" line_end=""
   if [[ "$location" =~ ^([^:[:space:]]+):([0-9]+)(-([0-9]+))?$ ]]; then
