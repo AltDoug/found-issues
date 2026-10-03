@@ -167,8 +167,10 @@ to find this page:
 
 - The Stop hook's blocking message names `FOUND_ISSUES_STOP_REMINDER=off`
   in its stderr output when it fires.
-- `pre-branch-delete` names `FOUND_ISSUES_PROMOTE_GUARD=off` when it
-  blocks.
+- `pre-branch-delete` prints the promote sequence when it blocks. It
+  deliberately does NOT name `FOUND_ISSUES_PROMOTE_GUARD=off`: the agent
+  reads that message, and an advertised off switch is the cheapest way past
+  the guard (v2.9.3). The switch is documented here for operators.
 - Invalid defer-flow tunables warn to stderr with the variable name.
 
 If a hook is misbehaving and there's no helpful message, that's a bug —

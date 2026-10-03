@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.9.2"
+readonly FI_VERSION="2.9.3"
 
 # Statusline fast path (lib/segment-cache.sh): `status --format=segment` runs
 # every few seconds per session, so it is answered from a content-checked

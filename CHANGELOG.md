@@ -4,6 +4,43 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.3] - 2026-10-03
+
+Fix batch 2 of the 2026-10-03 audit: guard bypasses.
+
+### Fixed
+
+- **The branch-delete guard reads the command as shell words.** It used to
+  delete every quoted span and regex-match the rest, so a quoted operand
+  (`git branch -D "$b"`, `git branch -D "feat/x"`), a quoted flag
+  (`git push origin "--delete" x`, `-'d'`), git global options
+  (`git -C dir branch -D x`, `git -c k=v ...`) and bundled short flags
+  (`-df`, `push -fd`) all deleted a branch unchecked. Words now keep quoted
+  content and drop the quote characters, `git -C` runs every check in that
+  directory, and a `$variable` branch name (a delete loop) is blocked with a
+  request to delete by literal name. Text that only appears inside a string
+  (`printf 'git branch -D x'`) is still inert. (audit hook-2, hook-3, hook-4,
+  ledger entry `hooks/pre-branch-delete.sh:92`)
+- **The format enforcer checks the full lines an Edit leaves behind.** It
+  validated only `new_string`, so a sub-line edit of `[open] … x.sh:4` to
+  `[fixed] … x.sh:4` closed an entry with no verification token. Edits (and
+  MultiEdit, in order) are applied to an in-memory copy and every touched
+  line is validated; untouched lines are not. (hook-5)
+- **Both blocking hooks find their lib on Codex.** Without
+  `CLAUDE_PLUGIN_ROOT` (every Codex hook) they looked for the CLI on `PATH`,
+  which GNU `readlink -f` resolved against the CWD, so both guards allowed
+  everything. They now look next to themselves first, and say so on stderr
+  when the lib is still missing. (hook-14)
+- **The block message no longer advertises the guard's off switch** to the
+  agent reading it, and gives the concrete promote sequence instead.
+  (prompt-6)
+- **Large Bash commands no longer stall the Bash hooks.** The zero-fork
+  gate's escape pass is quadratic in bash: a 70 KB heredoc cost ~4 s per
+  hook in a UTF-8 locale. Payloads over 16 KB now skip the gate and take the
+  full path (~0.5 s at 70 KB); the gate itself runs in byte mode.
+- **A missing `jq` is reported.** The blocking hooks fail open without jq;
+  `doctor` now warns, and SessionStart says so once a day. (hook-18)
+
 ## [2.9.2] - 2026-10-03
 
 Fix batch 1 of the 2026-10-03 audit (`docs/audits/2026-10-03-audit/`): data

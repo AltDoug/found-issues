@@ -49,6 +49,43 @@ case "$file_path" in
   *) exit 0 ;;
 esac
 
+# fi_edit_touched_lines <old> <new> <replace_all> — the FULL lines an Edit
+# will leave behind wherever it applies. Validating new_string alone missed
+# sub-line edits: old `[open] 2026-09-01 x.sh:4`, new `[fixed] 2026-09-01
+# x.sh:4` has no line starting with `- [`, so a token-less [open]->[fixed]
+# flip passed (2026-10-03 audit, hook-5). Applies the edit to an in-memory
+# copy of the file ($_fi_doc, updated so MultiEdit can chain) and sets
+# $_fi_touched to each occurrence's surrounding lines (a variable, not
+# stdout: a $(...) subshell would drop the $_fi_doc update). Lines the edit does not touch are not
+# returned — a full-file check would block every edit on grandfathered text.
+# Falls back to new_string when the file or old_string cannot be found.
+_fi_doc=""
+_fi_doc_loaded=0
+_fi_touched=""
+fi_edit_touched_lines() {
+  local old="$1" new="$2" all="$3"
+  if (( ! _fi_doc_loaded )); then
+    _fi_doc_loaded=1
+    [[ -f "$file_path" ]] && _fi_doc="$(cat "$file_path"; printf x)" && _fi_doc="${_fi_doc%x}"
+  fi
+  if [[ -z "$old" || "$_fi_doc" != *"$old"* ]]; then
+    _fi_touched="$new"
+    return 0
+  fi
+  local rest="$_fi_doc" out="" pre head tail touched=""
+  while [[ "$rest" == *"$old"* ]]; do
+    pre="${rest%%"$old"*}"
+    rest="${rest#*"$old"}"
+    head="${pre##*$'\n'}"
+    tail="${rest%%$'\n'*}"
+    touched+="$head$new$tail"$'\n'
+    out+="$pre$new"
+    [[ "$all" == "true" ]] || break
+  done
+  _fi_doc="$out$rest"
+  _fi_touched="$touched"
+}
+
 # Collect candidate content based on tool
 content=""
 case "$tool_name" in
@@ -56,11 +93,26 @@ case "$tool_name" in
     content="$(get_field '.tool_input.content')"
     ;;
   Edit)
-    content="$(get_field '.tool_input.new_string')"
+    fi_edit_touched_lines \
+      "$(get_field '.tool_input.old_string')" \
+      "$(get_field '.tool_input.new_string')" \
+      "$(get_field '.tool_input.replace_all')"
+    content="$_fi_touched"
     ;;
   MultiEdit)
     if command -v jq >/dev/null 2>&1; then
-      content="$(printf '%s' "$input" | jq -r '.tool_input.edits[]?.new_string // empty' 2>/dev/null || true)"
+      # Edits apply in order; each one is validated against the file as the
+      # earlier ones left it. One jq call per field: MultiEdit is rare, and
+      # NUL-safe batching would need a read loop over process substitution.
+      _fi_n="$(printf '%s' "$input" | jq -r '.tool_input.edits | length' 2>/dev/null || echo 0)"
+      [[ "$_fi_n" =~ ^[0-9]+$ ]] || _fi_n=0
+      for (( _fi_i = 0; _fi_i < _fi_n; _fi_i++ )); do
+        fi_edit_touched_lines \
+          "$(get_field ".tool_input.edits[$_fi_i].old_string")" \
+          "$(get_field ".tool_input.edits[$_fi_i].new_string")" \
+          "$(get_field ".tool_input.edits[$_fi_i].replace_all")"
+        content+="$_fi_touched"$'\n'
+      done
     fi
     ;;
   *)
@@ -156,19 +208,26 @@ fi
 # === Determine action based on mode ===
 
 mode="local"
-# Locate lib for detect-mode (plugin root preferred)
-if [[ -n "${FOUND_ISSUES_LIB_DIR:-}" ]]; then
-  lib_dir="$FOUND_ISSUES_LIB_DIR"
-elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
-  lib_dir="$CLAUDE_PLUGIN_ROOT/lib"
-else
-  cli_dir="$(dirname "$(readlink -f "${FOUND_ISSUES_BIN:-found-issues}" 2>/dev/null || command -v "${FOUND_ISSUES_BIN:-found-issues}" 2>/dev/null || echo "")")"
-  lib_dir="$cli_dir/../lib"
-fi
-if [[ -f "$lib_dir/detect-mode.sh" ]]; then
+# Locate lib for detect-mode. Script-relative first after the explicit
+# override: Codex hooks get no CLAUDE_PLUGIN_ROOT, and the old PATH/readlink
+# fallback resolved `found-issues` against the CWD under GNU readlink, so
+# mode stayed "local" and nothing was ever blocked there (audit hook-14).
+_fi_hook_dir="${BASH_SOURCE[0]%/*}"
+[[ "$_fi_hook_dir" == "${BASH_SOURCE[0]}" ]] && _fi_hook_dir=.
+lib_dir=""
+for _fi_cand in "${FOUND_ISSUES_LIB_DIR:-}" "$_fi_hook_dir/../lib" \
+    "${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/lib}"; do
+  if [[ -n "$_fi_cand" && -f "$_fi_cand/detect-mode.sh" ]]; then
+    lib_dir="$_fi_cand"
+    break
+  fi
+done
+if [[ -n "$lib_dir" ]]; then
   # shellcheck source=../lib/detect-mode.sh
   source "$lib_dir/detect-mode.sh"
   mode="$(fi_detect_mode 2>/dev/null || echo "local")"
+else
+  echo "found-issues: format-enforcer could not find its lib; ledger format NOT enforced." >&2
 fi
 
 # Format the violation report
