@@ -147,7 +147,7 @@ fi_annotate_apply_picks() {
 
   # Pass B: rewrite the file.
   local tmp matched=0 already=0
-  tmp="$(mktemp -t found-issues.XXXXXX)"
+  tmp="$(fi_ledger_tmp "$file")"
   trap "rm -f '$tmp'" EXIT
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -170,7 +170,7 @@ fi_annotate_apply_picks() {
   done <"$file"
 
   if (( matched > 0 )); then
-    mv "$tmp" "$file"
+    fi_ledger_replace "$file" "$tmp"
     trap - EXIT
     printf 'Annotated %d entr%s with %s\n' "$matched" "$([[ $matched -eq 1 ]] && echo y || echo ies)" "$annotation"
     if (( promoted > 0 )); then
@@ -377,8 +377,15 @@ fi_annotate_auto() {
   # downstream (the already-annotated test, the rewrite pass, the summary
   # line) uses write_annotation; `annotation` stays the canonical form so the
   # confirm command printed for the operator is the one that arms sync.
+  #
+  # A bare run (no --pick/--all) writes the suggestion form too (audit
+  # prompt-2). Its only evidence is "this change touched a file the entry
+  # cites" — no line check, no reading of the symptom — and a canonical token
+  # written on that basis false-closed unrelated entries on merge, with no way
+  # back. Only an explicit selection (--pick, or --all as a deliberate
+  # "every candidate") writes the closing form.
   local write_annotation="$annotation"
-  if [[ "$hook_auto" == "yes" ]]; then
+  if [[ "$hook_auto" == "yes" || "$annotate_all" != "yes" ]]; then
     write_annotation="$(fi_auto_form "$annotation")"
   fi
 
@@ -526,7 +533,7 @@ fi_annotate_auto() {
 
   # Pass 3: rewrite the file with the unambiguous annotations.
   local tmp matched=0
-  tmp="$(mktemp -t found-issues.XXXXXX)"
+  tmp="$(fi_ledger_tmp "$file")"
   trap "rm -f '$tmp'" EXIT
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -539,9 +546,9 @@ fi_annotate_auto() {
   done <"$file"
 
   if (( matched > 0 )); then
-    mv "$tmp" "$file"
+    fi_ledger_replace "$file" "$tmp"
     trap - EXIT
-    if [[ "$hook_auto" == "yes" ]]; then
+    if [[ "$write_annotation" != "$annotation" ]]; then
       # "Suggested", not "Annotated": this token does not close anything, and
       # the caller's context line is built from this first output line.
       printf 'Suggested %d entr%s with %s — pending review, will NOT close on sync\n' \

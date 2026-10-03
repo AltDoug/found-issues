@@ -34,7 +34,7 @@ teardown() {
   mkdir -p src
   printf 'x\n' > src/foo.py
 
-  fi_run log "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
   fi_run sync
   [ "$status" -eq 0 ]
   # Entry flipped to [fixed] via PR-merge path (not tombstone)
@@ -51,7 +51,7 @@ teardown() {
   mkdir -p src
   printf 'x\n' > src/foo.py
 
-  fi_run log "src/foo.py:1 — bug (PR: foo/bar#99)"
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#99)"
   fi_run sync
   [ "$status" -eq 0 ]
   # Entry stays [open] with original annotation (no demotion, no flip)
@@ -66,7 +66,7 @@ teardown() {
   export GH_MOCK_PR_VIEW=$'42\t{"state":"CLOSED","baseRefName":"main","mergedAt":null,"isDraft":false}'
   mkdir -p src && printf 'x\n' > src/foo.py
 
-  fi_run log "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
   fi_run sync
   [ "$status" -eq 0 ]
   # Entry stays [open], but annotation demoted
@@ -79,7 +79,7 @@ teardown() {
   export GH_MOCK_PR_VIEW=$'42\t{"state":"CLOSED","baseRefName":"main","mergedAt":null,"isDraft":false}'
   mkdir -p src && printf 'x\n' > src/foo.py
 
-  fi_run log "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
   fi_run sync
   local snapshot
   snapshot="$(cat docs/found-issues.md)"

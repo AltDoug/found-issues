@@ -14,7 +14,7 @@ teardown() {
 
 # === annotate-commit ===
 
-@test "annotate-commit: adds (commit: <sha>) to matching entry" {
+@test "annotate-commit: a bare run suggests (commit-auto: <sha>) on the matching entry" {
   mkdir -p src
   echo "x" > src/foo.py
   fi_run log "src/foo.py:1 — bug"
@@ -24,7 +24,7 @@ teardown() {
 
   fi_run annotate-commit HEAD
   [ "$status" -eq 0 ]
-  grep -q "src/foo.py:1.*\(commit: $short_sha\)" docs/found-issues.md
+  grep -q "src/foo.py:1.*\(commit-auto: $short_sha\)" docs/found-issues.md
 }
 
 @test "annotate-commit: defaults to HEAD" {
@@ -37,7 +37,7 @@ teardown() {
 
   fi_run annotate-commit
   [ "$status" -eq 0 ]
-  grep -q "(commit: $short_sha)" docs/found-issues.md
+  grep -q "(commit-auto: $short_sha)" docs/found-issues.md
 }
 
 @test "annotate-commit: no-op when commit doesn't touch logged paths" {
@@ -65,7 +65,7 @@ teardown() {
   fi_run annotate-commit HEAD
 
   # Should have exactly one (commit: ...) annotation
-  count="$(grep -oE '\(commit: [a-f0-9]+\)' docs/found-issues.md | wc -l | tr -d ' ')"
+  count="$(grep -oE '\(commit-auto: [a-f0-9]+\)' docs/found-issues.md | wc -l | tr -d ' ')"
   [ "$count" = "1" ]
 }
 
@@ -101,7 +101,7 @@ teardown() {
   git checkout -q -b fix/some-fix
   fi_run annotate-commit HEAD --force
   [ "$status" -eq 0 ]
-  grep -q "(commit: $short_sha)" docs/found-issues.md
+  grep -q "(commit-auto: $short_sha)" docs/found-issues.md
 }
 
 @test "annotate-commit: fresh commit on a feature branch still annotates without --force" {
@@ -117,7 +117,7 @@ teardown() {
   short_sha="$(git rev-parse --short=7 HEAD)"
   fi_run annotate-commit HEAD
   [ "$status" -eq 0 ]
-  grep -q "(commit: $short_sha)" docs/found-issues.md
+  grep -q "(commit-auto: $short_sha)" docs/found-issues.md
 }
 
 @test "annotate-commit: guard does not fire on the default branch itself" {
@@ -132,7 +132,7 @@ teardown() {
   short_sha="$(git rev-parse --short=7 HEAD)"
   fi_run annotate-commit HEAD
   [ "$status" -eq 0 ]
-  grep -q "(commit: $short_sha)" docs/found-issues.md
+  grep -q "(commit-auto: $short_sha)" docs/found-issues.md
 }
 
 # === annotate-pr ===
@@ -159,7 +159,7 @@ teardown() {
   fi_run log "src/foo.py:1 — bug"
   fi_run annotate-pr 7
   [ "$status" -eq 0 ]
-  grep -q '(PR: vercel/next.js#7)' docs/found-issues.md
+  grep -q '(PR-auto: vercel/next.js#7)' docs/found-issues.md
   unset GH_MOCK_PR_VIEW
 }
 
@@ -240,7 +240,7 @@ _setup_pr_repo() {
   fi_run log "src/cold.py:5 — lone bug"
   fi_run annotate-pr 9
   [ "$status" -eq 3 ]
-  grep -q 'lone bug (PR: org/repo#9)' docs/found-issues.md
+  grep -q 'lone bug (PR-auto: org/repo#9)' docs/found-issues.md
   ! grep -q 'first bug (PR:' docs/found-issues.md
   [[ "$output" == *"src/hot.py:1"* ]]
   [[ "$output" == *"--pick"* ]]
@@ -279,7 +279,7 @@ _setup_pr_repo() {
   fi_run log "src/foo.py:1 — bug"
   fi_run annotate-pr 7
   [ "$status" -eq 0 ]
-  grep -q '(PR: org/repo#7)' docs/found-issues.md
+  grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
   unset GH_MOCK_PR_VIEW
 }
 
@@ -506,7 +506,7 @@ _setup_pr_repo() {
   fi_run annotate-commit HEAD
   [ "$status" -eq 0 ]
   fi_assert_both_entries_survived
-  grep -q "final entry with no trailing newline (commit: $short_sha)" docs/found-issues.md
+  grep -q "final entry with no trailing newline (commit-auto: $short_sha)" docs/found-issues.md
 }
 
 @test "annotate-pr: --pick can select and keep a final entry lacking a trailing newline" {
@@ -571,7 +571,7 @@ _setup_pr_repo() {
 
   fi_run annotate-commit HEAD
   [ "$status" -eq 0 ]
-  grep -q "src/only.py:1-3 — range bug (commit: $short_sha)" docs/found-issues.md
+  grep -q "src/only.py:1-3 — range bug (commit-auto: $short_sha)" docs/found-issues.md
 }
 
 # The builtin basename pre-filter in fi_annotate_auto (lib/annotate.sh) must
@@ -587,7 +587,7 @@ _setup_pr_repo() {
 
   fi_run annotate-commit HEAD
   [ "$status" -eq 0 ]
-  grep -q "foo.py:1.*(commit: $short_sha)" docs/found-issues.md
+  grep -q "foo.py:1.*(commit-auto: $short_sha)" docs/found-issues.md
 }
 
 @test "annotate-commit: entry citing a longer prefixed path still matches the touched file" {
@@ -600,5 +600,5 @@ _setup_pr_repo() {
 
   fi_run annotate-commit HEAD
   [ "$status" -eq 0 ]
-  grep -q "monorepo/src/foo.py:1.*(commit: $short_sha)" docs/found-issues.md
+  grep -q "monorepo/src/foo.py:1.*(commit-auto: $short_sha)" docs/found-issues.md
 }

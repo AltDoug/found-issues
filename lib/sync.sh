@@ -63,6 +63,14 @@ cmd_sync() {
     return 1
   }
 
+  # A ledger mid-merge has both sides' lines between the markers; rewriting it
+  # would close or demote entries the operator is still choosing between, and
+  # SessionStart runs this unattended (audit ledger-17).
+  if fi_has_conflict_markers "$file"; then
+    fi_err "sync: $file has merge-conflict markers — resolve them first; nothing synced"
+    return 0
+  fi
+
   local mode
   mode="$(fi_detect_mode)"
 
@@ -89,9 +97,21 @@ cmd_sync() {
   local -a gh_empty_warnings=()
   local today
   today="$(fi_today)"
+  # The gh loop below can take seconds per PR. Anything that rewrites the
+  # ledger meanwhile (defer, resolve, an annotate from a commit hook) would be
+  # reverted by our final mv, so snapshot the ledger now and let
+  # fi_ledger_replace refuse a stale write (audit ledger-1).
+  local snapshot
+  snapshot="$(fi_ledger_snapshot "$file")"
   local tmp
-  tmp="$(mktemp -t found-issues.XXXXXX)"
+  tmp="$(fi_ledger_tmp "$file")"
   trap "rm -f '$tmp'" EXIT
+
+  # Demoting an unresolvable (commit:) is permanent, so only do it where git
+  # can actually see the whole history: a shallow clone (CI, cloud checkouts)
+  # cannot resolve older commits at all (audit ledger-11).
+  local shallow_repo=0
+  [[ "$(git rev-parse --is-shallow-repository 2>/dev/null || true)" == "true" ]] && shallow_repo=1
 
   local line
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
@@ -195,6 +215,10 @@ cmd_sync() {
               break
             fi
             # SHA exists but isn't ancestor — leave alone (unmerged feature branch)
+          elif (( shallow_repo )) \
+               || [[ "$(git cat-file -t "$sha" 2>&1 || true)" == *ambiguous* ]]; then
+            : # Git cannot tell here (shallow history / ambiguous short SHA) —
+              # leave the annotation for a full clone to judge.
           else
             # B1/B2: SHA doesn't resolve (squash-merge dropped it, force-push removed it) → demote
             demote_commit_refs+=("$sha")
@@ -364,8 +388,22 @@ cmd_sync() {
     rm -f "$tmp"
     trap - EXIT
   else
-    mv "$tmp" "$file"
+    local replace_rc=0
+    fi_ledger_replace "$file" "$tmp" "$snapshot" || replace_rc=$?
     trap - EXIT
+    if (( replace_rc == 3 )); then
+      # Someone wrote the ledger while we were asking gh. Their write stands;
+      # redo our pass once against the new content. A second collision means
+      # sustained contention — give up loudly rather than loop.
+      if [[ -z "${FI_SYNC_RETRY:-}" ]]; then
+        FI_SYNC_RETRY=1 cmd_sync
+        return $?
+      fi
+      fi_err "sync: the ledger changed while sync was running — nothing written; run sync again"
+      return 1
+    elif (( replace_rc != 0 )); then
+      return "$replace_rc"
+    fi
   fi
 
   local total_closed=$((closed_pr + closed_commit + closed_tomb))

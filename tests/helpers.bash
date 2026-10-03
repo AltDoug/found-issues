@@ -198,3 +198,13 @@ fi_assert_synced_not_archived() {
   grep -Fq "$FI_ARCHIVE_BAIT_OLD src/old.py:1" docs/found-issues.md
   [ ! -f docs/found-issues-archive.md ]
 }
+
+# Append a raw [open] entry to docs/found-issues.md, bypassing `log`. For
+# fixtures that need an annotation already on the entry: `log` refuses a
+# symptom ending in a closing annotation (audit cli-4), which is exactly the
+# shape these tests start from.
+# Args: $1 = "<location> — <symptom with annotations>"
+fi_seed_entry() {
+  mkdir -p docs
+  printf -- '- [open] %s %s\n' "$(date +%Y-%m-%d)" "$1" >> docs/found-issues.md
+}

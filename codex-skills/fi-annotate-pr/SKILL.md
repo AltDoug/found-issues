@@ -18,15 +18,22 @@ The CLI:
 1. Verifies the PR exists via `gh pr view`
 2. Fetches the list of files touched by the PR
 3. Scans `docs/found-issues.md` for `[open]` entries whose paths match those files
-4. Auto-annotates only UNAMBIGUOUS matches — entries that are the sole `[open]`
-   entry citing their touched file. When several entries share one touched
-   file, the CLI annotates none of them and prints the candidate list instead
-   (file-level matching alone would tag every entry on a hot file, and sync
-   would false-flip them all to `[fixed]` on merge).
+4. Without `--pick`/`--all`, writes only a NON-closing suggestion
+   `(PR-auto: org/repo#N)` on UNAMBIGUOUS matches — entries that are the sole
+   `[open]` entry citing their touched file. A touched file is not a fixed
+   entry, so a bare run never writes the closing token. When several entries
+   share one touched file, the CLI suggests none of them and prints the
+   candidate list instead.
+5. `--pick <path:line>,...` writes the closing `(PR: org/repo#N)` on exactly
+   the entries you name (and confirms a pending suggestion in place).
 
 Possible outputs:
 
-- `Annotated N entries with (PR: org/repo#N)` — happy path
+- `Annotated N entries with (PR: org/repo#N)` — a `--pick`/`--all` run; these
+  close when the PR merges
+- `Suggested N entries with (PR-auto: org/repo#N) — pending review, will NOT
+  close on sync` — a bare run. Compare each entry's symptom against the PR,
+  then confirm the ones it actually fixes with the printed `--pick` command
 - `annotate-pr: no [open] entries match files touched by PR #N. No changes.` — edge case (PR addresses code with no logged entries)
 - A candidate list ending in a `--pick` instruction — ambiguous matches that
   need YOUR judgment. **Do not skip this step.** Compare each candidate's

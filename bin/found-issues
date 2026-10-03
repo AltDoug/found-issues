@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.9.1"
+readonly FI_VERSION="2.9.2"
 
 # Statusline fast path (lib/segment-cache.sh): `status --format=segment` runs
 # every few seconds per session, so it is answered from a content-checked
@@ -179,7 +179,11 @@ fi_detect_rename() {
     return 1
   fi
   local renames
-  renames="$(git log --diff-filter=R -M --name-status --pretty=format: 2>/dev/null \
+  # core.quotepath=off: by default git C-quotes non-ASCII paths
+  # ("docs/caf\303\251.md"), which never equals the entry's raw path, so a
+  # renamed non-ASCII file fell through to the tombstone oracle and was
+  # closed (audit ledger-12).
+  renames="$(git -c core.quotepath=off log --diff-filter=R -M --name-status --pretty=format: 2>/dev/null \
     | awk -F'\t' '/^R[0-9]+\t/ { print $2 "\t" $3 }')"
   if [[ -z "$renames" ]]; then
     return 1

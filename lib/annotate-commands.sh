@@ -258,7 +258,7 @@ cmd_annotate_commit() {
   # different file than the symptom).
   if [[ -n "$picks_nl" ]]; then
     fi_annotate_apply_picks "$file" "$annotation" "$picks_nl" \
-      "annotate-commit" "found-issues annotate-commit $target"
+      "annotate-commit" "found-issues annotate-commit $short_sha"
     return $?
   fi
 
@@ -277,7 +277,7 @@ cmd_annotate_commit() {
   fi
 
   fi_annotate_auto "$file" "$annotation" "$touched_files" "$annotate_all" \
-    "annotate-commit" "found-issues annotate-commit $target" "commit $short_sha" \
+    "annotate-commit" "found-issues annotate-commit $short_sha" "commit $short_sha" \
     "$hook_auto" "$old_ranges" || return $?
 }
 

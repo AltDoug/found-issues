@@ -43,6 +43,13 @@ cmd_archive() {
     return 1
   }
 
+  # Inside conflict markers the same entry can appear twice (once per side);
+  # moving either copy decides the merge for the operator (audit ledger-17).
+  if fi_has_conflict_markers "$file"; then
+    fi_err "archive: $file has merge-conflict markers — resolve them first; nothing archived"
+    return 0
+  fi
+
   local archive_file
   archive_file="$(dirname "$file")/found-issues-archive.md"
 
@@ -58,25 +65,27 @@ cmd_archive() {
 
   # Pass 1: extract all [fixed] entries with their effective date
   # Effective date = (fixed: YYYY-MM-DD) annotation if present, else the
-  # entry's own header date. Output one "DATE\tLINE" per fixed entry,
-  # sorted oldest-first.
+  # entry's own header date. Output one "DATE\tNR\tLINE" per fixed entry,
+  # oldest first, ties in file order. NR (the line number) is what pass 3
+  # deletes by — see there. LC_ALL=C: the ledger is bytes, and a stray
+  # invalid-UTF-8 byte must not change what any tool here matches.
   local fixed_pairs
-  fixed_pairs="$(awk '
+  fixed_pairs="$(LC_ALL=C awk '
     /^- \[fixed\]/ {
       line = $0
       date = ""
       # Try (fixed: YYYY-MM-DD) first
-      if (match(line, /\(fixed: [0-9]{4}-[0-9]{2}-[0-9]{2}\)/)) {
+      if (match(line, /\(fixed: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\)/)) {
         date = substr(line, RSTART+8, 10)
-      } else if (match(line, / [0-9]{4}-[0-9]{2}-[0-9]{2} /)) {
+      } else if (match(line, / [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] /)) {
         # Fall back to entry header date
         date = substr(line, RSTART+1, 10)
       }
       if (date != "") {
-        print date "\t" line
+        print date "\t" NR "\t" line
       }
     }
-  ' "$file" | sort)"
+  ' "$file" | LC_ALL=C sort -t "$(printf '\t')" -k1,1 -k2,2n)"
 
   local fixed_total=0
   if [[ -n "$fixed_pairs" ]]; then
@@ -87,12 +96,20 @@ cmd_archive() {
   # An entry is archived if EITHER:
   #   (a) its date < cutoff  (older than threshold_days)
   #   (b) it's among the oldest (fixed_total - threshold_count) entries
-  local to_archive_lines=""
+  local to_archive_lines="" to_archive_nrs=""
   local archived_count=0
   local remaining=$fixed_total
 
   if [[ -n "$fixed_pairs" ]]; then
-    while IFS=$'\t' read -r date line; do
+    # Split by hand, not with IFS=$'\t' read: tab is IFS whitespace, so read
+    # strips a line's trailing tabs, and the stripped text no longer matched
+    # the ledger line it came from (audit ledger-15).
+    local rec date nr line
+    while IFS= read -r rec; do
+      date="${rec%%$'\t'*}"
+      rec="${rec#*$'\t'}"
+      nr="${rec%%$'\t'*}"
+      line="${rec#*$'\t'}"
       local archive_this=0
       if [[ "$date" < "$cutoff" ]]; then
         archive_this=1
@@ -101,6 +118,7 @@ cmd_archive() {
       fi
       if (( archive_this == 1 )); then
         to_archive_lines+="$line"$'\n'
+        to_archive_nrs+="$nr"$'\n'
         archived_count=$((archived_count + 1))
         remaining=$((remaining - 1))
       fi
@@ -121,6 +139,34 @@ cmd_archive() {
     return 0
   fi
 
+  # Pass 3: build the active file without the archived LINE NUMBERS. This used
+  # to be `grep -F -x -v -f <archived lines>`, which (a) deleted every
+  # byte-identical copy when the count rule picked one, and (b) in a UTF-8
+  # locale treated a ledger with one invalid byte as binary — the `|| true`
+  # swallowed the error and the mv installed a ledger missing every [open]
+  # entry (audit ledger-3). awk by NR has no binary mode and no pattern
+  # semantics. Built and checked BEFORE the archive is appended, so a failure
+  # here leaves both files untouched.
+  local snapshot tmp nrs_file
+  snapshot="$(fi_ledger_snapshot "$file")"
+  tmp="$(fi_ledger_tmp "$file")"
+  nrs_file="$(fi_ledger_tmp "$file")"
+  printf '%s' "$to_archive_nrs" >"$nrs_file"
+  if ! LC_ALL=C awk 'NR == FNR { drop[$1]; next } !(FNR in drop)' "$nrs_file" "$file" >"$tmp"; then
+    rm -f "$tmp" "$nrs_file"
+    fi_err "archive: could not rewrite $file — nothing archived"
+    return 1
+  fi
+  rm -f "$nrs_file"
+  local before_n after_n
+  before_n="$(LC_ALL=C awk 'END { print NR }' "$file")"
+  after_n="$(LC_ALL=C awk 'END { print NR }' "$tmp")"
+  if (( after_n != before_n - archived_count )); then
+    rm -f "$tmp"
+    fi_err "archive: line count check failed ($before_n - $archived_count != $after_n) — nothing archived"
+    return 1
+  fi
+
   # Create archive file with header on first write
   if [[ ! -f "$archive_file" ]]; then
     cat >"$archive_file" <<HEADER
@@ -134,20 +180,12 @@ HEADER
 
   printf '%s' "$to_archive_lines" >>"$archive_file"
 
-  # Rewrite active file with archived lines removed
-  local tmp
-  tmp="$(mktemp -t found-issues-archive.XXXXXX)"
-  # Use grep -F -x -v -f with the archived lines as patterns. -x (whole-line
-  # match) is load-bearing: without it an archived line that is a strict
-  # prefix of a newer entry (sync builds these — it appends "(fixed: date)"
-  # to the original line) substring-matched that entry too, deleting it from
-  # the active file without ever writing it to the archive.
-  local patterns_file
-  patterns_file="$(mktemp -t found-issues-archive-patterns.XXXXXX)"
-  printf '%s' "$to_archive_lines" >"$patterns_file"
-  grep -F -x -v -f "$patterns_file" "$file" >"$tmp" || true
-  rm -f "$patterns_file"
-  mv "$tmp" "$file"
+  local replace_rc=0
+  fi_ledger_replace "$file" "$tmp" "$snapshot" || replace_rc=$?
+  if (( replace_rc != 0 )); then
+    fi_err "archive: $file changed while archiving — the moved entries were appended to $archive_file but are still in the active file; re-run archive after checking for duplicates"
+    return 1
+  fi
 
   printf 'archive: moved %d entries from %s to %s\n' \
     "$archived_count" "$file" "$archive_file"
