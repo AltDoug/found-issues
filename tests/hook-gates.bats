@@ -76,7 +76,8 @@ seed_unpromoted_branch() {
 @test "hook-gate: pre-branch-delete reaches the full path for delete shapes, incl. quote-spliced words" {
   local c
   for c in 'git branch -D feat/x' 'git push origin --delete feat/x' 'git push origin :feat/x' \
-           "git bra''nch -D feat/x" 'git bra"x"nch -D feat/x' "git push origin -''d feat/x" \
+           "git bra''nch -D feat/x" 'git bra""nch -D feat/x' "git push origin -''d feat/x" \
+           "git branch -'D' feat/x" 'git push origin "--delete" feat/x' 'git -C . branch -fD feat/x' \
            'gh api -X DELETE repos/o/r/git/refs/heads/feat/x'; do
     rm -f "$TMP/jq-calls"
     payload pre "$c" >"$TMP/p.json"
@@ -107,7 +108,11 @@ seed_unpromoted_branch() {
     'git status' 'ls -la' 'git push origin feat/x' 'git push origin --delete feat/x'
     'git push -d origin feat/x' 'git push origin :feat/x' 'git branch -D feat/x'
     'git branch --delete feat/x' 'git branch -d main feat/x' "git bra''nch -D feat/x"
-    'git bra"x"nch -D feat/x' "git branch -'D' feat/x" "printf 'git branch -D feat/x' | cat"
+    'git bra"x"nch -D feat/x' 'git bra""nch -D feat/x' "git branch -'D' feat/x" "printf 'git branch -D feat/x' | cat"
+    'git -C . branch -D feat/x' 'git -c a=b branch -df feat/x' 'git push origin "--delete" feat/x'
+    'for b in feat/x; do git branch -D "$b"; done' 'git branch --show-current' 'git branch --merged main'
+    'git push origin -fd feat/x' $'git bra\
+nch -D feat/x' 
     'echo "git push origin --delete feat/x"' 'gh api -X DELETE repos/o/r/git/refs/heads/feat/x'
     'git br\anch -D feat/x' $'git\tbranch\t-D\tfeat/x' $'git status\ngit branch -D feat/x'
     'FOUND_ISSUES_PROMOTE_GUARD=off git branch -D feat/x' 'git push origin main && git push origin --delete feat/x'
@@ -124,7 +129,7 @@ seed_unpromoted_branch() {
     done
   done
   # The corpus really exercises both outcomes.
-  payload pre 'git bra"x"nch -D feat/x' >"$TMP/p.json"
+  payload pre 'git bra""nch -D feat/x' >"$TMP/p.json"
   run_hook "$PRE" "$TMP/p.json" on
   [ "$(cat "$TMP/on.rc")" -eq 2 ]
 }

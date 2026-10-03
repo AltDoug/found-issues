@@ -133,6 +133,14 @@ cmd_doctor() {
   printf '%s CLI: %s\n' "$section_pass" "${FI_BIN_DIR}/found-issues"
   fi_doctor_plugin_version "$section_pass" "$section_warn"
   printf '%s lib dir: %s\n' "$section_pass" "$FI_LIB_DIR"
+  # The blocking hooks (branch-delete promote guard, ledger format enforcer)
+  # read their payload with jq and fail open without it — by design, but
+  # nothing used to say so (audit hook-18). Git Bash often lacks jq.
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s jq: %s\n' "$section_pass" "$(command -v jq)"
+  else
+    printf '%s jq not found — the branch-delete and format guard hooks are INACTIVE (they allow everything). Install jq.\n' "$section_warn"
+  fi
   if [[ -d "$HOME/.claude/found-issues" ]]; then
     if [[ -f "$HOME/.claude/found-issues/.onboarded" ]]; then
       printf '%s Onboarding marker present (setup ran at least once).\n' "$section_pass"

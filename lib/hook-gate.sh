@@ -33,9 +33,16 @@
 # (\"command\"). Past 400 escaped quotes the scan gives up and widens to the
 # whole payload (each step is O(length)).
 fi_gate_text() {
+  # Byte mode: in a UTF-8 locale every ${rest#*\"} below rescans multi-byte
+  # text from the start, which made a 70 KB command take ~4 s per hook.
+  local LC_ALL=C
   local input="$1" rest pre bs raw="" i=0
   local re='"command"[[:space:]]*:[[:space:]]*"'
   [[ "${FOUND_ISSUES_HOOK_GATES:-on}" == "off" ]] && return 1
+  # The ${raw//...} pass below is quadratic in bash: ~2-4 s on a 70 KB
+  # heredoc payload. A gate exists to save forks on ordinary commands; a
+  # payload this large just takes the full path.
+  (( ${#input} > 16384 )) && return 1
   if [[ "$input" =~ $re ]]; then
     rest="${input#*"${BASH_REMATCH[0]}"}"
     while :; do

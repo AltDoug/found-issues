@@ -191,6 +191,21 @@ EOF
 fi
 fi
 
+# Missing-jq notice — at most once per day per machine (audit hook-18). The
+# blocking hooks fail open without jq, so on a jq-less machine (common on Git
+# Bash) the guards silently allow everything; say so instead.
+if ! command -v jq >/dev/null 2>&1; then
+  mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
+  __fi_jq_marker="$ONBOARD_DIR/.jq-missing-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
+  if [[ ! -f "$__fi_jq_marker" ]]; then
+    cat <<'EOF'
+[found-issues: jq is not installed — the branch-delete and ledger-format guards are inactive until it is. Tell the user once: "found-issues guards are off: install jq".]
+
+EOF
+    touch "$__fi_jq_marker" 2>/dev/null || true
+  fi
+fi
+
 # Locate the CLI binary.
 __fi_colocated_bin="${FI_BIN_DIR:-$__fi_hook_dir/../bin}/found-issues"
 FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"
