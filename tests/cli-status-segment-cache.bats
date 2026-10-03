@@ -114,11 +114,11 @@ render_stubbed() {
   export FOUND_ISSUES_AUTOSYNC_CMD="true"
   fi_run status --format=segment --cwd "$TMP"
   # The full path stamped an epoch: a warm render is fully builtin.
-  [[ "$(cat "$TMP/cache/segment-autosync-ts")" =~ ^[0-9]+$ ]]
+  [[ "$(cat "$(fi_autosync_ts "$TMP/cache")")" =~ ^[0-9]+$ ]]
   run render_stubbed
   [ ! -e "$TMP/external-calls" ]
   # An older CLI truncates the stamp: the fast path must not guess its age.
-  : >"$TMP/cache/segment-autosync-ts"
+  : >"$(fi_autosync_ts "$TMP/cache")"
   run render_stubbed
   [ -e "$TMP/external-calls" ]
   unset FOUND_ISSUES_AUTOSYNC_CMD
@@ -133,8 +133,8 @@ render_stubbed() {
   rm -f "$TMP/synced"
   # Long overdue by both clocks: the epoch the fast path reads and the
   # mtime the full path stats.
-  echo 1 >"$TMP/cache/segment-autosync-ts"
-  touch -t 200001010000 "$TMP/cache/segment-autosync-ts"
+  echo 1 >"$(fi_autosync_ts "$TMP/cache")"
+  touch -t 200001010000 "$(fi_autosync_ts "$TMP/cache")"
   fi_run status --format=segment --cwd "$TMP"
   for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -e "$TMP/synced" ]] && break; sleep 0.05; done
   [ -e "$TMP/synced" ]

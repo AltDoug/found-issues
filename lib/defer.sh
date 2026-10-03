@@ -81,10 +81,7 @@ cmd_defer() {
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue
     # Case-insensitive substring match on the whole entry line
-    local lower_entry lower_match
-    lower_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
-    lower_match="$(printf '%s' "$match" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$lower_entry" == *"$lower_match"* ]]; then
+    if fi_icontains "$entry" "$match"; then
       matches+=("$entry")
     fi
   done < <(fi_entries "$file" open 2>/dev/null || true)
@@ -94,10 +91,7 @@ cmd_defer() {
     local deferred_matches=()
     while IFS= read -r entry; do
       [[ -z "$entry" ]] && continue
-      local lower_entry lower_match
-      lower_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
-      lower_match="$(printf '%s' "$match" | tr '[:upper:]' '[:lower:]')"
-      if [[ "$lower_entry" == *"$lower_match"* ]]; then
+      if fi_icontains "$entry" "$match"; then
         deferred_matches+=("$entry")
       fi
     done < <(fi_entries "$file" deferred 2>/dev/null || true)

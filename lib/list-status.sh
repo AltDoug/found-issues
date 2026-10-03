@@ -113,7 +113,8 @@ cmd_status() {
   local critical=0 issues=0 in_pr=0 stale=0 total_open=0
   if [[ -n "$file" && -f "$file" ]]; then
     critical="$(fi_count_critical "$file")"
-    total_open="$(fi_count "$file" open)"
+    # Only the json format prints it (audit status-14).
+    [[ "$format" == "json" ]] && total_open="$(fi_count "$file" open)"
     in_pr="$(fi_count_in_pr "$file")"
     # Residual computed by exclusion (entries neither critical nor in-PR),
     # NOT by subtraction: total_open - in_pr - critical double-subtracts
@@ -143,12 +144,22 @@ cmd_status() {
         && -n "$file" && -f "$file" ]]; then
     local _autosync_interval="${FOUND_ISSUES_SEGMENT_AUTOSYNC_INTERVAL:-600}"
     local _autosync_cache="${FOUND_ISSUES_CACHE_DIR:-$HOME/.cache/found-issues}"
-    local _autosync_ts="$_autosync_cache/segment-autosync-ts"
-    mkdir -p "$_autosync_cache" 2>/dev/null || true
+    # One stamp PER LEDGER (audit status-2): a single global stamp let only
+    # the first repo to render in each window sync, with 3-5 sessions open.
+    # Same sanitized name as the segment cache; the fast path in
+    # lib/segment-cache.sh reads the same file.
+    local _autosync_ts
+    _autosync_ts="$(fi_autosync_stamp_path "$_autosync_cache" "$file")"
+    mkdir -p "${_autosync_ts%/*}" 2>/dev/null || true
     local _autosync_now _autosync_last _autosync_age
-    _autosync_now="$(date +%s)"
+    _autosync_now="${EPOCHSECONDS:-$(date +%s)}"
     _autosync_last=0
+    # The stamp carries the epoch (2.9.0+): read it builtin, stat only as a
+    # fallback for an older stamp.
     if [[ -f "$_autosync_ts" ]]; then
+      IFS= read -r _autosync_last <"$_autosync_ts" 2>/dev/null || true
+    fi
+    if [[ -f "$_autosync_ts" && ! "$_autosync_last" =~ ^[0-9]+$ ]]; then
       # GNU first (Linux), then BSD (macOS). On Linux `stat -f` is the
       # filesystem-status form, NOT file mtime — it can succeed-with-garbage
       # and break the arithmetic below under `set -e`. Trying `-c` first
@@ -165,16 +176,21 @@ cmd_status() {
     if (( _autosync_age >= _autosync_interval )); then
       # The epoch goes INTO the stamp too: the segment fast path reads it with
       # a builtin instead of stat'ing the mtime. Readers here keep the mtime.
-      printf '%s\n' "$_autosync_now" >"$_autosync_ts" 2>/dev/null || true
-      if [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
+      # Spawn only if the stamp landed (audit status-1): an unwritable cache
+      # dir otherwise meant a background sync on EVERY render. The spawned
+      # sync runs from search_root (audit status-3) — sync finds its ledger
+      # from PWD, and the statusline's PWD is not the workspace.
+      if ! printf '%s\n' "$_autosync_now" >"$_autosync_ts" 2>/dev/null; then
+        :
+      elif [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
         # Testing knob: a self-contained command STRING, dispatched via bash -c.
-        ( bash -c "$FOUND_ISSUES_AUTOSYNC_CMD" >/dev/null 2>&1 & ) >/dev/null 2>&1
+        ( cd "$search_root" 2>/dev/null && bash -c "$FOUND_ISSUES_AUTOSYNC_CMD" >/dev/null 2>&1 & ) >/dev/null 2>&1
       else
         # Default: invoke ourselves as argv, never through a bash -c string —
         # an install path containing a space (e.g. C:/Users/John Doe/...)
         # word-splits inside the string and exits 127 silently.
         # No auto-archive in an unattended sync — see hooks/session-start.sh.
-        ( FOUND_ISSUES_AUTO_ARCHIVE=off "$0" sync >/dev/null 2>&1 & ) >/dev/null 2>&1
+        ( cd "$search_root" 2>/dev/null && FOUND_ISSUES_AUTO_ARCHIVE=off "$0" sync >/dev/null 2>&1 & ) >/dev/null 2>&1
       fi
     fi
   fi

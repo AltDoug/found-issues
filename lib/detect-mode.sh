@@ -82,36 +82,45 @@ fi_detect_mode() {
     return 0
   fi
 
-  # GitHub remote present. Check gh availability + auth.
+  # GitHub remote present. Check gh availability.
   if ! command -v gh >/dev/null 2>&1; then
     printf 'git'
     return 0
   fi
-  if ! gh auth status >/dev/null 2>&1; then
-    printf 'git'
-    return 0
-  fi
 
-  # Cached result for this repo?
+  # Cached result for this repo? Read BEFORE `gh auth status`: that call
+  # validates the token over the network, and a fresh cache answers without
+  # it (audit ledger-8a). A cached github-* mode with auth gone since just
+  # degrades to sync's "could not be fetched" warnings.
   local cache_dir="${HOME}/.cache/found-issues"
   mkdir -p "$cache_dir" 2>/dev/null || true
 
-  local repo_id
-  repo_id="$(printf '%s' "$remote_url" \
-    | sed -E 's|/+$||; s|\.git$||; s|.*github\.com[:/]([^/]+/[^/]+).*|\1|' \
-    | tr '/' '_')"
+  # Builtin twin of: sed 's|/+$||; s|\.git$||; s|.*github\.com[:/]([^/]+/[^/]+).*|\1|' | tr / _
+  local repo_id="$remote_url"
+  while [[ "$repo_id" == */ ]]; do repo_id="${repo_id%/}"; done
+  repo_id="${repo_id%.git}"
+  local re_gh='github\.com[:/]([^/]+/[^/]+)'
+  [[ "$repo_id" =~ $re_gh ]] && repo_id="${BASH_REMATCH[1]}"
+  repo_id="${repo_id//\//_}"
   local cache_file="$cache_dir/mode_${repo_id}"
 
   local ttl=3600  # 1 hour
   if [[ -f "$cache_file" ]]; then
     local mtime now age
     mtime="$(fi_file_mtime "$cache_file")"
-    now="$(date +%s)"
+    now="${EPOCHSECONDS:-$(date +%s)}"
     age=$((now - mtime))
     if [[ "$age" -lt "$ttl" ]]; then
-      cat "$cache_file"
+      local cached
+      cached="$(<"$cache_file")"
+      printf '%s\n' "$cached"
       return 0
     fi
+  fi
+
+  if ! gh auth status >/dev/null 2>&1; then
+    printf 'git'
+    return 0
   fi
 
   # Query for recent merged PRs (last 30 days, limit 5)

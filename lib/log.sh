@@ -130,15 +130,20 @@ cmd_log() {
   local file
   file="$(fi_resolve_issues_file)"
 
-  # Dedup check
+  # Dedup check. Builtin keys (fi_*_v in lib/canonicalize.sh) and one repo-root
+  # lookup for the whole scan: this loop used to cost ~40 process creations
+  # per existing entry (audit cli-10).
+  fi_repo_root_cached
+  local repo_root="$FI_REPO_ROOT"
   local new_key
   if [[ -n "$line_num" ]]; then
-    new_key="$(fi_dedup_key "$path" "$line_num" "$symptom")"
+    fi_dedup_key_v "$path" "$line_num" "$symptom" "$repo_root"
   elif [[ "$path" == */* || "$path" == *.* ]]; then
-    new_key="$(fi_dedup_key "$path" "" "$symptom")"
+    fi_dedup_key_v "$path" "" "$symptom" "$repo_root"
   else
-    new_key="$(fi_dedup_key_abstract "$symptom")"
+    fi_dedup_key_abstract_v "$symptom"
   fi
+  new_key="$FI_KEY"
 
   # Dedup against [open] AND [deferred] entries.
   # - [open] match: existing behavior — print "Skipped — already logged" and return.
@@ -146,23 +151,13 @@ cmd_log() {
   #   auto-promote (handled by fi_handle_deferred_touch).
   local matched_status=""  # "open" or "deferred", or empty if no match
   local matched_entry=""
-  local entry e_data e_path e_line e_symptom existing_key
+  local entry
 
   # Scan [open] first (preserve existing precedence)
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue
-    e_data="$(fi_parse_entry "$entry")" || continue
-    e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
-    e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
-    e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
-    if [[ -n "$e_line" ]]; then
-      existing_key="$(fi_dedup_key "$e_path" "$e_line" "$e_symptom")"
-    elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
-      existing_key="$(fi_dedup_key "$e_path" "" "$e_symptom")"
-    else
-      existing_key="$(fi_dedup_key_abstract "$e_symptom")"
-    fi
-    if [[ "$existing_key" == "$new_key" ]]; then
+    fi_entry_dedup_key_v "$entry" "$repo_root" || continue
+    if [[ "$FI_KEY" == "$new_key" ]]; then
       matched_status="open"
       matched_entry="$entry"
       break
@@ -173,18 +168,8 @@ cmd_log() {
   if [[ -z "$matched_status" ]]; then
     while IFS= read -r entry; do
       [[ -z "$entry" ]] && continue
-      e_data="$(fi_parse_entry "$entry")" || continue
-      e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
-      e_line="$(printf '%s' "$e_data" | grep '^line=' | head -1 | cut -d= -f2-)"
-      e_symptom="$(printf '%s' "$e_data" | grep '^symptom=' | head -1 | cut -d= -f2-)"
-      if [[ -n "$e_line" ]]; then
-        existing_key="$(fi_dedup_key "$e_path" "$e_line" "$e_symptom")"
-      elif [[ "$e_path" == */* || "$e_path" == *.* ]]; then
-        existing_key="$(fi_dedup_key "$e_path" "" "$e_symptom")"
-      else
-        existing_key="$(fi_dedup_key_abstract "$e_symptom")"
-      fi
-      if [[ "$existing_key" == "$new_key" ]]; then
+      fi_entry_dedup_key_v "$entry" "$repo_root" || continue
+      if [[ "$FI_KEY" == "$new_key" ]]; then
         matched_status="deferred"
         matched_entry="$entry"
         break

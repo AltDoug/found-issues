@@ -11,13 +11,15 @@
 #   GH_MOCK_TRACE         path to write each invocation (for assertions)
 #
 # Behavior: print matching JSON to stdout and exit 0; exit 1 if no match.
-# Does NOT honor --jq filtering — callers should pipe to real jq in the CLI.
+# `pr view --jq <filter>` IS honored when the mocked row is JSON (sync asks gh
+# for a pre-joined answer since v2.10.2, audit ledger-7): the row is run
+# through real jq. A non-JSON row (a pre-filtered list) passes through as-is.
 #
 # Limitations (intentional):
 #   - Only space-separated --flag value form is recognized; --flag=value
 #     is NOT stripped from argv (no callers in this repo use the equals form).
-#   - --jq filters are stripped — tests must populate GH_MOCK_PR_VIEW with
-#     already-filtered output if the production CLI uses --jq for that call.
+#   - Rows that are NOT JSON skip the --jq filter — tests may still populate
+#     GH_MOCK_PR_VIEW with already-filtered output for such calls.
 #     (`bin/found-issues:cmd_annotate_pr` does this for `.files[].path`.)
 
 set -euo pipefail
@@ -27,16 +29,19 @@ if [[ -n "${GH_MOCK_TRACE:-}" ]]; then
   printf '%s\n' "$*" >> "$GH_MOCK_TRACE"
 fi
 
-# Strip --json fields and --jq from argv (we don't filter)
+# Strip --json fields and --jq from argv, remembering the --jq filter
 filtered_args=()
-skip_next=0
+jq_filter=""
+skip_next=""
 for a in "$@"; do
-  if [[ "$skip_next" == "1" ]]; then
-    skip_next=0
+  if [[ -n "$skip_next" ]]; then
+    [[ "$skip_next" == "jq" ]] && jq_filter="$a"
+    skip_next=""
     continue
   fi
   case "$a" in
-    --json|--jq) skip_next=1 ;;
+    --json) skip_next=json ;;
+    --jq) skip_next=jq ;;
     *) filtered_args+=("$a") ;;
   esac
 done
@@ -54,7 +59,12 @@ case "$cmd $sub" in
           # Expand literal \n sequences so one row can mock multi-line output
           # (the pre-filtered .files[].path list for multi-file PRs). Row
           # parsing above stays one-row-per-line.
-          printf '%s\n' "${mock_json//\\n/$'\n'}"
+          out="${mock_json//\\n/$'\n'}"
+          if [[ -n "$jq_filter" ]] && printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
+            printf '%s' "$out" | jq -r "$jq_filter"
+          else
+            printf '%s\n' "$out"
+          fi
           exit 0
         fi
       done <<<"$GH_MOCK_PR_VIEW"
@@ -74,7 +84,11 @@ case "$cmd $sub" in
     ;;
   "repo view")
     if [[ -n "${GH_MOCK_REPO_VIEW:-}" ]]; then
-      printf '%s\n' "$GH_MOCK_REPO_VIEW"
+      if [[ -n "$jq_filter" ]]; then
+        printf '%s' "$GH_MOCK_REPO_VIEW" | jq -r "$jq_filter"
+      else
+        printf '%s\n' "$GH_MOCK_REPO_VIEW"
+      fi
       exit 0
     fi
     exit 1

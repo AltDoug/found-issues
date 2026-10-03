@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.10.1"
+readonly FI_VERSION="2.10.2"
 
 # Statusline fast path (lib/segment-cache.sh): `status --format=segment` runs
 # every few seconds per session, so it is answered from a content-checked
@@ -221,11 +221,12 @@ fi_detect_rename() {
 # Find or create the issues file based on detected mode.
 # Echoes the path. Creates parent directory + initial header if missing.
 fi_resolve_issues_file() {
-  local mode
-  mode="$(fi_detect_mode)"
-
+  # Only "local or not" matters here, and fi_detect_mode answers "local"
+  # exactly for these two cases — calling it ran `gh auth status` (a network
+  # token check) and an hourly `gh pr list` on every log/defer/resolve
+  # (audit cli-11 / ledger-8a).
   local target=""
-  if [[ "$mode" == "local" ]]; then
+  if [[ "${FOUND_ISSUES_MODE:-}" == "local" ]] || ! git rev-parse --git-dir >/dev/null 2>&1; then
     target="$PWD/.found-issues.md"
   else
     local repo_root
@@ -263,8 +264,12 @@ fi_repo_id() {
   # made sync query the wrong repo. The slash strip comes first so
   # pasted-URL remotes like https://github.com/org/repo.git/ still lose
   # the .git suffix.
-  printf '%s' "$remote_url" \
-    | sed -E 's|/+$||; s|\.git$||; s|.*github\.com[:/]([^/]+/[^/]+).*|\1|'
+  # Builtin (no sed fork); same three steps.
+  while [[ "$remote_url" == */ ]]; do remote_url="${remote_url%/}"; done
+  remote_url="${remote_url%.git}"
+  local re_gh='github\.com[:/]([^/]+/[^/]+)'
+  [[ "$remote_url" =~ $re_gh ]] && remote_url="${BASH_REMATCH[1]}"
+  printf '%s' "$remote_url"
 }
 
 # Resolve the default branch with a layered fallback chain:
@@ -288,10 +293,19 @@ fi_resolve_default_branch() {
   # Fallback: gh repo view, with cache
   local repo_slug
   repo_slug="$(fi_repo_id 2>/dev/null || true)"
-  if [[ -n "$repo_slug" ]] && command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  if [[ -n "$repo_slug" ]] && command -v gh >/dev/null 2>&1; then
     local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/found-issues"
     local cache_file="$cache_dir/default-branch-${repo_slug//\//-}.txt"
     mkdir -p "$cache_dir" 2>/dev/null || true
+
+    # Negative cache (audit ledger-8c): a failed lookup (offline, no auth)
+    # used to be retried on every sync and every hook-mode annotate. Back off
+    # for 10 minutes and fall through to the last resort.
+    if [[ -f "$cache_file.miss" ]] \
+       && (( ${EPOCHSECONDS:-$(date +%s)} - $(fi_file_mtime "$cache_file.miss") < 600 )); then
+      printf 'main'
+      return 0
+    fi
 
     # Check cache freshness (1h TTL). fi_file_mtime is the cross-platform
     # mtime helper (see lib/detect-mode.sh) — guarantees a numeric result
@@ -313,13 +327,15 @@ fi_resolve_default_branch() {
 
     # Fetch fresh
     local gh_result
-    gh_result="$(gh repo view --json defaultBranchRef 2>/dev/null \
-      | jq -r '.defaultBranchRef.name // empty' 2>/dev/null || true)"
+    gh_result="$(gh repo view --json defaultBranchRef \
+      --jq '.defaultBranchRef.name // empty' 2>/dev/null || true)"
     if [[ -n "$gh_result" ]]; then
       printf '%s' "$gh_result" > "$cache_file"
+      rm -f "$cache_file.miss" 2>/dev/null || true
       printf '%s' "$gh_result"
       return 0
     fi
+    : > "$cache_file.miss" 2>/dev/null || true
   fi
 
   # Last resort

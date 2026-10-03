@@ -33,7 +33,8 @@ fi_find_issues_file() {
       printf '%s' "$dir/.found-issues.md"
       return 0
     fi
-    dir="$(dirname "$dir")"
+    dir="${dir%/*}"
+    [[ -z "$dir" ]] && dir="/"
   done
 
   return 1
@@ -49,6 +50,18 @@ fi_has_conflict_markers() {
   local file="$1"
   [[ -f "$file" ]] || return 1
   LC_ALL=C grep -qE '^(<<<<<<< |=======$|>>>>>>> )' "$file"
+}
+
+# fi_icontains <haystack> <needle> — case-insensitive substring test, builtin
+# (nocasematch, bash 3.2+). defer and promote-deferred used two subshell+tr
+# pairs per entry for this (audit cli-12).
+fi_icontains() {
+  local was=0 rc=1
+  shopt -q nocasematch && was=1
+  shopt -s nocasematch
+  [[ "$1" == *"$2"* ]] && rc=0
+  (( was )) || shopt -u nocasematch
+  return $rc
 }
 
 # === Ledger rewrites ===
@@ -103,6 +116,12 @@ fi_ledger_replace() {
 # LOOK like annotations but sit mid-line are therefore excluded.
 # Compatible with bash 3.2 (regex in a variable, no lookbehind).
 fi_annotation_tail() {
+  fi_annotation_tail_v "$1"
+  printf '%s' "$FI_ANN_TAIL"
+}
+
+# Same walk, result in $FI_ANN_TAIL — no subshell for in-process callers.
+fi_annotation_tail_v() {
   local line="$1" tail=""
   local re_tail_group='\((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested): [^)]*\)[[:space:]]*$'
   while [[ "$line" =~ $re_tail_group ]]; do
@@ -110,227 +129,136 @@ fi_annotation_tail() {
     tail="${grp}${tail}"
     line="${line%"$grp"}"
   done
-  printf '%s' "$tail"
+  FI_ANN_TAIL="$tail"
 }
 
 # Parse a single entry line into KEY=VALUE pairs (one per line).
-# Returns 1 if the line is not a valid entry.
+# Returns 1 if the line is not a valid entry. Prints from fi_parse_entry_vars
+# below; in-process callers should call that directly and read FE_* instead
+# of re-splitting this output with grep pipelines.
 fi_parse_entry() {
+  fi_parse_entry_vars "$1" || return 1
+  printf 'status=%s\n' "$FE_status"
+  printf 'critical=%s\n' "$FE_critical"
+  printf 'date=%s\n' "$FE_date"
+  printf 'path=%s\n' "$FE_path"
+  printf 'line=%s\n' "$FE_line"
+  # Empty unless the location carried a range. Consumers grep '^line=' and
+  # '^line_end=' — anchored, so neither key matches the other's prefix.
+  printf 'line_end=%s\n' "$FE_line_end"
+  printf 'symptom=%s\n' "$FE_symptom"
+  printf 'fix=%s\n' "$FE_fix"
+  printf 'prs=%s\n' "$FE_prs"
+  printf 'prs_auto=%s\n' "$FE_prs_auto"
+  printf 'prs_closed=%s\n' "$FE_prs_closed"
+  printf 'commits=%s\n' "$FE_commits"
+  printf 'commits_auto=%s\n' "$FE_commits_auto"
+  printf 'commits_stale=%s\n' "$FE_commits_stale"
+  printf 'renamed_from=%s\n' "$FE_renamed_from"
+  printf 'fixed_date=%s\n' "$FE_fixed_date"
+  printf 'verified=%s\n' "$FE_verified"
+}
+
+# fi_parse_entry_vars <line> — builtin-only twin of fi_parse_entry. Sets the
+# FE_* globals instead of printing KEY=VALUE lines; returns 1 if the line is
+# not a valid entry. Zero processes: fi_parse_entry used to fork a sed, a
+# subshell for the annotation tail and six grep|sed|paste pipelines per call,
+# and its callers re-split the output with three to five more pipelines —
+# ~65 process creations per [open] entry in sync, ~650 per SessionStart on an
+# 8-entry ledger (2026-10-03 audit, ledger-5 / cli-10 / annot-2). On Git Bash
+# every one of those is a Windows process creation.
+#
+# Field semantics are identical to fi_parse_entry (which now prints from
+# these variables); tests/parse-entries*.bats pin them.
+FE_status="" FE_critical="" FE_date="" FE_path="" FE_line="" FE_line_end=""
+FE_symptom="" FE_fix="" FE_prs="" FE_prs_auto="" FE_prs_closed=""
+FE_commits="" FE_commits_auto="" FE_commits_stale="" FE_renamed_from=""
+FE_fixed_date="" FE_verified=""
+
+# _fi_collect <tail> <regex with one capture group> — comma-join every
+# capture, left to right, the way `grep -oE | sed | paste -sd ,` did.
+_fi_collect() {
+  local rest="$1" re="$2" out=""
+  while [[ "$rest" =~ $re ]]; do
+    out+="${out:+,}${BASH_REMATCH[1]}"
+    rest="${rest#*"${BASH_REMATCH[0]}"}"
+  done
+  _fi_collected="$out"
+}
+
+fi_parse_entry_vars() {
   local line="$1"
+  FE_status="" FE_critical="no" FE_date="" FE_path="" FE_line="" FE_line_end=""
+  FE_symptom="" FE_fix="" FE_prs="" FE_prs_auto="" FE_prs_closed=""
+  FE_commits="" FE_commits_auto="" FE_commits_stale="" FE_renamed_from=""
+  FE_fixed_date="" FE_verified=""
 
-  # Status (acts as entry-validity check)
   local re_status='^- \[(open|deferred|fixed)\]'
-  local status=""
-  if [[ "$line" =~ $re_status ]]; then
-    status="${BASH_REMATCH[1]}"
-  else
-    return 1
-  fi
+  [[ "$line" =~ $re_status ]] || return 1
+  FE_status="${BASH_REMATCH[1]}"
 
-  # Critical flag
   local re_critical='^- \[(open|deferred|fixed)\] \[!\]'
-  local critical="no"
-  if [[ "$line" =~ $re_critical ]]; then
-    critical="yes"
-  fi
+  [[ "$line" =~ $re_critical ]] && FE_critical="yes"
 
-  # Date (first ISO date in the line)
   local re_date='([0-9]{4}-[0-9]{2}-[0-9]{2})'
-  local date=""
-  if [[ "$line" =~ $re_date ]]; then
-    date="${BASH_REMATCH[1]}"
-  fi
+  [[ "$line" =~ $re_date ]] && FE_date="${BASH_REMATCH[1]}"
 
-  # Location: path:line, path-only, or abstract topic
-  # Note: em-dash is U+2014 (—); using grep for portability instead of inline regex
-  local path="" line_num="" line_end=""
-  local after_date
-  # Anchor the strip to the status-prefix pattern so only the entry's leading
-  # date is consumed. The earlier `^.*[0-9]{4}-…` form was greedy: if the
-  # symptom mentioned another ISO date (very common — "regressed on YYYY-MM-DD",
-  # "surfaced YYYY-MM-DD"), `.*` happily ate past the entry-date and stripped
-  # into the symptom, returning a broken location and silently breaking
-  # annotate-pr / annotate-commit path matching.
-  after_date="$(printf '%s' "$line" | sed -E 's/^- \[(open|deferred|fixed)\]( \[!\])? [0-9]{4}-[0-9]{2}-[0-9]{2} //')"
-  # after_date now starts with location followed by ' — symptom...'
+  # Strip the status prefix + entry date (anchored, so a date inside the
+  # symptom is never consumed). No match leaves the line unchanged — what
+  # the sed it replaces did.
+  local re_prefix='^- \[(open|deferred|fixed)\]( \[!\])? [0-9]{4}-[0-9]{2}-[0-9]{2} '
+  local after_date="$line"
+  [[ "$line" =~ $re_prefix ]] && after_date="${line#"${BASH_REMATCH[0]}"}"
   local location_part="${after_date%% — *}"
 
-  # Charset parity with cmd_log's location acceptance ([^:[:space:]]+):
-  # the earlier [A-Za-z0-9_./-] set rejected legitimate path characters
-  # like + (src/UIView+Ext.swift), so accepted-at-log-time entries
-  # round-tripped with an empty path — dedup double-logged, annotate-pr /
-  # annotate-commit never matched, tombstone sync never fired.
-  # A line spec may be a single line (`:42`) or a RANGE (`:23-49`). Ranges are
-  # split into a numeric start (line_num) and a numeric end (line_end) rather
-  # than kept verbatim in line_num: three consumers evaluate the line field
-  # arithmetically — fi_entry_to_json's `10#` coercion below, cmd_sync's
-  # tombstone `-lt` probe, and fi_line_matched's `(( ))` — and bash silently
-  # evaluates "23-49" as the SUBTRACTION -26, so a verbatim range would emit
-  # `"line":-26` in --json and exit 0. Keeping the field numeric leaves those
-  # three sites correct untouched; only location RECONSTRUCTION (fi_entry_loc
-  # and the annotate candidate list) has to rejoin the two halves, and a site
-  # that forgets to degrades to "no match" — the visible failure that already
-  # existed — instead of a silently wrong number.
   local re_path_line='^([^:[:space:]]+):([0-9]+)(-([0-9]+))?$'
   local re_path_only='^([^:[:space:]]+)$'
-  # Entries sometimes follow the path with a symbol name and/or approximate
-  # line range (e.g. `bin/found-issues fi_strip_target_markers ~1982-1989`),
-  # which the standalone regexes can't match. Take the first whitespace-
-  # delimited token as the path candidate and treat the remainder as
-  # supplementary location info. Regression coverage in tests/parse-entries.bats.
+  local re_repo_line='^(.+):([0-9]+)(-([0-9]+))?$'
   local first_token="${location_part%%[[:space:]]*}"
   if [[ "$first_token" =~ $re_path_line ]]; then
-    path="${BASH_REMATCH[1]}"
-    line_num="${BASH_REMATCH[2]}"
-    line_end="${BASH_REMATCH[4]}"
+    FE_path="${BASH_REMATCH[1]}"
+    FE_line="${BASH_REMATCH[2]}"
+    FE_line_end="${BASH_REMATCH[4]}"
   elif [[ "$first_token" =~ $re_path_only ]]; then
-    path="${BASH_REMATCH[1]}"
+    FE_path="${BASH_REMATCH[1]}"
   elif [[ "$first_token" == *:* && ( "${first_token#*:}" == */* || "${first_token#*:}" == *.* ) ]]; then
-    # Legacy multi-repo locations use a `Repo:path` / `Repo:path:line` shape.
-    # The charsets above exclude ':' from a path, so these tokens matched
-    # neither regex and returned an EMPTY path — fi_entry_loc rejects an empty
-    # path, so the entries never reached the --pick candidate list and could
-    # not be closed through annotate-pr / annotate-commit at all. cmd_log
-    # writes the shape verbatim, so the CLI produced entries it could not
-    # then select.
-    #
-    # The repo prefix stays INSIDE the path on purpose. Exposing the bare
-    # sub-path would make it look repo-relative to every caller that resolves
-    # paths against this repo: sync would probe it and false-tombstone the
-    # entry, and auto-annotate would match it against a same-named local file
-    # and false-flip a foreign-repo entry on merge. Both callers additionally
-    # skip ':' paths outright, so keeping the prefix means a missed guard
-    # degrades to "no match" instead of a wrong match.
-    #
-    # The remainder after the FIRST colon must still look path-ish ('/' or
-    # '.', the same heuristic the tombstone probe uses) so that abstract topic
-    # locations like `topic:with:colons` keep parsing as pathless. Without
-    # that check this branch swallowed them and broke fi_entry_to_json's
-    # "path":null contract.
-    #
-    # Greedy `.+` splits on the LAST colon, so only a trailing all-numeric
-    # segment (or numeric range) is taken as the line number.
-    if [[ "$first_token" =~ ^(.+):([0-9]+)(-([0-9]+))?$ ]]; then
-      path="${BASH_REMATCH[1]}"
-      line_num="${BASH_REMATCH[2]}"
-      line_end="${BASH_REMATCH[4]}"
+    if [[ "$first_token" =~ $re_repo_line ]]; then
+      FE_path="${BASH_REMATCH[1]}"
+      FE_line="${BASH_REMATCH[2]}"
+      FE_line_end="${BASH_REMATCH[4]}"
     else
-      path="$first_token"
+      FE_path="$first_token"
     fi
   fi
 
-  # Symptom: text after ' — ' up to first '(' or end of line
-  local symptom=""
   if [[ "$after_date" == *" — "* ]]; then
     local rest="${after_date#* — }"
-    symptom="${rest%%(*}"
-    symptom="${symptom%"${symptom##*[![:space:]]}"}"
+    FE_symptom="${rest%%(*}"
+    FE_symptom="${FE_symptom%"${FE_symptom##*[![:space:]]}"}"
   fi
 
-  # Suggested fix
   local re_fix='\(suggested: ([^)]+)\)'
-  local fix=""
-  if [[ "$line" =~ $re_fix ]]; then
-    fix="${BASH_REMATCH[1]}"
+  [[ "$line" =~ $re_fix ]] && FE_fix="${BASH_REMATCH[1]}"
+
+  fi_annotation_tail_v "$line"
+  local tail="$FI_ANN_TAIL"
+  if [[ -n "$tail" ]]; then
+    local repo='[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+' sha='[a-f0-9]{7,40}'
+    _fi_collect "$tail" "\\(PR: ($repo)\\)";            FE_prs="$_fi_collected"
+    _fi_collect "$tail" "\\(PR-auto: ($repo)\\)";       FE_prs_auto="$_fi_collected"
+    _fi_collect "$tail" "\\(PR-closed: ($repo)\\)";     FE_prs_closed="$_fi_collected"
+    _fi_collect "$tail" "\\(commit: ($sha)\\)";         FE_commits="$_fi_collected"
+    _fi_collect "$tail" "\\(commit-auto: ($sha)\\)";    FE_commits_auto="$_fi_collected"
+    _fi_collect "$tail" "\\(commit-stale: ($sha)\\)";   FE_commits_stale="$_fi_collected"
   fi
 
-  # Flip-driving annotations (PR/PR-closed/commit/commit-stale) are extracted
-  # from the trailing annotation run ONLY — a canonical form quoted inside
-  # the symptom ("earlier repair shipped as (commit: abc1234) but…") is
-  # narrative, not an annotation. Whole-line extraction let sync flip a live
-  # entry whenever a PR/commit it merely MENTIONED landed (agent-config
-  # 2026-07-20, twice on the same entry).
-  local ann_tail
-  ann_tail="$(fi_annotation_tail "$line")"
-
-  # PR annotations (multiple allowed) — extract via grep -oE
-  local prs
-  prs="$(printf '%s' "$ann_tail" \
-    | grep -oE '\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' \
-    | sed -E 's/^\(PR: //; s/\)$//' \
-    | paste -sd , - 2>/dev/null || true)"
-
-  # PR-auto annotations (hook-suggested form; multiple allowed). NOT
-  # flip-driving: sync must never close an entry on one of these. The literal
-  # colon-space in '(PR: ' cannot match '(PR-auto:' (hyphen-a), so the
-  # flip-driving `prs` extraction above naturally excludes them — the same
-  # structural exclusion PR-closed already relies on. Extracted only so sync
-  # and the statusline can REPORT that a suggestion is awaiting confirmation.
-  local prs_auto
-  prs_auto="$(printf '%s' "$ann_tail" \
-    | grep -oE '\(PR-auto: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' \
-    | sed -E 's/^\(PR-auto: //; s/\)$//' \
-    | paste -sd , - 2>/dev/null || true)"
-
-  # PR-closed annotations (sync-demoted form; multiple allowed)
-  local prs_closed
-  prs_closed="$(printf '%s' "$ann_tail" \
-    | grep -oE '\(PR-closed: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' \
-    | sed -E 's/^\(PR-closed: //; s/\)$//' \
-    | paste -sd , - 2>/dev/null || true)"
-
-  # Commit annotations (multiple allowed)
-  local commits
-  commits="$(printf '%s' "$ann_tail" \
-    | grep -oE '\(commit: [a-f0-9]{7,40}\)' \
-    | sed -E 's/^\(commit: //; s/\)$//' \
-    | paste -sd , - 2>/dev/null || true)"
-
-  # Commit-auto annotations (hook-suggested form; multiple allowed). Same
-  # non-flip-driving contract as PR-auto above.
-  local commits_auto
-  commits_auto="$(printf '%s' "$ann_tail" \
-    | grep -oE '\(commit-auto: [a-f0-9]{7,40}\)' \
-    | sed -E 's/^\(commit-auto: //; s/\)$//' \
-    | paste -sd , - 2>/dev/null || true)"
-
-  # Commit-stale annotations (sync-demoted form; multiple allowed)
-  local commits_stale
-  commits_stale="$(printf '%s' "$ann_tail" \
-    | grep -oE '\(commit-stale: [a-f0-9]{7,40}\)' \
-    | sed -E 's/^\(commit-stale: //; s/\)$//' \
-    | paste -sd , - 2>/dev/null || true)"
-
-  # Renamed-from annotation (single occurrence — sync auto-correct trail)
   local re_renamed='\(renamed-from: ([^)]+)\)'
-  local renamed_from=""
-  if [[ "$line" =~ $re_renamed ]]; then
-    renamed_from="${BASH_REMATCH[1]}"
-  fi
-
-  # Fixed date
+  [[ "$line" =~ $re_renamed ]] && FE_renamed_from="${BASH_REMATCH[1]}"
   local re_fixed='\(fixed: ([0-9]{4}-[0-9]{2}-[0-9]{2})\)'
-  local fixed_date=""
-  if [[ "$line" =~ $re_fixed ]]; then
-    fixed_date="${BASH_REMATCH[1]}"
-  fi
-
-  # Verified source
+  [[ "$line" =~ $re_fixed ]] && FE_fixed_date="${BASH_REMATCH[1]}"
   local re_verified='\(verified: (ai|review)\)'
-  local verified=""
-  if [[ "$line" =~ $re_verified ]]; then
-    verified="${BASH_REMATCH[1]}"
-  fi
-
-  printf 'status=%s\n' "$status"
-  printf 'critical=%s\n' "$critical"
-  printf 'date=%s\n' "$date"
-  printf 'path=%s\n' "$path"
-  printf 'line=%s\n' "$line_num"
-  # Empty unless the location carried a range. Consumers grep '^line=' and
-  # '^line_end=' — anchored, so neither key matches the other's prefix.
-  printf 'line_end=%s\n' "$line_end"
-  printf 'symptom=%s\n' "$symptom"
-  printf 'fix=%s\n' "$fix"
-  printf 'prs=%s\n' "$prs"
-  printf 'prs_auto=%s\n' "$prs_auto"
-  printf 'prs_closed=%s\n' "$prs_closed"
-  printf 'commits=%s\n' "$commits"
-  printf 'commits_auto=%s\n' "$commits_auto"
-  printf 'commits_stale=%s\n' "$commits_stale"
-  printf 'renamed_from=%s\n' "$renamed_from"
-  printf 'fixed_date=%s\n' "$fixed_date"
-  printf 'verified=%s\n' "$verified"
+  [[ "$line" =~ $re_verified ]] && FE_verified="${BASH_REMATCH[1]}"
+  return 0
 }
 
 # Output entries matching status_filter (open|deferred|fixed|all).

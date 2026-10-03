@@ -231,7 +231,10 @@ cmd_annotate_commit() {
   # it would break the direct-to-main flow and the post-commit --hook-auto
   # path that annotates exactly that shape. --force covers the legitimate
   # remainder (retroactively annotating an already-merged fix from a branch).
-  if [[ "$force" != "yes" ]]; then
+  # Skipped in --hook-auto mode: it writes only the non-closing commit-auto
+  # suggestion, and the default-branch lookup can be a network `gh` call on
+  # every commit (audit annot-13). A later --pick confirm still passes here.
+  if [[ "$force" != "yes" && "$hook_auto" != "yes" ]]; then
     local default_branch current_branch
     default_branch="$(fi_resolve_default_branch)"
     current_branch="$(git branch --show-current 2>/dev/null || true)"

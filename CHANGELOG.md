@@ -4,6 +4,55 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.2] - 2026-10-03
+
+Fix batch 4 of the 2026-10-03 audit: process creations. On Git Bash every
+fork and exec is a Windows process creation (and leaks a kernel token while
+the foreground lock is armed), so these are user-visible there. Measured in a
+Linux container with strace, same ledger, before -> after:
+
+| Event | before | after |
+|---|---|---|
+| SessionStart (8 open entries) | 652 | 129 |
+| Stop | 22 | 11 |
+| PreToolUse Edit, non-ledger file | 7 | 0 |
+| statusline segment, cold | 621 | 92 |
+| sync, 8 / 80 open entries | 581 / 5,894 | 58 / 700 |
+| list --json | 444 | 173 |
+
+### Fixed
+
+- **Builtin entry parser.** `fi_parse_entry_vars` sets `FE_*` variables with
+  bash regexes only; `fi_parse_entry` prints from it. A differential over
+  2,325 real ledger lines gave identical output on bash 5 and 3.2. Sync, log,
+  annotate, the branch-delete guard and the post-commit hook read the
+  variables instead of re-splitting the output with grep pipelines.
+  (ledger-5, cli-10, annot-2)
+- **Builtin dedup keys and membership tests** (`fi_dedup_key_v`,
+  `fi_nl_has`, `fi_icontains`); the repo root is resolved once per process.
+  (cli-10, annot-1, cli-12)
+- **Sync asks gh once per distinct PR, without jq**: gh's built-in `--jq`
+  returns the fields, so a machine with gh but no jq now closes merged PRs.
+  (ledger-7, ledger-8b)
+- **Mode detection reads its cache before `gh auth status`** (a network call);
+  `log`/`defer`/`resolve` no longer run mode detection at all. A failed
+  default-branch lookup is cached for 10 minutes instead of retried on every
+  sync. (ledger-8a/c, cli-11)
+- Sync skips the whole-history rename scan for never-tracked locations and
+  computes the spaced-path recovery only for missing files. (ledger-6)
+- Hooks: the format enforcer exits before jq unless the payload names a
+  ledger; the Stop hook reads its fields with builtin regexes; SessionStart
+  skips sync and status when nothing is [open]; the branch-delete guard
+  builds main's key set once per repo, not per branch. (hook-6, hook-7,
+  hook-11, hook-12)
+- SessionStart caps criticals by `FOUND_ISSUES_SESSION_INJECT_MAX` too and
+  cuts injected lines at 240 bytes. (hook-20)
+- Statusline autosync: one stamp per ledger (it was global, so only one of
+  several open repos synced), no spawn when the stamp cannot be written, and
+  the spawned sync runs in the rendered repo. (status-1, status-2, status-3)
+- `annotate-commit --hook-auto` skips the default-branch guard (it writes
+  only non-closing suggestions). (annot-13)
+
 ## [2.10.1] - 2026-10-03
 
 Fix batch 3 of the 2026-10-03 audit: the rules reach Claude, and what the

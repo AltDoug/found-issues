@@ -94,3 +94,80 @@ fi_dedup_key_abstract() {
   bare="$(fi_strip_parentheticals "$symptom")"
   printf 'abstract::%s' "$(fi_canonicalize_symptom "$bare" 80)"
 }
+
+# === Builtin twins (2026-10-03 audit, cli-10 / hook-12) ===
+#
+# fi_dedup_key / fi_dedup_key_abstract fork ~8 processes per call (three
+# subshells, two `tr`, a `git rev-parse` for the repo root), and `log`,
+# pre-branch-delete and sync call them once per ledger entry. These twins set
+# $FI_KEY instead of printing and use only builtins on bash >= 4 (one `tr`
+# on bash 3.2, which has no ${x,,}). Keys are never stored — every comparison
+# computes both sides with the same function in the same process — so the
+# twins only have to be self-consistent, not byte-identical to the printing
+# versions (they differ only in how non-ASCII case folds).
+
+# Repo root, resolved once per process per working directory.
+_FI_ROOT_CACHE_DIR="" _FI_ROOT_CACHE=""
+fi_repo_root_cached() {
+  if [[ "$_FI_ROOT_CACHE_DIR" != "$PWD" ]]; then
+    _FI_ROOT_CACHE="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    _FI_ROOT_CACHE_DIR="$PWD"
+  fi
+  FI_REPO_ROOT="$_FI_ROOT_CACHE"
+}
+
+# _fi_canon_symptom_v <text> <n> — lowercase, squeeze whitespace, trim,
+# truncate to n characters. Result in $_fi_canon.
+_fi_canon_symptom_v() {
+  local s="$1" n="$2"
+  if (( BASH_VERSINFO[0] >= 4 )); then
+    s="${s,,}"
+  else
+    s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')"
+  fi
+  local IFS=$' \t\n\r\v\f'
+  local -a w=()
+  read -r -d '' -a w <<<"$s" || true
+  s="${w[*]+"${w[*]}"}"
+  _fi_canon="${s:0:n}"
+}
+
+# fi_dedup_key_v <path> <line> <symptom> [<repo_root>] — $FI_KEY
+fi_dedup_key_v() {
+  local path="$1" line="$2" symptom="$3" root="${4-}"
+  local bare="${symptom%%(*}"
+  bare="${bare%"${bare##*[![:space:]]}"}"
+  path="${path#"${path%%[![:space:]]*}"}"
+  path="${path%"${path##*[![:space:]]}"}"
+  path="${path//\\//}"
+  while [[ "$path" == ./* ]]; do path="${path#./}"; done
+  if [[ -z "$root" ]]; then
+    fi_repo_root_cached
+    root="$FI_REPO_ROOT"
+  fi
+  [[ -n "$root" && "$path" == "$root"/* ]] && path="${path#"$root"/}"
+  _fi_canon_symptom_v "$bare" 50
+  FI_KEY="$path:$line:$_fi_canon"
+}
+
+# fi_dedup_key_abstract_v <symptom> — $FI_KEY
+fi_dedup_key_abstract_v() {
+  local bare="${1%%(*}"
+  bare="${bare%"${bare##*[![:space:]]}"}"
+  _fi_canon_symptom_v "$bare" 80
+  FI_KEY="abstract::$_fi_canon"
+}
+
+# fi_entry_dedup_key_v <entry line> [<repo_root>] — the dedup key `log` uses
+# for an existing entry (path:line, path-only, or abstract), in $FI_KEY.
+# Returns 1 when the line is not an entry.
+fi_entry_dedup_key_v() {
+  fi_parse_entry_vars "$1" || return 1
+  if [[ -n "$FE_line" ]]; then
+    fi_dedup_key_v "$FE_path" "$FE_line" "$FE_symptom" "${2-}"
+  elif [[ "$FE_path" == */* || "$FE_path" == *.* ]]; then
+    fi_dedup_key_v "$FE_path" "" "$FE_symptom" "${2-}"
+  else
+    fi_dedup_key_abstract_v "$FE_symptom"
+  fi
+}

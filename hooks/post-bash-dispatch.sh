@@ -127,16 +127,15 @@ legacy_pr_prompt() {
   repo_id="$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)"
   local already_annotated_pattern="\\(PR: $repo_id#$pr_num\\)"
 
-  local matching="" entry e_data e_path tf
+  local matching="" entry e_path tf
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue
     if [[ "$entry" =~ $already_annotated_pattern ]]; then
       continue
     fi
 
-    e_data="$(fi_parse_entry "$entry" 2>/dev/null || true)"
-    [[ -z "$e_data" ]] && continue
-    e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+    fi_parse_entry_vars "$entry" || continue
+    e_path="$FE_path"
     [[ -z "$e_path" ]] && continue
 
     while IFS= read -r tf; do
@@ -186,16 +185,15 @@ legacy_commit_prompt() {
 
   local already_annotated_pattern="\\(commit: $short_sha\\)"
 
-  local matching="" entry e_data e_path tf
+  local matching="" entry e_path tf
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue
     if [[ "$entry" =~ $already_annotated_pattern ]]; then
       continue
     fi
 
-    e_data="$(fi_parse_entry "$entry" 2>/dev/null || true)"
-    [[ -z "$e_data" ]] && continue
-    e_path="$(printf '%s' "$e_data" | grep '^path=' | head -1 | cut -d= -f2-)"
+    fi_parse_entry_vars "$entry" || continue
+    e_path="$FE_path"
     [[ -z "$e_path" ]] && continue
 
     while IFS= read -r tf; do

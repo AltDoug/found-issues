@@ -33,7 +33,7 @@ fi
 fi_codex_stop() {
   command -v jq >/dev/null 2>&1 || exit 0
   local input fields active msg tpath sid
-  input="$(cat)"
+  IFS= read -r -d '' input || true
   # \x1f, not a tab: tab is IFS whitespace, so an empty session_id would
   # collapse and shift the transcript path into $sid.
   fields="$(printf '%s' "$input" | jq -r '[(.stop_hook_active // false | tostring), (.session_id // ""), (.transcript_path // "")] | join("\u001f")' 2>/dev/null)" || exit 0
@@ -111,17 +111,11 @@ input="$(cat)"
 # end-of-turn), so the marker check below can race even when the
 # assistant included the marker. Other Stop hooks in the wild (e.g.
 # stop-tests-pass.sh) follow this same pattern.
-stop_hook_active=""
-if command -v jq >/dev/null 2>&1; then
-  stop_hook_active="$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null || true)"
-fi
-if [[ -z "$stop_hook_active" || "$stop_hook_active" == "false" ]]; then
-  # Fallback: grep for the literal flag in the input
-  if printf '%s' "$input" | grep -qE '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
-    stop_hook_active="true"
-  fi
-fi
-if [[ "$stop_hook_active" == "true" ]]; then
+# Builtin regexes, not jq (audit hook-7): every Stop of every turn runs this
+# hook, and the jq + grep-fallback chain cost ~10 process creations before
+# the once-per-session early exit could even fire.
+_fi_re_active='"stop_hook_active"[[:space:]]*:[[:space:]]*true'
+if [[ "$input" =~ $_fi_re_active ]]; then
   exit 0
 fi
 
@@ -135,16 +129,11 @@ fi
 # at block time, reaped after 7 days. FOUND_ISSUES_STOP_REMINDER_EVERY_TURN=on
 # restores the pre-2.8.0 per-turn block. No session_id in the payload = no
 # state, so a bare local invocation still blocks every time.
+# Only a plain file-name charset is ever used (it names a state file), so a
+# value with anything else — escapes included — reads as "no session_id".
 session_id=""
-if command -v jq >/dev/null 2>&1; then
-  session_id="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)"
-fi
-if [[ -z "$session_id" ]]; then
-  session_id="$(printf '%s' "$input" \
-    | grep -oE '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
-    | sed -E 's/.*:[[:space:]]*"([^"]*)".*/\1/' \
-    | head -1 || true)"   # no session_id at all: grep's 1 must not trip pipefail
-fi
+_fi_re_sid='"session_id"[[:space:]]*:[[:space:]]*"([^"]*)"'
+[[ "$input" =~ $_fi_re_sid ]] && session_id="${BASH_REMATCH[1]}"
 case "$session_id" in *[!A-Za-z0-9._-]*) session_id="" ;; esac   # a file name, nothing else
 REMINDED_DIR="$HOME/.claude/found-issues/reminded"
 if [[ "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" != "on" \
@@ -153,8 +142,13 @@ if [[ "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" != "on" \
 fi
 
 # Extract transcript_path
+# Builtin when the JSON string has no escapes (always, for a real path on
+# macOS/Linux); jq only to decode one that does (Windows backslashes).
 transcript_path=""
-if command -v jq >/dev/null 2>&1; then
+_fi_re_tp='"transcript_path"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
+if [[ "$input" =~ $_fi_re_tp ]]; then
+  transcript_path="${BASH_REMATCH[1]}"
+elif command -v jq >/dev/null 2>&1; then
   transcript_path="$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null || true)"
 fi
 if [[ -z "$transcript_path" ]]; then
