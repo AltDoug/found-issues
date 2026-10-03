@@ -1,6 +1,6 @@
 ---
 name: fi-setup
-description: First-run orientation — explains the system, surfaces optional config, offers the statusline integration and the fi alias. Run once after installing; safe to re-run. Logging itself is zero-config and does not need this.
+description: "First-run orientation — explains the system, surfaces optional config, offers the statusline integration and the fi alias. Run once after installing; safe to re-run. Logging itself is zero-config and does not need this."
 ---
 <!-- loc-override: generated 1:1 from commands/setup.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
@@ -75,7 +75,7 @@ shows actionable items:
 
 - `~/.claude/statusline.sh` contains `# === found-issues plugin segment ===` → omit option 1
 - `~/.claude/settings.json` has `statusLine.command` set to a path OTHER than `~/.claude/statusline.sh` → omit option 1 (user has a custom statusline our `install-statusline` can't safely modify; surface the manual-integration message instead, see Optional 1 below)
-- `~/.claude/commands/fi.md` contains `Run /found-issues:<the user-provided arguments>` → omit option 2
+- `~/.claude/commands/fi.md` contains `Run /found-issues:$ARGUMENTS` → omit option 2
 
 **Doctor pass before the picker (informational, v1.0.4+):** running
 `found-issues doctor-statusline` before the picker is no longer required
@@ -187,7 +187,7 @@ Flow:
      > <paste contents of /tmp/fi-dry-run.diff>
      > ```
 
-     Then `AskUserQuestion`: **"Apply this edit?"** → yes / no.
+     Then ask with a yes/no picker: **"Apply this edit?"** → yes / no.
 
      On yes:
      ```bash
@@ -324,8 +324,8 @@ Show the user the current state:
 found-issues status --format=plain
 ```
 
-Tell them the rules file is auto-loaded into context (no further action
-needed) and that the system is ready.
+Tell them the rules are injected into context at every session start (no
+further action needed) and that the system is ready.
 
 If they want to read more, point them at the project README:
 <https://github.com/AltDoug/found-issues>.

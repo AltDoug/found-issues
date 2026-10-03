@@ -1,6 +1,6 @@
 ---
 name: fi-annotate-pr
-description: After opening a PR that addresses an [open] entry, attach the canonical (PR: org/repo#N) reference so sync auto-flips the entry when the PR merges — bare text like 'PR #N' in an entry is invisible to sync; this command writes the only format that closes the loop. When several entries cite one touched file a candidate list appears: re-run with --pick path:line for exactly the entries the PR addresses, never --all as a shortcut. Use $fi-annotate-commit instead when the fix is a direct commit with no PR.
+description: "After opening a PR that addresses an [open] entry, attach the canonical (PR: org/repo#N) reference so sync auto-flips the entry when the PR merges — bare text like 'PR #N' in an entry is invisible to sync; this command writes the only format that closes the loop. When several entries cite one touched file a candidate list appears: re-run with --pick path:line for exactly the entries the PR addresses, never --all as a shortcut. Use $fi-annotate-commit instead when the fix is a direct commit with no PR."
 ---
 <!-- loc-override: generated 1:1 from commands/annotate-pr.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
@@ -62,8 +62,9 @@ Pass the result through to the user.
 
 ## When to invoke
 
-The post-bash dispatcher hook normally handles this automatically
-(`--hook-auto`: line-matched entries annotate silently; exit 3 surfaces
+The post-bash dispatcher hook normally suggests these annotations automatically
+(`--hook-auto`: line-matched entries get a NON-closing `-auto` suggestion
+and the hook prints the `--pick` command to confirm them; exit 3 surfaces
 candidates). This command is the manual fallback for web-UI PRs or when
 hooks are disabled.
 

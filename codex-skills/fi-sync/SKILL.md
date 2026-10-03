@@ -1,6 +1,6 @@
 ---
 name: fi-sync
-description: Reconcile the ledger with reality: flip [open] entries whose annotated PR merged or whose annotated commit landed on the default branch to [fixed], tombstone entries whose cited file git confirms was removed, and surface stale in-PR work. Run after merges land or when the ledger looks out of date. Mutating and not reversible — no command reopens a closure, so use --dry-run first when unsure. Do NOT use it to link a PR or commit to an entry: $fi-annotate-pr and $fi-annotate-commit write those references; sync only reads what they wrote.
+description: "Reconcile the ledger with reality: flip [open] entries whose annotated PR merged or whose annotated commit landed on the default branch to [fixed], tombstone entries whose cited file git confirms was removed, and surface stale in-PR work. Run after merges land or when the ledger looks out of date. Mutating and not reversible — no command reopens a closure, so use --dry-run first when unsure. Do NOT use it to link a PR or commit to an entry: $fi-annotate-pr and $fi-annotate-commit write those references; sync only reads what they wrote."
 ---
 <!-- loc-override: generated 1:1 from commands/sync.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
@@ -13,8 +13,11 @@ you do AI verification in phase 2.
 Run:
 
 ```bash
-found-issues sync
+found-issues sync <the user-provided arguments>
 ```
+
+(`--dry-run` reports what would change and writes nothing — use it first
+when unsure; closures are not reversible.)
 
 This handles three closure mechanisms automatically:
 
@@ -28,7 +31,21 @@ This handles three closure mechanisms automatically:
 
   A path being absent says nothing about whether the issue was fixed, and no supported command reopens a `[fixed]` entry — so when in doubt, leave it `[open]`.
 
-The CLI prints a one-line summary: `Synced. Closed: N (P PR + C commit + T tombstone).`
+The CLI output, section by section, and what each one asks of you:
+
+- `Synced. Closed: N (P PR + C commit + T tombstone).` (plus `Demoted:` /
+  `Renamed:` counts), `Synced. Nothing to close.`, or with `--dry-run`
+  `Dry run — nothing written.` — report it.
+- The status line (`3 issues · 1 in PR`) — pass it through.
+- `N hook-suggested annotation(s) awaiting confirmation (NOT closed)` — a
+  `(PR-auto:)`/`(commit-auto:)` suggestion whose ref has landed. Compare each
+  listed entry against what that change did; confirm the ones it fixed with
+  the printed `annotate-commit <sha> --pick` (or `annotate-pr <N> --pick`)
+  command, leave the rest open. Never confirm on the suggestion alone.
+- `archive: moved N entries …` — old `[fixed]` entries moved to
+  `found-issues-archive.md`; both files changed and need committing.
+- `Warning: N PR annotation(s) could not be fetched via gh` — check
+  `gh auth status`; nothing was demoted.
 
 ## Phase 2 — AI verification of unannotated entries
 

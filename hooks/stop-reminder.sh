@@ -291,7 +291,10 @@ if [[ "$__fi_verbosity" == "auto" ]]; then
 fi
 
 if [[ "$__fi_verbosity" == "terse" ]]; then
-  printf 'Stop blocked: missing <!-- found-issues-checked: ... --> marker. (Options: none-noticed | logged | deferred)\n' >&2
+  # Carries the literal markers (audit prompt-12): this terse form is what
+  # fires once a machine is onboarded, and naming the options without the
+  # comment to copy left the model guessing the syntax.
+  printf 'Stop blocked (once per session): end your reply with one of <!-- found-issues-checked: none-noticed --> (nothing out-of-scope noticed) | <!-- found-issues-checked: logged --> (logged with found-issues log) | <!-- found-issues-checked: deferred --> (noticed, logging later)\n' >&2
 else
   cat >&2 <<'EOF'
 Stop blocked: include a found-issues acknowledgment in your final message.

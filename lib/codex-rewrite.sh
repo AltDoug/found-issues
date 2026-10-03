@@ -15,9 +15,14 @@
 #   @found-issues-rules.md -> the auto-injected found-issues rules
 
 # Rewrite stdin -> stdout with the core Claude→Codex substitutions.
+# The literal `/found-issues:$ARGUMENTS` (the Claude /fi alias body that the
+# setup skill checks for) is protected first: rewriting its $ARGUMENTS
+# corrupted the very string the check compares against (audit prompt-13).
 fi_codex_rewrite_core() {
   sed -E \
+    -e 's|/found-issues:\$ARGUMENTS|/found-issues:@FI_ARGS_LITERAL@|g' \
     -e 's|/found-issues:([a-z-]+)|$fi-\1|g' \
     -e 's|\$ARGUMENTS|<the user-provided arguments>|g' \
+    -e 's|/found-issues:@FI_ARGS_LITERAL@|/found-issues:$ARGUMENTS|g' \
     -e 's|@found-issues-rules\.md|the auto-injected found-issues rules|g'
 }

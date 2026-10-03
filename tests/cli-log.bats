@@ -564,3 +564,17 @@ EOF
   fi_assert_both_entries_survived
   grep -q '(touched:' docs/found-issues.md
 }
+
+@test "log: --critical anywhere but first is rejected, not folded into the location" {
+  # prompt-14 (2026-10-03 audit): `src/a.sh:1 --critical — sym` used to log a
+  # spaced pseudo-path with no [!] and no error.
+  fi_run log "src/a.sh:1 --critical — sym"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--critical"* ]]
+  [ ! -s docs/found-issues.md ] || ! grep -q 'sym' docs/found-issues.md
+}
+
+@test "log: a symptom that mentions --critical is still accepted" {
+  fi_run log "src/a.sh:1 — the --critical flag is ignored here"
+  [ "$status" -eq 0 ]
+}

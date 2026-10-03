@@ -1,6 +1,6 @@
 ---
 name: fi-annotate-commit
-description: After committing a fix directly (no PR — push-to-main workflows), attach a (commit: <sha>) reference so sync auto-flips the entry once that commit reaches the default branch. Defaults to HEAD: run it AFTER the fix commit exists, never right after cutting a branch — a target already on the default branch is rejected because it predates the fix and would false-close the entry (--force overrides for genuinely retroactive annotation). Prefer $fi-annotate-pr when a PR exists. Same --pick discipline for ambiguous matches, never --all as a shortcut.
+description: "After committing a fix directly (no PR — push-to-main workflows), attach a (commit: <sha>) reference so sync auto-flips the entry once that commit reaches the default branch. Defaults to HEAD: run it AFTER the fix commit exists, never right after cutting a branch — a target already on the default branch is rejected because it predates the fix and would false-close the entry (--force overrides for genuinely retroactive annotation). Prefer $fi-annotate-pr when a PR exists. Same --pick discipline for ambiguous matches, never --all as a shortcut."
 ---
 <!-- loc-override: generated 1:1 from commands/annotate-commit.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
@@ -46,8 +46,9 @@ Pass through the CLI's output:
 
 ## When to invoke
 
-The post-bash dispatcher hook normally handles this automatically
-(`--hook-auto`: line-matched entries annotate silently; exit 3 surfaces
+The post-bash dispatcher hook normally suggests these annotations automatically
+(`--hook-auto`: line-matched entries get a NON-closing `-auto` suggestion
+and the hook prints the `--pick` command to confirm them; exit 3 surfaces
 candidates). This command is the manual fallback for web-UI PRs or when
 hooks are disabled.
 

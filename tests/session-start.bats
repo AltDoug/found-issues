@@ -402,10 +402,22 @@ run_session_start_hook() {
   [[ "$output" != *"statusline"* ]]
 }
 
-@test "session-start on claude: does NOT inject the rules block (skill owns it)" {
+@test "session-start on claude: injects the rules block (the skill is never auto-loaded)" {
+  # prompt-17 (2026-10-03 audit): `disable-model-invocation: true` keeps the
+  # rules skill out of the model's context, so SessionStart must carry it.
   export CLAUDE_CODE_ENTRYPOINT=cli
   run_session_start_hook
-  [[ "$output" != *"found-issues — agent rules"* ]]
+  [[ "$output" == *"found-issues — agent rules"* ]]
+  [[ "$output" == *"Issues found and not tracked are issues lost"* ]]
+  # frontmatter stripped
+  [[ "$output" != *"disable-model-invocation"* ]]
+}
+
+@test "session-start on claude: injects the rules even when the repo has no ledger" {
+  export CLAUDE_CODE_ENTRYPOINT=cli
+  rm -f docs/found-issues.md .found-issues.md 2>/dev/null || true
+  run_session_start_hook
+  [[ "$output" == *"found-issues — agent rules"* ]]
 }
 
 # === found-issues.md:296 fix: critical detection must anchor to the status

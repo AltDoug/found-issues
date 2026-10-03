@@ -329,7 +329,7 @@ TRANSCRIPT
   run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=terse echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=terse '$HOOK'"
   [ "$status" -eq 2 ]
   [[ "$output" == *"Stop blocked"* ]]
-  [[ "$output" == *"missing"* ]]
+  [[ "$output" == *"found-issues-checked: none-noticed"* ]]
   [[ "$output" != *"Add ONE of these"* ]]
   line_count="$(printf '%s' "$output" | grep -c '' || true)"
   [ "$line_count" -le 2 ]
@@ -494,4 +494,15 @@ TRANSCRIPT
   run bash -c "echo '$input' | PLUGIN_DATA='$PLUGIN_DATA' '$HOOK'"
   [ "$status" -eq 0 ]
   rm -f "$TR"
+}
+
+@test "stop-reminder: the terse block message carries the literal marker to copy" {
+  # prompt-12 (2026-10-03 audit): the terse form is what effectively always
+  # fires, and it named the options without the literal comment to write.
+  export FOUND_ISSUES_REMINDER_VERBOSITY=terse
+  t="$TMP/t.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{}}]}}' > "$t"
+  run bash -c "printf '%s' '{\"transcript_path\":\"$t\"}' | '$TEST_REPO_ROOT/hooks/stop-reminder.sh'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"<!-- found-issues-checked: none-noticed -->"* ]]
 }

@@ -11,10 +11,13 @@ and date stamping — your job is just to pass the user's input through.
 
 ## What to do
 
-Run the CLI with the user's arguments:
+Run the CLI with the user's arguments, as ONE single-quoted argument (the
+symptom routinely contains parentheses and apostrophes, which break an
+unquoted shell line; escape an apostrophe as `'\''`). `--critical`, when
+wanted, goes first and outside the quotes:
 
 ```bash
-found-issues log $ARGUMENTS
+found-issues log [--critical] '<path:line> — <symptom> (suggested: <fix>)'
 ```
 
 Then read the output and report the result to the user concisely:
@@ -26,8 +29,8 @@ Then read the output and report the result to the user concisely:
 ## When to use this command vs. proactive logging
 
 The user typically does NOT invoke `/found-issues:log` directly. You invoke it on their
-behalf when you observe an out-of-scope issue per the rules in
-`@found-issues-rules.md`. They run `/found-issues:log` only when they want to manually
+behalf when you observe an out-of-scope issue per the found-issues rules
+(injected at session start). They run `/found-issues:log` only when they want to manually
 log something they noticed.
 
 Either way, the command behaves identically — it just appends to the file.

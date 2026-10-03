@@ -68,7 +68,12 @@ for cmd in commands/*.md; do
   {
     printf -- '---\n'
     printf 'name: fi-%s\n' "$name"
-    printf 'description: %s\n' "$desc"
+    # Double-quoted scalar: several descriptions contain ": " ("reality:
+    # flip", "(PR: org/repo#N)"), which a strict YAML loader rejects as a
+    # plain scalar (2026-10-03 audit, cli-19). Escape \ first, then ".
+    desc_q="${desc//\\/\\\\}"
+    desc_q="${desc_q//\"/\\\"}"
+    printf 'description: "%s"\n' "$desc_q"
     printf -- '---\n'
     printf '<!-- loc-override: generated 1:1 from commands/%s.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->\n' "$name"
     # Body = everything after the closing frontmatter fence, with Claude-only

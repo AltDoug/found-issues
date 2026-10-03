@@ -8,7 +8,7 @@ How the pieces fit together.
                     ┌─────────────────────────────────┐
                     │       Claude Code session        │
                     │                                  │
-                    │  Skills auto-loaded:             │
+                    │  Rules (SessionStart-injected):  │
                     │  • skills/rules/SKILL.md         │ ◀── rules guide
                     │                                  │     Claude's behavior
                     │  Slash commands:                 │     proactively
@@ -83,12 +83,17 @@ How the pieces fit together.
 
 ## Layer responsibilities
 
-### Skills (auto-loaded context)
+### Rules (injected by SessionStart)
 
-`skills/rules/SKILL.md` is loaded into Claude's working context every
-session via the plugin spec's auto-load mechanism (`disable-model-invocation: true`).
-This is what makes Claude *proactively* log issues — without the rules
-in context, Claude would only log when explicitly told to.
+`skills/rules/SKILL.md` is the source of the agent rules, and
+`hooks/session-start.sh` injects its body (frontmatter stripped) into
+every session — plain stdout on Claude Code, the `additionalContext` JSON
+envelope on Codex. This is what makes the agent *proactively* log issues.
+Until 2.10.x the Claude side relied on the skill being auto-loaded, but
+its `disable-model-invocation: true` does the opposite — it keeps a skill
+out of the model's context unless the user types its slash command — so
+the rules never reached Claude sessions (2026-10-03 audit, prompt-17).
+The skill stays as the single source and a user-invocable reference.
 
 The rules answer: when to log, when not to log, when to annotate, when
 to promote, what the format is.
@@ -129,15 +134,14 @@ One CLI, one `lib/`, one ledger — two thin adapters translate the same
 core into each harness's own UI conventions:
 
 - **Claude Code adapter** — `commands/*.md` slash commands
-  (`/found-issues:<name>`) plus the auto-loaded `skills/rules/SKILL.md`
-  skill (rules injected into context every session via the plugin's
-  auto-load mechanism).
+  (`/found-issues:<name>`) plus the rules from `skills/rules/SKILL.md`,
+  injected into context every session by the SessionStart hook.
 - **Codex adapter** — `codex-skills/fi-<name>/SKILL.md`, generated from
   `commands/*.md` by `scripts/gen-codex-skills.sh` (invoked as `$fi-<name>`
   mentions or by description match), plus SessionStart rules injection:
   `hooks/session-start.sh` emits the rules body into context on Codex
   (wrapped in Codex's SessionStart JSON envelope — see below), since
-  Codex has no auto-loaded-skill mechanism equivalent to Claude's.
+  — the same body Claude Code receives as plain stdout.
 
 The hook *scripts* themselves are shared, not adapted — every script in
 `hooks/` runs unmodified on both harnesses; the same JSON payload shape
@@ -208,7 +212,7 @@ Pure-function libraries sourced by the CLI and (some) hooks:
 
 The lifecycle of a single issue from observation to closure:
 
-1. **Notice** — Claude is working on task X. While reading `lib/foo.py`, sees a null check is missing at line 42. The CLAUDE.md rules (auto-loaded skill) say: log it.
+1. **Notice** — Claude is working on task X. While reading `lib/foo.py`, sees a null check is missing at line 42. The found-issues rules (injected at SessionStart) say: log it.
 
 2. **Log** — Claude runs `/found-issues:log src/foo.py:42 — null check missing (suggested: add guard)`. The slash command shells out to `bin/found-issues log ...`. The CLI:
    - Sources `lib/parse-entries.sh` (for `fi_find_issues_file`)
