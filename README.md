@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**5 lifecycle hooks · 13 slash commands · 847 tests on Linux/macOS · zero manual bookkeeping**
+**5 lifecycle hooks · 13 slash commands · 863 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -68,8 +68,9 @@ annotator into Codex's own `$CODEX_HOME/hooks.json` instead. Then start a
 new Codex session. The ledger (`docs/found-issues.md`) is shared across
 harnesses with no migration or sync step — a repo worked on from both
 Claude Code and Codex is just one ledger. Skills are available as
-`$fi-log`, `$fi-sync`, `$fi-status`, etc. Details and known v1 gaps (no
-statusline, no stop-hook marker on Codex): [`AGENTS.md`](AGENTS.md#installing-for-codex).
+`$fi-log`, `$fi-sync`, `$fi-status`, etc. Run `/hooks` once in Codex to
+trust the new hook entries; `found-issues doctor` checks the wiring. Details
+and the one gap (no statusline on Codex): [`AGENTS.md`](AGENTS.md#installing-for-codex).
 
 ## Quick start
 

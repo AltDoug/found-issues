@@ -39,13 +39,16 @@ to run this once, right after `codex plugin add`:
 found-issues install-codex-hooks
 ```
 
-This wires SessionStart, the format enforcer, the branch-delete guard,
-and the PostToolUse annotator into Codex's own `$CODEX_HOME/hooks.json`
-(default `~/.codex/hooks.json`). It's idempotent — safe to re-run — and
-**must be re-run after every `codex plugin update`** (the plugin cache
-path changes on update, and the installer self-heals stale paths on
-re-run). There is no Stop-hook marker discipline on Codex yet (deferred —
-the transcript rollout format isn't parsed).
+This wires SessionStart, the format enforcer (Write/Edit and apply_patch),
+the branch-delete guard, the PostToolUse annotator and the Stop nudge into
+Codex's own `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`). It's
+idempotent — safe to re-run — and **must be re-run after every `codex
+plugin update`** (the plugin cache path changes on update, and the
+installer self-heals stale paths on re-run).
+
+Then tell the user to open an interactive Codex session and run `/hooks`
+once: Codex skips new hook entries until they are trusted. Confirm with
+`found-issues doctor` (its Codex section must read "wired and trusted").
 
 The statusline picker and per-repo pre-commit hook below are Claude Code
 concepts with no Codex equivalent — skip straight to the reporting step

@@ -43,6 +43,27 @@ get_field() {
 tool_name="$(get_field '.tool_name')"
 file_path="$(get_field '.tool_input.file_path')"
 
+# Codex edits files through apply_patch: no file_path, the patch envelope is
+# in tool_input.command. Collect the ADDED lines of every hunk that targets a
+# ledger file — patch lines are whole lines, so they validate as-is below.
+_fi_patch_content=""
+if [[ "$tool_name" == "apply_patch" ]]; then
+  _fi_cur=""
+  while IFS= read -r _fi_pl || [[ -n "$_fi_pl" ]]; do
+    case "$_fi_pl" in
+      '*** Update File: '*|'*** Add File: '*) _fi_cur="${_fi_pl#\*\*\* * File: }" ;;
+      '*** Move to: '*) _fi_cur="${_fi_pl#\*\*\* Move to: }" ;;
+      '*** Delete File: '*|'*** End Patch'*) _fi_cur="" ;;
+      +*)
+        case "$_fi_cur" in
+          *docs/found-issues.md|*.found-issues.md|found-issues.md) _fi_patch_content+="${_fi_pl#+}"$'\n'; file_path="$_fi_cur" ;;
+        esac
+        ;;
+    esac
+  done <<<"$(get_field '.tool_input.command')"
+  [[ -z "$_fi_patch_content" ]] && exit 0
+fi
+
 # Only fire for found-issues files
 case "$file_path" in
   *docs/found-issues.md|*.found-issues.md) ;;
@@ -114,6 +135,9 @@ case "$tool_name" in
         content+="$_fi_touched"$'\n'
       done
     fi
+    ;;
+  apply_patch)
+    content="$_fi_patch_content"   # collected above
     ;;
   *)
     exit 0

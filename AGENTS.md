@@ -120,9 +120,14 @@ implicitly by description match).
 
 The ledger is the same committed `docs/found-issues.md` in either harness —
 a repo worked on from both Claude Code and Codex shares one ledger with no
-migration or sync step. Known v1 limitations on Codex: no statusline
-counter (Codex has no statusline surface) and the stop-hook marker
-discipline is inactive (documented in the ledger).
+migration or sync step. Known limitation on Codex: no statusline counter
+(Codex has no statusline surface). Since 2.10.0 the Stop-hook marker nudge
+runs on Codex too (once per session, read from `last_assistant_message`).
+
+**After installing, trust the hooks:** Codex silently skips new
+`hooks.json` entries until someone reviews them — open an interactive
+Codex session and run `/hooks` once. `found-issues doctor` reports whether
+the Codex hooks are wired, current and trusted.
 
 ## Other agents (Cursor, Aider, plain API)
 
