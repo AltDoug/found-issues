@@ -41,6 +41,7 @@ individual opt-outs.
 | `FOUND_ISSUES_AUTO_MIGRATE` | `on` | The SessionStart auto-migration of broken statusline marker blocks (v1.4.x POSIX-only and v1.5.0–v1.5.5 `--cwd`-less custom targets). Set to `off` to keep session start fully hands-off and migrate manually via `found-issues install-statusline --target <path> --apply`. |
 | `FOUND_ISSUES_SESSION_INJECT_MAX` | `15` | Caps how many `[open]` entries the SessionStart hook injects into context. Critical (`[!]`) entries are always injected in full; the newest non-critical entries fill the remaining slots up to this cap; anything past the cap is summarized as a one-line count instead of injected verbatim. Raise it for repos with a large deliberate backlog you want fully visible every session; lower it to shrink the SessionStart token cost. |
 | `FOUND_ISSUES_SEGMENT_AUTOSYNC` | `on` | Throttled in-segment background sync (default once per 10 min). Triggered from `found-issues status --format=segment` — runs detached, statusline returns immediately. Set to `off` to disable the auto-refresh entirely. |
+| `FOUND_ISSUES_HOOK_GATES` | `on` | Zero-fork relevance gates in front of the two Bash hooks (`pre-branch-delete`, `post-bash-dispatch`): a command that cannot be a branch delete, a commit or a `gh pr create/merge/close/reopen` exits 0 before any `jq`/`sed`/subshell. Each gate tests a necessary condition of its hook's own matchers, so it changes no outcome. Set to `off` to run the full hooks on every Bash call (debugging). |
 
 Example — silence the Stop reminder and disable auto-archive, but keep
 everything else:
@@ -105,6 +106,7 @@ touches a deferred entry, not on shell startup.
 |---|---|---|
 | `FOUND_ISSUES_STALE_DAYS` | `30` | The "stale" counter in `found-issues status` flags `[open]` entries older than this many days. Drop it to surface bit-rot sooner; raise it for projects that genuinely revisit entries quarterly. |
 | `FOUND_ISSUES_SEGMENT_AUTOSYNC_INTERVAL` | `600` | Seconds between background syncs fired from the statusline-segment renderer. Lower for fresher counts at the cost of more `gh pr view` calls; raise for long sessions where you don't need second-by-second accuracy. Has no effect when `FOUND_ISSUES_SEGMENT_AUTOSYNC=off`. |
+| `FOUND_ISSUES_SEGMENT_CACHE` | `on` | Builtin-only cache for `status --format=segment` (statusline renders). A render whose ledger bytes, CLI version, `FOUND_ISSUES_STALE_DAYS`, locale and date all match the cached render prints the cached segment without starting a single process; anything else runs the full count. Lives under `~/.cache/found-issues/segment/` (or `$FOUND_ISSUES_CACHE_DIR/segment/`). Needs bash 4.2+; older bash always takes the full path. Set to `off` to always count. |
 
 ```bash
 # Surface stale entries after a week instead of a month

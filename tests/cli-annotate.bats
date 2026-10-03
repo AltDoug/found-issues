@@ -573,3 +573,32 @@ _setup_pr_repo() {
   [ "$status" -eq 0 ]
   grep -q "src/only.py:1-3 — range bug (commit: $short_sha)" docs/found-issues.md
 }
+
+# The builtin basename pre-filter in fi_annotate_auto (lib/annotate.sh) must
+# keep both suffix-match directions: entry path shorter than the touched file,
+# and touched file shorter than the entry path.
+@test "annotate-commit: entry citing a bare basename still matches a nested touched file" {
+  mkdir -p docs src
+  printf -- '- [open] %s foo.py:1 — bug\n' "$(date +%Y-%m-%d)" >docs/found-issues.md
+  echo "x" > src/foo.py
+  git add -A
+  git commit -q -m "fix foo"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+
+  fi_run annotate-commit HEAD
+  [ "$status" -eq 0 ]
+  grep -q "foo.py:1.*(commit: $short_sha)" docs/found-issues.md
+}
+
+@test "annotate-commit: entry citing a longer prefixed path still matches the touched file" {
+  mkdir -p docs src
+  printf -- '- [open] %s monorepo/src/foo.py:1 — bug\n' "$(date +%Y-%m-%d)" >docs/found-issues.md
+  echo "x" > src/foo.py
+  git add -A
+  git commit -q -m "fix foo"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+
+  fi_run annotate-commit HEAD
+  [ "$status" -eq 0 ]
+  grep -q "monorepo/src/foo.py:1.*(commit: $short_sha)" docs/found-issues.md
+}

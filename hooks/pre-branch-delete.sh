@@ -33,7 +33,26 @@ if [[ "${FOUND_ISSUES_PROMOTE_GUARD:-on}" == "off" ]]; then
   exit 0
 fi
 
-input="$(cat)"
+IFS= read -r -d '' input || true
+
+# Zero-fork relevance gate (lib/hook-gate.sh): a command that cannot be a
+# branch delete exits here, before any jq/sed/$(...). A missing lib or an
+# untrustworthy gate falls through to the full path below.
+__fi_hook_dir="${BASH_SOURCE[0]%/*}"
+[[ "$__fi_hook_dir" == "${BASH_SOURCE[0]}" ]] && __fi_hook_dir=.
+# shellcheck source=../lib/hook-gate.sh
+if [[ -f "$__fi_hook_dir/../lib/hook-gate.sh" ]] \
+    && source "$__fi_hook_dir/../lib/hook-gate.sh" && fi_gate_text "$input"; then
+  # Every pattern below matches the command with its quoted spans DELETED, so
+  # a trigger word can be spliced from pieces (`git bra''nch -D x`); the
+  # gapped form tolerates exactly that. Necessary conditions, per pattern:
+  #   1 "branch" + a -d/-D/--delete token   2 "push" + a -d/--delete token
+  #   3 "push" + ":"                        4 "heads" (refs/heads) + "DELETE"
+  { fi_gate_gapped branch && { fi_gate_gapped -d || fi_gate_gapped -D; }; } \
+    || { fi_gate_gapped push && { fi_gate_gapped -d || fi_gate_has :; }; } \
+    || { fi_gate_gapped heads && fi_gate_gapped DELETE; } \
+    || exit 0
+fi
 
 get_field() {
   local field="$1"

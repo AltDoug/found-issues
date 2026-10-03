@@ -4,6 +4,53 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] - 2026-10-03
+
+### Changed
+
+- **Bash hooks and the statusline segment start almost no processes.** On
+  Windows 11 every process creation can leak a kernel token while the
+  foreground lock is armed, and under Git Bash every fork and exec is a
+  Windows process. Measured on dougstation (2026-10-03), the plugin's two
+  Bash hooks were the biggest named hook source after agent-config #560.
+  Process creations (Linux strace, fork + exec) per call, old vs new:
+
+  | Path | Before | After |
+  |---|---|---|
+  | 300 real Bash commands from local transcripts, both hooks, mean | 46.9 | 5.7 (8.2x) |
+  | same, median | 35 | 2 |
+  | `pre-branch-delete.sh` on a non-delete command | 21 | 1 |
+  | `post-bash-dispatch.sh` on a command no route handles | 14 | 1 |
+  | `git commit` that touches no cited file (post hook) | 369 | 57 |
+  | `status --format=segment`, warm, autosync not due | 57 | 1 |
+
+  - **`lib/hook-gate.sh`** (new): both Bash hooks read stdin with `read` and
+    decide relevance with `[[ ]]` matches on the raw JSON before any
+    `jq`/`sed`/`$(...)`. Each gate tests a necessary condition of its hook's
+    own matchers, so a skipped call is one the hook would have let through
+    silently anyway. `pre-branch-delete` matches the command with quoted
+    spans deleted, so its gate tolerates a quoted span spliced between
+    letters (`git bra''nch -D x`). A `\uXXXX` escape in the payload, or
+    `FOUND_ISSUES_HOOK_GATES=off`, runs the full hook.
+  - **`fi_annotate_auto`** (annotate-commit / annotate-pr) skips an `[open]`
+    entry before parsing it when no touched file's basename occurs in the
+    line. Every one of the three match forms needs that basename inside the
+    entry's path, so the result is unchanged. The cost of parsing was ~30
+    processes per open entry on every commit.
+  - **`lib/segment-cache.sh`** (new): `status --format=segment` is answered
+    by a fast path at the top of the CLI, using builtins only. The cached
+    segment is served only when the key matches (CLI version,
+    `FOUND_ISSUES_STALE_DAYS`, today's date, locale, ledger path) and the
+    ledger's bytes equal the bytes stored with it. A due autosync, bash older
+    than 4.2, or anything else unusual runs the full count. The autosync
+    stamp now also holds its epoch (the mtime is unchanged), so the fast path
+    can check the throttle without `stat`. `FOUND_ISSUES_SEGMENT_CACHE=off`
+    disables the cache.
+
+  Evidence that nothing else changed: `tests/hook-gates.bats` runs a corpus
+  of commands through each hook with gates on and off and compares exit
+  code, stdout, stderr and the dispatched CLI calls. 18 new bats cases.
+
 ## [2.8.0] - 2026-09-14
 
 ### Added

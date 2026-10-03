@@ -28,7 +28,29 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.8.0"
+readonly FI_VERSION="2.9.0"
+
+# Statusline fast path (lib/segment-cache.sh): `status --format=segment` runs
+# every few seconds per session, so it is answered from a content-checked
+# cache with bash builtins only — before fi_script_dir's $(...) and the lib
+# sourcing below. Any miss falls through to the full CLI. The lib dir follows
+# the same priority as FI_LIB_DIR below; a symlinked entry point skips it.
+if [[ "${1:-}" == "status" ]]; then
+  if [[ -n "${FOUND_ISSUES_LIB_DIR:-}" ]]; then
+    __fi_fast_lib="$FOUND_ISSUES_LIB_DIR"
+  elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+    __fi_fast_lib="$CLAUDE_PLUGIN_ROOT/lib"
+  elif [[ "${BASH_SOURCE[0]}" == */* && ! -h "${BASH_SOURCE[0]}" ]]; then
+    __fi_fast_lib="${BASH_SOURCE[0]%/*}/../lib"
+  else
+    __fi_fast_lib=""
+  fi
+  if [[ -n "$__fi_fast_lib" && -f "$__fi_fast_lib/segment-cache.sh" ]]; then
+    # shellcheck source=../lib/segment-cache.sh
+    source "$__fi_fast_lib/segment-cache.sh"
+    fi_segment_clock_ok && fi_segment_fast_path "${@:2}" && exit 0
+  fi
+fi
 
 # Resolve script directory, following symlinks.
 fi_script_dir() {
@@ -95,6 +117,8 @@ source "$FI_LIB_DIR/resolve.sh"
 source "$FI_LIB_DIR/promote-deferred.sh"
 # shellcheck source=../lib/list-status.sh
 source "$FI_LIB_DIR/list-status.sh"
+# shellcheck source=../lib/segment-cache.sh
+source "$FI_LIB_DIR/segment-cache.sh"
 
 # the annotate engine, sync and promote (extracted v2.2.9 — the final group).
 # shellcheck source=../lib/annotate.sh
