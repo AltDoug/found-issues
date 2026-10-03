@@ -26,6 +26,14 @@ teardown() {
   fi_teardown_tmp
 }
 
+# The fast path needs bash 4.2+ (builtin clock); older bash — macOS CI's
+# /bin/bash 3.2 — always takes the full path by design, so the
+# "no external command" assertions only hold on 4.2+.
+need_fast_bash() {
+  "$BASH_BIN" -c '(( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 ) ))' \
+    || skip "fast path needs bash 4.2+ ($BASH_BIN is older; full path covered elsewhere)"
+}
+
 # Render with the stub-only PATH (fast path must not need anything else).
 render_stubbed() {
   rm -f "$TMP/external-calls"
@@ -33,6 +41,7 @@ render_stubbed() {
 }
 
 @test "segment-cache: a warm render prints the same segment with no external command" {
+  need_fast_bash
   fi_run status --format=segment --cwd "$TMP"
   [ "$status" -eq 0 ]
   cold="$output"
@@ -70,6 +79,7 @@ render_stubbed() {
 }
 
 @test "segment-cache: no ledger anywhere up the tree prints nothing with no external command" {
+  need_fast_bash
   # Outside $TMP: $TMP itself holds a ledger the walk would find.
   local bare
   bare="$(mktemp -d -t fi-bare.XXXXXX)"
@@ -99,6 +109,7 @@ render_stubbed() {
 }
 
 @test "segment-cache: an autosync stamp without an epoch (pre-2.9 CLI) falls back to the full path" {
+  need_fast_bash
   unset FOUND_ISSUES_SEGMENT_AUTOSYNC
   export FOUND_ISSUES_AUTOSYNC_CMD="true"
   fi_run status --format=segment --cwd "$TMP"
