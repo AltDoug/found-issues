@@ -1,0 +1,1010 @@
+[
+  {
+    "id": "annot-1",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "ledger-18",
+    "reason": "lib/annotate.sh:533 (pass 3) and :154 (pick pass B) run `printf | grep -Fxq` on every ledger line once auto_set is non-empty. That is a pipeline subshell plus a grep exec per line, headings and [fixed] lines included. Pass 2 at :482/:488 repeats it for each candidate, touched file and other candidate. Pass 3 only pays this when something gets annotated, but pass B pays it on every --pick confirm, and the hook tells the agent to run --pick. On Git Bash a 1,500-line ledger costs about 3,000 process creations per confirm.",
+    "fix": "Replace the per-line grep with a builtin test. auto_set always ends in a newline (lines :138/:127 and :474/:502), so use `nl=$'\\n'; [[ \"$nl$auto_set\" == *\"$nl$line$nl\"* ]]`. Use the same form for cand_tfs and ann_tfs at :482/:488. Recording ledger line numbers in pass 1 is the more robust variant.",
+    "repro": ""
+  },
+  {
+    "id": "annot-2",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "For each candidate, :414 calls fi_parse_entry, :415/:439-441 run four `printf|grep|head|cut` chains, and :448 calls fi_entry_loc, which re-parses (lib/annotate.sh:35) and runs three more chains. fi_annotate_apply_picks pass A (:111) calls fi_entry_loc for every [open] entry with no prefilter, and the extended pick form parses a third time (:120). The prefilter idea is sound: fi_entry_loc builds loc only from first_token captures (lib/parse-entries.sh:134-173), so loc is always a verbatim substring of the line. This is the same parse-cost family as sync's 65 forks per entry.",
+    "fix": "Parse once and split e_data with a single `while IFS='=' read -r k v` loop. Build loc from the already-parsed path, line and line_end. In pass A, skip a line with `[[ \"$line\" == *\"$p_loc\"* ]]` (p_loc = pick, or the part of the pick before ' — ') before calling fi_entry_loc.",
+    "repro": ""
+  },
+  {
+    "id": "annot-3",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "`git show --name-only` (lib/annotate-commands.sh:267) and `gh pr view --json files` (:142) report only the new path of a detected rename (diff.renames defaults on). The entry citing the old path therefore fails the match at lib/annotate.sh:427 and is never a candidate. fi_diff_old_ranges keys ranges by the `---` old path (:242-246). The 'reverse case' needs the entry to already cite the new path while the same diff still contains the rename, which is rare. The impact is a missed annotation, not a false close, and the design treats misses as the cheap direction (annotate.sh:313-315). No test covers rename-plus-edit annotate.",
+    "fix": "For annotate-commit, add the old names to touched_files: parse `git show --name-status -M --format=` and emit both columns of R lines. For annotate-pr, take `previous_filename` from `gh api repos/{o}/{r}/pulls/N/files`. Keep ranges keyed by the old path, since entries cite the old path. Do NOT use --no-renames: it turns the whole old file into a removal range and would line-match every entry on it.",
+    "repro": ""
+  },
+  {
+    "id": "annot-4",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "lib/annotate.sh:494-497 lists non-line-matched candidates and returns 3, and hooks/post-bash-dispatch.sh:293-299 injects them every time. The list at :560-569 has no cap, and neither does the mass-touch loop at :520-523. In the finder's 40-entries-on-one-file scenario the reason would actually be 'shares a touched file' (:505-506), but the outcome is the same. Listing non-touched candidates with rc=3 is deliberately pinned by tests/cli-annotate-hook-auto.bats:37-46, :48-56, :101-116 and :118-133. Dropping them as suggested would break the documented contract. The uncapped list is the real friction.",
+    "fix": "Keep the rc=3 contract, which tests pin. In hook mode, cap the printed list at about 5 lines plus a '+N more (run without --hook-auto to see all)' line. Optionally sort line-matched or contested items first.",
+    "repro": ""
+  },
+  {
+    "id": "annot-5",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "Under `set -euo pipefail` (bin/found-issues:29), a failing `gh pr diff` makes the pipeline at lib/annotate-commands.sh:151 fail. `|| true` swallows that, and old_ranges ends up empty. fi_line_matched then returns 1 for every candidate (lib/annotate.sh:282), so each uncontested candidate gets the false reason 'cited line not touched by this change' (:497). That reason actively steers the agent away from --pick. Only non-closing suggestions are lost, so severity is low. The 406 'diff too large' trigger depends on GitHub's runtime behaviour, but any gh failure reproduces it.",
+    "fix": "Use `diff_out=\"$(gh pr diff \"$pr_num\" 2>/dev/null)\" || diff_ok=no`. When diff_ok=no or diff_out is empty, print 'annotate-pr: PR diff unavailable — no line-matched suggestions attempted' and return 0 without listing candidates. Otherwise run old_ranges from fi_diff_old_ranges <<<\"$diff_out\".",
+    "repro": ""
+  },
+  {
+    "id": "annot-6",
+    "verdict": "PLAUSIBLE",
+    "severity": "medium",
+    "duplicate_of": "ledger-1",
+    "reason": "The unlocked read-modify-write is real. lib/annotate.sh:150/:173 and :529/:542, and lib/sync.sh:94 with its read loop, all build from a snapshot and `mv` over the ledger, and rg finds no flock/lockdir/fi_lock anywhere in bin/, lib/ or hooks/. The in-hook ordering at post-bash-dispatch.sh:304-321 only serializes the routes inside one hook invocation. A background sync spawned by a merge (:329) can still be running when the next commit's hook, or an explicit --pick, rewrites the ledger. Sync's open fd keeps reading the old inode, and its later mv drops the annotation. The mktemp -t part (ledger mode becomes 0600; mv is cross-filesystem only when $TMPDIR is on another fs, e.g. Linux tmpfs) duplicates ledger-2/cli-23.",
+    "fix": "Create the tmp file beside the ledger (`mktemp \"$file.XXXXXX\"`, then chmod to match the original). Wrap read-through-mv in annotate, sync, resolve, defer and archive in one shared mkdir-based lock helper with a stale-lock timeout, which works on bash 3.2 and Git Bash. The cheaper stopgap is to compare cksum before the mv and retry on mismatch.",
+    "repro": "Put a gh shim on PATH that sleeps 5 s per `pr view`. Log 2 entries with (PR: o/r#1). Run `found-issues sync &`. After 1 s, run `found-issues annotate-commit <sha> --pick <loc>` on a third entry. Then `wait` and grep for the (commit: ...) token. Predicted: it is gone."
+  },
+  {
+    "id": "annot-7",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "lib/annotate-commands.sh:267 runs `git show --name-only` with neither -z nor core.quotepath=off. Under the default core.quotePath=true a non-ASCII path prints as \"docs/caf\\303\\251.md\" with the quotes, so the match at lib/annotate.sh:427 fails. In the diff (:276) the header is `--- \"a/...\"`, so `sub(/^a\\//...)` at annotate.sh:244 strips nothing and the ranges key is also wrong. Two related config hazards: color.ui=always would inject ANSI codes into both pipes, and diff.noprefix would make the a/ strip eat a real top-level `a/` directory.",
+    "fix": "Use `git -c core.quotepath=off show --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/` for both calls at :267 and :276.",
+    "repro": ""
+  },
+  {
+    "id": "annot-8",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "(a) lib/annotate.sh:435 and :155 test the whole line, while flip-driving extraction reads only fi_annotation_tail (parse-entries.sh:193-204). A symptom that quotes the exact ref being written therefore reads as already annotated, and sync never closes the entry. This is rare: the quoted ref has to be the same one. (b) With hook_auto=no, write_annotation is canonical, and '(PR: o/r#7)' is not a substring of '(PR-auto: o/r#7)'. The entry is appended to (:534) instead of promoted as at :158-162, which leaves a duplicate ref. Correction to the finding: the stale report is bounded. Sync processes only [open] lines (sync.sh:101), so the canonical token closes the entry in the same pass that emits one 'has merged' line (sync.sh:133-145). Until the PR merges, though, every sync makes an extra `gh pr view` for the leftover auto token.",
+    "fix": "Test `fi_annotation_tail \"$line\"` instead of $line at :155 and :435. In fi_annotate_auto pass 3 with hook_auto=no, substitute an existing `$(fi_auto_form \"$annotation\")` token in place, as :158-162 does, instead of appending.",
+    "repro": ""
+  },
+  {
+    "id": "annot-9",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "fi_find_issues_file walks up to `/` with no git-toplevel bound (lib/parse-entries.sh:27). annotate (annotate-commands.sh:123, :249) uses it, while log, defer, resolve and promote-deferred use fi_resolve_issues_file, which is bounded by toplevel (bin/found-issues:228; lib/defer.sh:77, resolve.sh:77, log.sh:104). sync (sync.sh:61), archive, promote and session-start also walk up. A ledger-less repo B under a directory holding a ledger is therefore resolved to the ancestor's ledger. One realistic trigger is a `~/.found-issues.md` left by local mode. The consequences are suffix-matched commit-auto suggestions, and also SessionStart sync in B demoting A's commit annotations to (commit-stale:), because A's SHAs do not resolve in B (sync.sh:189-200). That is why I raised severity to medium.",
+    "fix": "Bound fi_find_issues_file: when `git rev-parse --show-toplevel` succeeds, stop the walk after checking the toplevel directory. Keep the unbounded walk only outside git, which is local mode. A single change there fixes annotate, sync, archive, promote and session-start together.",
+    "repro": ""
+  },
+  {
+    "id": "annot-10",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "The hook passes the literal HEAD (post-bash-dispatch.sh:284), and rerun_cmd embeds `$target` (lib/annotate-commands.sh:261, :280), so the printed confirm command re-resolves HEAD whenever it is run. After a later commit B, :218/:254 stamp (commit: B). The promote check at annotate.sh:158 derives the auto form from B, so it appends, and the stale (commit-auto: A) stays. Worse case: the agent checks out main before confirming. The guard at :238 is skipped on the default branch, so main's tip is stamped, sync's ancestor test (sync.sh:190) closes the entry immediately, and the real fix is still unmerged. That is a false close.",
+    "fix": "Build rerun_cmd with the resolved commit instead of $target at both :261 and :280: `\"found-issues annotate-commit $short_sha\"` (or $full_sha).",
+    "repro": ""
+  },
+  {
+    "id": "annot-11",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "The sed at bin/found-issues:262-263 captures `[^/]+/[^/]+` right after `github.com[:/]`. With a port, `ssh://git@ssh.github.com:443/org/repo.git` (GitHub's documented firewall fallback) yields `443/org`, and the PR-existence check still passes because gh parses the remote itself. With an ssh host alias such as `git@github.com-work:org/repo`, a common two-account setup, the sed does not match and returns the whole URL. In that case gh usually fails the PR check first (:117), so the failure is mostly loud. The sed output is never validated against the org/repo shape.",
+    "fix": "Take the last two path segments and validate them: `id=\"$(printf '%s' \"$remote_url\" | sed -E 's|/+$||; s|\\.git$||; s|.*[:/]([^/:]+/[^/:]+)$|\\1|')\"; [[ \"$id\" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || return 1`.",
+    "repro": ""
+  },
+  {
+    "id": "annot-12",
+    "verdict": "PLAUSIBLE",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "post-bash-dispatch.sh:278-279 treats an empty exit_code as success, and the regex at :277 also matches `git commit` inside echo or quoted text. Whether this ever fires depends on the harness: whether the Bash PostToolUse payload carries exit_code, and whether PostToolUse fires at all for a failed tool call. Impact is small. Re-running on an already-processed HEAD finds the existing commit-auto token and skips it (annotate.sh:435), so the usual result is a repeated rc=3 context block. New tokens appear only for commits the hook never saw, and they never close anything.",
+    "fix": "Record the last processed HEAD sha in the state/cache dir. Skip the route when `git rev-parse HEAD` equals it. That costs one rev-parse and handles both the failed-commit and the echo false positives.",
+    "repro": "Log a raw PostToolUse(Bash) payload for a failing `git commit` (nothing staged) on Claude Code and on Codex. Check whether the hook fires and whether .tool_response.exit_code is present."
+  },
+  {
+    "id": "annot-13",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "lib/annotate-commands.sh:234-239 runs fi_resolve_default_branch on every non-forced call, including the post-commit --hook-auto path. When origin/HEAD is unset (repos built with `git init` + `remote add`), that means `gh repo view` + jq, and failures are never cached (bin/found-issues:312-318), so an offline commit pays the gh failure every time. The guard's purpose is to stop a closing canonical SHA from being armed (:220-233). Hook mode writes only non-closing commit-auto tokens, so skipping the guard there is safe. A later --pick confirm still passes through the guard. Related to ledger-10/cli-13 (default-branch fallback) but a different defect.",
+    "fix": "Change the guard to `if [[ \"$force\" != \"yes\" && \"$hook_auto\" != \"yes\" ]]`. Optionally cache a negative gh result for a short TTL in fi_resolve_default_branch.",
+    "repro": ""
+  },
+  {
+    "id": "annot-14",
+    "verdict": "PLAUSIBLE",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "`read -r` keeps a trailing \\r, so lib/annotate.sh:164 and :534 write `...\\r (PR: ...)\\n`, leaving a mid-line CR and an LF-only ending. fi_annotation_tail still parses because \\r counts as [[:space:]] (parse-entries.sh:62). No code outside the JSON escaper (parse-entries.sh:548, :564) handles CR. User repos on Git for Windows default to core.autocrlf=true, and this repo's own `* text=auto eol=lf` protects only itself. The in-place substitution at :160 keeps CRLF intact.",
+    "fix": "Before appending, run `cr=\"\"; [[ \"$line\" == *$'\\r' ]] && { cr=$'\\r'; line=\"${line%$'\\r'}\"; }`, then write `printf '%s %s%s\\n' \"$line\" \"$annotation\" \"$cr\"` at :164 and :534.",
+    "repro": "Run `unix2dos docs/found-issues.md`, then `found-issues annotate-commit <sha> --pick <loc> --force`, then `od -c docs/found-issues.md | rg '\\\\r  '` to check for a CR followed by a space before the annotation."
+  },
+  {
+    "id": "cli-1",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "bin/found-issues:219-243 decides the target from the mode alone: $PWD/.found-issues.md in local mode, repo_root/docs/found-issues.md otherwise. It creates that file if it is missing and never calls fi_find_issues_file. Readers do walk up (parse-entries.sh:22-39, used by list-status.sh:60, sync.sh:61, session-start.sh:351), so running `log` from a subdirectory of a local-mode tree, or in a git repo whose ledger is root .found-issues.md (pre-branch-delete.sh:186-188 supports that layout), creates a nearer ledger that hides the real one. docs/format-spec.md:61 does say `<cwd>/.found-issues.md` for local mode, so the writer follows the spec while the readers do not. No test pins either behavior. defer.sh:77, resolve.sh:77 and promote-deferred.sh:54 also create an empty ledger on their no-match paths.",
+    "fix": "In git mode, check repo_root/docs/found-issues.md and then repo_root/.found-issues.md, and do not walk above repo_root. In local mode, use fi_find_issues_file. Create docs/found-issues.md (or $PWD/.found-issues.md) only when nothing is found, and only from `log`. defer/resolve/promote-deferred should use the same lookup and exit 1 when no ledger exists.",
+    "repro": ""
+  },
+  {
+    "id": "cli-2",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "For 'docs/my notes.md:12' and 'Repo:src/a.go:12', both line-spec regexes in log.sh:63/78 fail, so log.sh:89-91 keeps the whole string as the path with an empty line. new_key becomes 'docs/my notes.md:12::stale' or 'Repo:src/a.go:12::x'. The parser takes first_token (parse-entries.sh:136), which gives path 'docs/my'. For the Repo shape it splits on the last colon (:168-171), giving 'Repo:src/a.go' with line 12. The scan keys at log.sh:131-137 therefore never equal new_key, and every re-log appends a duplicate. The parser comment at :144-150 says the Repo shape is something cmd_log writes, so this is a supported input.",
+    "fix": "Build the candidate entry line first, run fi_parse_entry on it, and compute new_key from the parsed path and line, so the writer and the scanner share one key path. Separately, reject whitespace in a location that looks like a path (exit 2), the same way bad line specs are rejected.",
+    "repro": ""
+  },
+  {
+    "id": "cli-3",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "canonicalize.sh:70 `bare=\"${input%%(*}\"` cuts at the first '(' on both sides of the comparison. The writer uses it through fi_dedup_key (canonicalize.sh:83). The scanner gets an already-truncated symptom from parse-entries.sh:181. So 'parse() returns None' and 'parse() raises' both key to 'src/a.py:10:parse', and log.sh:169-172 prints 'Skipped — already logged' and returns 0. A symptom that starts with '(' reduces to an empty string, so every such symptom at one path:line collides.",
+    "fix": "Remove only the recognised trailing annotation groups (strip the fi_annotation_tail result) rather than cutting at the first '('. Apply this in fi_strip_parentheticals and in the parser's symptom field (parse-entries.sh:181) in the same change, so existing entries' keys stay symmetric with new logs. Keeping the 50-character truncation is acceptable.",
+    "repro": ""
+  },
+  {
+    "id": "cli-4",
+    "verdict": "CONFIRMED",
+    "severity": "high",
+    "duplicate_of": "",
+    "reason": "cmd_log writes the symptom verbatim (log.sh:200,212) and validates nothing beyond the separator. fi_annotation_tail (parse-entries.sh:62) accepts a trailing '(commit: <hex>)' or '(PR: o/r#N)' group, and parse-entries.sh:199 passes it to the flip-driving `commits`/`prs` fields. sync.sh:184-195 then closes the entry if that SHA is an ancestor of the default branch. Citing the regressing commit, which is already on main, closes the entry on the next sync. SessionStart runs sync automatically, so no user action is needed, and closures are irreversible. Regraded to high because this is a false close.",
+    "fix": "In cmd_log, run fi_annotation_tail on the symptom. If the tail contains any key other than `suggested`, exit 2 with a message telling the caller to use annotate-pr/annotate-commit. Neutralising silently (for example rewriting 'commit:' to 'commit -') is the weaker alternative.",
+    "repro": ""
+  },
+  {
+    "id": "cli-5",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "bin/found-issues:370 passes \"$@\", but cmd_uninstall (uninstall.sh:26-92) never reads its arguments. It runs straight into cmd_uninstall_statusline (:31), `rm -rf ~/.claude/found-issues` (:54), `rm -rf ~/.cache/found-issues` (:61) and alias removal (:70). `uninstall --help` and `--dry-run` therefore perform the full cleanup. tests/cli-uninstall.bats has no help or unknown-flag test. This is the same class as the sync --help fix (sync.sh:39-49).",
+    "fix": "At the top of cmd_uninstall, loop over the arguments: -h/--help prints usage and returns 0, and any other argument returns exit 2 before anything is touched. --dry-run is optional.",
+    "repro": ""
+  },
+  {
+    "id": "cli-6",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "defer.sh:45-47 has a `*) shift` arm, so `--mute-until=2026-12-01`, `--reason=x` and typos are dropped silently. A trailing `--reason` with no value takes `shift 2 || break` (:39), and the entry is deferred with no reason, exit 0. resolve.sh:55-58 (`[[ -z \"$match\" ]] && match=\"$1\"; shift`) swallows `--verifed human` and closes with the default `(verified: ai)`. promote-deferred.sh:38-43 has the same catch-all. cli-5 is the same root-cause class: unknown flags are not rejected.",
+    "fix": "Add `--reason=*` and `--mute-until=*` (and `--verified=*` in resolve) arms. In the catch-all, `exit 2 'unknown option'` for any token starting with '-'. Flags that take a value should exit 2 when it is missing, instead of `shift 2 || break`.",
+    "repro": ""
+  },
+  {
+    "id": "cli-7",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "commands/defer.md:53 shows `--reason \"blocked on legal review (JIRA-1234)\"`, and defer.sh:160 writes it verbatim. fi_extract_reason (parse-entries.sh:~503) stops `[^)]+` at the first ')'. On re-defer, the strip at defer.sh:156 removes only up to the first ')' and leaves a stray ')' on the line. fi_annotation_tail's `[^)]*\\)[[:space:]]*$` also cannot match the nested group, so the tail walk stops there.",
+    "fix": "In cmd_defer, reject or translate '(' and ')' (and newlines) in --reason, for example to '[' and ']'. Change the example in commands/defer.md to avoid parentheses.",
+    "repro": ""
+  },
+  {
+    "id": "cli-8",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "prompt-7",
+    "reason": "fi_promote_apply skips a source [open] line only when the target holds the exact same text (promote.sh:69 `grep -Fxq -- \"$line\" \"$tmp\"`). If main has flipped, annotated or archived that entry, the text differs and --apply appends a fresh [open] copy next to the [fixed] one, which brings a closed entry back. The listing at promote.sh:157 also compares verbatim and over-reports. pre-branch-delete.sh:11-13 and :300-323 already moved to dedup keys built from main plus its archive.",
+    "fix": "Build a dedup-key set from the target ledger plus docs/found-issues-archive.md (fi_dedup_key_for_line, as pre-branch-delete does). Use it both for the listing and for the --apply skip test. Keep the within-run duplicate check keyed as well.",
+    "repro": ""
+  },
+  {
+    "id": "cli-9",
+    "verdict": "PLAUSIBLE",
+    "severity": "medium",
+    "duplicate_of": "hook-1",
+    "reason": "promote.sh:157 runs `! printf '%s' \"$main_content\" | grep -Fxq` under `set -euo pipefail` (bin/found-issues:29). pre-branch-delete.sh:322 does the same with $main_keyset (the hook also sets pipefail at :29). When grep -q matches and exits while the printf subshell is still blocked writing past the pipe buffer, printf dies with 141, pipefail makes the pipeline fail, and `!` turns the hit into 'not found'. One correction to the finding: this repo's ledger is about 31 KB (docs/found-issues.md), not several hundred KB, so it only triggers on larger ledgers or smaller pipe buffers. Same root cause as hook-1, hook-19 and cli-9.",
+    "fix": "Use a builtin membership test with no forks: `[[ $'\\n'\"$main_content\"$'\\n' == *$'\\n'\"$line\"$'\\n'* ]]`. A here-string (`grep -Fxq -- \"$line\" <<<\"$main_content\"`) also works. Apply the same fix at pre-branch-delete.sh:322.",
+    "repro": "In a repo, make main's ledger about 200 KB by appending distinct [open] lines after one early entry X. Put X on a branch and run `found-issues promote` about 20 times. X is listed intermittently. Linux reproduces most reliably with a ledger over 64 KB."
+  },
+  {
+    "id": "cli-10",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "For each [open] entry, and then each [deferred] entry when nothing matched, log.sh:125-165 runs fi_parse_entry: one sed, six grep|sed|paste pipelines (parse-entries.sh:203-247) and an fi_annotation_tail subshell. It then runs three printf|grep|head|cut pipelines (:128-130) and fi_dedup_key. fi_dedup_key forks for fi_strip_parentheticals, fi_canonicalize_path (which runs `git rev-parse --show-toplevel` at canonicalize.sh:37) and fi_canonicalize_symptom (two `tr`). That is about 40 processes per entry, which matches the measured cost of about 65 forks per entry in sync. Process creation is the expensive part on Git Bash. Same per-entry fork-amplification class as annot-1/ledger-18, but on a different code path.",
+    "fix": "Hoist repo_root once and pass it as the second argument of fi_canonicalize_path. Replace the three extraction pipelines with one `while IFS='=' read -r k v` over e_data. A string prefilter is safe only for path entries: skip unless the entry contains the canonical path. Do not prefilter abstract entries, because their key depends on the normalised symptom.",
+    "repro": ""
+  },
+  {
+    "id": "cli-11",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "ledger-8a",
+    "reason": "detect-mode.sh:90 runs `gh auth status`, which validates the token over the network, before reading the cache at :106-115. fi_resolve_issues_file (bin/found-issues:221-224) only compares the result with 'local', and that depends solely on FOUND_ISSUES_MODE or `git rev-parse --git-dir` (:57-66). Every log/defer/resolve/promote-deferred in a GitHub repo therefore pays for remote get-url, `gh auth status`, stat and date, and an hourly `gh pr list`.",
+    "fix": "In fi_resolve_issues_file, test `[[ ${FOUND_ISSUES_MODE:-} == local ]] || ! git rev-parse --git-dir` directly. In fi_detect_mode, read a fresh cache file before the gh probes.",
+    "repro": ""
+  },
+  {
+    "id": "cli-12",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "defer.sh:84-86 and :97-99 recompute the loop-invariant lower_match, and lowercase each entry, with two subshell+tr pairs per entry. promote-deferred.sh:60-62 and :73-75 do the same. resolve.sh:62 already hoists lower_match. This is the same fork-amplification class as cli-10, on a colder path.",
+    "fix": "Compute lower_match once before the loops. Lowercase the whole fi_entries output with one `tr` (keeping the original lines in a parallel array), then compare with bash `[[ == *x* ]]`.",
+    "repro": ""
+  },
+  {
+    "id": "cli-13",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "ledger-10",
+    "reason": "bin/found-issues:321-323 returns the unverified literal 'main'. In a local-only repo on master, sync.sh:190-191 `merge-base --is-ancestor $sha main` fails silently, so the commit-annotated entry stays [open] with no warning. promote.sh:113 then treats master as a feature branch. tests/cli-sync-default-branch.bats:49 pins the literal-'main' fallback, so that test has to change with the fix. pre-branch-delete.sh:183 has its own copy of the same fallback.",
+    "fix": "As the last resort, return the first of main, master, trunk that passes `git rev-parse --verify --quiet refs/heads/<b>`. If none exists, return failure, and have sync print a 'default branch unknown — commit annotations not evaluated' warning. Apply the same change in pre-branch-delete.sh:183.",
+    "repro": ""
+  },
+  {
+    "id": "cli-14",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "(a) help.sh:174 treats any '[!]' substring as critical, so a non-critical entry whose symptom mentions '[!]' is auto-promoted at the threshold (:192-193). (b) help.sh:128-135 re-finds the touched entry by bare prefix over the deferred list. Same-day entries such as '…— foo' and '…— foo bar' make the first match win. If the longer entry comes first, the count, threshold and auto-promote are read from and applied to the wrong entry, while fi_append_touch updated the right one.",
+    "fix": "Test criticality with `[[ \"$updated_entry\" == '- [deferred] [!] '* ]]`. Re-locate the entry by exact equality with the line fi_append_touch produced (have it echo the new line), not by prefix.",
+    "repro": ""
+  },
+  {
+    "id": "cli-15",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "`critical` is read only at log.sh:184. The [open]-match branch returns at :169-172, and the [deferred] branch (:175-177) never looks at it. tests/cli-log.bats:78-84 only covers critical-then-critical, so non-critical-then-critical is untested. An escalation attempt prints 'Skipped' and the [!] flag is lost.",
+    "fix": "On an [open] match with --critical and no existing [!], rewrite that line to insert ' [!]' after the status (serialized rewrite like resolve) and print 'Escalated'. At minimum, print a warning to stderr that --critical was ignored.",
+    "repro": ""
+  },
+  {
+    "id": "cli-16",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "log.sh:38-54 joins the arguments and trims only the outer whitespace. Embedded newlines survive into $symptom, and :200/:212 write them with printf '%s\\n'. Continuation lines become orphan text. A continuation line starting with '- [open] ' matches re_status (parse-entries.sh) and becomes an entry that was never validated.",
+    "fix": "Exit 2 when the location or symptom contains a newline or CR (`[[ $input == *$'\\n'* || $input == *$'\\r'* ]]`). Collapsing to a space also works, but rejecting is clearer for agents.",
+    "repro": ""
+  },
+  {
+    "id": "cli-17",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "doctor.sh:264 checks only five variables. post-bash-dispatch.sh:245/280 (FOUND_ISSUES_AUTO_ANNOTATE), :324 (FOUND_ISSUES_POST_PR_STATE), session-start.sh:243 (FOUND_ISSUES_AUTO_MIGRATE), list-status.sh:142 and segment-cache.sh:119 (FOUND_ISSUES_SEGMENT_AUTOSYNC) and hook-gate.sh:38 (FOUND_ISSUES_HOOK_GATES) are not checked. doctor prints 'All hooks default-active' while those behaviours are off. Regraded to low: this is a diagnostic gap in a read-only command, not a hot-path wrong result.",
+    "fix": "Add AUTO_ANNOTATE, POST_PR_STATE, AUTO_MIGRATE and SEGMENT_AUTOSYNC to the loop. Report HOOK_GATES=off separately, because it makes hooks run more rather than disabling them. Use one shared array if convenient.",
+    "repro": ""
+  },
+  {
+    "id": "cli-18",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "codex-hooks.sh:83-85 derives hooks/ from FI_BIN_DIR/.. and :226-244 prints success without checking `-f`/`-x` on any script. doctor.sh has no Codex section. The copied-CLI scenario is speculative: fi_script_dir follows symlinks, and the plugin cache keeps bin/ and hooks/ side by side. The stale-path-after-update case is already called out in the install text (:240-243). Regraded to low.",
+    "fix": "Before writing, check that each of the four hook scripts is executable (`[[ -x ]]`) and return non-zero with the missing path if not. A doctor section that reads $CODEX_HOME/hooks.json and flags sentinel commands whose script no longer exists is a cheap follow-up.",
+    "repro": ""
+  },
+  {
+    "id": "cli-19",
+    "verdict": "PLAUSIBLE",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "gen-codex-skills.sh:71 writes `description: %s` as a plain scalar. Under YAML 1.2, ': ' inside a block plain scalar is an error, and ' #' starts a comment. This affects codex-skills/fi-sync:3 ('reality: flip'), fi-log:3, fi-fix:3, fi-annotate-commit:3 ('HEAD: run') and fi-annotate-pr:3 ('(PR: org' and \"'PR #N'\"). Whether Codex rejects these depends on its loader. Mitigating evidence: before v2.5.0 the fi-annotate-commit and fi-annotate-pr descriptions already contained '(commit: <sha>)' and '(PR: ...)', and the fixed ledger entry at docs/found-issues.md:13 reports 'fi-* skills visible' in headless codex exec. That entry does not name which skills, so it is not conclusive. The finder's high severity is unproven, so this is regraded to medium.",
+    "fix": "Emit the description double-quoted: escape '\\' then '\"' (`d=${desc//\\\\/\\\\\\\\}; d=${d//\\\"/\\\\\\\"}; printf 'description: \"%s\"\\n' \"$d\"`). Regenerate the skills, and add a drift test that parses each frontmatter with a strict YAML parser when one is available.",
+    "repro": "Run `python3 -c 'import yaml,sys; yaml.safe_load(open(sys.argv[1]).read().split(\"---\")[1])' codex-skills/fi-sync/SKILL.md`. A 'mapping values are not allowed here' error means the YAML is invalid. Then run `codex exec 'list your available skills'` with the plugin installed and check whether fi-sync, fi-log, fi-fix, fi-annotate-commit and fi-annotate-pr are all listed."
+  },
+  {
+    "id": "cli-20",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "cmd_uninstall (uninstall.sh:26-92) never calls cmd_uninstall_codex_hooks. Its closing text (:79-91) lists only the Claude /plugin commands. AGENTS.md documents `found-issues uninstall-codex-hooks` as a separate manual step, so this is a documented gap rather than a silent one. A Codex user who follows only the $fi-uninstall output is left with hooks.json commands pointing at a deleted cache directory.",
+    "fix": "In cmd_uninstall, when \"$(fi_codex_home_default)/hooks.json\" contains FI_CODEX_HOOKS_SENTINEL, call cmd_uninstall_codex_hooks, or at least print that the user must run `found-issues uninstall-codex-hooks` before removing the plugin.",
+    "repro": ""
+  },
+  {
+    "id": "cli-21",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "`merged` is declared on its own line (codex-hooks.sh:204), so the status of the assignment at :206 is jq's status. main runs unconditionally (bin/found-issues tail) under `set -e` (:29), so invalid JSON aborts at :206 and :270 before the guards at :216-219 and :272-275. The 'leaving it untouched' message is unreachable, and the file is still left untouched. tests/cli-codex-hooks.bats:99-108 pins rc 5. That test passes only because jq 1.7.x happens to exit 5 on a parse error, so the documented exit code depends on the jq version.",
+    "fix": "Use `merged=\"$(jq …)\" || merged=\"\"` at :206 and `stripped=\"$(jq …)\" || stripped=\"\"` at :270, so the existing guard prints its message and returns 5.",
+    "repro": ""
+  },
+  {
+    "id": "cli-22",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "detect-mode.sh:80 and :90-93 return 'git' for a remote without 'github.com' (an SSH host alias, GHE) or when `gh auth status` fails. sync.sh:70-72 then leaves repo_id empty, and PR annotations are never evaluated, with no warning. doctor.sh:247 prints the mode with a pass marker. One correction: the empty-cache-file claim is overstated. The truncate-then-write at :143 only exposes a sub-millisecond window to a concurrent reader, and the next call reads the completed file, so the mode is not empty for an hour. Also, a gh-auth failure is not cached.",
+    "fix": "In sync, warn once when entries carry (PR: …) annotations but repo_id is empty, and name the mode and the reason. In fi_detect_mode, return the cached value only if it is one of the four known modes. Optionally map a gh auth failure to a distinct 'github-noauth' mode that doctor flags.",
+    "repro": ""
+  },
+  {
+    "id": "cli-23",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "ledger-2",
+    "reason": "defer.sh:146/172, resolve.sh:120/134 and :152/170, and promote.sh:57/73 all use `mktemp -t` (in $TMPDIR) and then `mv` over the ledger. The parse-entries.sh rewrite helpers use the same pattern. When $TMPDIR is a separate filesystem (Linux tmpfs /tmp), mv falls back to copy plus unlink, which is not atomic. mv keeps the temp file's 0600 mode, so the ledger becomes 0600 after any mutation. Git tracks only the exec bit, so the mode change is cosmetic for commits. codex-hooks.sh:168-176 already creates its temp file in the target directory for this reason.",
+    "fix": "Use `tmp=\"$(mktemp \"$file.XXXXXX\")\"` (same directory), restore the original mode before the mv (`chmod \"$(stat -c %a \"$file\" 2>/dev/null || stat -f %Lp \"$file\")\" \"$tmp\"`), and add `trap 'rm -f \"$tmp\"'` cleanup. Factor this into one fi_atomic_replace helper.",
+    "repro": ""
+  },
+  {
+    "id": "cli-24",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "promote.sh:62 and :156 consider only [open] lines, and pre-branch-delete.sh:313 checks only [open] branch entries. A branch-only [deferred] entry is therefore neither promoted nor protected, and it disappears when the branch is deleted. This is a documented design choice (promote.sh:60-61, commands/promote.md:59-60), not an oversight, which is why the severity is low.",
+    "fix": "Include [deferred] lines in the pre-branch-delete key check and in promote's listing and --apply, using the dedup-key comparison from cli-8 so entries already on main are not re-copied. If deferred entries should stay branch-local, have the guard at least print a warning naming them.",
+    "repro": ""
+  },
+  {
+    "id": "hook-1",
+    "verdict": "PLAUSIBLE",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "The mechanism is real. pre-branch-delete.sh:29 sets pipefail, and at :322 `! printf '%s' \"$main_keyset\" | LC_ALL=C grep -Fxq` becomes true when printf dies of SIGPIPE (141) after grep matches early. Claude Code launches hooks through libuv, which resets SIGPIPE to the default in the child, and even with SIGPIPE ignored printf would return 1, so the outcome is the same. The real constraint is size: keys are path:line plus at most 50 characters of symptom (canonicalize.sh:77-88), roughly 80-120 bytes each. The keyset has to exceed the pipe buffer plus grep's read buffer, roughly 100-160KB, which means about 1500 or more entries across the ledger and archive. This repo has 92 entries, about 9KB. The failure is fail-closed (a false block) and the env-var bypass gets past it. This is the canonical entry of the pipefail/`grep -q` cluster (cli-9, hook-19). stop-reminder.sh:194 uses the same pattern, but its input is capped at 16KB, which fits in the pipe buffer.",
+    "fix": "Use a here-string so no writer process exists: `elif ! LC_ALL=C grep -Fxq -- \"$b_key\" <<< \"$main_keyset\"; then`. Better, use the builtin newline-padded match `[[ $'\\n'\"$main_keyset\" == *$'\\n'\"$b_key\"$'\\n'* ]]`, which also drops a fork per branch entry.",
+    "repro": "Make a default branch whose ledger plus archive holds about 3000 entries (keyset over 200KB). Make a branch whose single [open] entry duplicates the first main entry. Pipe a PreToolUse payload for `git branch -D thatbranch` into hooks/pre-branch-delete.sh 20 times. Any exit 2 confirms the bug."
+  },
+  {
+    "id": "hook-2",
+    "verdict": "CONFIRMED",
+    "severity": "high",
+    "duplicate_of": "",
+    "reason": "The gate at pre-branch-delete.sh:51 passes `git -C /r branch -D x`. The segment regexes at :113 (`git[[:space:]]+branch`), :139 (`git[[:space:]]+push`) and :162 all require the verb right after `git`, so `-C /r` or `-c k=v` makes them miss. branches stays empty and :171 exits 0. tests/pre-branch-delete.bats has no global-option case. Even with the regex fixed, the later `git show`/`cat-file`/`rev-parse` calls (:176-199, :263-292) run in the hook's cwd, not the -C target. This is a guard bypass on a common agent form.",
+    "fix": "In all three regexes, allow global options between `git` and the verb, e.g. `git([[:space:]]+(-C|-c|--git-dir|--work-tree|--namespace)([[:space:]]+|=)[^[:space:]]+|[[:space:]]+--[a-z-]+)*[[:space:]]+branch[[:space:]]+(.*)`. Capture the -C directory and pass it as `git -C \"$dir\"` to every later git call. If -C is present but cannot be parsed, fail closed (block with a message).",
+    "repro": ""
+  },
+  {
+    "id": "hook-3",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "git's parse-options accepts bundled short flags, so `git branch -df x` force-deletes. At pre-branch-delete.sh:120-121 only the literal tokens -d, -D and --delete count, and `-df`/`-fd` fall into `-*) :`. Separately, the gate at :51 needs a `-d` or `-D` substring, so `-fd` with no other `-d` in the text exits at the gate. Push (:146) has the same gap. It is a real bypass, but agents rarely write bundled delete flags.",
+    "fix": "In the case arms use `--delete|-[!-]*[dD]*) has_delete_flag=1 ;;` (for push, the `-[!-]*d*` equivalent). Widen the gate to accept `branch`/`push` together with any `-` cluster containing d or D. The simplest option is to drop the flag sub-condition and gate on `branch`, or `push` plus `-`/`:`.",
+    "repro": ""
+  },
+  {
+    "id": "hook-4",
+    "verdict": "CONFIRMED",
+    "severity": "high",
+    "duplicate_of": "",
+    "reason": "pre-branch-delete.sh:92-94 deletes whole quoted spans, contents included. `git branch -D \"feature/x\"` therefore becomes `git branch -D `, the tokenizer at :118 yields no targets, :129 adds nothing, and :171 exits 0. Pattern 3 (:162) and pattern 4 (:167) lose a quoted `:name` or `refs/heads/...` the same way. The only quote test (bats:325) covers a fully quoted command string, not a quoted operand. The quoted-variable loop (`git branch -D \"$b\"`) is the normal bulk-cleanup form, which is exactly when unpromoted entries get lost.",
+    "fix": "Keep quote stripping only for deciding whether the verb and flag tokens sit outside quotes. Extract operands from a second copy where quote characters are removed but their contents kept, e.g. `sed \"s/'\\([^']*\\)'/\\1/g\" | sed -E 's/\"(([^\"\\\\]|\\\\.)*)\"/\\1/g'`. An operand that is still an unexpanded `$var` cannot be resolved, so block, or at least warn, rather than allow.",
+    "repro": ""
+  },
+  {
+    "id": "hook-5",
+    "verdict": "CONFIRMED",
+    "severity": "high",
+    "duplicate_of": "",
+    "reason": "format-enforcer.sh:58-60 validates only `new_string`, and :84 skips any line that does not start with `- [`. An Edit with old_string `[open] 2026-09-01 lib/x.sh:4` (unique, so the Edit tool accepts it) and new_string `[fixed] 2026-09-01 lib/x.sh:4` passes. Rule 6 (:138-145) never sees the line, so the result is a false close with no verification token. The bats test at format-enforcer.bats:117 only covers a new_string that contains the full `- [fixed]` line. pre-commit.sh:45-46 would catch it because it validates full diff lines, but that hook is opt-in and runs after the write.",
+    "fix": "For Edit, read file_path, find the line(s) containing old_string, apply the replacement in memory (bash `${line/old/new}` on those lines, or awk), and run the existing loop over the resulting full lines. For MultiEdit, apply the edits in sequence. Cheaper stopgap: if new_string matches `\\[(fixed|open|deferred|OPEN|FIXED)\\]` or `PR[[:space:]]+#[0-9]` and does not start with `- [`, rebuild the line or block with 'edit whole entry lines'.",
+    "repro": ""
+  },
+  {
+    "id": "hook-6",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "format-enforcer.sh:30 forks `cat`, and :43-44 each run `$(printf | jq)` before the `case` at :47-50 rejects non-ledger paths. That is about 7 forks and 4 execs on every Edit/Write/MultiEdit, matching the measured 7 forks. Both accepted path shapes contain the literal `found-issues.md`, and JSON never escapes those letters except through \\u, so a builtin substring gate preserves coverage. hook-7 (and the pre-gate design of the Bash hooks) has the same root pattern of running jq before the gate.",
+    "fix": "Replace :30 with `IFS= read -r -d '' input || true`, then `[[ \"$input\" == *found-issues.md* || \"$input\" == *'\\u'* ]] || exit 0` before get_field. Optionally merge the tool_name and file_path jq calls into one `jq -r '.tool_name, .tool_input.file_path'`.",
+    "repro": ""
+  },
+  {
+    "id": "hook-7",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "stop-reminder.sh:54 forks cat. :66 (stop_hook_active), :90 (session_id) and :108 (transcript_path) are each a `$(printf | jq)` pipeline. :70's `printf | grep -qE` fallback also runs on every normal turn, because jq returns \"false\" and that triggers the fallback. So even after the session is reminded (early exit at :100-102), each turn pays about 10 or more forks before exiting, and roughly 22 on the full path, matching the measurement. This is the same jq-before-gate pattern as hook-6.",
+    "fix": "Use `IFS= read -r -d '' input || true`. Replace :65-73 with `[[ $input =~ \\\"stop_hook_active\\\"[[:space:]]*:[[:space:]]*true ]] && exit 0`. Extract session_id with a bash regex limited to `[A-Za-z0-9._-]+` (the same charset :98 enforces) and check the reminded file next. Use jq only for transcript_path, and only when the regex-extracted value contains a backslash.",
+    "repro": ""
+  },
+  {
+    "id": "hook-8",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "stop-reminder.sh:14 sets errexit and pipefail. The :112-115 fallback `grep -oE ... | sed | head -1` has no `|| true`, so when the key is missing grep's exit 1 propagates through the assignment and the script exits 1 before the fail-open check at :119. The :93-96 session_id twin carries `|| true` with a comment explaining exactly this. bats:171 only covers a present-but-invalid path. Claude Code always sends transcript_path, so in practice this is an edge case.",
+    "fix": "Append `|| true` to the pipeline at stop-reminder.sh:115.",
+    "repro": ""
+  },
+  {
+    "id": "hook-9",
+    "verdict": "PLAUSIBLE",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "stop-reminder.sh:178 keeps only the last 16KB. The awk at :188-192 treats tool_result lines (which carry tool_use_id) as non-boundaries. A tool_result line over about 16KB therefore pushes the Edit/Bash tool_use out of the window, and :194-196 exits 0. The 8KB marker scan at :210 can likewise be satisfied by marker text inside a tool result. Impact is limited because 2.8.0 blocks only once per session (:100-102): a missed turn just delays the single block to a later qualifying turn. Whether real lines reach that size depends on Claude Code's transcript format (inline results duplicated in toolUseResult, with very large outputs persisted to a file instead).",
+    "fix": "Bound the boundary search by lines, not bytes, e.g. `tail -n 200`, or a larger byte window such as 1MB with the awk keeping only `\"name\":\"...\"` tokens since the last real user line. For the marker, scan only assistant-type lines after that boundary.",
+    "repro": "Write a JSONL transcript: a real user line, an assistant line with an Edit tool_use, a user tool_result line (with tool_use_id) carrying 20KB of content, and an assistant text line without the marker. Pipe `{\"transcript_path\":\"<file>\"}` into hooks/stop-reminder.sh with CLAUDE_CODE_ENTRYPOINT=cli. Expected 2, bug gives 0."
+  },
+  {
+    "id": "hook-10",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "session-start.sh:13 sets errexit. The onboarding block runs a bare `mkdir -p \"$ONBOARD_DIR\"` at :100 and a bare `touch \"$ONBOARD_MARKER\"` at :111, while the neighbouring :128 and :189 are guarded with `|| true`. If mkdir fails the hook exits 1 before sync or injection, and keeps doing so every session because the marker never gets written, which contradicts the header's 'Exit code: 0 always' (:10). Claude Code itself needs ~/.claude writable, so this is mostly sandboxed or read-only setups.",
+    "fix": "`mkdir -p \"$ONBOARD_DIR\" 2>/dev/null || true` at :100, and `touch \"$ONBOARD_MARKER\" 2>/dev/null || true` at :111. Optionally print the hint only after a successful touch.",
+    "repro": ""
+  },
+  {
+    "id": "hook-11",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "session-start.sh:366 runs a full `sync` unconditionally. :375 spawns a second CLI process for `status --format=plain` before the :378 empty check, so a clean ledger pays both. The stdin `input` read at :337 is never used, so payload `source` (startup/resume/clear/compact) is ignored. :245-249 run jq/awk/sed on every session. sync acts only on [open] entries (lib/sync.sh has no deferred or mute handling), so gating it on an `- [open]` line is safe. The plain status format does not trigger segment autosync (list-status.sh:141-142), so status adds no further sync.",
+    "fix": "Before :366, run a builtin scan of $issues_file for `- [open]` and skip sync when there is none. Move `status` below the empty check, or derive the count from `open_entries`. Optionally throttle sync with a stamp keyed on the ledger mtime and HEAD, and skip sync (not injection) for source=compact. Daily-stamp the :245 migration probe.",
+    "repro": ""
+  },
+  {
+    "id": "hook-12",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "pre-branch-delete.sh:269-308 rebuilds main_content, archive_content and main_keyset inside the `for branch` loop, although none of them depend on the branch. The rebuild happens before any check that the branch has an [open] line; :266 only skips empty content. Each line costs fi_parse_entry plus three `printf|grep|head|cut` pipelines (:241-244), plus fi_dedup_key's subshells. fi_canonicalize_path also runs `git rev-parse --show-toplevel` for every key because no repo_root is passed (canonicalize.sh:36-38). That comes to about 25 forks per ledger line, times the number of branches. This is not a per-call hot path, but on Windows a large ledger can push the hook past the host timeout, and a timed-out PreToolUse hook is non-blocking, which turns the cost into a bypass.",
+    "fix": "First check whether branch_content contains `- [open]` (builtin match) and `continue` if not. Hoist main/archive reads and the main_keyset build out of the loop and compute them lazily once. Pass a precomputed repo_root into fi_canonicalize_path, or batch the key extraction in a single awk pass.",
+    "repro": ""
+  },
+  {
+    "id": "hook-13",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "The post-bash-dispatch.sh:277 commit regex `(^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_])` matches `rg -n \"git commit\" docs/` because `\"` satisfies both boundary classes. :278-279 treat a missing exit_code as success and run `annotate-commit HEAD --hook-auto`. The same applies to the :323 merge route, which spawns a detached sync. Damage is limited: auto tokens are non-closing suggestions (format-enforcer-new-annotations.bats:91-97). On a feature branch annotate-commit refuses a HEAD already on the default branch (annotate-commands.sh:234-246), and re-annotating the same HEAD is mostly redundant. The real costs are context noise and process churn.",
+    "fix": "Only once the cheap regex matches, strip quoted spans (the same two seds as pre-branch-delete.sh:92-94) and re-test the commit and merge regexes on the stripped text. For the commit route, also require `tool_response.stdout` to match git's commit summary line `^\\[[^]]+ [0-9a-f]{7,}\\]`.",
+    "repro": ""
+  },
+  {
+    "id": "hook-14",
+    "verdict": "PLAUSIBLE",
+    "severity": "high",
+    "duplicate_of": "",
+    "reason": "pre-branch-delete.sh:209-216 and format-enforcer.sh:160-167 fall back to `readlink -f found-issues || command -v`. With GNU coreutils, `readlink -f <bare name>` resolves against the cwd and succeeds even when that file does not exist, so the PATH fallback is dead on Linux. On macOS, `command -v` returns the unresolved PATH symlink, so `../lib` points next to it. The Codex user-level commands (codex-hooks.sh:110-114) set only FOUND_ISSUES_HARNESS, and harness.sh:6-15 says CLAUDE_PLUGIN_ROOT is supplied only to plugin-manifest hooks. pre-branch-delete then exits 0 at :222-226, and format-enforcer stays in mode=local (:158, :186), which disables both blocking guards on Codex. post-bash-dispatch.sh:79 and session-start.sh:19 use BASH_SOURCE and are fine.",
+    "fix": "In both hooks, use the script-relative lib as the default after FOUND_ISSUES_LIB_DIR: `lib_dir=\"${FOUND_ISSUES_LIB_DIR:-${BASH_SOURCE[0]%/*}/../lib}\"`, with CLAUDE_PLUGIN_ROOT and PATH as later fallbacks. When the lib is still missing, write one stderr line instead of exiting silently.",
+    "repro": "In a repo whose branch `feat` has an unpromoted [open] entry, with the CLI not on PATH (or on Linux with it on PATH), run `env -u CLAUDE_PLUGIN_ROOT FOUND_ISSUES_HARNESS=codex <abs>/hooks/pre-branch-delete.sh` with the Bash payload for `git branch -D feat`. Bug gives 0, expected 2."
+  },
+  {
+    "id": "hook-15",
+    "verdict": "PLAUSIBLE",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "format-enforcer.sh:44-50 reads only `.tool_input.file_path`, and :54-69 handle only the Write, Edit and MultiEdit tool names. codex-hooks.sh:118 installs it with matcher `Write|Edit|MultiEdit`. Codex edits go through apply_patch, so the hook either never fires (if Codex's PreToolUse only covers the shell tool) or fires with no file_path and exits 0. Either way it is inert on Codex. Which of the two happens depends on Codex runtime behaviour.",
+    "fix": "Cheapest correct option: stop installing the format-enforcer entry in fi_codex_hooks_new_entries_json, and document format enforcement as Claude-only (pre-commit.sh covers commits). Parse apply_patch `*** (Add|Update) File:` hunks only once Codex is confirmed to fire PreToolUse for apply_patch.",
+    "repro": "Under Codex with install-codex-hooks applied, have the agent apply_patch a `- [OPEN] ... - x` line into docs/found-issues.md in a github-mode repo. If the patch lands unblocked, the finding is confirmed."
+  },
+  {
+    "id": "hook-16",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "In git mode, format-enforcer.sh:189-192 prints the report to stderr and exits 0. For PreToolUse, Claude Code does not feed exit-0 stderr to the model; it shows only in verbose or transcript mode. The advisory therefore reaches neither the agent nor, normally, the user. bats:64 only asserts the stream content, not visibility. The pre-branch-delete.sh:200-204 note is user-facing information, and missing it is harmless.",
+    "fix": "On Claude, emit `{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":<report>}}` on stdout with exit 0, if the host version supports PreToolUse additionalContext. Otherwise document git mode as advisory to the operator only. On Codex, route through a harness.sh emitter.",
+    "repro": ""
+  },
+  {
+    "id": "hook-17",
+    "verdict": "PLAUSIBLE",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "hooks.json:9,18,29,39,49 use `${CLAUDE_PLUGIN_ROOT}/hooks/x.sh` unquoted. If Claude Code substitutes the variable textually and runs the command through a shell, a plugin root containing a space (for example a Windows home such as /c/Users/John Doe under Git Bash, or a custom CLAUDE_CONFIG_DIR) word-splits, and every hook fails with a non-blocking error, leaving the plugin silently inert. lib/codex-hooks.sh:87-95 quotes for exactly this reason. Whether this happens depends on Claude Code's substitution and quoting behaviour.",
+    "fix": "Quote each command: `\"command\": \"\\\"${CLAUDE_PLUGIN_ROOT}/hooks/format-enforcer.sh\\\"\"` (all five), or prefix with `bash ` plus the quoted path. Add a CI check that hooks.json commands are quoted.",
+    "repro": "Set CLAUDE_CONFIG_DIR='/tmp/a b/.claude', install the plugin, start `claude --debug`, and look for SessionStart/Stop hook 'No such file' errors."
+  },
+  {
+    "id": "hook-18",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "pre-branch-delete.sh:57-65: without jq, get_field prints nothing, so `[[ \"\" != \"Bash\" ]] && exit 0` allows every delete. format-enforcer.sh:36-40,47-50 behaves the same way. This fail-open on a missing jq is documented design (docs/architecture.md:252-266, which says the blocking hooks still fail open when they cannot initialize). The real gap is only that nothing ever tells the operator. jq is often absent from Git Bash.",
+    "fix": "Add a `jq` presence check to `found-issues doctor`, and a once-per-day line in session-start when jq is missing ('branch-delete and format guards are inactive: install jq'). Do not reuse FI_GATE as the command: it is still JSON-escaped.",
+    "repro": ""
+  },
+  {
+    "id": "hook-19",
+    "verdict": "PLAUSIBLE",
+    "severity": "low",
+    "duplicate_of": "hook-1",
+    "reason": "pre-commit.sh:18 sets pipefail. At :28, `git diff --cached --name-only | grep -Fxq` gets status 141 when git takes SIGPIPE after grep matches early. `if` reads that as not staged, :35 exits 0, and validation is skipped. This needs more than about 64-100KB of staged names after the match. `.found-issues.md` sorts near the top, and `docs/found-issues.md` sorts after uppercase and early-alphabet paths, so the case is a massive commit. The hook is also opt-in.",
+    "fix": "`staged=\"$(git diff --cached --name-only 2>/dev/null || true)\"` once, then `[[ $'\\n'\"$staged\"$'\\n' == *$'\\n'\"$candidate\"$'\\n'* ]]` in the loop.",
+    "repro": "In a scratch repo, stage 5000 files named a0000..a4999 (over 64KB of names) plus a malformed `.found-issues.md`, and run the hook 10 times. Any exit 0 confirms it."
+  },
+  {
+    "id": "hook-20",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "At session-start.sh:403-404 criticals reduce `slots` but are never capped themselves, and :411 injects all of `crit_entries`. No per-line length limit exists anywhere in :395-415. A ledger with many [!] entries or long suggested-fix text injects an unbounded block into every SessionStart, so FOUND_ISSUES_SESSION_INJECT_MAX does not hold as a total.",
+    "fix": "Cap criticals at max_inject (take the newest with `tail -n`) and add the excess to `omitted`, with a separate 'N more critical' count line. Truncate each injected line, e.g. with awk at about 240 bytes plus an ellipsis, which keeps the leading `- [` the fence relies on.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-1",
+    "verdict": "CONFIRMED",
+    "severity": "high",
+    "duplicate_of": "status-4",
+    "reason": "Same root cause as status-4 and annot-6. sync.sh:100/:361 reads through an fd opened on the original inode, and :367 runs `mv \"$tmp\" \"$file\"` unconditionally, even on a no-op pass. There is no lock anywhere in lib/ or bin/ (rg flock/.lock finds nothing). Every other mutator replaces the inode by tmp+mv (resolve.sh:153, defer.sh:172, annotate.sh:173/:542, promote.sh:73, archive.sh:150), so any of those writes that lands mid-sync is reverted. The post-bash-dispatch.sh:14-23 ordering claim only covers the sync that hook spawns itself. One caveat: `log` appends with `>>` to the same inode (log.sh:212), so a log written while sync is still mid-loop gets read and kept. Only a log landing after EOF and before the mv is lost.",
+    "fix": "Minimal: skip the write when nothing changed (`cmp -s \"$tmp\" \"$file\" || mv ...`), and use optimistic concurrency: capture `cksum <\"$file\"` before the loop and re-check it right before mv. If it changed, discard tmp. Unattended runs exit quietly; an explicit sync re-runs once. A mkdir-lock that every mutator shares is the full fix, but sync must not hold it across gh network calls.",
+    "repro": "Use a stub gh that sleeps 5s on a ledger with one (PR: o/r#1) entry. Run `found-issues sync &`, then after 1s run `found-issues resolve <other entry>` or `defer` (not `log`, which appends to the same inode and usually survives). After `wait`, the resolve/defer is gone."
+  },
+  {
+    "id": "ledger-2",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "cli-23",
+    "reason": "sync.sh:93 and the other mutators (archive.sh:139, resolve.sh:139, defer.sh:146, annotate.sh:150/:529, parse-entries.sh:684/:785, promote.sh:57) all create the tmp with `mktemp -t` in $TMPDIR. The mode change is deterministic: mktemp makes the file 0600 and mv keeps the source mode, so the ledger becomes 0600, and a symlinked ledger is replaced by a regular file. Git does not track 0644 vs 0600, so there is no diff noise. Cross-device non-atomicity depends on the platform (tmpfs /tmp on Fedora/Arch, TEMP on C: with the repo on D:). For KB-sized files the truncated-read window is tiny, so real loss needs a crash or ENOSPC mid-copy. Grade low. codex-hooks.sh:171 already uses the correct same-directory pattern.",
+    "fix": "`tmp=\"$(mktemp \"$(dirname \"$file\")/.found-issues.XXXXXX\")\"`, as codex-hooks.sh:171 already does. Optionally restore the mode with the same original_mode approach statusline-install.sh:435 uses. The dot-prefixed tmp is removed by the existing EXIT traps.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-3",
+    "verdict": "PLAUSIBLE",
+    "severity": "high",
+    "duplicate_of": "",
+    "reason": "archive.sh:148 runs `grep -F -x -v -f ... >\"$tmp\" || true`, which swallows exit status 2, and :150 mv's the result with no check. Unlike parse-entries.sh:51 it does not set LC_ALL=C or -a. The finder overstates the scope. GNU grep >=3.5 in a UTF-8 locale suppresses only the lines containing invalid encoding (message goes to stderr, exit 0), so the bad-byte [open] entry itself is deleted from the ledger and never archived. A NUL suppresses everything after it, and grep <3.5 writes 'Binary file matches' to stdout, i.e. into the ledger. Silent data loss, but it needs a rare trigger (cp1252 bytes pasted on Git Bash, truncated UTF-8). Since v2.9.1 archive only runs on explicit sync/archive.",
+    "fix": "`LC_ALL=C grep -a -F -x -v -f ...`. Capture rc and abort before mv when rc>1. Assert that the tmp line count equals the original count minus archived_count. The ledger-15 fix (awk delete by NR) subsumes this.",
+    "repro": "Ledger with `- [fixed] 2020-01-01 a.sh:1 — old (fixed: 2020-01-02)` plus `printf -- '- [open] 2026-10-01 b.sh:1 — bad \\xff byte\\n' >>`. Run `LANG=en_US.UTF-8 found-issues archive` with GNU grep and check whether the [open] line survives in docs/found-issues.md."
+  },
+  {
+    "id": "ledger-4",
+    "verdict": "PLAUSIBLE",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "archive.sh:69 and :71 depend on ERE interval expressions `{4}`/`{2}` inside a plain `awk` call. mawk 1.3.4-20200120 (Debian 12, Ubuntu 22.04 default awk) does not support repetitions, so both matches fail, fixed_pairs is empty, and :111-112 print 'nothing to archive' with 'fixed entries: 0'. PR CI is ubuntu-latest (24.04, mawk 20240123 with intervals) and macOS (bwk awk with intervals), so neither would catch it. Elsewhere the code already avoids regex portability traps in awk (parse-entries.sh:325-327).",
+    "fix": "Replace the intervals with `[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]` in both match() calls. Add a bats case that forces `awk` to mawk when one is available.",
+    "repro": "On Debian 12 / Ubuntu 22.04 without gawk: `printf -- '- [fixed] 2020-01-01 a — b (fixed: 2020-01-02)\\n' | awk '{print match($0,/\\(fixed: [0-9]{4}-/)}'` prints 0. Then `found-issues archive --days 1` reports 'fixed entries: 0'."
+  },
+  {
+    "id": "ledger-5",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "Fork sources verified: sync.sh:106 runs `$(fi_parse_entry)`, inside which parse-entries.sh:109 is printf|sed, :199 is `$(fi_annotation_tail)`, and :203-247 are six printf|grep|sed|paste pipelines. sync.sh:107-112 add five printf|grep|head|cut re-splits. sync.sh:239 runs `git rev-parse --show-toplevel` per entry although the value is loop-invariant. The :254 guard is always true because e_path is the first whitespace token (parse-entries.sh:136), so the :255 sed runs for every path-like entry, including ones whose file exists. :164/:165/:175 spawn three jq per PR. SessionStart runs this synchronously (session-start.sh:366).",
+    "fix": "Low-risk subset first: hoist repo_root above the loop; move the recovered_loc block inside `[[ ! -e \"$full_path\" ]]`; replace :107-112 with one `while IFS= read -r kv; do case ${kv%%=*} in path) ...; esac; done <<<\"$e_data\"` (the pattern at parse-entries.sh:585-607); collapse the three jq calls into one `gh pr view --json state,baseRefName,mergedAt --jq '[.state,.baseRefName,.mergedAt]|@tsv'` read into three vars. The builtin parser rewrite is worthwhile but larger.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-6",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "For an entry whose path is missing and contains '/' or '.', sync.sh:286-291 calls fi_detect_rename. That runs a whole-history `git log --diff-filter=R -M --name-status` plus 2 awk (bin/found-issues:182-190) before the cheap tracked-ever check in fi_git_confirms_removed (:161/:165). Abstract locations are never tombstoned (never tracked), so they pay this cost on every sync forever. Correction: the call happens twice only for spaced locations (recovered_loc is empty otherwise, :259), so the cost is K calls, not 2K, for typical abstract tokens.",
+    "fix": "Before fi_detect_rename, skip both rename and tombstone when `git log -1 --format=%H -- \"$path\"` is empty. A rename source must have been tracked, so this changes no outcome. Optionally memoize `renames` in a global for the whole sync.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-7",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "sync.sh:148 (and :133) require `command -v jq`, and gh_empty_warnings is only filled inside that block (:160), so on a gh-without-jq machine merged PRs never close and nothing is printed. Graded low because missing jq is a documented fail-open (docs/architecture.md:258). post-bash-dispatch.sh:56 also exits without jq, so on such a machine PR annotations only arrive from other machines' commits. :139 shows gh's built-in --jq already works.",
+    "fix": "Drop the jq gate on both blocks: use `gh pr view --json state,baseRefName,mergedAt --jq '[.state,.baseRefName,.mergedAt]|@tsv'` and split the result via read (shared with the ledger-5 fix). The same applies to bin/found-issues:287/:312 (`gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`).",
+    "repro": ""
+  },
+  {
+    "id": "ledger-8",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "cli-11",
+    "reason": "(a) detect-mode.sh:90 runs `gh auth status`, which validates the token against the API, before the 1h cache check at :106-114. sync (:67), log/resolve/defer/promote-deferred (via bin/found-issues:221) and doctor all pay it. (b) sync.sh:156 and :139 issue one `gh pr view` per entry per PR with no per-run dedupe. (c) bin/found-issues:312 has no negative cache: when origin/HEAD is unset and the gh fetch fails, every sync retries the network call. All of this sits on the synchronous SessionStart path (session-start.sh:366), which has no timeout.",
+    "fix": "Move the cache-file check above `gh auth status` (a stale-auth cached mode just degrades to gh_empty warnings). Memoize pr_ref→tsv in a newline-delimited string per sync. Write an empty negative-cache stamp (e.g. 10 min TTL) when the gh default-branch lookup fails.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-9",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "status-2",
+    "reason": "The cwd half is largely refuted. Both installed snippets do `cd \"$__FI_DIR\" && status --cwd \"$__FI_DIR\"` precisely so the background `$0 sync` (list-status.sh:177) inherits the workspace as PWD (statusline-install.sh:420-422 and the append form, statusline-target.sh:166/:200). A mismatch remains only in the no-jq fallback branch and in hand-rolled statuslines that pass --cwd without cd, where status uses CLAUDE_PROJECT_DIR (:99) but cmd_sync walks $PWD (sync.sh:61, parse-entries.sh:23). The global stamp is confirmed: list-status.sh:146 uses one `segment-autosync-ts` for all repos, so with parallel sessions only the first repo to render in each 600s window gets synced. Overlaps status-2/status-3.",
+    "fix": "Key the stamp by ledger path, e.g. `segment-autosync-ts-$(cksum <<<\"$file\" | cut -d' ' -f1)` or a builtin slug of $file. Spawn the child as `( cd \"$(dirname \"$(dirname \"$file\")\")\" && ... \"$0\" sync & )`, which removes the reliance on the caller's cd.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-10",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "cli-13",
+    "reason": "bin/found-issues:321-323 returns the literal 'main' unverified. origin/HEAD is unset after `git remote add` + push (it is only set by clone or set-head). Combined with a non-GitHub remote, gh absent, or jq absent (the :287 gate), a master/trunk repo's commit annotations never close: both is-ancestor probes at sync.sh:190-191 fail silently. The PR half is narrower than claimed: it needs gh pr view to succeed while gh repo view fails. tests/cli-sync-default-branch.bats:49-58 pins only 'does not crash', not correctness.",
+    "fix": "Before falling back, probe `git rev-parse --verify --quiet` for refs/remotes/origin/{main,master,trunk}, then local refs/heads/{main,master,trunk}, and `git config init.defaultBranch`. Return the first that exists. If none resolves, return empty (sync already skips commit closure when default_branch is empty) and print a one-line notice.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-11",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "sync.sh:189 treats any `git rev-parse --verify` failure as 'squash/force-push dropped it' and :198-200/:350 permanently rewrite the token to (commit-stale:). parse-entries.sh:230 only extracts `(commit: `, and no command reverses the demotion. A depth-1 clone (CI, cloud session checkouts) or an ambiguous 7-hex SHA in a large repo hits the same branch. The impact is fail-safe (the entry stays open rather than false-closing), but a valid closure path is destroyed and the destruction is committed. tests/cli-sync-commit-stale.bats:13 pins demotion only for a nonexistent SHA in a full clone.",
+    "fix": "Before demoting, skip demotion (leave the annotation) when `git rev-parse --is-shallow-repository` prints true. Also skip it when `git cat-file -t \"$sha\" 2>&1` reports 'ambiguous'. Otherwise keep the current behavior.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-12",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "bin/found-issues:182 parses `--name-status` with core.quotepath at its default, so a non-ASCII src arrives as `\"docs/caf\\303\\251.md\"`, :199 never equals the raw path, and fi_detect_rename returns 1. fi_git_confirms_removed then sees the path absent from HEAD (:161) but present in history (:165, a pathspec works unquoted), so sync.sh:299-308 tombstones a live renamed entry irreversibly. That is a false close, but it requires a non-ASCII filename plus a rename, so graded medium rather than high.",
+    "fix": "`git -c core.quotepath=off log --diff-filter=R -M --name-status ...` at bin/found-issues:182. That is enough for non-ASCII. -z is only needed for tab/newline/quote in names.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-13",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "sync.sh:332 `corrected_line=\"${corrected_line/$rename_source/$rename_target}\"`: on bash >=5.2 (patsub_replacement on by default; Debian 12, Ubuntu 24.04, Homebrew) an `&` (or backslash) in a git-supplied rename target is expanded to the matched text. The unquoted pattern is a glob, but e_path is guarded (:222) and recovered_loc must itself equal a renamed path, so the glob half is near-theoretical. The suggested fix ('quote both operands') is not portable. On bash <=4.2 (macOS /bin/bash 3.2) the replacement inside a double-quoted ${//} does not undergo quote removal (compat42 semantics), so `\"$rename_target\"` would insert literal quotes. The same construct exists at annotate.sh:160; tests/cli-annotate-hook-auto.bats:249 uses a substring grep that would not catch stray quotes, so check it under /bin/bash 3.2.",
+    "fix": "Use a prefix/suffix split with quoted patterns only (portable to 3.2): `pre=\"${corrected_line%%\"$rename_source\"*}\"; post=\"${corrected_line#*\"$rename_source\"}\"; corrected_line=\"$pre$rename_target$post\"`. Do not quote the replacement operand.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-14",
+    "verdict": "PLAUSIBLE",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "`IFS= read -r` keeps a trailing CR, :101 still matches, and :328 `printf '%s %s\\n' \"$fixed_line\" \"$closure_label\"` puts the CR mid-line. The rename append at :334 behaves the same, as do resolve.sh:147 and annotate.sh:164/:534. Git for Windows defaults to core.autocrlf=true, so CRLF working-tree ledgers are the default there. Whether MSYS2 bash's read preserves CR (no igncr) is the runtime hinge. The impact is cosmetic plus diff noise.",
+    "fix": "In each append site: `local cr=\"\"; [[ $line == *$'\\r' ]] && { cr=$'\\r'; line=${line%$'\\r'}; }` then `printf '%s %s%s\\n' \"$fixed_line\" \"$closure_label\" \"$cr\"`.",
+    "repro": "In Git Bash with autocrlf=true, check out a ledger (or unix2dos it), close an entry via tombstone or a merged PR, then run `grep -c $'\\r (fixed' docs/found-issues.md` and expect 1."
+  },
+  {
+    "id": "ledger-15",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "archive.sh:95 `IFS=$'\\t' read -r date line`: tab is IFS whitespace, so trailing tabs are stripped from `line`, and :148 `-x` then no longer matches the active line. The entry is re-appended to the archive on every run (needs a hand-edited [fixed] line ending in a tab; sync/resolve always end lines with ')'). For (b), the count rule (:99) can select one of two byte-identical lines, while :148 deletes every identical copy. That loses one duplicate copy only, no unique content. Both are rare.",
+    "fix": "Remove by line number: have the pass-1 awk emit `NR\\tdate\\tline`, select NRs in bash, then `awk 'NR==FNR{d[$1];next} !(FNR in d)' nrs_file \"$file\" >\"$tmp\"`. Read with `IFS= read -r rec` plus parameter-expansion splitting. This also fixes ledger-3 (awk has no binary mode).",
+    "repro": ""
+  },
+  {
+    "id": "ledger-16",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "sync.sh:430 `archive_output=\"$(cmd_archive 2>&1 || true)\"` and :432 print only on *moved*entries*. A cutoff failure (archive.sh:54-56; e.g. busybox/Alpine `date`, which rejects both `-v-30d` and `-d '30 days ago'`) or a missing ledger is fully hidden, and sync exits 0. Partial nuance: because of `|| true`, set -e is suspended inside cmd_archive, so an mv failure still reaches the 'moved' printf and does get surfaced along with the error text.",
+    "fix": "`archive_output=\"$(cmd_archive 2>&1)\" && arc=0 || arc=$?`. When arc is non-zero, print the output to stderr. Returning non-zero from sync is optional; a visible message is enough.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-17",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "The sync loop (sync.sh:100-101) and the archive awk (archive.sh:65) match `- [open]`/`- [fixed]` lines inside `<<<<<<<`...`>>>>>>>` regions. fi_entries skips those regions (parse-entries.sh:330-332), and fi_has_conflict_markers exists (:48) but neither sync nor archive calls it. SessionStart sync (session-start.sh:366) therefore mutates a conflicted ledger unattended, and an explicit archive can remove one side's line. The impact is confusion during resolution, not silent loss outside the conflict.",
+    "fix": "At the top of cmd_sync (after file resolution) and cmd_archive, add `if fi_has_conflict_markers \"$file\"; then fi_err \"<cmd>: ledger has merge-conflict markers — skipped\"; return 0; fi`.",
+    "repro": ""
+  },
+  {
+    "id": "ledger-18",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "annot-1",
+    "reason": "annotate.sh:533 (and :154) runs `printf | grep -Fxq` for every ledger line, including headers and blanks, whenever auto_set is non-empty, so about 2 process creations per line. Exact-content membership means byte-identical duplicate lines are all annotated (:534 / :164). It also belongs to the pipefail family (hook-1/cli-9): bin/found-issues:29 sets pipefail, so a large auto_set could make grep -q's early exit SIGPIPE printf and fail the match. In practice auto_set is far below the pipe buffer, so that part is theoretical.",
+    "fix": "Gate on `[[ $line == \"- [\"* ]]` first, then use the builtin `[[ $'\\n'$auto_set == *$'\\n'\"$line\"$'\\n'* ]]` (auto_set already ends in a newline, :502). After a match, remove that one occurrence from auto_set (`auto_set=\"${auto_set/\"$line\"$'\\n'/}\"`; pattern-side quoting is 3.2-safe) so a selection annotates at most one copy.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-1",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "SKILL.md:22 still says line-matched entries 'are annotated automatically' and that the agent's job is 'ONLY the judgment cases'. annotate-pr.md:59-61 and annotate-commit.md:45-47 still say 'line-matched entries annotate silently'. In the code, lib/annotate.sh:380-383 writes fi_auto_form, which is (PR-auto:)/(commit-auto:), whenever hook_auto=yes, and :547-551 prints 'Suggested ... will NOT close on sync' along with a --pick confirm command. Severity is downgraded because the hook's own context text says plainly to confirm with --pick (post-bash-dispatch.sh:250-257 and :285-292). The failure also leans the safe way: the entry stays open, and sync lists it as awaiting confirmation (sync.sh:396-406). It does not false-close. The Format section at SKILL.md:44 also leaves out the -auto and (verified:) tokens.",
+    "fix": "Rewrite SKILL.md:22 and the 'When to invoke' paragraphs of annotate-pr.md and annotate-commit.md to say that hook output is a non-closing (PR-auto:)/(commit-auto:) suggestion, and that the agent must run the printed --pick for the entries the change really fixes. Add the -auto and (verified:) tokens to SKILL.md:44. Keep it within the 3700-byte budget in tests/docs-consistency.bats:102.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-2",
+    "verdict": "CONFIRMED",
+    "severity": "high",
+    "duplicate_of": "",
+    "reason": "In lib/annotate.sh:493-503 the line-overlap check (fi_line_matched) and the scope-limited check both run only when hook_auto=yes. Without the flag, any candidate that is the only citer of a touched file goes into auto_set, and :534 writes write_annotation, which stays canonical because of :380 (the closing (PR:)/(commit:) token). Since sync closes on canonical tokens with no further check, the manual path is weaker than the hook path. That contradicts the CHANGELOG 2.6.0 rationale ('touched is not fixed'). Three places steer agents onto this bare path: session-start.sh:464-467, SKILL.md:22 ('Run /found-issues:annotate-pr <N> manually'), and the legacy hook-off prompt at post-bash-dispatch.sh:216-221. An unrelated entry that is the only citer of any file the PR touches gets false-closed on merge, and nothing can reopen it.",
+    "fix": "In fi_annotate_auto, write fi_auto_form unless annotate_all=yes (so with no flag it only suggests). Picks keep writing the canonical token. Change the session-start.sh:464-467 text to 'run `annotate-pr <N> --pick <path:line>` for the entries it fixes'. Update annotate-pr.md and annotate-commit.md (steps 4 and 'Possible outputs') and the matching tests.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-3",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "The guard in lib/annotate-commands.sh:234-245 runs before the --pick branch (:259), so `annotate-commit <merged-sha> --pick` exits 2 from any branch other than the default. fix.md:38-40 gives that command without mentioning --force. Severity is downgraded for three reasons. Phase 2 runs before Phase 3 creates the branch, so the run is often on the default branch, where the guard does not fire. The CLI's own error (:242) names --force for retroactive annotation. And a --force'd commit annotation that closes on the next sync carries about the same false-close risk as the sanctioned `resolve --verified ai` route.",
+    "fix": "In fix.md bucket 1: for an identified already-merged fix, run `annotate-commit <sha> --force --pick <path:line>` only after `git show <sha> -- <path>` shows the symptom removed, and cite that evidence in the PR body. Otherwise use `found-issues resolve '<fragment>' --verified ai`.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-4",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "sync.sh:128 and :141 collect both commit-auto and PR-auto suggestions, but :403-405 prints a single confirm line for both, `annotate-commit <sha> --pick`. For a PR-auto entry that is the wrong command, and no sha is shown (:141 prints only the PR ref). For a landed commit-auto, running it from a non-default branch hits the ancestor guard at annotate-commands.sh:238-244 (exit 2). The only 'reject' route offered is 'delete the token by hand', which contradicts SKILL.md:48 hard rule 1. sync.md:32 documents only the one-line summary. This partly shares a root cause with prompt-3: the already-merged guard has no sanctioned confirm path.",
+    "fix": "Print a confirm command per kind: `annotate-pr <N> --pick '<loc>'` for PR-auto, and `annotate-commit <sha> --force --pick '<loc>'` for a landed commit-auto, with the actual N/sha and loc filled in. Add a CLI reject verb (for example `annotate-reject <loc> <ref>` that strips the -auto token under the same tmp+mv path). Document the block in sync.md.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-5",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "defer.md:29 says false positives 'should be removed from the file entirely', but SKILL.md:48-49 (hard rules 1-2) forbids both direct writes and deleting [open] entries. defer.sh:133 and resolve.sh:131 tell the agent to 'manually remove the (PR: ...) annotation', and no CLI verb strips annotations. Severity is downgraded because sync already demotes CLOSED PRs to (PR-closed:) automatically. That leaves only an abandoned PR that is still open. A false positive can still be parked through `defer --reason`, so the agent is never fully stuck.",
+    "fix": "Reword defer.md:29 to 'defer with --reason \"not a real issue: ...\"' (or add a dismiss verb). Add a narrow `unannotate <match> <ref>` subcommand and point the defer.sh:133 and resolve.sh:131 messages at it.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-6",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "pre-branch-delete.sh:356 prints the bypass ('set FOUND_ISSUES_PROMOTE_GUARD=off') in the stderr the agent reads. :76 honors that exact inline prefix, so the cheapest way for an agent to get unblocked is to bypass the guard. That contradicts SKILL.md:51 hard rule 4. The 'imprecise' half is weak. 'Run /found-issues:promote on the branch first' is accurate, because promote.sh:109-117 requires being on that branch. It is still not a concrete command sequence.",
+    "fix": "Remove line :356 from the agent-visible message and leave it documented in docs/configuration.md. Replace :352-354 with the concrete sequence: `git checkout <branch> && found-issues promote`, then on a fresh branch off the default `found-issues promote --apply --from <branch>`, then PR, merge, delete.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-7",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "cli-8",
+    "reason": "promote.sh:157 (listing) and :69 (apply) compare with verbatim `grep -Fxq`. pre-branch-delete.sh:299-307 and :322 compare dedup keys across open, deferred and fixed entries plus the archive. When main holds the entry as [fixed], [open] with an annotation, or archived, promote lists it as needing promotion, and --apply appends a fresh `- [open]` duplicate of a closed issue. Promote and the guard disagree on what 'promoted' means.",
+    "fix": "Have both the promote listing and fi_promote_apply build main's keyset with fi_dedup_key_for_line over the main ledger plus the archive across all statuses, the same as pre-branch-delete.sh:299-307, and skip branch lines whose key is in that set. Better still, extract the keyset builder into a shared lib function.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-8",
+    "verdict": "PLAUSIBLE",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "The code divergence is real. list-status.sh:58 and :99 resolve `${cwd:-${CLAUDE_PROJECT_DIR:-$PWD}}`. annotate-commands.sh:123 and :249 call fi_find_issues_file with no argument, which defaults to $PWD (parse-entries.sh:23). fix.md:16 runs `list --json` without --cwd. fix.md:62-63 has no worktree, fetch or clean-tree step, and the per-day branch name collides on a second run the same day (`checkout -b` fails). Severity is downgraded from high because a mismatch makes --pick exit 1 ('no [open] entry matches', annotate.sh:192-193) rather than close anything. Whether the two ledgers actually diverge depends on whether Claude Code exports CLAUDE_PROJECT_DIR into the Bash tool environment after EnterWorktree.",
+    "fix": "Have fix.md pass `--cwd \"$PWD\"` to every list and status call. Add a Phase 0: a dedicated worktree, `git fetch`, branch from origin/<default> with a time or counter suffix, and refuse a dirty tree. Alternatively, make annotate-* resolve the same search root as list/status, or the reverse, so they agree in one place.",
+    "repro": "In a Claude Code session, EnterWorktree into a worktree whose ledger differs from the main checkout, then run in the Bash tool: `echo \"$CLAUDE_PROJECT_DIR\"; pwd; found-issues list --json | jq length; found-issues annotate-pr <N> --pick <loc-only-in-worktree>`."
+  },
+  {
+    "id": "prompt-9",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "fix.md:82-88 has the agent run `annotate-pr <N> --pick` after `gh pr create`, which rewrites the tracked ledger in the working tree only (annotate.sh:173 mv). No step commits or pushes it, so the annotation lives only in that checkout. It is lost when the worktree is reaped, and it is absent from the checkout where SessionStart's autosync runs. The fix.md:18-20 resume rule also relies on that annotation persisting. fix.md:40-42 calls for an explicit `/found-issues:sync`, which auto-archives unless FOUND_ISSUES_AUTO_ARCHIVE=off (sync.sh:426-434) and leaves diffs in two tracked files with nothing committing them. The failure leans the safe way (entries stay open), so this is medium.",
+    "fix": "Phase 4: after annotate-pr, `git add docs/found-issues.md` (only that path), commit, and push to the PR branch before merge. Run the closing sync as `FOUND_ISSUES_AUTO_ARCHIVE=off found-issues sync`, and either put any ledger diff in the PR or report it.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-10",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "fix.md:5 pre-authorizes only Bash(bats:*) as a test runner, while fix.md:67 and :79 require 'the repo's tests + build'. In a headless run without bypass permissions, npm, pytest or make calls get denied or prompt. The range-pick mismatch is real too. annotate.sh:43-45 renders `path:23-49`, and :124 matches by exact equality, so a pick built from `list --json` line=23 exits 1 with a visible 'no [open] entry matches' (annotate.sh:192-193). It fails loudly, never silently.",
+    "fix": "Document that the dispatcher must pre-authorize the repo's test and build commands (or drop the bats-only implication). Tell the agent to build picks from `raw` as `path:line` or `path:line-line_end`, exactly as the candidate list prints them.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-11",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "session-start.sh:96-113 (the 'Prepend this single italicized line' directive plus `touch $ONBOARD_MARKER`) and :127-192 (the daily statusline nudge) are gated only on harness=claude, never on CLAUDE_CODE_ENTRYPOINT. stop-reminder.sh:42-44, by contrast, skips non-cli entrypoints. A headless `claude -p` run therefore gets a directive that conflicts with fix.md:94-95's first-line scoreboard, and it uses up the once-ever onboarding hint where nobody will read it.",
+    "fix": "Wrap both blocks in `if [[ -z \"${CLAUDE_CODE_ENTRYPOINT:-}\" || \"$CLAUDE_CODE_ENTRYPOINT\" == cli ]]` so the marker is touched only in interactive sessions.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-12",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "SKILL.md:34-35 requires the marker on 'every substantive turn', but stop-reminder.sh:78-103 blocks only once per session (2.8.0), and only on mutating turns (:193-198). The 'full' message (:246-256) is chosen only when ~/.claude/found-issues/.onboarded is absent (:235-241), and session-start.sh:111 touches that file in the very first SessionStart, before any Stop. So the terse form (:244) is what effectively always fires. The terse form does list the three options, so it is usable, but it has no literal string to copy. That matters more if the rules never load at all (see prompt-17).",
+    "fix": "Reword SKILL.md:34 to 'on the first substantive (editing or mutating) turn of a session'. Change the terse message to include the literal `<!-- found-issues-checked: none-noticed|logged|deferred -->` and one clause on what each option means.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-13",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "session-start.sh:65 strips only the frontmatter, so the 'Stop-hook marker (if enabled)' section (SKILL.md:32-35) reaches Codex. Codex never runs the Stop discipline: stop-reminder.sh:49-51 fails open, and install-codex-hooks registers no Stop hook. Running fi_codex_rewrite_core (lib/codex-rewrite.sh:18-23) leaves Claude tool names in place: codex-skills/fi-fix/SKILL.md:23 'Agent tool', fi-sync/SKILL.md:48 'Read tool', and fi-setup:56 and :187 'AskUserQuestion'. It also turns $ARGUMENTS into a bare `<the user-provided arguments>` inside bash fences (fi-log:16, fi-annotate-pr:14). One more instance: fi-setup:75 and :298 rewrite the literal `$ARGUMENTS` that the setup skill checks for in the Claude /fi alias file, which corrupts that check text.",
+    "fix": "For harness=codex, cut the 'Stop-hook marker' section (an awk range from '## Stop-hook marker' up to the next '## '). Make tool references in commands/*.md harness-neutral. Have the rewrite emit `'<arguments>'` (quoted), and exempt the fi.md alias literal in setup.md from the $ARGUMENTS substitution.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-14",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "The --critical half is proven by the code. log.sh:26 honors --critical only as $1, and :38 joins the rest. For `src/a.sh:1 --critical — sym`, the location `src/a.sh:1 --critical` fails both line-spec regexes (they forbid whitespace) and falls into the `*/*` path branch, so it is logged with a spaced pseudo-path and no [!], and no error. The shell-splice half depends on the model. log.md:17 gives a bare `found-issues log $ARGUMENTS`, and its own example at :48 contains parentheses, which are a bash syntax error if spliced literally, but whether the model quotes them is runtime behaviour.",
+    "fix": "Change log.md to `found-issues log [--critical] '<location — symptom (suggested: fix)>'` (single-quoted, with apostrophes escaped) and update SKILL.md:14 to match. In cmd_log, return 2 when ' --critical' appears anywhere other than $1.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-15",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "sync.md:4 declares '(no arguments)' and :16-18 runs a bare `found-issues sync`. sync.md:32 documents only `Synced. Closed: ...`. The CLI also prints 'Dry run — nothing written.', Demoted/Renamed counts, 'Synced. Nothing to close.', the status line, the awaiting-confirmation block (sync.sh:396-406) and an archive block (:431-434). It mitigates the flag risk, but only partly: when a command body lacks $ARGUMENTS, Claude Code appends the arguments to the prompt, so the model does see --dry-run, but forwarding it is up to the model. The CLI now rejects unknown flags (sync.sh:43-56).",
+    "fix": "Change sync.md to `found-issues sync $ARGUMENTS` with argument-hint `[--dry-run]`. Replace :32 with a short list of the output sections and the action each one calls for (especially the awaiting-confirmation block; see prompt-4).",
+    "repro": ""
+  },
+  {
+    "id": "prompt-16",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "SKILL.md:26 gives the literal `[fixed] (verified: ai) (fixed: <today>)` as the result to produce and never names `found-issues resolve` (lib/resolve.sh:15-34), the serialized path that sync.md:56-58 uses. SKILL.md:48 forbids direct writes in the same file. log.md:30 still refers to `@found-issues-rules.md`, which AGENTS.md says must not be used as an import. The Codex rewrite papers over this only for Codex (codex-rewrite.sh:22).",
+    "fix": "Change SKILL.md:26 to 'close fixed ones with `found-issues resolve \"<fragment>\" --verified ai` — never by editing'. Change log.md:30 to 'per the found-issues rules'.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-17",
+    "verdict": "PLAUSIBLE",
+    "severity": "high",
+    "duplicate_of": "",
+    "reason": "What the repo says about how the rules reach Claude. It asserts but never proves: docs/architecture.md:88-89 ('loaded ... every session via the plugin spec auto-load mechanism (disable-model-invocation: true)'), :132-134, AGENTS.md:38, README.md:100, and CHANGELOG 0.1.0 at :1554. CHANGELOG :1624 explicitly lists 'Skill auto-loading behavior in a real session' as untested in CI, and no later entry closes that. tests/session-start.bats:405-408 actively pins that SessionStart does NOT inject the rules on Claude, and session-start.sh:37-39 delegates to the skill. hooks.json and plugin.json have no other injection path. No test exercises the skill-load path. By documented Claude Code semantics, disable-model-invocation:true makes a skill user-invocable only and removes it from the model's skill list, which is the opposite of preloading. Consistent with that, this session's skill list shows found-issues:fix, :log and :sync but no found-issues:rules, and no rules text is in context. On Claude, then, the rules probably reach the model only if the user types /found-issues:rules. The operator's global CLAUDE.md carries its own found-issues logging rule, which would hide this gap when the operator tests the plugin on his own machine.",
+    "fix": "Have session-start.sh emit the rules body for harness=claude as well. That means lifting the :58 codex-only gate for the body (not the slash rewrite) and flipping tests/session-start.bats:405. Keep the skill as a user-invocable reference, or delete it so the content isn't duplicated. Correct architecture.md, AGENTS.md and README.md to describe the real mechanism.",
+    "repro": "With the plugin installed, in a repo with no open ledger entries, run `claude -p 'If text headed \"found-issues — agent rules\" is in your context, quote its Hard rules section verbatim; otherwise reply NONE'`. Also run /context in an interactive session to see whether found-issues:rules is loaded."
+  },
+  {
+    "id": "prompt-18",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "session-start.sh:397-415 picks the criticals plus the newest max_inject non-criticals, with no filter on (PR:)/(commit:) tokens. In-flight entries can crowd actionable ones out of the 15-entry cap. The :462-467 paragraph repeats the annotation guidance, and as prompt-2 shows, it points at the unsafe bare command. The cost is a few KB per session and only when there are more than 15 open entries. Showing in-flight entries also has some value, since it keeps the agent from re-logging them.",
+    "fix": "Fill the slots with unannotated entries first, put annotated in-flight ones last, and count any overflow in the 'and N more' line. Fix the :464-467 text as described under prompt-2.",
+    "repro": ""
+  },
+  {
+    "id": "prompt-19",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "status.md:16-17 says empty output means there are no open entries. lib/list-status.sh:221-228 prints `0 open` for an existing clean ledger and prints nothing only when no ledger file is found. The agent therefore misreports a missing ledger (or a wrong cwd) as a clean repo, and status.md never mentions the `0 open` form.",
+    "fix": "Document `0 open` as the output for a clean ledger. Say that empty output means no ledger was found from this cwd (start one with /found-issues:log, or check the directory).",
+    "repro": ""
+  },
+  {
+    "id": "status-1",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "If the cache dir can't be written, the stamp is never created. list-status.sh:147 (`mkdir -p ... || true`) and :168 (`printf ... >\"$_autosync_ts\" 2>/dev/null || true`) swallow the failure, so _autosync_last stays 0 (:150) and the spawn at :169-178 runs on every render. The fast path never helps either, because segment-cache.sh:124 `[[ -f \"$ts\" ]] || return 1` sends each render to the full cold path. The code path is real. It is graded down from high because the trigger is uncommon: the Claude Code statusline subprocess normally has a writable $HOME/.cache, and Codex has no statusline surface. When it does fire, it multiplies the unlocked overlapping-sync race in status-4.",
+    "fix": "Spawn only if the stamp write succeeded: `if printf '%s\\n' \"$_autosync_now\" >\"$_autosync_ts\" 2>/dev/null; then (spawn); fi`. That also skips autosync when the cache dir is unwritable. Minimal and correct.",
+    "repro": ""
+  },
+  {
+    "id": "status-2",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "Only one global stamp exists. list-status.sh:146 and segment-cache.sh:123 both build `<cache>/segment-autosync-ts` with no ledger component, while the segment cache itself is keyed per ledger (segment-cache.sh:45-47). With the 3-5 parallel repos that are normal here, each 600 s window syncs only the repo whose render crosses the boundary first. SessionStart and PostToolUse still sync each repo, so counts don't go stale forever, but autosync's stated purpose (picking up external merges mid-session) is lost for every repo but one. Canonical item of the autosync cluster (status-2 / status-3 / ledger-9). status-3 is a different root cause in the same mechanism.",
+    "fix": "Key the stamp per ledger using the same sanitized name: `<cache>/segment-autosync/$name`. Change it in both list-status.sh:146 and segment-cache.sh:123 together, or the fast path will read a stamp the slow path never writes. Pairs with the status-1 fix.",
+    "repro": ""
+  },
+  {
+    "id": "status-3",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "status-2",
+    "reason": "cmd_status finds the ledger from `${cwd:-${CLAUDE_PROJECT_DIR:-$PWD}}` (list-status.sh:99), but the spawned `\"$0\" sync` (:177) inherits PWD, and sync resolves its ledger from PWD only (sync.sh:61 `fi_find_issues_file` with no argument; parse-entries.sh:23 defaults to $PWD). The installed templates usually hide this by cd-ing first (statusline-target.sh:201, statusline-install.sh:423), and the bash-target template also falls back to CLAUDE_PROJECT_DIR. The mismatch is still reachable in two cases: the canonical inline/append templates' no-jq branch (statusline-install.sh:425 and the append twin), which runs with no cd while CLAUDE_PROJECT_DIR is set, and a manual `status --cwd X` run from elsewhere. The global stamp is consumed either way. Different root cause from status-2, grouped with it per the brief.",
+    "fix": "Spawn as `( cd \"$search_root\" 2>/dev/null && FOUND_ISSUES_AUTO_ARCHIVE=off \"$0\" sync ... & )`, and the same for FOUND_ISSUES_AUTOSYNC_CMD. Use search_root, not `${file%/*}`: it mirrors cmd_status's own resolution exactly and keeps git/gh in the right repo.",
+    "repro": ""
+  },
+  {
+    "id": "status-4",
+    "verdict": "CONFIRMED",
+    "severity": "high",
+    "duplicate_of": "ledger-1",
+    "reason": "sync reads the whole ledger in a loop (sync.sh:100-361) that calls `gh pr view` with no timeout (:139, :156), then writes the result back with `mv \"$tmp\" \"$file\"` (:367). There is no lock and no re-check before the write. rg finds no flock or lock dir anywhere in lib/bin/hooks. Any mutating command that rewrites the ledger during the gh loop is silently overwritten. Autosync (list-status.sh:177) makes this recurrent and unattended. The comment at :133-136 only considers two syncs racing, not lost updates. Same root cause as ledger-1 / annot-6.",
+    "fix": "Add a per-ledger mkdir lock with a stale-pid check, shared by sync and every mutating command. Minimal interim step: capture the ledger content or mtime before the loop and abort the mv if it changed. Also wrap gh in a timeout.",
+    "repro": ""
+  },
+  {
+    "id": "status-5",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "For `console.log(\"x\");` the Node installer (statusline-target.sh:548) emits `\" + __fiSeg(typeof dir...:(typeof cwd...:undefined)));  // found-issues:seg`. The uninstall regex at statusline-uninstall.sh:106/119 needs `[^)]*\\)\\s*\\);`, but after the first two `)` comes a third `)` where it expects `;`, and :107/:120 can't match either. The Python plain form (statusline-target.sh:785) emits `+ _fi_seg(locals().get(\"dir\") or ...))`, which defeats :113/:114 at `locals()`. The block that defines __fiSeg/_fi_seg is still removed (:94-98), so the leftover call throws ReferenceError/NameError while :131 prints success. Tests only cover the template-literal and f-string forms (tests/cli-install-statusline-custom-target.bats:267, :336). Graded medium: the statusline goes blank after an explicit uninstall, but the session itself keeps working.",
+    "fix": "Call fi_strip_target_markers (the literal strip_lit surgery, statusline-core.sh:295) on the target after detecting language from the extension. Add the missing Python concat literal ` + _fi_seg(locals().get(\"dir\") or locals().get(\"cwd\"))` to it: its regex fallback at statusline-core.sh:375 fails on `locals()` the same way, so the v1.5.x migration path has this bug too. Add tests for plain console.log and print(\"x\").",
+    "repro": ""
+  },
+  {
+    "id": "status-6",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "The awk at statusline-uninstall.sh:51-53 (and the custom-target version at :94-98) sets skip at the start marker and clears it only on an exact end-marker line, so a missing or edited end marker drops everything to EOF. Neither uninstall path takes a backup. The install path calls cmd_uninstall_statusline with no backup on installed-broken (statusline-install.sh:122), while backups only happen at :139/:160. One correction to the finder: when only the end marker is missing and the block is current, fi_statusline_state reads to EOF, finds __FI_DIR and --cwd (statusline-core.sh:121-127), and returns installed-fixed, a no-op. So install truncates only for an old (pre---cwd) block. Explicit `uninstall-statusline` truncates in every case.",
+    "fix": "In both awk passes, count start and end markers first and refuse (non-zero exit with a message) when they are unbalanced. Call fi_save_statusline_backup before any in-place rewrite, including uninstall.",
+    "repro": ""
+  },
+  {
+    "id": "status-7",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "`mv \"$tmp_atomic\" \"$path\"` (statusline-target.sh:352, :574, :811) replaces a symlink with a regular file, so the `[[ -L \"$path\" ]]` warning checked afterwards (:360, :581, :818) can never fire. The canonical paths also mv over the link with no check at all (statusline-uninstall.sh:56, :128; statusline-install.sh:434). Meanwhile the append path uses `>>` (statusline-install.sh:450), which follows the link, so behaviour is inconsistent. A symlinked ~/.claude statusline into a dotfiles/agent-config repo is a realistic setup here.",
+    "fix": "Resolve the real path once at the top of each install/uninstall (portable readlink loop, since macOS readlink has no -f) and operate on it. Or test -L before the mv and warn/refuse there. Moving the existing warning above the mv is the minimum.",
+    "repro": ""
+  },
+  {
+    "id": "status-8",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "--dry-run and --apply only set target_mode (statusline-install.sh:52-59), and target_mode is read only inside the --target branch (:74-77). Without --target, execution falls through to the canonical mutating logic (:97-195): the inline insert, the append, and the installed-broken uninstall-plus-reinstall. No test covers `install-statusline --dry-run` without --target (rg finds none).",
+    "fix": "Reject --dry-run, --apply and --language without --target, using exit 2 and a usage line. That is the smallest safe change. Honouring --dry-run in the canonical path can come later.",
+    "repro": ""
+  },
+  {
+    "id": "status-9",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "Pass is declared on `-n \"$probe_output\" && probe_has_error -eq 0` (statusline-install.sh:274) without checking that the found-issues segment appears in the output, so any host output counts as 'Segment rendered'. On the FAIL branch, sub-probe (a) at :285 greps for ' \\| ' and misreports a clean ledger as 'binary resolution / cwd'. Downgraded to low: it's a doctor diagnostic, not a hot path, and the static splice-gap check (:297+) partly compensates.",
+    "fix": "Compute the expected segment with `found-issues status --format=segment --cwd \"$probe_cwd\"`. If it is non-empty, require it as a substring of probe_output. If it is empty, report 'ledger clean, nothing to render' instead of pass or fail.",
+    "repro": ""
+  },
+  {
+    "id": "status-10",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "statusline-install.sh:213 takes awk `$NF` and expands only `${HOME}` and a leading `~`, so quotes and an unbraced `$HOME` survive, and paths containing spaces split. `-f` then fails and :223-229 silently probes $FI_STATUSLINE_FILE instead of the configured script.",
+    "fix": "Strip surrounding quotes, expand both `$HOME` and `${HOME}`, and when the configured path is set but isn't a file, print a warning naming it rather than switching targets silently.",
+    "repro": ""
+  },
+  {
+    "id": "status-11",
+    "verdict": "CONFIRMED",
+    "severity": "medium",
+    "duplicate_of": "",
+    "reason": "fi_find_bash_splice_point prints every matching line number (statusline-target.sh:124 for LINE1=, :127 for echo), and the awk splices every line in splice_set (:296-314). Two consecutive LINE1 assignments both get `${__FI_SEG}`, so the segment renders twice. With no LINE1, every echo is spliced. For `echo x >&2` the unquoted `${__FI_SEG}` lands in the redirect word (an 'ambiguous redirect' once the segment holds spaces), and for `echo \"$x\" | jq -r '.a'` it is appended to jq's filter. The canonical installer, by contrast, uses only the last LINE1.",
+    "fix": "Splice only the last LINE1 assignment, or the last echo/printf when there is no LINE1. Skip candidates containing a redirect or pipe. If several candidates remain, exit 16 (the unused multiple_splices code) instead of guessing.",
+    "repro": ""
+  },
+  {
+    "id": "status-12",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "The append install is chosen whenever there are fewer than 2 LINE1 assignments (statusline-install.sh:191-194). cmd_install_statusline_append (:446-492) appends after a trailing newline check and never scans for a top-level exit/exec, so a block placed after `exit 0` never runs while install reports success. status-9's probe then shows a false pass.",
+    "fix": "Before appending, look for a top-level `exit`/`exec` line (unindented) after the last output statement and insert the block above it, or refuse with a message.",
+    "repro": ""
+  },
+  {
+    "id": "status-13",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "fi_count_in_pr (parse-entries.sh:375-376) and fi_count_residual (:412) grep the whole entry line for `(PR: o/r#N)`. fi_parse_entry, and therefore sync, only honours the trailing annotation run (fi_annotation_tail :60-69; rationale at :192-197). A PR mentioned mid-line is counted 'in PR' even though sync will never close the entry. The demoted grep in fi_count_stale (~:460) has the same whole-line looseness for `(PR-closed:|commit-stale:`.",
+    "fix": "Count in_pr, residual and demoted from the annotation tail. In awk: strip trailing recognized `(key: ...)` groups into a tail string and match against that. Ideally this lands in the single-pass counter proposed in status-14.",
+    "repro": ""
+  },
+  {
+    "id": "status-14",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "total_open is computed on every call (list-status.sh:116) but used only in the json branch (:184-185). critical, in_pr, residual and stale each re-run fi_entries plus grep pipelines (:115-123), and fi_count_stale forks date and runs a second fi_entries pass. fi_find_issues_file forks `$(cd && pwd)` (parse-entries.sh:25) plus `$(dirname)` per directory level (:36). The segment cache absorbs most warm renders on bash 4.2 and later.",
+    "fix": "Guard total_open behind `[[ $format == json ]]`. Add one awk pass that prints all counts, with the cutoff computed once. Replace `$(dirname \"$dir\")` with `${dir%/*}` and a `/` guard, as the fast path already does (segment-cache.sh:113-114).",
+    "repro": ""
+  },
+  {
+    "id": "status-15",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "Both bin/found-issues:51 and fi_segment_cache_key (segment-cache.sh:42) require fi_segment_clock_ok, i.e. bash 4.2 or later (:35-37), so under macOS /bin/bash 3.2 every render takes the full cold path plus the autosync mkdir, date and stat (list-status.sh:147-158). This is a documented design limit (segment-cache.sh:23), not a correctness bug. It is a real cost on a stated target platform whenever the statusline resolves to /bin/bash.",
+    "fix": "For bash below 4.2, get now and today from one `date +%s:%Y-%m-%d` fork, then use the same content-checked cache compare. One fork replaces about 35.",
+    "repro": ""
+  },
+  {
+    "id": "status-16",
+    "verdict": "PLAUSIBLE",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "fi_capture_mode (statusline-core.sh:38-40) tries BSD `stat -f '%Lp'` first. Under GNU stat (Linux and Git Bash), `-f` means filesystem mode, where %L is not a valid directive. The repo already documents the same trap for `stat -f %m` succeeding with garbage (list-status.sh:152-155, detect-mode.sh:35-39). If the call exits 0 with garbage, `chmod \"$mode\"` fails. The installers then fall back to `chmod +x`, giving 0700/0711 instead of the original mode, and the custom-target uninstall (statusline-uninstall.sh:129, `|| true` with no fallback) leaves the file at mktemp's 0600 with no execute bit. Existing tests only assert -x (tests/cli-statusline.bats:273, :289), which the fallback satisfies.",
+    "fix": "Try `stat -c '%a'` first, validate `^[0-7]{3,4}$`, then try BSD with the same validation, then fall back to 755.",
+    "repro": "On Linux: `touch f; chmod 644 f; stat -f '%Lp' f; echo rc=$?` (expect garbage such as `?p` with rc=0). Then install and uninstall --target on a 0755 .sh statusline and run `stat -c %a` on it after each step."
+  },
+  {
+    "id": "status-17",
+    "verdict": "CONFIRMED",
+    "severity": "low",
+    "duplicate_of": "",
+    "reason": "bin/found-issues:29 sets `set -euo pipefail`. A bare `--target` dereferences an unset `$2` at statusline-install.sh:41 and statusline-uninstall.sh:24, which aborts with 'unbound variable' and no usage text. `--target --apply` takes '--apply' as the path and fails with 'does not exist' (exit 12).",
+    "fix": "In both parsers: `[[ $# -ge 2 && $2 != --* ]] || { fi_err '--target requires a path'; return 2; }`.",
+    "repro": ""
+  }
+]
