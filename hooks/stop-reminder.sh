@@ -18,6 +18,56 @@ if [[ "${FOUND_ISSUES_STOP_REMINDER:-on}" == "off" ]]; then
   exit 0
 fi
 
+# === Codex (FOUND_ISSUES_HARNESS=codex, set by install-codex-hooks) ===
+#
+# Codex 0.159's Stop payload (stop.command.input schema in the binary) hands
+# us the final reply as `last_assistant_message`, so the marker check needs no
+# transcript parsing — the reason Codex was left out until 2026-10-03, when an
+# operator noticed Codex sessions never logged anything. Same discipline as
+# Claude: at most one block per session, only on a turn that used a tool
+# (Codex tools all run through one `exec` custom tool, so "edited" cannot be
+# told from "read"; a tool call is the closest signal), and the block is the
+# JSON {"decision":"block","reason":...} from stop.command.output. A rollout
+# we cannot read counts as a tool-using turn: the nudge is the only thing on
+# Codex that asks the model to log at all.
+fi_codex_stop() {
+  command -v jq >/dev/null 2>&1 || exit 0
+  local input fields active msg tpath sid
+  input="$(cat)"
+  # \x1f, not a tab: tab is IFS whitespace, so an empty session_id would
+  # collapse and shift the transcript path into $sid.
+  fields="$(printf '%s' "$input" | jq -r '[(.stop_hook_active // false | tostring), (.session_id // ""), (.transcript_path // "")] | join("\u001f")' 2>/dev/null)" || exit 0
+  IFS=$'\x1f' read -r active sid tpath <<<"$fields"
+  [[ "$active" == "true" ]] && exit 0
+  msg="$(printf '%s' "$input" | jq -r '.last_assistant_message // ""' 2>/dev/null || true)"
+  [[ "$msg" == *'<!-- found-issues-checked:'* ]] && exit 0
+  case "$sid" in *[!A-Za-z0-9._-]*) sid="" ;; esac
+  local state_dir="$HOME/.claude/found-issues/reminded"
+  if [[ "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" != "on" && -n "$sid" && -f "$state_dir/codex-$sid" ]]; then
+    exit 0
+  fi
+  if [[ -n "$tpath" && -r "$tpath" ]]; then
+    # Records after the turn's last task_started; any tool call = substantive.
+    if ! LC_ALL=C awk '
+        /"type":"task_started"/ { used = 0; next }
+        /"type":"(custom_tool_call|function_call|local_shell_call)"/ { used = 1 }
+        END { exit(used ? 0 : 1) }
+      ' "$tpath" 2>/dev/null; then
+      exit 0
+    fi
+  fi
+  if [[ -n "$sid" ]] && mkdir -p "$state_dir" 2>/dev/null; then
+    : > "$state_dir/codex-$sid" 2>/dev/null || true
+    find "$state_dir" -type f -mtime +7 -delete 2>/dev/null || true
+  fi
+  jq -cn --arg r "found-issues: before you finish, check whether you noticed any defect OUTSIDE this task (a bug, a broken contract, dead code, misleading docs) while working. Log each one with \$fi-log (found-issues log '<path:line> — <symptom>'), then end your reply with exactly one of: <!-- found-issues-checked: none-noticed --> (nothing noticed), <!-- found-issues-checked: logged --> (you logged something), <!-- found-issues-checked: deferred --> (noticed, logging later). Asked once per session." \
+    '{decision: "block", reason: $r}'
+  exit 0
+}
+if [[ "${FOUND_ISSUES_HARNESS:-}" == "codex" ]]; then
+  fi_codex_stop
+fi
+
 # Skip when there is no interactive operator to read the block message.
 #
 # Claude Code sets CLAUDE_CODE_ENTRYPOINT for every hook invocation:

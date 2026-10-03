@@ -206,6 +206,31 @@ EOF
   fi
 fi
 
+# Codex wiring notice — Claude sessions only, at most once per day. The
+# operator who runs both harnesses only ever looks at doctor from Claude, and
+# a Codex install with no hooks is otherwise invisible (observed 2026-10-03:
+# months of Codex sessions that never logged anything). Builtins until a
+# found-issues cache dir exists under $CODEX_HOME, then one grep.
+if [[ "$harness" == "claude" ]]; then
+  __fi_codex_home="${FOUND_ISSUES_CODEX_HOME:-$HOME/.codex}"
+  __fi_codex_has=0
+  for __fi_d in "$__fi_codex_home"/plugins/cache/*/found-issues; do
+    [[ -d "$__fi_d" ]] && { __fi_codex_has=1; break; }
+  done
+  if (( __fi_codex_has )) \
+     && ! grep -Fq 'env FOUND_ISSUES_HARNESS=codex ' "$__fi_codex_home/hooks.json" 2>/dev/null; then
+    mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
+    __fi_codex_marker="$ONBOARD_DIR/.codex-unwired-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
+    if [[ ! -f "$__fi_codex_marker" ]]; then
+      cat <<'EOF'
+[found-issues: the plugin is installed in Codex but none of its hooks are wired, so Codex sessions get no rules, ledger context or log nudge. Tell the user once: "found-issues is inactive in Codex — run `found-issues install-codex-hooks`, then `/hooks` in Codex to trust them".]
+
+EOF
+      touch "$__fi_codex_marker" 2>/dev/null || true
+    fi
+  fi
+fi
+
 # Locate the CLI binary.
 __fi_colocated_bin="${FI_BIN_DIR:-$__fi_hook_dir/../bin}/found-issues"
 FI_BIN="${FOUND_ISSUES_BIN:-found-issues}"

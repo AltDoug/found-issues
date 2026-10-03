@@ -4,6 +4,39 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0] - 2026-10-03
+
+found-issues was installed in Codex on the author's own machine for months
+with no hook ever firing: `~/.codex/hooks.json` held none of its entries,
+nothing said so, and Codex sessions never logged an issue. This release
+makes Codex a first-class harness and makes the gap impossible to miss.
+
+### Added
+
+- **Stop nudge on Codex.** `install-codex-hooks` now registers
+  `stop-reminder.sh` for Codex's Stop event. Codex's Stop payload carries
+  the final reply as `last_assistant_message` (the `stop.command.input`
+  schema in Codex 0.159), so the marker check needs no transcript parsing —
+  the reason it was left out before. Same discipline as Claude: at most one
+  block per session, only on a turn that made a tool call, answered with
+  `{"decision":"block","reason":...}`.
+- **`doctor` has a Codex section**: found-issues installed in Codex but its
+  hooks never wired, wired at stale paths after a plugin update, or wired
+  but not yet trusted through Codex's `/hooks` review (Codex silently skips
+  untrusted entries).
+- **Claude sessions say once a day when the Codex install has no hooks**,
+  since doctor is usually run from Claude.
+
+### Fixed
+
+- **The format enforcer reads Codex edits.** Codex edits files through
+  `apply_patch` (patch envelope in `tool_input.command`, no `file_path`), so
+  a `Write|Edit|MultiEdit` matcher never saw a Codex ledger edit. The Codex
+  matcher now includes `apply_patch`, and the enforcer validates the added
+  lines of every hunk that targets the ledger.
+- `install-codex-hooks` ends with the `/hooks` trust step instead of the
+  outdated "no Stop hook" note; setup, README and AGENTS.md say the same.
+
 ## [2.9.3] - 2026-10-03
 
 Fix batch 2 of the 2026-10-03 audit: guard bypasses.

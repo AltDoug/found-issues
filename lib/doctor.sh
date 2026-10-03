@@ -265,6 +265,29 @@ cmd_doctor() {
   fi
   printf '\n'
 
+  # --- Codex (2.10.0) — see fi_codex_wiring_state in lib/codex-hooks.sh ---
+  local codex_home codex_state
+  codex_home="$(fi_codex_home_default)"
+  codex_state="$(fi_codex_wiring_state "$codex_home")"
+  if [[ "$codex_state" != "absent" ]]; then
+    printf '== Codex ==\n'
+    case "$codex_state" in
+      unwired)
+        printf '%s found-issues is installed in Codex (%s) but its hooks were never wired —\n' "$section_fail" "$codex_home"
+        printf '   no rules, ledger context, guards or Stop nudge reach Codex sessions.\n'
+        printf '   Fix: found-issues install-codex-hooks, then run /hooks once in an interactive Codex session.\n' ;;
+      stale)
+        printf '%s Codex hook entries point at scripts that no longer exist (plugin updated?).\n' "$section_fail"
+        printf '   Fix: found-issues install-codex-hooks (self-heals the paths), then /hooks in Codex.\n' ;;
+      untrusted)
+        printf '%s Codex hooks are wired but not all are trusted — Codex skips untrusted entries.\n' "$section_warn"
+        printf '   Fix: open an interactive Codex session and run /hooks to review and trust them.\n' ;;
+      ok)
+        printf '%s Codex hooks: wired and trusted (%s/hooks.json)\n' "$section_pass" "$codex_home" ;;
+    esac
+    printf '\n'
+  fi
+
   # --- Hook opt-outs ---
   printf '== Hook opt-outs ==\n'
   local any_off=0

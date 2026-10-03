@@ -147,8 +147,8 @@ install time. On Codex, that path is dead — Codex CLI 0.144.5 removed
 the `plugin_hooks` feature, so a plugin's `hooks.json` pointer never
 loads (`.codex-plugin/plugin.json`'s `"hooks"` key is inert there). The
 same scripts still work on Codex; they just have to be registered a
-different way: `found-issues install-codex-hooks` copies the same four
-non-Stop hook entries into Codex's own stable user-level
+different way: `found-issues install-codex-hooks` copies the same five
+hook entries (Stop included since 2.10.0) into Codex's own stable user-level
 `$CODEX_HOME/hooks.json`, each command prefixed with `env
 FOUND_ISSUES_HARNESS=codex` so the script self-identifies without
 needing `PLUGIN_DATA` (which a hook run outside the plugin manifest

@@ -44,9 +44,11 @@
 # prior `codex plugin update` (the cache path embeds a version segment
 # that changes on update).
 #
-# No Stop entry: Stop-hook marker discipline needs the transcript rollout
-# format parsed, which Codex support doesn't have yet (deferred — see
-# docs/found-issues.md).
+# Stop entry (2.10.0): Codex's Stop payload carries last_assistant_message,
+# so the marker check needs no rollout parsing — see the Codex branch at the
+# top of hooks/stop-reminder.sh. The format enforcer also matches apply_patch:
+# Codex edits files through it (tool_input.command holds the patch envelope,
+# no file_path), so a Write|Edit-only matcher never saw a Codex ledger edit.
 
 readonly FI_CODEX_HOOKS_SENTINEL='env FOUND_ISSUES_HARNESS=codex '
 
@@ -94,33 +96,36 @@ fi_shell_quote() {
   printf "'%s'" "${s//\'/\'\\\'\'}"
 }
 
-# Build the JSON object of found-issues' own hook entries (3 events, 4
-# command entries — no Stop), commands resolved to the current install
+# Build the JSON object of found-issues' own hook entries (4 events, 5
+# command entries), commands resolved to the current install
 # root. Each script path is single-quoted (fi_shell_quote) so the
 # generated command string is safe if the install root ever contains a
 # space or other shell-special character.
 fi_codex_hooks_new_entries_json() {
   local hooks_dir
   hooks_dir="$(fi_codex_hooks_dir)"
-  local q_session q_fmt q_preb q_postb
+  local q_session q_fmt q_preb q_postb q_stop
   q_session="$(fi_shell_quote "$hooks_dir/session-start.sh")"
   q_fmt="$(fi_shell_quote "$hooks_dir/format-enforcer.sh")"
   q_preb="$(fi_shell_quote "$hooks_dir/pre-branch-delete.sh")"
   q_postb="$(fi_shell_quote "$hooks_dir/post-bash-dispatch.sh")"
+  q_stop="$(fi_shell_quote "$hooks_dir/stop-reminder.sh")"
   jq -n \
     --arg session_cmd "env FOUND_ISSUES_HARNESS=codex $q_session" \
     --arg fmt_cmd "env FOUND_ISSUES_HARNESS=codex $q_fmt" \
     --arg preb_cmd "env FOUND_ISSUES_HARNESS=codex $q_preb" \
     --arg postb_cmd "env FOUND_ISSUES_HARNESS=codex $q_postb" \
+    --arg stop_cmd "env FOUND_ISSUES_HARNESS=codex $q_stop" \
     '{
       SessionStart: [ { hooks: [ { type: "command", command: $session_cmd } ] } ],
       PreToolUse: [
-        { matcher: "Write|Edit|MultiEdit", hooks: [ { type: "command", command: $fmt_cmd } ] },
+        { matcher: "Write|Edit|MultiEdit|apply_patch", hooks: [ { type: "command", command: $fmt_cmd } ] },
         { matcher: "Bash", hooks: [ { type: "command", command: $preb_cmd } ] }
       ],
       PostToolUse: [
         { matcher: "Bash", hooks: [ { type: "command", command: $postb_cmd } ] }
-      ]
+      ],
+      Stop: [ { hooks: [ { type: "command", command: $stop_cmd } ] } ]
     }'
 }
 
@@ -208,6 +213,7 @@ cmd_install_codex_hooks() {
     | .hooks.SessionStart = ((.hooks.SessionStart // []) + (\$new.SessionStart // []))
     | .hooks.PreToolUse   = ((.hooks.PreToolUse   // []) + (\$new.PreToolUse   // []))
     | .hooks.PostToolUse  = ((.hooks.PostToolUse  // []) + (\$new.PostToolUse  // []))
+    | .hooks.Stop         = ((.hooks.Stop         // []) + (\$new.Stop         // []))
   " "$hooks_file")"
 
   # Belt-and-braces: never write unless $merged is confirmed non-empty,
@@ -228,14 +234,15 @@ cmd_install_codex_hooks() {
   cat <<EOF
 install-codex-hooks: wrote $hooks_file
 
-  SessionStart                       -> $hooks_dir/session-start.sh
-  PreToolUse  (Write|Edit|MultiEdit) -> $hooks_dir/format-enforcer.sh
-  PreToolUse  (Bash)                 -> $hooks_dir/pre-branch-delete.sh
-  PostToolUse (Bash)                 -> $hooks_dir/post-bash-dispatch.sh
+  SessionStart                                   -> $hooks_dir/session-start.sh
+  PreToolUse  (Write|Edit|MultiEdit|apply_patch) -> $hooks_dir/format-enforcer.sh
+  PreToolUse  (Bash)                             -> $hooks_dir/pre-branch-delete.sh
+  PostToolUse (Bash)                             -> $hooks_dir/post-bash-dispatch.sh
+  Stop                                           -> $hooks_dir/stop-reminder.sh
 
-No Stop hook installed — marker-discipline enforcement needs Codex's
-transcript rollout format parsed, which isn't wired up yet (deferred,
-see docs/found-issues.md).
+NEXT: Codex skips new hook entries until you trust them. Open an
+interactive Codex session and run /hooks once to review and trust them.
+\`found-issues doctor\` shows whether they are trusted.
 
 Re-run \`found-issues install-codex-hooks\` after every \`codex plugin
 update\` — the plugin cache path changes on update, and stale entries
@@ -283,3 +290,59 @@ cmd_uninstall_codex_hooks() {
     "$FI_CODEX_HOOKS_SENTINEL" "$hooks_file"
 }
 
+
+# === Codex wiring check (2.10.0) ===
+#
+# found-issues can sit installed in Codex for months with no hook ever firing:
+# Codex dropped plugin-shipped hooks in 0.144.5, `install-codex-hooks` is a
+# manual step, and Codex silently skips hook entries nobody has trusted via
+# its /hooks review. Observed 2026-10-03 on the author's own machine (plugin
+# 2.8.0 enabled, zero entries in ~/.codex/hooks.json). doctor and the Claude
+# SessionStart notice both read this.
+#
+# fi_codex_wiring_state [<codex_home>] prints one word:
+#   absent    found-issues is not installed in Codex — nothing to check
+#   unwired   installed, but hooks.json has none of our entries
+#   stale     our entries point at scripts that no longer exist (plugin update)
+#   untrusted wired, but config.toml has no [hooks.state] record for some entry
+#   ok        wired and every entry has a trust record
+# Trust records are checked for presence only: the hash is Codex's to compute.
+fi_codex_found_issues_installed() {
+  local home="$1" d
+  for d in "$home"/plugins/cache/*/found-issues; do
+    [[ -d "$d" ]] && return 0
+  done
+  [[ -f "$home/config.toml" ]] && grep -Fq '[plugins."found-issues@' "$home/config.toml" 2>/dev/null
+}
+
+fi_codex_wiring_state() {
+  local home="${1:-$(fi_codex_home_default)}"
+  local hooks_file="$home/hooks.json"
+  if ! fi_codex_found_issues_installed "$home"; then
+    printf 'absent'; return 0
+  fi
+  if [[ ! -f "$hooks_file" ]] || ! grep -Fq "$FI_CODEX_HOOKS_SENTINEL" "$hooks_file" 2>/dev/null; then
+    printf 'unwired'; return 0
+  fi
+  command -v jq >/dev/null 2>&1 || { printf 'ok'; return 0; }
+  local abs_file rows row key script missing=0 stale=0
+  abs_file="$(cd "$(dirname "$hooks_file")" && pwd)/$(basename "$hooks_file")"
+  # One row per entry of ours: <trust key>\t<script path>
+  rows="$(jq -r --arg f "$abs_file" --arg s "$FI_CODEX_HOOKS_SENTINEL" '
+    (.hooks // {}) | to_entries[] | .key as $ev
+    | ($ev | gsub("(?<a>[a-z])(?<b>[A-Z])"; "\(.a)_\(.b)") | ascii_downcase) as $snake
+    | (.value // []) | to_entries[] | .key as $g
+    | (.value.hooks // []) | to_entries[]
+    | select((.value.command // "") | startswith($s))
+    | "\($f):\($snake):\($g):\(.key)\t\(.value.command | capture("'"'"'(?<p>.*)'"'"'$").p // "")"
+  ' "$hooks_file" 2>/dev/null || true)"
+  while IFS=$'\t' read -r key script; do
+    [[ -z "$key" ]] && continue
+    [[ -n "$script" && ! -f "$script" ]] && stale=1
+    grep -Fq "[hooks.state.\"$key\"]" "$home/config.toml" 2>/dev/null || missing=$((missing + 1))
+  done <<<"$rows"
+  if (( stale )); then printf 'stale'
+  elif (( missing > 0 )); then printf 'untrusted'
+  else printf 'ok'
+  fi
+}

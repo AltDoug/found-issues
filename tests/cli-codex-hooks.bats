@@ -11,7 +11,7 @@ load 'helpers'
 setup() { fi_setup_tmp; }
 teardown() { fi_teardown_tmp; }
 
-@test "install-codex-hooks: creates hooks.json with our 4 entries across 3 events" {
+@test "install-codex-hooks: creates hooks.json with our 5 entries across 4 events" {
   CODEX_HOME="$TMP/codex-home"
   fi_run install-codex-hooks --codex-home "$CODEX_HOME"
   [ "$status" -eq 0 ]
@@ -20,9 +20,9 @@ teardown() { fi_teardown_tmp; }
   jq -e '.hooks.SessionStart | length == 1' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PreToolUse | length == 2' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PostToolUse | length == 1' "$CODEX_HOME/hooks.json"
-  jq -e '.hooks.Stop == null' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.Stop | length == 1' "$CODEX_HOME/hooks.json"
 
-  jq -e '.hooks.PreToolUse[0].matcher == "Write|Edit|MultiEdit"' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PreToolUse[0].matcher == "Write|Edit|MultiEdit|apply_patch"' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PreToolUse[1].matcher == "Bash"' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PostToolUse[0].matcher == "Bash"' "$CODEX_HOME/hooks.json"
 
@@ -74,7 +74,7 @@ teardown() { fi_teardown_tmp; }
   done
 }
 
-@test "install-codex-hooks: empty hooks.json is seeded then installed (4 entries, exit 0)" {
+@test "install-codex-hooks: empty hooks.json is seeded then installed (5 entries, exit 0)" {
   CODEX_HOME="$TMP/codex-home"
   mkdir -p "$CODEX_HOME"
   : > "$CODEX_HOME/hooks.json"
@@ -85,7 +85,7 @@ teardown() { fi_teardown_tmp; }
   jq -e '.hooks.PostToolUse | length == 1' "$CODEX_HOME/hooks.json"
 }
 
-@test "install-codex-hooks: whitespace-only hooks.json is seeded then installed (4 entries, exit 0)" {
+@test "install-codex-hooks: whitespace-only hooks.json is seeded then installed (5 entries, exit 0)" {
   CODEX_HOME="$TMP/codex-home"
   mkdir -p "$CODEX_HOME"
   printf '   \n  \t \n' > "$CODEX_HOME/hooks.json"
