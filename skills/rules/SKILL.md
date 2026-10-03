@@ -1,5 +1,5 @@
 ---
-description: Rules for how AI agents maintain docs/found-issues.md — logging, annotation after PR/commit, sync, branch-deletion guard, dead code. Auto-loaded every session by the found-issues plugin.
+description: Rules for how AI agents maintain docs/found-issues.md — logging, annotation after PR/commit, sync, branch-deletion guard, dead code. Injected into every session by the found-issues SessionStart hook.
 disable-model-invocation: true
 ---
 
@@ -19,11 +19,11 @@ disable-model-invocation: true
 
 ## Annotation after PR / commit
 
-A hook auto-runs annotation after `gh pr create` and `git commit`: entries whose cited line the diff modifies are annotated automatically and reported in one line. Your job is ONLY the judgment cases the hook surfaces — a candidate list means the CLI could not decide. Compare each candidate's symptom against what the PR/commit actually changes, then run the printed `found-issues annotate-pr <N> --pick <loc>,...` (`--all` only when it genuinely addresses every candidate). Never annotate entries the PR does not fix — they false-flip to `[fixed]` on merge. Do not defer; unannotated entries can never auto-close. No hook (web-UI PR)? `/found-issues:annotate-pr <N> --pick <loc>`; commits: `annotate-commit <sha> --pick <loc>`. Without `--pick` it only suggests (never closes).
+After `gh pr create` / `git commit` a hook writes a NON-closing suggestion (`(PR-auto: …)` / `(commit-auto: …)`) on entries whose cited line the diff touched, and lists candidates it could not decide. Compare each symptom with what the change did, then run the printed `found-issues annotate-pr <N> --pick <loc>,...` for exactly the entries it fixes — only `--pick` (or `--all`, when every candidate is fixed) writes the closing token. Never pick an entry it does not fix: it closes on merge, irreversibly. Unconfirmed entries never auto-close. No hook (web-UI PR)? Same `--pick` command; commits: `annotate-commit <sha> --pick <loc>`.
 
 ## Sync
 
-On `/found-issues:sync`, for each unannotated `[open]` entry: read the code at `path:line`; decide still-present / fixed / unclear; flip only fixed → `[fixed] (verified: ai) (fixed: <today>)`. Be conservative — a false flip is worse than a stale open. Only git-confirmed removals auto-close; absence alone never does. Judging still-present code is YOUR pass.
+On `/found-issues:sync`, for each unannotated `[open]` entry: read the code at `path:line`; decide still-present / fixed / unclear; close only fixed ones, with `found-issues resolve "<fragment>" --verified ai` — never by editing. Be conservative — a false flip is worse than a stale open. Only git-confirmed removals auto-close; absence alone never does. Judging still-present code is YOUR pass.
 
 ## Branch deletion
 
@@ -31,7 +31,7 @@ Before deleting any branch, consolidate its `[open]` entries missing from main: 
 
 ## Stop-hook marker (if enabled)
 
-Every substantive turn includes exactly one HTML comment:
+The first tool-using turn of a session ends with exactly one HTML comment:
 `<!-- found-issues-checked: none-noticed -->` | `logged` | `deferred` (rare; say why).
 
 ## Dead code
@@ -41,7 +41,7 @@ Zero importers → do not edit, do not delete. Log with prefix `dead code:`, the
 ## Format (full spec: docs/format-spec.md)
 
 `- [open] [!] YYYY-MM-DD path/file.ext:42 — symptom (suggested: fix)`
-Statuses `[open]`/`[deferred]`/`[fixed]`; `[!]` = critical; ` — ` em-dash with spaces; `(PR: org/repo#N)` / `(commit: <sha>)` added by annotation; `(fixed: YYYY-MM-DD)` added by sync.
+Statuses `[open]`/`[deferred]`/`[fixed]`; `[!]` = critical; ` — ` em-dash with spaces; `(PR: org/repo#N)` / `(commit: <sha>)` added by `--pick` (closing); `(PR-auto:)` / `(commit-auto:)` = unconfirmed suggestion; `(verified: ai)`, `(fixed: YYYY-MM-DD)` added on close.
 
 ## Hard rules (no single-turn override)
 

@@ -63,8 +63,9 @@ Pass the result through to the user.
 
 ## When to invoke
 
-The post-bash dispatcher hook normally handles this automatically
-(`--hook-auto`: line-matched entries annotate silently; exit 3 surfaces
+The post-bash dispatcher hook normally suggests these annotations automatically
+(`--hook-auto`: line-matched entries get a NON-closing `-auto` suggestion
+and the hook prints the `--pick` command to confirm them; exit 3 surfaces
 candidates). This command is the manual fallback for web-UI PRs or when
 hooks are disabled.
 

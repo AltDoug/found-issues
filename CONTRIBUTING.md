@@ -55,7 +55,7 @@ commands/          Slash command markdown files
 docs/              User-facing documentation
 hooks/             Hook scripts + hooks.json registration
 lib/               Shared bash libraries (sourced by CLI + hooks)
-skills/            Auto-loading skills (rules)
+skills/            Agent rules (SessionStart injects the body)
 tests/             bats-core test suite
 ```
 

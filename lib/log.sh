@@ -37,6 +37,15 @@ cmd_log() {
   # Reassemble full input from remaining args
   local input="$*"
 
+  # `--critical` is only honored as the first argument. Anywhere else it was
+  # folded into the location (`src/a.sh:1 --critical`), logged as a spaced
+  # pseudo-path with no [!] and no error (audit prompt-14).
+  case " ${input%% — *} " in
+    *" --critical "*)
+      fi_err "found-issues log: --critical must come first: found-issues log --critical '<location> — <symptom>'"
+      return 2 ;;
+  esac
+
   # Split on the first ' — ' (em-dash with spaces)
   local location symptom
   if [[ "$input" != *" — "* ]]; then

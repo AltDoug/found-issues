@@ -188,7 +188,7 @@ Flow:
      > <paste contents of /tmp/fi-dry-run.diff>
      > ```
 
-     Then `AskUserQuestion`: **"Apply this edit?"** → yes / no.
+     Then ask with a yes/no picker: **"Apply this edit?"** → yes / no.
 
      On yes:
      ```bash
@@ -325,8 +325,8 @@ Show the user the current state:
 found-issues status --format=plain
 ```
 
-Tell them the rules file is auto-loaded into context (no further action
-needed) and that the system is ready.
+Tell them the rules are injected into context at every session start (no
+further action needed) and that the system is ready.
 
 If they want to read more, point them at the project README:
 <https://github.com/AltDoug/found-issues>.

@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**5 lifecycle hooks · 13 slash commands · 863 tests on Linux/macOS · zero manual bookkeeping**
+**5 lifecycle hooks · 13 slash commands · 869 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -98,9 +98,9 @@ The closure loop runs **on its own**:
 
 | When | What happens |
 |---|---|
-| Claude notices an out-of-scope issue | Logs it via `/found-issues:log` per the auto-loaded [rules](skills/rules/SKILL.md) |
-| Claude opens a PR addressing an entry | Hook auto-annotates line-matched entries silently; ambiguous cases surface as a candidate list for `/found-issues:annotate-pr <N> --pick` |
-| Claude commits a fix directly to main | Hook auto-annotates line-matched entries silently; ambiguous cases surface for `/found-issues:annotate-commit` |
+| Claude notices an out-of-scope issue | Logs it via `/found-issues:log` per the [rules](skills/rules/SKILL.md) injected at session start |
+| Claude opens a PR addressing an entry | Hook writes a non-closing suggestion on line-matched entries and prints the `/found-issues:annotate-pr <N> --pick` command that confirms the ones the PR fixes |
+| Claude commits a fix directly to main | Same, with `/found-issues:annotate-commit <sha> --pick` |
 | PR merges or commit lands on main | Background sync flips `[open]` → `[fixed]` automatically — instantly when merged from inside the session, within ~10min for external merges, always at the next `SessionStart` as a fallback |
 | Referenced file/line is deleted | Tombstone detection auto-closes the entry |
 | Branch with un-promoted entries about to be deleted | `pre-branch-delete` hook blocks until `/found-issues:promote` runs |

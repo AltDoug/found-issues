@@ -35,7 +35,7 @@ The plugin handles:
 - File copying into the user's plugin cache
 - Hook registration into their settings
 - CLI binary placement onto PATH
-- Auto-loading the rules skill into context every session
+- Injecting the agent rules into context every session (SessionStart hook)
 
 **Do NOT**:
 
@@ -45,7 +45,7 @@ The plugin handles:
 - Run `bash install.sh` (no such script exists — the marketplace install
   is the only path)
 - Add `@found-issues-rules.md` to the user's CLAUDE.md (the rules ship as
-  an auto-loaded skill via the plugin, no @-import needed)
+  plugin's SessionStart hook injects them every session, no @-import needed)
 
 ## After installation
 

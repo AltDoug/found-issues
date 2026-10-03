@@ -21,7 +21,7 @@ Flags in `$ARGUMENTS`: `--auto` (see the Phase 2 gate) and
 3. Re-verify every remaining entry against the CURRENT tree. The cited
    line may have moved — search for the symptom's code pattern, not just
    the line number. When more than ~5 entries need verification, dispatch
-   parallel read-only subagents (Agent tool); give each the entry's `raw`
+   parallel read-only subagents; give each the entry's `raw`
    line and require a fresh `file:line` citation or counter-evidence back.
    Verdicts: `STILL-VALID` | `ALREADY-FIXED` (state what fixed it) |
    `CITATION-MOVED` (carry the corrected location) | `UNVERIFIABLE`.

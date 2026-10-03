@@ -1,6 +1,6 @@
 ---
 name: fi-fix
-description: Work the open ledger as a batch: re-verify every [open] entry against the CURRENT code, triage into buckets, gate on approval, fix the approved ones on a dedicated branch with tests, and ship a precisely annotated PR. Use when asked to fix the found issues or burn down the ledger. Not for logging new issues ($fi-log) and not for closing a single entry an ordinary PR already fixed ($fi-annotate-pr covers that).
+description: "Work the open ledger as a batch: re-verify every [open] entry against the CURRENT code, triage into buckets, gate on approval, fix the approved ones on a dedicated branch with tests, and ship a precisely annotated PR. Use when asked to fix the found issues or burn down the ledger. Not for logging new issues ($fi-log) and not for closing a single entry an ordinary PR already fixed ($fi-annotate-pr covers that)."
 ---
 <!-- loc-override: generated 1:1 from commands/fix.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
@@ -20,7 +20,7 @@ Flags in `<the user-provided arguments>`: `--auto` (see the Phase 2 gate) and
 3. Re-verify every remaining entry against the CURRENT tree. The cited
    line may have moved — search for the symptom's code pattern, not just
    the line number. When more than ~5 entries need verification, dispatch
-   parallel read-only subagents (Agent tool); give each the entry's `raw`
+   parallel read-only subagents; give each the entry's `raw`
    line and require a fresh `file:line` citation or counter-evidence back.
    Verdicts: `STILL-VALID` | `ALREADY-FIXED` (state what fixed it) |
    `CITATION-MOVED` (carry the corrected location) | `UNVERIFIABLE`.

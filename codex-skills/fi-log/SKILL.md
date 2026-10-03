@@ -1,6 +1,6 @@
 ---
 name: fi-log
-description: Log an out-of-scope issue noticed mid-task to docs/found-issues.md as a dated [open] entry with path:line, symptom, and optional suggested fix. Use whenever a defect, smell, or dead code is noticed that the current task will NOT fix — logging beats dismissing it as pre-existing. Only for NEW observations: to change an existing entry's state use $fi-defer (park it), $fi-promote-deferred (revive it), or the annotate commands (link a fix). Never edit the ledger file by hand — this is the only supported way to add an entry.
+description: "Log an out-of-scope issue noticed mid-task to docs/found-issues.md as a dated [open] entry with path:line, symptom, and optional suggested fix. Use whenever a defect, smell, or dead code is noticed that the current task will NOT fix — logging beats dismissing it as pre-existing. Only for NEW observations: to change an existing entry's state use $fi-defer (park it), $fi-promote-deferred (revive it), or the annotate commands (link a fix). Never edit the ledger file by hand — this is the only supported way to add an entry."
 ---
 <!-- loc-override: generated 1:1 from commands/log.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
@@ -10,10 +10,13 @@ and date stamping — your job is just to pass the user's input through.
 
 ## What to do
 
-Run the CLI with the user's arguments:
+Run the CLI with the user's arguments, as ONE single-quoted argument (the
+symptom routinely contains parentheses and apostrophes, which break an
+unquoted shell line; escape an apostrophe as `'\''`). `--critical`, when
+wanted, goes first and outside the quotes:
 
 ```bash
-found-issues log <the user-provided arguments>
+found-issues log [--critical] '<path:line> — <symptom> (suggested: <fix>)'
 ```
 
 Then read the output and report the result to the user concisely:
@@ -25,8 +28,8 @@ Then read the output and report the result to the user concisely:
 ## When to use this command vs. proactive logging
 
 The user typically does NOT invoke `$fi-log` directly. You invoke it on their
-behalf when you observe an out-of-scope issue per the rules in
-`the auto-injected found-issues rules`. They run `$fi-log` only when they want to manually
+behalf when you observe an out-of-scope issue per the found-issues rules
+(injected at session start). They run `$fi-log` only when they want to manually
 log something they noticed.
 
 Either way, the command behaves identically — it just appends to the file.

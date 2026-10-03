@@ -1,6 +1,6 @@
 ---
 name: fi-status
-description: Print the current open / in-PR / critical / stale counts as one line. Read-only and safe anytime — use for a quick pulse or when debugging the statusline counter. For the full entry list read docs/found-issues.md directly; for an installation health check use $fi-doctor instead.
+description: "Print the current open / in-PR / critical / stale counts as one line. Read-only and safe anytime — use for a quick pulse or when debugging the statusline counter. For the full entry list read docs/found-issues.md directly; for an installation health check use $fi-doctor instead."
 ---
 <!-- loc-override: generated 1:1 from commands/status.md by scripts/gen-codex-skills.sh; length is owned by the source command file -->
 
@@ -12,8 +12,13 @@ Show the current state of the found-issues file in this repo.
 found-issues status --format=plain
 ```
 
-If the output is empty, the repo has no open entries. Tell the user:
-*"No open found-issues entries in this repo."*
+If the output is `0 open`, the ledger exists and has no open entries. Tell
+the user: *"No open found-issues entries in this repo."*
+
+If the output is EMPTY, no ledger was found from this directory — not the
+same thing. Say so: *"No found-issues ledger here (checked from <cwd>)."*
+Either the repo has never logged anything (the first `$fi-log`
+creates `docs/found-issues.md`) or the session is in the wrong directory.
 
 If non-empty, pass the output through verbatim. It will look like one of:
 

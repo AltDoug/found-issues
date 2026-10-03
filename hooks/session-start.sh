@@ -34,11 +34,14 @@ if [[ -f "$__fi_hook_dir/../lib/codex-rewrite.sh" ]]; then
   source "$__fi_hook_dir/../lib/codex-rewrite.sh"
 fi
 
-# Codex has no auto-loaded-skill mechanism: the rules ship here instead.
-# (On Claude Code the skills/rules skill injects them — emitting here too
-# would double-pay the tokens.) Fires unconditionally, before the
-# ledger-existence early-exit further down — it does not depend on a
-# ledger existing.
+# The rules ship here, for BOTH harnesses. Claude Code was assumed to load
+# skills/rules/SKILL.md on its own, but that skill carries
+# `disable-model-invocation: true`, which per the Claude Code skills docs keeps
+# a skill OUT of the model's context unless the user types its slash command —
+# the rules never reached Claude sessions (2026-10-03 audit, prompt-17,
+# confirmed live: no found-issues:rules in the session skill list). Fires
+# unconditionally, before the ledger-existence early-exit further down — it
+# does not depend on a ledger existing.
 #
 # Output shape differs by harness (Task 11b, resolves found-issues.md:37).
 # Claude Code injects plain SessionStart stdout as context (legacy
@@ -55,8 +58,12 @@ fi
 # JSON envelope via fi_emit_session_context. Net effect for Claude: byte-
 # identical output to before this restructure.
 codex_rules_block=""
-if [[ "$harness" == "codex" ]]; then
-  __fi_rules="${PLUGIN_ROOT:-$__fi_hook_dir/..}/skills/rules/SKILL.md"
+__fi_rules="${PLUGIN_ROOT:-$__fi_hook_dir/..}/skills/rules/SKILL.md"
+if [[ "$harness" == "claude" && -f "$__fi_rules" ]]; then
+  # Plain stdout is SessionStart context on Claude Code.
+  LC_ALL=C awk 'c >= 2 { print } /^---$/ { c++ }' "$__fi_rules"
+  printf '\n'
+elif [[ "$harness" == "codex" ]]; then
   if [[ -f "$__fi_rules" ]]; then
     # Strip YAML frontmatter (everything before the second '---' fence),
     # capturing only the rules body, then rewrite Claude-only slash syntax

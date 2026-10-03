@@ -4,6 +4,41 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.1] - 2026-10-03
+
+Fix batch 3 of the 2026-10-03 audit: the rules reach Claude, and what the
+prompts tell the agent matches what the CLI does.
+
+### Fixed
+
+- **The agent rules now reach Claude Code sessions.** They were assumed to
+  load through `skills/rules/SKILL.md`, but that skill's
+  `disable-model-invocation: true` keeps it OUT of the model's context unless
+  the user types its slash command — confirmed live (no `found-issues:rules`
+  in the session's skill list, no rules text in context). Claude sessions
+  logged issues only when the user's own CLAUDE.md told them to.
+  SessionStart now injects the rules body on Claude Code as it already did
+  on Codex. (audit prompt-17)
+- **Codex skill descriptions are valid YAML.** Several contained `: `
+  (`reality: flip`, `(PR: org/repo#N)`), which a strict YAML loader rejects
+  as a plain scalar; they are now double-quoted, with a strict-parse test.
+  (cli-19)
+- Rules and command docs describe the hook's non-closing `-auto` suggestion
+  and the `--pick` confirm step, close entries with `found-issues resolve`,
+  and list the `-auto`/`(verified:)` tokens. (prompt-1, prompt-16)
+- The terse Stop message carries the literal marker to copy, and the rules
+  say it is asked on the first tool-using turn, not every turn. (prompt-12)
+- `log` rejects a `--critical` that is not the first argument instead of
+  logging it into the location; `log.md` single-quotes the entry.
+  (prompt-14)
+- `sync.md` passes `--dry-run` through and documents every output section,
+  including the awaiting-confirmation block. (prompt-15)
+- `status.md` tells `0 open` (clean ledger) from empty output (no ledger
+  found from this directory). (prompt-19)
+- Codex skills: harness-neutral tool wording, and the Claude `/fi` alias
+  literal the setup check compares against is no longer rewritten.
+  (prompt-13)
+
 ## [2.10.0] - 2026-10-03
 
 found-issues was installed in Codex on the author's own machine for months

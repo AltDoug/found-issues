@@ -13,8 +13,13 @@ Show the current state of the found-issues file in this repo.
 found-issues status --format=plain
 ```
 
-If the output is empty, the repo has no open entries. Tell the user:
-*"No open found-issues entries in this repo."*
+If the output is `0 open`, the ledger exists and has no open entries. Tell
+the user: *"No open found-issues entries in this repo."*
+
+If the output is EMPTY, no ledger was found from this directory — not the
+same thing. Say so: *"No found-issues ledger here (checked from <cwd>)."*
+Either the repo has never logged anything (the first `/found-issues:log`
+creates `docs/found-issues.md`) or the session is in the wrong directory.
 
 If non-empty, pass the output through verbatim. It will look like one of:
 
