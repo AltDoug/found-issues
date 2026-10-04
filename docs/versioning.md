@@ -76,6 +76,16 @@ The check intentionally does NOT verify MAJOR bumps for "breaking" changes — t
 | The previous release was mis-numbered (e.g. additive features under a PATCH bump in the past) | The check looks only at the **current** bump, not history. Mis-numbered past releases don't propagate failures forward. |
 | You're adding `### Added` content but the new functionality is actually a bug fix (e.g. "Added: workaround for X bug") | Rename the section to `### Fixed`. `### Added` is reserved for genuinely new capability. |
 
+## 3.0.0 — breaking changes
+
+3.0.0 is MAJOR (operator decision 2026-10-03). What can break for someone upgrading from 2.x:
+
+- **New tags in the ledger.** Entries may carry `(fix: …)`, `(decide: …)`, `(decided: …)`, `(manual: …)`, `(until: …)` and `(autofix-failed: …)`. A 2.x CLI reading a 3.x ledger treats them as symptom text, so every machine that writes the same ledger should upgrade together.
+- **`/found-issues:fix` changed shape.** It works in a fresh worktree on `fix/found-issues-<date>-<rand>`, runs the repo's test command through `found-issues fix test`, ships with `found-issues fix ship`, and closes already-fixed entries with `resolve --verified ai` instead of an archiving sync.
+- **The statusline segment gained two buckets.** `❓N` (decisions waiting) and `🔧N` (auto-fix runs in progress), inside the v1 shape (see `docs/statusline-integration-contract.md`); `status --format=json` gained `decisions` and `running`. Scripts that parse bucket text must allow them.
+- **Headless sessions are quiet.** `claude -p`, SDK sessions and auto-fix children no longer get the first-run hint or the daily notices, and no longer use them up.
+- **With auto-fix switched on** (off by default), the plugin creates branches, pushes, opens PRs and merges them without a human approval, and spends against your Claude or Codex account. None of this happens until `found-issues.autofix` is set to true.
+
 ## Release checklist
 
 When opening a release PR:

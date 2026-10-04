@@ -66,6 +66,30 @@ COMMANDS
                                         (verified: ...) (fixed: <today>). Use this
                                         instead of editing the ledger by hand.
                                         Refuses entries with an active (PR: ...).
+  tag <match> --fix S|M|L | --decide "<q>" | --manual "<why>"
+                                        Set the entry's one fix tag (v3).
+                                        Off-limits paths are tagged manual.
+  decide [--count] | decide <match> --answer "<text>"
+                                        The decision queue: list open
+                                        (decide: ...) questions, or record one.
+  config [<key> [<value>|--unset]] [--global]
+                                        Auto-fix settings (found-issues.autofix.*):
+                                        list with sources, get, set, unset.
+  autofix on|off|status                v3 auto-fix: kill switch and what is queued,
+                                        running and done today.
+  autofix summary [--peek]              What finished since the last interactive
+                                        session (the SessionStart line).
+  autofix cancel <id>                   Stop a queued or running item and its
+                                        background run; the ledger is untouched.
+  autofix run <id> [--engine E]         Fix a queued (fix: small) entry headlessly:
+                                        worktree, fixer, tests, verifier, self-merging PR.
+  autofix run <sweep-id>                A sweep: up to sweepMax fixable entries, one
+                                        commit each, one self-merging PR.
+  autofix claim|brief|next|test|verify|diff|ship|release <id>
+                                        The steps of a fix or sweep, for in-session fixers.
+  fix workspace | fix test <wt> | fix ship <wt> [--source R] --title T --body-file F --pick L
+                                        /found-issues:fix plumbing: a fresh fix worktree,
+                                        the repo's tests there, push + PR + annotations.
   install-statusline [--no-migrate]     Append the counter segment to ~/.claude/statusline.sh.
                                         Self-healing: auto-rewrites broken v1.0.0/1.0.1 marker blocks
                                         AND auto-migrates pre-v0.1.7 handwritten snippets (with a

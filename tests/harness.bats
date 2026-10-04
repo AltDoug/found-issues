@@ -56,9 +56,11 @@ teardown() { fi_teardown_tmp; }
   [ "$output" = "codex" ]
 }
 
-@test "emit: plain text on claude" {
-  CLAUDE_CODE_ENTRYPOINT=cli run fi_emit_post_context "hello world"
-  [ "$output" = "hello world" ]
+@test "emit: claude gets hookSpecificOutput JSON, not plain stdout" {
+  CLAUDE_CODE_ENTRYPOINT=cli run fi_emit_post_context $'hello\nworld "q"'
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"'
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext == "hello\nworld \"q\""'
 }
 
 @test "emit: JSON additionalContext on codex" {

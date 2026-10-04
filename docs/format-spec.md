@@ -8,7 +8,7 @@ Canonical entry format for `docs/found-issues.md` (or `<cwd>/.found-issues.md` i
 - [STATUS] [!] YYYY-MM-DD [LOCATION] — SYMPTOM [(suggested: FIX)] [ANNOTATION]* [(fixed: YYYY-MM-DD)] [(verified: ai|review)]
 ```
 
-Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract topic without slashes (e.g., `dispatch/shutdown`, `workflow`). `ANNOTATION` is one of the parenthesized forms in the Optional-parts table below — the active link forms `(PR: ORG/REPO#N)` / `(commit: SHA)`, their hook-suggested twins `(PR-auto: ...)` / `(commit-auto: ...)`, their sync-demoted twins `(PR-closed: ...)` / `(commit-stale: ...)`, the closure trail forms `(closure: tombstone)` / `(renamed-from: PATH)`, and the defer-flow forms `(touched: ...)` / `(defer-cycle: N)` / `(reason: ...)` / `(mute-until: YYYY-MM-DD)`. Multiple annotations are allowed (entry addressed by both a PR and a follow-up commit).
+Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract topic without slashes (e.g., `dispatch/shutdown`, `workflow`). `ANNOTATION` is one of the parenthesized forms in the Optional-parts table below — the active link forms `(PR: ORG/REPO#N)` / `(commit: SHA)`, their hook-suggested twins `(PR-auto: ...)` / `(commit-auto: ...)`, their sync-demoted twins `(PR-closed: ...)` / `(commit-stale: ...)`, the closure trail forms `(closure: tombstone)` / `(renamed-from: PATH)`, the defer-flow forms `(touched: ...)` / `(defer-cycle: N)` / `(reason: ...)` / `(mute-until: YYYY-MM-DD)` / `(until: ...)`, and the v3 fix-tag forms `(fix: small|medium|large)` / `(decide: ...)` / `(decided: ...)` / `(manual: ...)` / `(autofix-failed: ...)`. Multiple annotations are allowed (entry addressed by both a PR and a follow-up commit).
 
 ## Required parts
 
@@ -42,6 +42,12 @@ Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract
 | Defer-cycle annotation | `(defer-cycle: N)` | `(defer-cycle: 2)` | Added by `found-issues defer` on re-defer (absent = cycle 1) |
 | Reason annotation | `(reason: ...)` | `(reason: wait for second user report)` | Added by `found-issues defer --reason` |
 | Mute-until annotation | `(mute-until: YYYY-MM-DD)` | `(mute-until: 2026-08-01)` | Added by `found-issues defer --mute-until`; silences deferred-touch nudges until the date |
+| Until trigger | `(until: pr:ORG/REPO#N)` / `(until: date:YYYY-MM-DD)` / `(until: TEXT)` | `(until: pr:acme/api#42)` | Added by `found-issues defer --until`; `sync` wakes the entry to `[open]` when the PR merged or the date passed (then drops the trigger). Free text is never checked mechanically |
+| Fix tag | `(fix: small\|medium\|large)` | `(fix: small)` | v3. Set by `log --fix` / `tag --fix`. No decision needed, provable by tests. Never a closing token |
+| Decision needed | `(decide: QUESTION)` | `(decide: rename or alias?)` | v3. Set by `log --decide` / `tag --decide`. Listed by `found-issues decide` |
+| Decision recorded | `(decided: ANSWER)` | `(decided: alias)` | v3. Written by `found-issues decide --answer`; replaces `(decide: ...)` |
+| Manual only | `(manual: WHY)` | `(manual: off-limits: ci)` | v3. Set by `log --manual` / `tag --manual`, or forced for off-limits paths |
+| Auto-fix failed | `(autofix-failed: REASON)` | `(autofix-failed: tests stayed red)` | v3. Written by the auto-fixer; the entry is never retried automatically |
 
 ## Status semantics
 

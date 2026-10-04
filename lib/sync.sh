@@ -85,6 +85,7 @@ cmd_sync() {
   fi
 
   local closed_pr=0 closed_commit=0 closed_tomb=0
+  local woke=0
   # Hook-suggested annotations whose ref HAS landed. These never close an
   # entry — they are diff-inferred, not confirmed (see fi_auto_form in
   # lib/annotate.sh). Collected so sync can say so out loud: a suggestion
@@ -404,6 +405,14 @@ cmd_sync() {
       else
         printf '%s\n' "$line" >>"$tmp"
       fi
+    elif [[ "$line" == "- [deferred]"* && "$line" == *"(until: "* ]] \
+         && fi_parse_entry_vars "$line" && [[ -n "$FE_until" ]] \
+         && fi_until_due "$FE_until" "$today"; then
+      # v3 wake-up (spec §6 step 3): the blocker is gone, so the entry is
+      # actionable again. The trigger is dropped; its fix tag is kept.
+      fi_entry_retag "$line" drop-until ""
+      printf '%s\n' "- [open]${FI_RETAGGED#- \[deferred\]}" >>"$tmp"
+      woke=$((woke + 1))
     else
       printf '%s\n' "$line" >>"$tmp"
     fi
@@ -429,11 +438,13 @@ cmd_sync() {
     elif (( replace_rc != 0 )); then
       return "$replace_rc"
     fi
+    # v3 spec §4.1: woken entries may make a sweep due.
+    (( woke > 0 )) && { fi_af_sweep_check || true; }
   fi
 
   local total_closed=$((closed_pr + closed_commit + closed_tomb))
   local total_demoted=$((demoted_pr + demoted_commit))
-  if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 || "$renamed_count" -gt 0 ]]; then
+  if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 || "$renamed_count" -gt 0 || "$woke" -gt 0 ]]; then
     local summary="Synced."
     (( dry_run )) && summary="Dry run — nothing written."
     if (( total_closed > 0 )); then
@@ -447,6 +458,7 @@ cmd_sync() {
     if (( renamed_count > 0 )); then
       summary+="$(printf ' Renamed: %d.' "$renamed_count")"
     fi
+    (( woke > 0 )) && summary+="$(printf ' Woke: %d.' "$woke")"
     printf '%s\n' "$summary"
   else
     printf 'Synced. Nothing to close.\n'

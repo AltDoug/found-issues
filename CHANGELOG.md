@@ -4,6 +4,130 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-10-04
+
+Opt-in auto-fix and auto-sweep (spec: `docs/superpowers/specs/2026-10-03-autofix-v3-design.md`).
+
+### Breaking
+
+- See `docs/versioning.md` § "3.0.0 — breaking changes": new ledger tags,
+  the reshaped `/found-issues:fix`, two new statusline buckets, quiet
+  headless sessions, and (only when switched on) self-merging fix PRs.
+
+### Added
+
+- Fix tags on entries — `(fix: small|medium|large)`, `(decide: <question>)`,
+  `(manual: <why>)` — set with `found-issues log --fix|--decide|--manual` or
+  `found-issues tag`. Off-limits paths (CI, secrets/auth, dependency
+  manifests and lockfiles, migrations, untracked or outside the repo) are
+  always tagged `(manual: off-limits: <category>)`.
+- Decision queue: `found-issues decide` lists open questions;
+  `found-issues decide <match> --answer "<text>"` records `(decided: <text>)`.
+  New `/found-issues:decide` command; SessionStart says how many are waiting.
+- `found-issues defer --until pr:<owner/repo#N>|date:<YYYY-MM-DD>|"<text>"`;
+  `sync` returns a deferred entry to `[open]` when its PR merged or its date
+  passed.
+- Auto-fix queue: with `git config found-issues.autofix true` in a GitHub
+  repo, `found-issues log --fix small …` queues the entry and prints
+  `AUTOFIX-QUEUED <id>`. Logged inside a fixer, it queues without the marker.
+- `found-issues autofix run <id> [--engine claude|codex]` (launcher A). It:
+  - claims under a per-repo lock (stale after 60 min) and the daily cap
+    (`found-issues.autofix.dailyFixes`, default 5);
+  - cuts a `fi/autofix/*` worktree from `origin/<default>`;
+  - runs a headless fixer (`claude -p … --permission-mode dontAsk
+    --permission-prompts none`, sonnet, or `codex exec --sandbox
+    workspace-write`);
+  - re-runs the tests itself;
+  - gets an opus/high read-only verdict;
+  - opens a PR, annotates the ledger on the PR branch and in the checkout,
+    and arms auto-merge (falling back to `autofix merge-when-green`).
+
+  At most 2 attempts. A failure tags `(autofix-failed: <reason>)`. Spend is
+  capped by `found-issues.autofix.runBudget` (USD, default 3) and
+  `.runTimeoutMin` (default 20).
+- `found-issues autofix status | on | off | claim | diff | ship | release |
+  merge-when-green`.
+- Launchers. On `AUTOFIX-QUEUED`, the PostToolUse hook picks one:
+  - In a Claude Code session in auto or bypassPermissions mode (launcher B),
+    it asks the main agent to start the plugin agent
+    `found-issues:found-issues-fixer` in the background. The agent works only
+    through `found-issues autofix claim|brief|test|verify|ship|release`.
+  - In other modes and on Codex, it starts a detached
+    `found-issues autofix run` (launcher A).
+  - Items still queued when the session stops get launcher A
+    (`FOUND_ISSUES_AUTOFIX_STOP_GRACE`, default 60 s).
+  - Inside a subagent or a fixer, nothing launches.
+  - `FOUND_ISSUES_AUTOFIX_LAUNCHER=headless` forces launcher A.
+- `found-issues autofix brief | test | verify <id>`. `autofix ship` ships only
+  the exact tree the verifier approved, on both launchers. `autofix run`
+  refuses an unknown id and exits 3 capped, 4 locked, 7 engine outage.
+- Auto-sweep. When `log`, `tag`, `decide` or `sync` brings the fixable-now
+  count to `found-issues.autofix.sweepThreshold` (default 5), or records a
+  fixable critical `(fix: medium)`, one sweep is queued and
+  `AUTOFIX-SWEEP-DUE <id>` is printed (at most `dailySweeps`, default 1, a
+  day). The sweep:
+  - classifies up to 20 untagged entries and wakes `(until: <text>)`
+    entries whose trigger has happened (one read-only model call; tags go
+    through the same off-limits rules);
+  - fixes up to `sweepMax` (default 8) entries, critical first, then by
+    file, then oldest, each through the same fix → tests → verifier loop,
+    one commit per approved entry; any other outcome is recorded on that
+    entry alone;
+  - opens ONE self-merging PR on `fi/sweep/<date>-<n>`, annotating every
+    fixed entry. Budget: `found-issues.autofix.sweepBudget` (USD estimate,
+    default 10).
+  - `autofix off` mid-sweep requeues it (nothing ships after the switch);
+    a sweep requeued the same day keeps the cap it took, and a sweep over
+    the cap retires stale instead of stopping the day's spot fixes. Ship
+    drops a half-done entry, so only committed, approved entries ship.
+- The hook launches sweeps like single items: the plugin agent
+  `found-issues:found-issues-sweeper` (launcher B, driving
+  `found-issues autofix next|test|verify|release|ship`) or a detached
+  `autofix run` (launcher A).
+- `found-issues fix workspace | test | ship`: `/found-issues:fix` now works
+  in a fresh worktree on its own branch, runs the repo's own test command,
+  and ships through one command that commits the `(PR:)` annotation onto
+  the PR branch. Already-fixed entries close with `resolve --verified ai`
+  instead of an archiving sync. `fix ship --source <root>` names the
+  ledger to annotate (`fix workspace`'s `source=`), so a session in a
+  linked worktree annotates its own ledger, not the main checkout's.
+
+- `found-issues config [<key> [<value>|--unset]] [--global]`: list, get,
+  set and unset the `found-issues.autofix.*` settings with validation.
+  Turning auto-fix on prints that fix PRs merge themselves.
+- `found-issues autofix cancel <id>`: retires a queued or running item as
+  `cancelled` and stops its background run and engine process group; the
+  ledger is untouched.
+- `found-issues autofix status` shows each running item's launcher,
+  decisions waiting, recent results newest first with PR links and cost,
+  and today's spend.
+- Statusline: `🔧N` (auto-fix runs in progress) and `❓N` (decisions
+  waiting); `status --format=json` adds `decisions` and `running`.
+- SessionStart, interactive sessions only: "Since last session: fixed N
+  (PR …), M failed (reason), K decisions waiting" (`found-issues autofix
+  summary [--peek]`).
+- `found-issues doctor` has an Auto-fix section: on/off and why, test
+  command and its source, gh auth, `claude`/`codex` versions, engine, caps.
+- `/found-issues:setup` has an auto-fix step that states, before enabling,
+  that fix PRs merge themselves and runs bill your account, with the caps
+  and the off switches.
+
+### Changed
+
+- `/found-issues:fix` no longer needs a `bats`-only tool permission and reads
+  the ledger with `list --json --cwd <repo root>`.
+
+### Fixed
+
+- PostToolUse context (annotation suggestions, `--pick` prompts) now reaches
+  Claude. Claude Code shows `hookSpecificOutput.additionalContext` to the
+  model but writes plain PostToolUse stdout to its debug log only.
+- Headless sessions (auto-fix children, `claude -p`) no longer receive the
+  first-run hint or the daily statusline, jq and Codex notices, and no
+  longer use them up before a person sees them.
+- A launcher A child that inherited `CLAUDE_CODE_ENTRYPOINT=cli` is now
+  treated as headless too (`FOUND_ISSUES_AUTOFIX_CHILD=1`).
+
 ## [2.10.4] - 2026-10-03
 
 Fix batch 5 of the 2026-10-03 audit: CLI hygiene.

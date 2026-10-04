@@ -2,9 +2,9 @@ name: tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, release/v3]
   pull_request:
-    branches: [main]
+    branches: [main, release/v3]
   # Weekly canary on main. Some test fixtures are time-sensitive (e.g. entry
   # freshness vs the 30-day stale threshold) and the suite can rot on a repo
   # where no PR lands for weeks — 2026-07-09: 12 tests silently red since

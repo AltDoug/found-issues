@@ -100,8 +100,19 @@ fi_flush_codex_exit() {
 # Claude-only: this is a "prepend to your reply" directive aimed at Claude
 # Code's response convention, and it points at Claude-only surfaces
 # (statusline, /fi alias). Codex has no equivalent onboarding hook.
-if [[ "$harness" == "claude" ]]; then
+#
+# Interactive only (audit prompt-11): a headless run (an auto-fix child,
+# `claude -p`, CLAUDE_CODE_ENTRYPOINT other than cli) has no human to read
+# the line, and must not use up the one-time hint either.
+fi_ss_interactive=0
+# A launcher A child (FOUND_ISSUES_AUTOFIX_CHILD=1) is headless whatever
+# entrypoint it inherited.
+if [[ -z "${CLAUDE_CODE_ENTRYPOINT:-}" || "${CLAUDE_CODE_ENTRYPOINT}" == "cli" ]] \
+    && [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" != 1 ]]; then
+  fi_ss_interactive=1
+fi
 ONBOARD_DIR="$HOME/.claude/found-issues"
+if [[ "$harness" == "claude" && "$fi_ss_interactive" == 1 ]]; then
 ONBOARD_MARKER="$ONBOARD_DIR/.onboarded"
 if [[ ! -f "$ONBOARD_MARKER" ]]; then
   mkdir -p "$ONBOARD_DIR"
@@ -130,8 +141,9 @@ fi
 # until they fix it OR uninstall.
 #
 # Claude-only: targets ~/.claude/statusline.sh, a Claude Code-specific
-# integration point that has no Codex equivalent.
-if [[ "$harness" == "claude" ]]; then
+# integration point that has no Codex equivalent. Interactive only, like the
+# hint above (prompt-11).
+if [[ "$harness" == "claude" && "$fi_ss_interactive" == 1 ]]; then
 mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
 STATUSLINE_NUDGE_MARKER="$ONBOARD_DIR/.statusline-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
 if [[ ! -f "$STATUSLINE_NUDGE_MARKER" ]] && [[ -f "$HOME/.claude/statusline.sh" ]]; then
@@ -200,8 +212,9 @@ fi
 
 # Missing-jq notice — at most once per day per machine (audit hook-18). The
 # blocking hooks fail open without jq, so on a jq-less machine (common on Git
-# Bash) the guards silently allow everything; say so instead.
-if ! command -v jq >/dev/null 2>&1; then
+# Bash) the guards silently allow everything; say so instead. Interactive
+# only (prompt-11), like the notices above.
+if [[ "$fi_ss_interactive" == 1 ]] && ! command -v jq >/dev/null 2>&1; then
   mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
   __fi_jq_marker="$ONBOARD_DIR/.jq-missing-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
   if [[ ! -f "$__fi_jq_marker" ]]; then
@@ -217,8 +230,9 @@ fi
 # operator who runs both harnesses only ever looks at doctor from Claude, and
 # a Codex install with no hooks is otherwise invisible (observed 2026-10-03:
 # months of Codex sessions that never logged anything). Builtins until a
-# found-issues cache dir exists under $CODEX_HOME, then one grep.
-if [[ "$harness" == "claude" ]]; then
+# found-issues cache dir exists under $CODEX_HOME, then one grep. Interactive
+# only (prompt-11): a headless run would use up the day's notice unseen.
+if [[ "$harness" == "claude" && "$fi_ss_interactive" == 1 ]]; then
   __fi_codex_home="${FOUND_ISSUES_CODEX_HOME:-$HOME/.codex}"
   __fi_codex_has=0
   for __fi_d in "$__fi_codex_home"/plugins/cache/*/found-issues; do
@@ -267,6 +281,26 @@ fi
 if [[ -n "${FOUND_ISSUES_DEBUG_BIN:-}" ]]; then
   printf 'found-issues: hook resolved FI_BIN=%s\n' \
     "$(command -v "$FI_BIN" 2>/dev/null || printf '%s' "$FI_BIN")" >&2
+fi
+
+# v3 auto-fix summary (spec §8, phase 5 rulings 3-4): interactive sessions
+# only, and only on a machine that has used auto-fix (a builtin test, so no
+# fork otherwise). Emitted before the ledger checks, so it shows even when
+# every entry is now fixed. Fixed text, numbers and bash-authored reasons.
+if [[ "$fi_ss_interactive" == 1 && -d "${FOUND_ISSUES_STATE_DIR:-$HOME/.claude/found-issues}/autofix" ]]; then
+  __fi_af_sum="$("$FI_BIN" autofix summary 2>/dev/null || true)"
+  if [[ -n "$__fi_af_sum" ]]; then
+    __fi_af_block="## found-issues auto-fix — since the last session
+
+$__fi_af_sum
+
+Tell the user this line once, near the top of your next reply."
+    if [[ "$harness" == "codex" ]]; then
+      codex_rules_block+="${codex_rules_block:+$'\n\n'}$__fi_af_block"
+    else
+      printf '%s\n\n' "$__fi_af_block"
+    fi
+  fi
 fi
 
 # --- broken custom-target marker migration (auto-trigger) ---
@@ -407,7 +441,10 @@ fi
 # sync process and the status process both (audit hook-11). Builtin read.
 __fi_ledger_text="$(<"$issues_file")"
 __fi_re_open=$'(^|\n)- \\[open\\]'
-if [[ ! "$__fi_ledger_text" =~ $__fi_re_open ]]; then
+# A deferred entry with an (until: ...) trigger also needs the sync: it may
+# be due to wake (v3, spec §6 step 3).
+__fi_re_until=$'(^|\n)- \\[deferred\\][^\n]*\\(until: '
+if [[ ! "$__fi_ledger_text" =~ $__fi_re_open && ! "$__fi_ledger_text" =~ $__fi_re_until ]]; then
   fi_flush_codex_exit
 fi
 
@@ -529,6 +566,21 @@ EOF
   fi
   if (( omitted > 0 )); then
     printf "…and %s more [open] entries — run \`found-issues list\` for the full ledger.\n" "$omitted"
+  fi
+  # v3 decision queue (spec §3.4). Fixed text + a number only, so it stays
+  # outside the untrusted-data fence safely. Builtin count over the ledger
+  # text read for the hook-11 gate.
+  local fi_decide_ref='/found-issues:decide' __fi_dec=0 __fi_rest="$__fi_ledger_text" __fi_s="s"
+  # shellcheck disable=SC2016  # $fi- is Codex's literal mention sigil
+  [[ "$harness" == "codex" ]] && fi_decide_ref='$fi-decide'
+  local __fi_re_dec=$'(^|\n)- \\[open\\][^\n]*\\(decide: '
+  while [[ "$__fi_rest" =~ $__fi_re_dec ]]; do
+    __fi_dec=$((__fi_dec + 1))
+    __fi_rest="${__fi_rest#*"${BASH_REMATCH[0]}"}"
+  done
+  (( __fi_dec == 1 )) && __fi_s=""
+  if (( __fi_dec > 0 )); then
+    printf '\n%s decision%s waiting — answer with `%s`.\n' "$__fi_dec" "$__fi_s" "$fi_decide_ref"
   fi
   cat <<EOF
 

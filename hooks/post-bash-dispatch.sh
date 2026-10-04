@@ -30,7 +30,7 @@
 # one process + one jq parse per Bash call instead of three.
 #
 # Exit code: 0 always (additive; never blocks).
-# Output: via fi_emit_post_context (plain text on Claude, JSON on Codex).
+# Output: via fi_emit_post_context (hookSpecificOutput JSON on both harnesses).
 # Opt-outs: FOUND_ISSUES_AUTO_ANNOTATE=off (prompt-only legacy behavior —
 #           old post-pr-create/post-git-commit scan+prompt, verbatim below),
 #           FOUND_ISSUES_POST_PR_STATE=off (skip merge-route sync).
@@ -40,9 +40,11 @@ set -euo pipefail
 IFS= read -r -d '' input || true
 
 # Zero-fork relevance gate (lib/hook-gate.sh): every route below needs
-# "commit", or "gh" plus one of its four verbs, in the command. Anything else
-# exits here, before any jq/$(...). A missing lib or an untrustworthy gate
-# falls through to the full path.
+# "commit", or "gh" plus one of its four verbs, in the command — or an
+# AUTOFIX-QUEUED / AUTOFIX-SWEEP-DUE marker anywhere in the payload (it lives in tool_response,
+# not the command; a plain substring test, zero forks). Anything else exits
+# here, before any jq/$(...). A missing lib or an untrustworthy gate falls
+# through to the full path.
 __fi_hook_dir="${BASH_SOURCE[0]%/*}"
 [[ "$__fi_hook_dir" == "${BASH_SOURCE[0]}" ]] && __fi_hook_dir=.
 # shellcheck source=../lib/hook-gate.sh
@@ -50,6 +52,7 @@ if [[ -f "$__fi_hook_dir/../lib/hook-gate.sh" ]] \
     && source "$__fi_hook_dir/../lib/hook-gate.sh" && fi_gate_text "$input"; then
   fi_gate_has commit \
     || { fi_gate_has gh && fi_gate_has create merge close reopen; } \
+    || [[ "$input" == *AUTOFIX-QUEUED* || "$input" == *AUTOFIX-SWEEP-DUE* ]] \
     || exit 0
 fi
 
@@ -297,6 +300,39 @@ $out
 If this commit addresses any candidate, run the printed --pick command; otherwise ignore."
         ctx+=$'\n\n'
       fi
+    fi
+  fi
+fi
+
+# ===== route: AUTOFIX-QUEUED / AUTOFIX-SWEEP-DUE → launcher A or B (v3 spec §4.2) =====
+# The marker comes from `found-issues log` OUTPUT. Only ids whose item is
+# still in queue/ count, so re-printed old markers (a cat of a log) do
+# nothing. A gets one detached `autofix run` (it drains the queue); B gets
+# one nudge per id. Inside a subagent (agent_id) or a fixer child nothing
+# launches; the main session's Stop fallback picks those up.
+if [[ "$input" == *AUTOFIX-QUEUED* || "$input" == *AUTOFIX-SWEEP-DUE* ]] \
+    && [[ -f "$lib_dir/autofix-queue.sh" && -f "$lib_dir/autofix-hook.sh" ]]; then
+  # shellcheck source=../lib/autofix-queue.sh
+  source "$lib_dir/autofix-queue.sh"
+  # shellcheck source=../lib/autofix-hook.sh
+  source "$lib_dir/autofix-hook.sh"
+  fi_afh_ids "$(printf '%s' "$input" | jq -r '.tool_response | if type == "string" then . else tostring end' 2>/dev/null || true)"
+  if (( ${#FI_AFH_IDS[@]} > 0 )); then
+    __fi_harness="$(fi_detect_harness 2>/dev/null || printf claude)"
+    fi_afh_launcher "$__fi_harness" "$(get_field '.permission_mode')" "$(get_field '.agent_id')"
+    if [[ "$FI_AFH_LAUNCHER" != none ]]; then
+      fi_afh_now
+      __fi_first=""
+      for __fi_id in "${FI_AFH_IDS[@]}"; do
+        fi_afh_item "$__fi_id" || continue
+        fi_afh_mark "$FI_AFH_ITEM" "$FI_AFH_LAUNCHER" "$FI_AFH_NOW" || continue
+        if [[ "$FI_AFH_LAUNCHER" == B ]]; then
+          ctx+="$(fi_afh_context_b "$__fi_id" "$FI_AFH_ITEM")"$'\n\n'
+        elif [[ -z "$__fi_first" ]]; then
+          __fi_first="$FI_AFH_ITEM"
+        fi
+      done
+      if [[ -n "$__fi_first" ]]; then fi_afh_launch_a "$__fi_first" "$__fi_harness" "$FI_BIN" || true; fi
     fi
   fi
 fi

@@ -12,7 +12,7 @@
 
 # === Subcommand: log ===
 #
-# Usage: found-issues log [--critical] <location> — <symptom>
+# Usage: found-issues log [--critical] [--fix S|M|L | --decide Q | --manual W] <location> — <symptom>
 #
 # location can be:
 #   - path/file.ext:42  (concrete file:line)
@@ -21,16 +21,67 @@
 #
 # Symptom may include "(suggested: ...)" inline.
 
-cmd_log() {
-  local critical="no"
-  if [[ "${1:-}" == "--critical" ]]; then
-    critical="yes"
-    shift
+# Apply log's requested fix tag to the entry it matched instead of appending
+# (v3 review I2: the tag used to be dropped on escalation and on a deferred
+# match). Reads cmd_log's tag_kind; sets _fi_log_line to the entry as it now
+# reads. Returns 1 only when the write failed.
+_fi_log_tag_existing() {
+  local file="$1" entry="$2" trc=0
+  _fi_log_line="$entry"
+  [[ -n "$tag_kind" ]] || return 0
+  fi_parse_entry_vars "$entry"
+  if [[ -n "$FE_fixtag$FE_decide$FE_manual" ]]; then
+    fi_err "found-issues log: entry already tagged — left as is; change it with: found-issues tag '<match>' --$tag_kind ..."
+    return 0
   fi
+  fi_tag_apply "$file" "$entry" "$FI_TAG_KIND" "$FI_TAG_VALUE" || trc=$?
+  (( trc == 0 )) || { fi_err "found-issues log: could not tag the existing entry (rc $trc) — re-run"; return 1; }
+  _fi_log_line="$FI_RETAGGED"
+}
+
+# v3 spec §4.1: a (fix: small) entry this call wrote or tagged is queued for
+# auto-fix. Reads the line as written: an entry log left "already tagged"
+# (say medium) is not small, whatever this call asked for, and off-limits
+# paths were already turned into manual by fi_tag_resolve. Any tagged write
+# may then make a sweep due.
+_fi_log_autofix() {
+  [[ -n "$tag_kind" ]] || return 0
+  fi_parse_entry_vars "$1" || return 0
+  if [[ "$FE_status" == "open" && "$FE_fixtag" == "small" ]]; then
+    fi_af_queue_spot "$1" || true
+  fi
+  fi_af_sweep_check || true
+}
+
+cmd_log() {
+  local critical="no" tag_kind="" tag_value=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --critical) critical="yes"; shift ;;
+      --fix|--decide|--manual)
+        [[ -z "$tag_kind" ]] || { fi_err "found-issues log: one fix tag per entry (got $1 after --$tag_kind)"; return 2; }
+        fi_need_value log "$1" $# "${2:-}" || return 2
+        tag_kind="${1#--}"; tag_value="$2"; shift 2 ;;
+      --fix=*|--decide=*|--manual=*)
+        [[ -z "$tag_kind" ]] || { fi_err "found-issues log: one fix tag per entry (got ${1%%=*} after --$tag_kind)"; return 2; }
+        tag_kind="${1%%=*}"; tag_kind="${tag_kind#--}"; tag_value="${1#*=}"; shift ;;
+      *) break ;;
+    esac
+  done
+  # A tag flag AFTER the entry used to be folded into the symptom and logged
+  # untagged with exit 0 (v3 review I1) — refuse rather than guess.
+  local _fi_arg
+  for _fi_arg in "$@"; do
+    case "$_fi_arg" in
+      --fix|--fix=*|--decide|--decide=*|--manual|--manual=*)
+        fi_err "found-issues log: put ${_fi_arg%%=*} before the entry: found-issues log ${_fi_arg%%=*} <value> '<location> — <symptom>'"
+        return 2 ;;
+    esac
+  done
 
   if [[ $# -eq 0 ]]; then
     fi_err "found-issues log: missing arguments"
-    fi_err "Usage: found-issues log [--critical] <location> — <symptom>"
+    fi_err "Usage: found-issues log [--critical] [--fix small|medium|large | --decide \"<q>\" | --manual \"<why>\"] <location> — <symptom>"
     return 2
   fi
 
@@ -58,7 +109,7 @@ cmd_log() {
   local location symptom
   if [[ "$input" != *" — "* ]]; then
     fi_err "found-issues log: missing ' — ' separator"
-    fi_err "Usage: found-issues log [--critical] <location> — <symptom>"
+    fi_err "Usage: found-issues log [--critical] [--fix small|medium|large | --decide \"<q>\" | --manual \"<why>\"] <location> — <symptom>"
     return 2
   fi
   location="${input%% — *}"
@@ -132,6 +183,19 @@ cmd_log() {
   # Canonicalize path
   if [[ "$path" == */* || "$path" == *.* ]]; then
     path="$(fi_canonicalize_path "$path")"
+  fi
+
+  # v3 fix tag: validated and off-limits-checked up front so a bad value
+  # writes nothing (spec §3.3, §3.5). An abstract topic has no file, so it is
+  # checked as file-less rather than as an untracked path.
+  if [[ -n "$tag_kind" ]]; then
+    local tag_path=""
+    [[ "$path" == */* || "$path" == *.* ]] && tag_path="$path"
+    fi_repo_root_cached
+    fi_tag_resolve "$tag_kind" "$tag_value" "$tag_path" "$FI_REPO_ROOT" || return 2
+    if [[ "$tag_kind" == "fix" && "$FI_TAG_KIND" == "manual" ]]; then
+      fi_err "found-issues log: ${path:-this entry} is off-limits for auto-fix ($FI_TAG_VALUE) — tagged manual instead"
+    fi
   fi
 
   # Resolve issues file
@@ -213,8 +277,18 @@ cmd_log() {
         fi_err "found-issues log: the ledger changed while escalating — re-run"
         return 1
       fi
+      _fi_log_tag_existing "$file" "$esc_line" || return 1
+      _fi_log_autofix "$_fi_log_line"
       cmd_status plain
       return 0
+    fi
+    if [[ -n "$tag_kind" ]]; then
+      _fi_log_tag_existing "$file" "$matched_entry" || return 1
+      if [[ "$_fi_log_line" != "$matched_entry" ]]; then
+        _fi_log_autofix "$_fi_log_line"
+        cmd_status plain
+        return 0
+      fi
     fi
     printf 'Skipped — already logged: %s\n' "$matched_entry"
     cmd_status plain
@@ -222,7 +296,8 @@ cmd_log() {
   fi
 
   if [[ "$matched_status" == "deferred" ]]; then
-    fi_handle_deferred_touch "$file" "$matched_entry"
+    _fi_log_tag_existing "$file" "$matched_entry" || return 1
+    fi_handle_deferred_touch "$file" "$_fi_log_line"
     return $?
   fi
 
@@ -247,6 +322,10 @@ cmd_log() {
   fi
 
   local entry="- [open]${crit_flag} $(fi_today)${location_str} — $symptom"
+  if [[ -n "$tag_kind" ]]; then
+    fi_entry_retag "$entry" "$FI_TAG_KIND" "$FI_TAG_VALUE"
+    entry="$FI_RETAGGED"
+  fi
 
   # Append (with leading newline if file doesn't end in one).
   # Note: command substitution strips trailing newlines, so an empty result
@@ -261,6 +340,7 @@ cmd_log() {
   printf '%s\n' "$entry" >>"$file"
 
   printf 'Logged: %s\n' "$entry"
+  _fi_log_autofix "$entry"
   cmd_status plain
 }
 

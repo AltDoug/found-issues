@@ -19,6 +19,17 @@ This contract exists because `/found-issues:setup` splices the segment call into
 | Failure mode (file missing, parse error, etc.) | Empty stdout, exit 0 — silent-fail so the user's statusline never shows an error string |
 | Latency | Bounded: subsecond on cache hit. The 10-minute autosync (`FOUND_ISSUES_SEGMENT_AUTOSYNC`) runs in the background and never blocks the foreground render |
 
+## v3 additive buckets (3.0.0)
+
+Two buckets were added inside v1 in 3.0.0 (the auto-fix spec, §8, asks for them on the existing segment path). They follow every locked property above — `' | '` prefix, `' · '` separator, each bucket closed by `\033[0m` — and inputs without them still render the exact v1 bytes, so installed splices need no change.
+
+| Bucket | Bytes | Source |
+| --- | --- | --- |
+| Decisions waiting | `\033[36m❓N\033[0m`, after `stale` | `[open]` entries with a `(decide: …)` tag; ledger-derived, cached with the other counts |
+| Auto-fix runs in progress | `\033[35m🔧N\033[0m`, always last | `<state>/autofix/seg/<sanitized physical repo root>`, written by the CLI on every claim, finish and requeue; read with builtins after the cache, never cached |
+
+With only a run in progress and nothing open, the segment is `' | \033[35m🔧N\033[0m'`. `status --format=json` gained `decisions` and `running`. Snapshots: the last two tests in `tests/contract-segment.bats`.
+
 ## What is NOT part of the contract (free to change)
 
 - The shape of `docs/found-issues.md` itself, the parser, the counting rules, the cache directory layout, the autosync mechanism, internal helper function names, file paths under `lib/`.

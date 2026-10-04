@@ -12,12 +12,25 @@ and date stamping — your job is just to pass the user's input through.
 
 Run the CLI with the user's arguments, as ONE single-quoted argument (the
 symptom routinely contains parentheses and apostrophes, which break an
-unquoted shell line; escape an apostrophe as `'\''`). `--critical`, when
-wanted, goes first and outside the quotes:
+unquoted shell line; escape an apostrophe as `'\''`). `--critical` and the
+fix-tag flag, when wanted, go first and outside the quotes:
 
 ```bash
-found-issues log [--critical] '<path:line> — <symptom> (suggested: <fix>)'
+found-issues log [--critical] [--fix small|medium|large | --decide "<q>" | --manual "<why>"] '<path:line> — <symptom> (suggested: <fix>)'
 ```
+
+Tag every entry with exactly one fix tag (v3):
+
+- `--fix small|medium|large` — no human decision needed, and the repo's
+  tests can prove a fix. Off-limits paths (CI config, secrets/auth,
+  dependency manifests and lockfiles, migrations, untracked or outside the
+  repo, or no file at all) are tagged `(manual: off-limits: <category>)`
+  instead, and the CLI says so.
+- `--decide "<question>"` — needs the operator's call: several valid fixes,
+  an interface or UX choice, anything outside the repo, irreversible steps.
+- `--manual "<why>"` — no test can prove the fix, or it needs a live payload.
+
+Re-logging an untagged entry with a tag tags it instead of skipping it.
 
 Then read the output and report the result to the user concisely:
 

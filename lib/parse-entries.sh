@@ -14,6 +14,7 @@
 #   fi_count <file> [<status_filter>]
 #   fi_count_in_pr <file>
 #   fi_count_critical <file>
+#   fi_count_decide <file>
 #   fi_count_residual <file>
 #   fi_count_stale <file> [<days=30>]
 
@@ -149,7 +150,7 @@ fi_annotation_tail() {
 # Same walk, result in $FI_ANN_TAIL — no subshell for in-process callers.
 fi_annotation_tail_v() {
   local line="$1" tail=""
-  local re_tail_group='\((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested): [^)]*\)[[:space:]]*$'
+  local re_tail_group='\((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested|fix|decide|decided|manual|until|autofix-failed): [^)]*\)[[:space:]]*$'
   while [[ "$line" =~ $re_tail_group ]]; do
     local grp="${BASH_REMATCH[0]}"
     tail="${grp}${tail}"
@@ -183,6 +184,12 @@ fi_parse_entry() {
   printf 'renamed_from=%s\n' "$FE_renamed_from"
   printf 'fixed_date=%s\n' "$FE_fixed_date"
   printf 'verified=%s\n' "$FE_verified"
+  printf 'fixtag=%s\n' "$FE_fixtag"
+  printf 'decide=%s\n' "$FE_decide"
+  printf 'decided=%s\n' "$FE_decided"
+  printf 'manual=%s\n' "$FE_manual"
+  printf 'until=%s\n' "$FE_until"
+  printf 'autofix_failed=%s\n' "$FE_autofix_failed"
 }
 
 # fi_parse_entry_vars <line> — builtin-only twin of fi_parse_entry. Sets the
@@ -200,6 +207,7 @@ FE_status="" FE_critical="" FE_date="" FE_path="" FE_line="" FE_line_end=""
 FE_symptom="" FE_fix="" FE_prs="" FE_prs_auto="" FE_prs_closed=""
 FE_commits="" FE_commits_auto="" FE_commits_stale="" FE_renamed_from=""
 FE_fixed_date="" FE_verified=""
+FE_fixtag="" FE_decide="" FE_decided="" FE_manual="" FE_until="" FE_autofix_failed=""
 
 # _fi_collect <tail> <regex with one capture group> — comma-join every
 # capture, left to right, the way `grep -oE | sed | paste -sd ,` did.
@@ -218,6 +226,7 @@ fi_parse_entry_vars() {
   FE_symptom="" FE_fix="" FE_prs="" FE_prs_auto="" FE_prs_closed=""
   FE_commits="" FE_commits_auto="" FE_commits_stale="" FE_renamed_from=""
   FE_fixed_date="" FE_verified=""
+  FE_fixtag="" FE_decide="" FE_decided="" FE_manual="" FE_until="" FE_autofix_failed=""
 
   local re_status='^- \[(open|deferred|fixed)\]'
   [[ "$line" =~ $re_status ]] || return 1
@@ -281,6 +290,20 @@ fi_parse_entry_vars() {
     _fi_collect "$tail" "\\(commit: ($sha)\\)";         FE_commits="$_fi_collected"
     _fi_collect "$tail" "\\(commit-auto: ($sha)\\)";    FE_commits_auto="$_fi_collected"
     _fi_collect "$tail" "\\(commit-stale: ($sha)\\)";   FE_commits_stale="$_fi_collected"
+    # v3 fix tags — tail only, so a symptom that merely mentions one is not
+    # tagged (spec §3.5).
+    local re_fixtag='\(fix: (small|medium|large)\)'
+    [[ "$tail" =~ $re_fixtag ]] && FE_fixtag="${BASH_REMATCH[1]}"
+    local re_decide='\(decide: ([^)]*)\)'
+    [[ "$tail" =~ $re_decide ]] && FE_decide="${BASH_REMATCH[1]}"
+    local re_decided='\(decided: ([^)]*)\)'
+    [[ "$tail" =~ $re_decided ]] && FE_decided="${BASH_REMATCH[1]}"
+    local re_manual='\(manual: ([^)]*)\)'
+    [[ "$tail" =~ $re_manual ]] && FE_manual="${BASH_REMATCH[1]}"
+    local re_until='\(until: ([^)]*)\)'
+    [[ "$tail" =~ $re_until ]] && FE_until="${BASH_REMATCH[1]}"
+    local re_afail='\(autofix-failed: ([^)]*)\)'
+    [[ "$tail" =~ $re_afail ]] && FE_autofix_failed="${BASH_REMATCH[1]}"
   fi
 
   local re_renamed='\(renamed-from: ([^)]+)\)'
@@ -393,6 +416,15 @@ fi_count_critical() {
   local count
   count="$(fi_entries "$file" open 2>/dev/null \
     | grep -cE '^- \[open\] \[!\]' || true)"
+  printf '%s' "${count:-0}"
+}
+
+# Count [open] entries waiting on a decision: a (decide: ...) tag in the
+# entry (v3 decision queue, spec §3.4). Conflict-aware via fi_entries.
+fi_count_decide() {
+  local file="$1" count
+  if [[ ! -f "$file" ]]; then printf '0'; return; fi
+  count="$(fi_entries "$file" open 2>/dev/null | grep -cE '\(decide: [^)]*\)' || true)"
   printf '%s' "${count:-0}"
 }
 
@@ -585,6 +617,7 @@ fi_entry_to_json() {
   local status="" critical="" date="" path="" line="" line_end="" symptom="" fix=""
   local prs="" prs_auto="" prs_closed="" commits="" commits_auto="" commits_stale="" renamed_from=""
   local fixed_date="" verified=""
+  local fixtag="" decide="" decided="" manual="" until_="" autofix_failed=""
   local kv key val
   while IFS= read -r kv; do
     key="${kv%%=*}"
@@ -607,6 +640,12 @@ fi_entry_to_json() {
       renamed_from)  renamed_from="$val" ;;
       fixed_date)    fixed_date="$val" ;;
       verified)      verified="$val" ;;
+      fixtag)         fixtag="$val" ;;
+      decide)         decide="$val" ;;
+      decided)        decided="$val" ;;
+      manual)         manual="$val" ;;
+      until)          until_="$val" ;;
+      autofix_failed) autofix_failed="$val" ;;
     esac
   done <<< "$parsed"
 
@@ -624,7 +663,7 @@ fi_entry_to_json() {
   local mute
   mute="$(fi_extract_mute_until "$raw")"
 
-  printf '{"line_no":%s,"status":"%s","critical":%s,"date":%s,"path":%s,"line":%s,"line_end":%s,"symptom":%s,"suggested":%s,"prs":%s,"prs_auto":%s,"prs_closed":%s,"commits":%s,"commits_auto":%s,"commits_stale":%s,"verified":%s,"fixed_date":%s,"renamed_from":%s,"mute_until":%s,"raw":%s}' \
+  printf '{"line_no":%s,"status":"%s","critical":%s,"date":%s,"path":%s,"line":%s,"line_end":%s,"symptom":%s,"suggested":%s,"prs":%s,"prs_auto":%s,"prs_closed":%s,"commits":%s,"commits_auto":%s,"commits_stale":%s,"verified":%s,"fixed_date":%s,"renamed_from":%s,"mute_until":%s,"fix_tag":%s,"decide":%s,"decided":%s,"manual":%s,"until":%s,"autofix_failed":%s,"raw":%s}' \
     "$line_no" "$status" "$crit_bool" \
     "$(fi_json_str "$date")" "$(fi_json_str "$path")" "$line_json" "$line_end_json" \
     "$(fi_json_str "$symptom")" "$(fi_json_str "$fix")" \
@@ -632,6 +671,8 @@ fi_entry_to_json() {
     "$(fi_json_str "$commits")" "$(fi_json_str "$commits_auto")" "$(fi_json_str "$commits_stale")" \
     "$(fi_json_str "$verified")" "$(fi_json_str "$fixed_date")" \
     "$(fi_json_str "$renamed_from")" "$(fi_json_str "$mute")" \
+    "$(fi_json_str "$fixtag")" "$(fi_json_str "$decide")" "$(fi_json_str "$decided")" \
+    "$(fi_json_str "$manual")" "$(fi_json_str "$until_")" "$(fi_json_str "$autofix_failed")" \
     "$(fi_json_str "$raw")"
 }
 

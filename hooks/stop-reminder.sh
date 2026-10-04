@@ -13,6 +13,30 @@
 
 set -euo pipefail
 
+# Read the payload once: the auto-fix fallback and both harness branches
+# below use it.
+IFS= read -r -d '' __fi_stop_input || true
+
+# v3 auto-fix (spec §4.3): an item still queued at Stop gets launcher A.
+# Runs before every opt-out below (the marker nudge being off must not
+# strand a queued fix). Zero forks unless something is queued.
+__fi_stop_dir="${BASH_SOURCE[0]%/*}"
+[[ "$__fi_stop_dir" == "${BASH_SOURCE[0]}" ]] && __fi_stop_dir=.
+if [[ -f "$__fi_stop_dir/../lib/autofix-queue.sh" && -f "$__fi_stop_dir/../lib/autofix-hook.sh" ]]; then
+  # shellcheck source=../lib/autofix-queue.sh
+  source "$__fi_stop_dir/../lib/autofix-queue.sh"
+  # shellcheck source=../lib/autofix-hook.sh
+  source "$__fi_stop_dir/../lib/autofix-hook.sh"
+  __fi_engine=claude
+  [[ "${FOUND_ISSUES_HARNESS:-}" == "codex" ]] && __fi_engine=codex
+  __fi_bin="${FOUND_ISSUES_BIN:-}"
+  if [[ -z "$__fi_bin" ]]; then
+    if [[ -x "$__fi_stop_dir/../bin/found-issues" ]]; then __fi_bin="$__fi_stop_dir/../bin/found-issues"
+    else __fi_bin=found-issues; fi
+  fi
+  fi_afh_stop "$__fi_stop_input" "$__fi_engine" "$__fi_bin" || true
+fi
+
 # Allow opt-out via env var (for users who installed but want it off)
 if [[ "${FOUND_ISSUES_STOP_REMINDER:-on}" == "off" ]]; then
   exit 0
@@ -32,8 +56,7 @@ fi
 # Codex that asks the model to log at all.
 fi_codex_stop() {
   command -v jq >/dev/null 2>&1 || exit 0
-  local input fields active msg tpath sid
-  IFS= read -r -d '' input || true
+  local input="$__fi_stop_input" fields active msg tpath sid
   # \x1f, not a tab: tab is IFS whitespace, so an empty session_id would
   # collapse and shift the transcript path into $sid.
   fields="$(printf '%s' "$input" | jq -r '[(.stop_hook_active // false | tostring), (.session_id // ""), (.transcript_path // "")] | join("\u001f")' 2>/dev/null)" || exit 0
@@ -100,8 +123,8 @@ if [[ -z "${CLAUDE_CODE_ENTRYPOINT:-}" && -n "${PLUGIN_DATA:-}" ]]; then
   exit 0
 fi
 
-# Read JSON from stdin
-input="$(cat)"
+# The JSON payload, read from stdin at the top.
+input="$__fi_stop_input"
 
 # Honor stop_hook_active: when Claude Code re-fires Stop after a previous
 # block, the assistant has already had its chance to add the marker. Exit

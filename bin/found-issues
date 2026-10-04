@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.10.4"
+readonly FI_VERSION="3.0.0"
 
 # Statusline fast path (lib/segment-cache.sh): `status --format=segment` runs
 # every few seconds per session, so it is answered from a content-checked
@@ -82,6 +82,28 @@ fi
 source "$FI_LIB_DIR/canonicalize.sh"
 # shellcheck source=../lib/parse-entries.sh
 source "$FI_LIB_DIR/parse-entries.sh"
+# v3 fix tags: off-limits, tag text, retag (spec 2026-10-03 §3).
+# shellcheck source=../lib/autofix-tags.sh
+source "$FI_LIB_DIR/autofix-tags.sh"
+# v3 auto-fix settings, state paths, test command, engine (spec §5, §8, §9).
+# shellcheck source=../lib/autofix-config.sh
+source "$FI_LIB_DIR/autofix-config.sh"
+# shellcheck source=../lib/autofix-queue.sh
+source "$FI_LIB_DIR/autofix-queue.sh"
+# shellcheck source=../lib/autofix-engine.sh
+source "$FI_LIB_DIR/autofix-engine.sh"
+# shellcheck source=../lib/autofix-ship.sh
+source "$FI_LIB_DIR/autofix-ship.sh"
+# shellcheck source=../lib/autofix-b.sh
+source "$FI_LIB_DIR/autofix-b.sh"
+# shellcheck source=../lib/autofix-classify.sh
+source "$FI_LIB_DIR/autofix-classify.sh"
+# shellcheck source=../lib/autofix-sweep.sh
+source "$FI_LIB_DIR/autofix-sweep.sh"
+# shellcheck source=../lib/autofix-status.sh
+source "$FI_LIB_DIR/autofix-status.sh"
+# shellcheck source=../lib/fix-plumbing.sh
+source "$FI_LIB_DIR/fix-plumbing.sh"
 # shellcheck source=../lib/detect-mode.sh
 source "$FI_LIB_DIR/detect-mode.sh"
 # The statusline family lives in lib/ (extracted v2.2.5, tracked §12 split).
@@ -113,6 +135,12 @@ source "$FI_LIB_DIR/log.sh"
 source "$FI_LIB_DIR/defer.sh"
 # shellcheck source=../lib/resolve.sh
 source "$FI_LIB_DIR/resolve.sh"
+# shellcheck source=../lib/tag.sh
+source "$FI_LIB_DIR/tag.sh"
+# shellcheck source=../lib/decide.sh
+source "$FI_LIB_DIR/decide.sh"
+# shellcheck source=../lib/autofix.sh
+source "$FI_LIB_DIR/autofix.sh"
 # shellcheck source=../lib/promote-deferred.sh
 source "$FI_LIB_DIR/promote-deferred.sh"
 # shellcheck source=../lib/list-status.sh
@@ -263,7 +291,10 @@ fi_repo_id() {
   local remote_url
   remote_url="$(git remote get-url origin 2>/dev/null || true)"
   if [[ "$remote_url" != *"github.com"* ]]; then
-    return 1
+    # get-url expands url.<x>.insteadOf; the configured URL still names the
+    # GitHub repo (a mirror or a local bare remote in tests).
+    remote_url="$(git config --get remote.origin.url 2>/dev/null || true)"
+    [[ "$remote_url" == *"github.com"* ]] || return 1
   fi
   # Strip trailing slashes, then a literal .git suffix, then capture the
   # last two path segments verbatim. The earlier single-pass form used
@@ -397,6 +428,11 @@ main() {
     defer)            cmd_defer "$@" ;;
     promote-deferred)     cmd_promote_deferred "$@" ;;
     resolve)          cmd_resolve "$@" ;;
+    tag)              cmd_tag "$@" ;;
+    decide)           cmd_decide "$@" ;;
+    config)           cmd_config "$@" ;;
+    autofix)          cmd_autofix "$@" ;;
+    fix)              cmd_fix "$@" ;;
     promote)          cmd_promote "$@" ;;
     install-statusline)   cmd_install_statusline "$@" ;;
     uninstall-statusline) cmd_uninstall_statusline "$@" ;;

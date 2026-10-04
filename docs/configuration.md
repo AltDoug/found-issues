@@ -176,6 +176,49 @@ to find this page:
 If a hook is misbehaving and there's no helpful message, that's a bug —
 open an issue.
 
+## Auto-fix settings (v3)
+
+Auto-fix is configured in git config, not env vars: `--global` sets the
+default, a repo's local value overrides it. `found-issues config` lists,
+gets, sets and unsets them with validation:
+
+```bash
+found-issues config                          # every setting, its value and source
+found-issues config autofix true             # this repo (prints the auto-merge disclosure)
+found-issues config autofix.dailyFixes 3 --global
+found-issues config autofix.sweepMax --unset
+```
+
+| Key (`found-issues.…`) | Default | What it controls |
+|---|---|---|
+| `autofix` | `false` | Turns auto-fix on. Fix PRs merge themselves and runs bill your account. |
+| `autofix.engine` | `auto` | `claude`, `codex`, or `auto` (the session's own harness) |
+| `autofix.testCommand` | detected | The command that proves a fix (bats, npm test, pytest, go, cargo, make) |
+| `autofix.dailyFixes` | `5` | Spot fixes per repo per day |
+| `autofix.dailySweeps` | `1` | Sweeps per repo per day |
+| `autofix.sweepThreshold` | `5` | Fixable entries that trigger a sweep |
+| `autofix.sweepMax` | `8` | Entries one sweep fixes |
+| `autofix.runBudget` | `3` | USD estimate per spot run (Claude Code's `total_cost_usd`) |
+| `autofix.sweepBudget` | `10` | USD estimate per sweep |
+| `autofix.runTimeoutMin` | `20` | Minutes per engine call |
+
+| Variable | Default | What it controls |
+|---|---|---|
+| `FOUND_ISSUES_AUTOFIX` | (unset) | `off` stops auto-fix in this shell, whatever git config says |
+| `FOUND_ISSUES_AUTOFIX_LAUNCHER` | (auto) | `headless` forces launcher A (a detached `autofix run`) even in auto/bypass sessions |
+| `FOUND_ISSUES_AUTOFIX_STOP_GRACE` | `60` | Seconds an in-session item has to be claimed before the Stop hook launches it headlessly |
+| `FOUND_ISSUES_AUTOFIX_LOCK_STALE` | `3600` | Seconds after which a repo's run lock counts as abandoned |
+| `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS` | `runTimeoutMin` × 60 | Per engine-call timeout override |
+| `FOUND_ISSUES_AUTOFIX_MERGE_POLLS` / `_MERGE_SLEEP` | `60` / `60` | How long `autofix merge-when-green` waits for checks |
+| `FOUND_ISSUES_STATE_DIR` | `~/.claude/found-issues` | Where the queue, locks, caps and the statusline's run counts live |
+
+Set by the plugin, not by you: `FOUND_ISSUES_AUTOFIX_CHILD=1` marks a
+headless fixer, which queues what it logs but launches nothing.
+
+The kill switch for every repo at once is `found-issues autofix off`
+(undo: `found-issues autofix on`); `found-issues autofix cancel <id>`
+stops one queued or running fix.
+
 ## Where to set these
 
 | Where | Scope |

@@ -268,3 +268,49 @@ EOF
   [ "$exit_code" -eq 0 ] || { echo "$CONTRACT_NOTE"; echo "Expected exit 0 (silent-fail), got: $exit_code"; false; }
   [ -z "$output" ] || { echo "$CONTRACT_NOTE"; echo "Expected empty stdout on read error, got: [$output]"; false; }
 }
+
+# ============================================================================
+# v3 additive buckets (3.0.0; docs/statusline-integration-contract.md, "v3
+# additive buckets"): ❓N decisions waiting (ledger-derived) and 🔧N auto-fix
+# runs in progress (state file, appended after the cache). Same prefix,
+# separator and reset rules as every v1 bucket; inputs without them render
+# the v1 bytes above.
+# ============================================================================
+
+@test "contract(segment): a decide entry adds a cyan question-mark bucket" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<EOF
+# found-issues
+- [open] $(date +%Y-%m-%d) src/a.py:1 — which rounding? (decide: floor or round?)
+EOF
+  fi_run status --format=segment
+  [ "$status" -eq 0 ] || { echo "$CONTRACT_NOTE"; echo "Got exit code: $status"; false; }
+  local expected=$' | \033[31m1 issue\033[0m · \033[36m❓1\033[0m'
+  [ "$output" = "$expected" ] || {
+    echo "$CONTRACT_NOTE"
+    printf 'Expected (bytes): '; printf '%s' "$expected" | od -c | head -3
+    printf 'Got (bytes):      '; printf '%s' "$output"   | od -c | head -3
+    false
+  }
+}
+
+@test "contract(segment): a run in progress adds a magenta wrench bucket last" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<EOF
+# found-issues
+- [open] $(date +%Y-%m-%d) src/a.py:1 — x
+EOF
+  export FOUND_ISSUES_STATE_DIR="$TMP/state"
+  local root; root="$(pwd -P)"
+  mkdir -p "$FOUND_ISSUES_STATE_DIR/autofix/seg"
+  printf '1\n' > "$FOUND_ISSUES_STATE_DIR/autofix/seg/${root//[^A-Za-z0-9._-]/_}"
+  fi_run status --format=segment
+  [ "$status" -eq 0 ] || { echo "$CONTRACT_NOTE"; echo "Got exit code: $status"; false; }
+  local expected=$' | \033[31m1 issue\033[0m · \033[35m🔧1\033[0m'
+  [ "$output" = "$expected" ] || {
+    echo "$CONTRACT_NOTE"
+    printf 'Expected (bytes): '; printf '%s' "$expected" | od -c | head -3
+    printf 'Got (bytes):      '; printf '%s' "$output"   | od -c | head -3
+    false
+  }
+}

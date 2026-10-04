@@ -95,6 +95,20 @@ seed_unpromoted_branch() {
   grep -q "branch deletion blocked" "$TMP/pre.err"
 }
 
+@test "hook-gate: an AUTOFIX-QUEUED marker in the output reaches the full path" {
+  rm -f "$TMP/jq-calls"
+  payload post 'found-issues log --fix small "a:1 — b"' 'AUTOFIX-QUEUED 20261003-000000-00001' >"$TMP/p.json"
+  run_hook "$POST" "$TMP/p.json" post
+  [ -e "$TMP/jq-calls" ]
+}
+
+@test "hook-gate: an AUTOFIX-SWEEP-DUE marker in the output reaches the full path" {
+  rm -f "$TMP/jq-calls"
+  payload post 'found-issues log --fix medium "a:1 — b"' 'AUTOFIX-SWEEP-DUE 20261003-000000-00001' >"$TMP/p.json"
+  run_hook "$POST" "$TMP/p.json" post
+  [ -e "$TMP/jq-calls" ]
+}
+
 @test "hook-gate: FOUND_ISSUES_HOOK_GATES=off runs the full path" {
   export FOUND_ISSUES_HOOK_GATES=off
   payload pre 'ls -la' >"$TMP/p.json"
