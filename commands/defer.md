@@ -1,7 +1,7 @@
 ---
 description: Defer a [open] found-issue to [deferred] — suppresses it from the statusline counter, optionally adds reason or mute-until window. Re-defers (after promotion) automatically increment the defer-cycle and escalate the touch threshold for the next nudge.
 codex-description: Park an [open] entry as [deferred] — it stays in the ledger but leaves the statusline counter, optionally with a reason or mute-until window. Use for known-but-consciously-postponed work, NOT to silence an entry someone should fix (real fixes close via the annotate commands plus sync). Re-deferring after a promotion increments the defer-cycle and escalates the next nudge. Inverse of /found-issues:promote-deferred.
-argument-hint: <match> [--reason "<text>"] [--mute-until YYYY-MM-DD]
+argument-hint: <match> [--reason "<text>"] [--mute-until YYYY-MM-DD] [--until pr:<o/r#N>|date:<YYYY-MM-DD>|"<text>"]
 allowed-tools: Bash(found-issues:*)
 ---
 
@@ -10,7 +10,7 @@ The user wants to defer a `[open]` found-issue. Deferring means: keep the entry 
 ## Invocation
 
 ```bash
-found-issues defer <match> [--reason "<text>"] [--mute-until YYYY-MM-DD]
+found-issues defer <match> [--reason "<text>"] [--mute-until YYYY-MM-DD] [--until pr:<o/r#N>|date:<YYYY-MM-DD>|"<text>"]
 ```
 
 `<match>` is a substring matched case-insensitively against the entry's path or symptom. If the match is ambiguous (matches multiple `[open]` entries), the CLI lists all matches and exits 2 — surface them to the user and ask for a more specific match.
@@ -36,6 +36,19 @@ If you defer an entry that was previously `[deferred]` → promoted → now `[op
 ## Optional `--reason "<text>"`
 
 Captures a short human note explaining WHY this entry is being deferred. Stored as `(reason: ...)` on the entry. Replaces any existing `(reason: ...)` from a prior cycle. Helpful for future re-review.
+
+## Optional `--until <trigger>` (v3)
+
+Records what the entry is waiting for, as `(until: <trigger>)`:
+
+- `pr:<owner/repo#N>` — `sync` returns the entry to `[open]` once that PR is merged.
+- `date:<YYYY-MM-DD>` — `sync` returns it to `[open]` on or after that date.
+- Any other text (e.g. `"after phase 3"`) — not checked mechanically; the
+  auto-fix sweep re-judges it. Parentheses are stored as brackets.
+
+On wake-up the trigger is dropped and every other annotation (including the
+fix tag) is kept. SessionStart runs `sync` even when only such deferred
+entries exist.
 
 ## Optional `--mute-until YYYY-MM-DD`
 

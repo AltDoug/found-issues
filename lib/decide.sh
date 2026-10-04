@@ -7,6 +7,8 @@
 # Functions:
 #   cmd_decide [...]
 
+# shellcheck disable=SC2154  # cross-file globals: FE_* are set by fi_parse_entry_vars (parse-entries.sh)
+
 # Lists [open] entries tagged (decide: <question>), critical first, or
 # records an answer as (decided: <answer>) — which turns the entry fixable.
 # Exits: 0 ok, 1 no match, 2 usage/ambiguous, 3 entry has no open question.

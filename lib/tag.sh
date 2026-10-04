@@ -8,6 +8,8 @@
 #   fi_tag_apply <file> <target-line> <kind> <value>
 #   cmd_tag [...]
 
+# shellcheck disable=SC2154  # cross-file globals: FE_* are set by fi_parse_entry_vars (parse-entries.sh)
+
 # The single file writer of tags (log and decide call it too). Exact-line
 # match on the first occurrence, serialized like every other ledger write.
 # Returns 0 written, 1 target line no longer present, 3 ledger changed.

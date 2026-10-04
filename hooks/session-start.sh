@@ -546,7 +546,7 @@ EOF
   done
   (( __fi_dec == 1 )) && __fi_s=""
   if (( __fi_dec > 0 )); then
-    printf '\n%s decision%s waiting — run `%s` to answer them.\n' "$__fi_dec" "$__fi_s" "$fi_decide_ref"
+    printf '\n%s decision%s waiting — answer with `%s`.\n' "$__fi_dec" "$__fi_s" "$fi_decide_ref"
   fi
   cat <<EOF
 

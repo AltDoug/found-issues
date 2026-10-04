@@ -16,6 +16,7 @@ disable-model-invocation: true
 - **Log:** demonstrable bugs; off-task errors/warnings in test/build/log output; nameable race conditions; security defects; dead code (zero call sites); misleading docs; broken contracts.
 - **Don't log:** style nits; "could be cleaner"; known deprecations; existing TODOs; things you fixed in-task; third-party bugs; speculation without a concrete symptom; unmeasured perf hypotheticals; duplicates (the command dedups on path:line).
 - When in doubt, log — false positives get cleaned at sync; false negatives are silent.
+- **Tag it** (one flag): `--fix small|medium|large` = no decision needed and a test can prove the fix; `--decide "<question>"` = needs the operator's call (several valid fixes, interface/UX, outside the repo, irreversible); `--manual "<why>"` = no test can prove it. Blocked → also `found-issues defer "<loc>" --until pr:<o/r#N>|date:<YYYY-MM-DD>|"<text>"`. `--critical` orders work; it never blocks a fix.
 
 ## Annotation after PR / commit
 

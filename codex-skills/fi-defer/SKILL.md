@@ -9,7 +9,7 @@ The user wants to defer a `[open]` found-issue. Deferring means: keep the entry 
 ## Invocation
 
 ```bash
-found-issues defer <match> [--reason "<text>"] [--mute-until YYYY-MM-DD]
+found-issues defer <match> [--reason "<text>"] [--mute-until YYYY-MM-DD] [--until pr:<o/r#N>|date:<YYYY-MM-DD>|"<text>"]
 ```
 
 `<match>` is a substring matched case-insensitively against the entry's path or symptom. If the match is ambiguous (matches multiple `[open]` entries), the CLI lists all matches and exits 2 — surface them to the user and ask for a more specific match.
@@ -35,6 +35,19 @@ If you defer an entry that was previously `[deferred]` → promoted → now `[op
 ## Optional `--reason "<text>"`
 
 Captures a short human note explaining WHY this entry is being deferred. Stored as `(reason: ...)` on the entry. Replaces any existing `(reason: ...)` from a prior cycle. Helpful for future re-review.
+
+## Optional `--until <trigger>` (v3)
+
+Records what the entry is waiting for, as `(until: <trigger>)`:
+
+- `pr:<owner/repo#N>` — `sync` returns the entry to `[open]` once that PR is merged.
+- `date:<YYYY-MM-DD>` — `sync` returns it to `[open]` on or after that date.
+- Any other text (e.g. `"after phase 3"`) — not checked mechanically; the
+  auto-fix sweep re-judges it. Parentheses are stored as brackets.
+
+On wake-up the trigger is dropped and every other annotation (including the
+fix tag) is kept. SessionStart runs `sync` even when only such deferred
+entries exist.
 
 ## Optional `--mute-until YYYY-MM-DD`
 

@@ -99,8 +99,9 @@ fi_first_line() {
   [ "$stated" -eq "$actual" ]
 }
 
-@test "rules skill stays under the 3.7KB injection budget" {
+@test "rules skill stays under the 4.2KB injection budget" {
   size=$(wc -c < "$TEST_REPO_ROOT/skills/rules/SKILL.md")
   # budget raised 3584->3700 on review to restore the commit-annotation rule; the diet target is the 8.6KB->3.6KB reduction, not the exact byte line.
-  [ "$size" -le 3700 ]
+  # raised 3700->4200 for v3.0.0: the fix-tag rule is how entries get classified at log time (spec 2026-10-03 §3), and the rules are the only channel that reaches the logging agent.
+  [ "$size" -le 4200 ]
 }

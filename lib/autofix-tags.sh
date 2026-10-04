@@ -16,6 +16,8 @@
 #   fi_entry_retag <line> <kind> <value>
 #   fi_until_due <until-spec> <today>
 
+# shellcheck disable=SC2034,SC2154  # cross-file globals: FI_TAG_* are read by tag.sh/log.sh/decide.sh; _fi_pr_ans is set by sync.sh _fi_pr_info
+
 # Off-limits paths are never auto-fixed, whatever the logging agent tagged:
 # a wrong guess there costs a broken pipeline, a leaked secret or a bad
 # migration (spec §3.3). Matching is by exact name or whole path segment so
