@@ -120,7 +120,7 @@ fi_af_status() {
   done
   if (( ${#rows[@]} > 0 )); then
     # Newest first by finished stamp (items from before phase 5 sort as 0).
-    while IFS= read -r f; do
+    while IFS= read -r f || [[ -n "$f" ]]; do
       fi_af_item_read "${f#* }" || true
       printf '  %s  %s — %s\n' "$AFI_id" "${AFI_loc:-sweep}" "$AFI_result"
       _fi_af_pr_num
