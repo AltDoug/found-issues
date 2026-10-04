@@ -38,6 +38,21 @@ cmd_autofix() {
       mkdir -p "$FI_AF_ROOT"
       : >"$FI_AF_ROOT/disabled"
       printf 'Auto-fix switched off in every repo (undo: found-issues autofix on).\n' ;;
+    claim)
+      [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix claim <id>"; return 2; }
+      fi_af_context || return 1
+      fi_af_reap
+      local rc=0
+      fi_af_claim "$1" || rc=$?
+      case $rc in
+        0) printf '%s\n' "$AFI_wt" ;;
+        1) fi_err "autofix: no queued item $1" ;;
+        3) fi_err "autofix: today's spot-fix cap is reached; $1 waits for tomorrow" ;;
+        4) fi_err "autofix: another auto-fix run holds this repo; $1 stays queued" ;;
+        5) fi_err "autofix: $1 retired — $FI_AF_WHY" ;;
+        6) fi_err "autofix: $1 failed — $FI_AF_WHY" ;;
+      esac
+      return $rc ;;
     ""|-h|--help|help) _fi_af_usage ;;
     *) fi_unknown_arg autofix "$sub"; return 2 ;;
   esac

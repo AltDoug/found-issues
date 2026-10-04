@@ -16,6 +16,14 @@
 #   fi_af_new_id
 #   fi_af_log <id> <text>
 #   fi_af_queue_spot <entry-line>
+#   fi_af_lock <id> / fi_af_unlock <id>
+#   fi_af_cap_ok <kind> <limit> / fi_af_cap_take <kind> <id>
+#   fi_af_find_entry [<ledger>]
+#   fi_af_eligible
+#   fi_af_worktree_add / fi_af_worktree_remove
+#   fi_af_retire <id> <outcome> <text>
+#   fi_af_reap
+#   fi_af_claim <id>
 
 # shellcheck disable=SC2034  # AFI_* are read by the other autofix libs
 
@@ -102,3 +110,155 @@ fi_af_queue_spot() {
     printf 'AUTOFIX-QUEUED %s\n' "$FI_AF_ID"
   fi
 }
+
+FI_AF_ENTRY="" FI_AF_LEDGER=""
+
+# Spec §5.1: one fixer per repo at a time. mkdir is the atomic test-and-set;
+# a lock older than 60 min (FOUND_ISSUES_AUTOFIX_LOCK_STALE seconds) belonged
+# to a dead run and is broken by rename, so only one breaker wins.
+fi_af_lock() {
+  local id="$1" lock="$FI_AF_ST/lock" now age
+  if mkdir "$lock" 2>/dev/null; then
+    printf '%s\n' "$id" >"$lock/owner"; return 0
+  fi
+  now="$(date +%s)"
+  age=$(( now - $(fi_file_mtime "$lock") ))
+  (( age >= ${FOUND_ISSUES_AUTOFIX_LOCK_STALE:-3600} )) || return 1
+  mv "$lock" "$lock.stale.$$" 2>/dev/null || return 1
+  rm -rf "$lock.stale.$$"
+  mkdir "$lock" 2>/dev/null || return 1
+  printf '%s\n' "$id" >"$lock/owner"
+}
+
+fi_af_unlock() {
+  local lock="$FI_AF_ST/lock" owner=""
+  [[ -f "$lock/owner" ]] && IFS= read -r owner <"$lock/owner"
+  [[ "$owner" == "$1" ]] && rm -rf "$lock"
+  return 0
+}
+
+# Spec §7: claims per repo per day, one line per claim.
+fi_af_cap_ok() {
+  local f="$FI_AF_ST/day/$(fi_today).$1" n=0 line
+  if [[ -f "$f" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$f"
+  fi
+  (( n < $2 ))
+}
+
+fi_af_cap_take() {
+  printf '%s\n' "$2" >>"$FI_AF_ST/day/$(fi_today).$1"
+}
+
+# The entry this item is about, re-found by dedup key (relative path, line,
+# symptom — annotations and tags may have changed since it was queued) in
+# the source checkout's ledger, or in <ledger> when given (ship uses the
+# worktree's own ledger).
+fi_af_find_entry() {
+  local file="${1:-}" entry
+  FI_AF_ENTRY=""
+  [[ -n "$file" ]] || file="$(fi_find_issues_file "$AFI_root")" || return 1
+  [[ -f "$file" ]] || return 1
+  FI_AF_LEDGER="$file"
+  while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    fi_entry_dedup_key_v "$entry" "$AFI_root" || continue
+    if [[ "$FI_KEY" == "$AFI_key" ]]; then FI_AF_ENTRY="$entry"; return 0; fi
+  done < <(fi_entries "$file" open 2>/dev/null || true)
+  return 1
+}
+
+# Spec §5.1: still [open], fixable now, no fix reference, never failed.
+fi_af_eligible() {
+  FI_AF_WHY=""
+  fi_af_find_entry || { FI_AF_WHY="entry is no longer [open]"; return 1; }
+  fi_parse_entry_vars "$FI_AF_ENTRY"
+  if [[ -n "$FE_prs$FE_prs_auto$FE_commits$FE_commits_auto" ]]; then
+    FI_AF_WHY="entry already has a fix reference"; return 1
+  fi
+  if [[ -n "$FE_autofix_failed" ]]; then
+    FI_AF_WHY="auto-fix failed before: $FE_autofix_failed"; return 1
+  fi
+  case "$FE_fixtag" in small|medium) return 0 ;; esac
+  [[ -n "$FE_decided" && -z "$FE_decide" ]] && return 0
+  FI_AF_WHY="entry is not fixable now (fix: ${FE_fixtag:-none})"
+  return 1
+}
+
+fi_af_worktree_add() {
+  local s base
+  base="$(cd "$AFI_root" && fi_resolve_default_branch)"
+  git -C "$AFI_root" fetch -q origin "$base" 2>/dev/null || { FI_AF_WHY="git fetch failed"; return 1; }
+  s="${AFI_loc//[^A-Za-z0-9]/-}"
+  s="${s:0:40}"
+  AFI_base="$base"
+  AFI_branch="fi/autofix/$s-$AFI_id"
+  AFI_wt="$AFI_root/.claude/worktrees/fi-autofix-$AFI_id"
+  mkdir -p "$AFI_root/.claude/worktrees"
+  git -C "$AFI_root" worktree add -q -b "$AFI_branch" "$AFI_wt" "origin/$base" >/dev/null 2>&1 \
+    || { FI_AF_WHY="git worktree add failed"; return 1; }
+}
+
+fi_af_worktree_remove() {
+  [[ -n "$AFI_wt" && -n "$AFI_root" ]] || return 0
+  git -C "$AFI_root" worktree remove --force "$AFI_wt" >/dev/null 2>&1 || rm -rf "$AFI_wt"
+  git -C "$AFI_root" worktree prune >/dev/null 2>&1 || true
+  if [[ -n "$AFI_branch" ]]; then
+    git -C "$AFI_root" branch -D "$AFI_branch" >/dev/null 2>&1 || true
+  fi
+}
+
+# Move an item (queued or running) to done/ with a result, no ledger write.
+fi_af_retire() {
+  local id="$1" outcome="$2" text="$3" f="$FI_AF_ST/running/$1"
+  [[ -f "$f" ]] || f="$FI_AF_ST/queue/$id"
+  [[ -f "$f" ]] || return 1
+  fi_af_item_set "$f" result "$outcome: $text"
+  mv "$f" "$FI_AF_ST/done/$id"
+  fi_af_unlock "$id"
+  fi_af_log "$id" "$outcome: $text"
+}
+
+# Spec §8: a running item whose process is gone crashed. Requeue it once;
+# the second crash fails it.
+fi_af_reap() {
+  local f
+  for f in "$FI_AF_ST"/running/*; do
+    [[ -f "$f" ]] || continue
+    fi_af_item_read "$f"
+    if [[ -n "$AFI_pid" ]] && kill -0 "$AFI_pid" 2>/dev/null; then continue; fi
+    fi_af_worktree_remove
+    if (( ${AFI_crashes:-0} < 1 )); then
+      fi_af_item_set "$f" crashes 1
+      fi_af_item_set "$f" pid ""
+      fi_af_unlock "$AFI_id"
+      mv "$f" "$FI_AF_ST/queue/$AFI_id"
+      fi_af_log "$AFI_id" "requeued after a crash"
+    else
+      fi_af_finish "$AFI_id" failed "crashed"
+    fi
+  done
+}
+
+# Spec §5.1. Lock first, so of two claimers exactly one sees the queue file.
+fi_af_claim() {
+  local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1"
+  fi_af_lock "$id" || { [[ -f "$q" ]] || return 1; return 4; }
+  if ! fi_af_item_read "$q"; then fi_af_unlock "$id"; return 1; fi
+  if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY"; return 5; fi
+  if ! fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"; then fi_af_unlock "$id"; return 3; fi
+  mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
+  fi_af_cap_take spot "$id"
+  fi_af_item_set "$r" pid "${FI_AF_PID:-$$}"
+  if ! fi_af_worktree_add; then
+    fi_af_finish "$id" failed "$FI_AF_WHY"
+    return 6
+  fi
+  fi_af_item_set "$r" wt "$AFI_wt"
+  fi_af_item_set "$r" branch "$AFI_branch"
+  fi_af_item_set "$r" base "$AFI_base"
+  fi_af_log "$id" "claimed: $AFI_wt ($AFI_branch from origin/$AFI_base)"
+}
+
+# Task 4 replaces this stub with the ledger-writing fi_af_finish.
+fi_af_finish() { fi_af_retire "$1" "$2" "$3"; }
