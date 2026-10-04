@@ -174,9 +174,11 @@ fi_af_sweep_load() {
   return 1
 }
 
+# One line per settled entry: <loc>\t<outcome>\t<dedup key>\t<text>. The key,
+# not the location, names the entry: two entries can share one line.
 _fi_af_sweep_record() {
   local text="${2//$'\t'/ }"
-  printf '%s\t%s\t%s\n' "$AFI_loc" "$1" "${text//$'\n'/ }" >>"$FI_AF_ST/sweeps/$AFI_id.outcomes"
+  printf '%s\t%s\t%s\t%s\n' "$AFI_loc" "$1" "$AFI_key" "${text//$'\n'/ }" >>"$FI_AF_ST/sweeps/$AFI_id.outcomes"
 }
 
 _fi_af_sweep_advance() {
@@ -269,11 +271,11 @@ _fi_af_run_sweep() {
 
 # "2 fixed, 1 failed" from the outcomes file.
 _fi_af_sweep_tally() {
-  local f="$FI_AF_ST/sweeps/$1.outcomes" k c loc out text t=""
+  local f="$FI_AF_ST/sweeps/$1.outcomes" k c loc out key text t=""
   for k in fixed already-fixed decide manual failed; do
     c=0
     if [[ -f "$f" ]]; then
-      while IFS=$'\t' read -r loc out text || [[ -n "$loc" ]]; do
+      while IFS=$'\t' read -r loc out key text || [[ -n "$loc" ]]; do
         [[ "$out" == "$k" ]] && c=$((c + 1))
       done <"$f"
     fi
@@ -301,11 +303,11 @@ fi_af_sweep_finish() {
 }
 
 _fi_af_sweep_pr_body() {
-  local tlog="$1" loc out text
+  local tlog="$1" loc out key text
   printf 'Unattended sweep by found-issues auto-fix (launcher %s, engine %s): %s.\n\n' \
     "${AFI_launcher:-A}" "${AFI_engine:-?}" "$(_fi_af_sweep_tally "$AFI_id")"
   printf '| Entry | Outcome | Note |\n|---|---|---|\n'
-  while IFS=$'\t' read -r loc out text || [[ -n "$loc" ]]; do
+  while IFS=$'\t' read -r loc out key text || [[ -n "$loc" ]]; do
     printf '| `%s` | %s | %s |\n' "$loc" "$out" "${text//|/\\|}"
   done <"$FI_AF_ST/sweeps/$AFI_id.outcomes"
   printf '\nOne commit per fixed entry; the verifier approved each one.\n\n'
@@ -319,7 +321,7 @@ _fi_af_sweep_pr_body() {
 # other than head's (plan Review Focus 3), then publishes one PR.
 fi_af_sweep_ship() {
   local wt="$AFI_wt" tlog="$FI_AF_RUNS/$AFI_id.ship-tests.log" bodyf="$FI_AF_RUNS/$AFI_id.pr-body.md"
-  local rows="$FI_AF_RUNS/$AFI_id.publish" loc out text line
+  local rows="$FI_AF_RUNS/$AFI_id.publish" loc out key text
   FI_AF_PR="" FI_AF_MERGE="none" FI_AF_WHY=""
   [[ -n "$FI_AF_TESTCMD" ]] || { FI_AF_WHY="no test command"; return 1; }
   fi_af_run_tests "$wt" "$FI_AF_TESTCMD" "$tlog" || { FI_AF_WHY="tests fail at ship"; return 1; }
@@ -329,14 +331,8 @@ fi_af_sweep_ship() {
     FI_AF_WHY="the tree differs from the approved commits (did the tests leave files?)"; return 1
   fi
   : >"$rows"
-  while IFS=$'\t' read -r loc out text || [[ -n "$loc" ]]; do
-    [[ "$out" == "fixed" ]] || continue
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      fi_entry_loc_v "$line" || continue
-      [[ "$FE_loc" == "$loc" ]] || continue
-      fi_entry_dedup_key_v "$line" "$AFI_root" && printf '%s\t%s\n' "$FI_KEY" "$loc" >>"$rows"
-      break
-    done <"$FI_AF_ST/sweeps/$AFI_id.entries"
+  while IFS=$'\t' read -r loc out key text || [[ -n "$loc" ]]; do
+    [[ "$out" == "fixed" && -n "$key" ]] && printf '%s\t%s\n' "$key" "$loc" >>"$rows"
   done <"$FI_AF_ST/sweeps/$AFI_id.outcomes"
   _fi_af_sweep_pr_body "$tlog" >"$bodyf"
   _fi_af_publish "fix: found-issues sweep ($AFI_fixed entries)" "$bodyf" "$rows"

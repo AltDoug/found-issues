@@ -289,3 +289,15 @@ gh_mock() {
   run "$FI_BIN" autofix claim "$QID"
   [ "$status" -eq 5 ]
 }
+
+@test "sweep run: two fixed entries on one line are each annotated once" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  run "$FI_BIN" log --fix medium 'src/f1.sh:1 — f1 ignores its argument'
+  SID="$(printf '%s\n' "$output" | sed -n 's/^AUTOFIX-SWEEP-DUE //p')"
+  ST="$FOUND_ISSUES_STATE_DIR/autofix/foo__bar"
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #9, 5 fixed' "$ST/done/$SID"
+  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 5 ]
+  ! grep -q '(PR: foo/bar#9) (PR: foo/bar#9)' docs/found-issues.md || false
+  grep -F 'f1 ignores its argument' docs/found-issues.md | grep -q '(PR: foo/bar#9)'
+}
