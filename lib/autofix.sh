@@ -21,7 +21,8 @@ Usage: found-issues autofix <command>
   ship <id>                   Test, commit, push, open the PR, annotate, arm auto-merge
   release <id> --already-fixed|--decide|--manual|--failed "<text>"
                               Give a claimed item back with an outcome
-  merge-when-green <N>        Wait for PR <N>'s checks, then squash-merge it
+  merge-when-green <N> [--repo owner/name]
+                              Wait for PR <N>'s checks, then squash-merge it
 Settings: git config found-issues.autofix true|false (local overrides --global),
 found-issues.autofix.{engine,testCommand,dailyFixes,runBudget,runTimeoutMin}.
 EOF
@@ -35,13 +36,17 @@ _fi_af_fix_attempt() {
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
   fi_af_collect "$engine" "$base.out" "$base.last"
   fi_af_parse_result "$FI_AF_TEXT"
+  FI_AF_FIX_RC=$rc
+  if [[ -z "$FI_AF_ENGINE_ERR" ]] && (( rc != 0 && rc != 124 )) && [[ "$FI_AF_RESULT" == "none" ]]; then
+    FI_AF_ENGINE_ERR="$engine exited $rc: $(tail -n 1 "$base.err" 2>/dev/null)"
+  fi
   (( rc == 124 )) && fi_af_log "$AFI_id" "attempt $n: fixer timed out"
   fi_af_log "$AFI_id" "attempt $n: fixer rc=$rc result=$FI_AF_RESULT"
 }
 
 _fi_af_verify() {
   local engine="$1" n="$2" base="$FI_AF_RUNS/$AFI_id.verify$n" rc=0
-  fi_af_verifier_cmd "$engine" "$(fi_af_verifier_prompt "$(fi_af_diff "$AFI_wt" "$AFI_base")")" \
+  fi_af_verifier_cmd "$engine" "$(fi_af_verifier_prompt "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")")" \
     "$base.last" "$FI_AF_RUNS/verdict.schema.json"
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
   fi_af_collect "$engine" "$base.out" "$base.last"
@@ -50,7 +55,7 @@ _fi_af_verify() {
 }
 
 _fi_af_reset_wt() {
-  git -C "$AFI_wt" reset -q --hard "origin/$AFI_base" >/dev/null 2>&1 || true
+  git -C "$AFI_wt" reset -q --hard "${AFI_base_sha:-origin/$AFI_base}" >/dev/null 2>&1 || true
   git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
 }
 
@@ -85,6 +90,14 @@ _fi_af_run_one() {
     fi
     (( n == 1 )) || _fi_af_reset_wt
     _fi_af_fix_attempt "$engine" "$n" "$feedback"
+    # An outage (usage limit, logged out, network) is not an attempt: the
+    # item goes back to the queue untagged and the drain stops (rc 7).
+    if [[ -n "$FI_AF_ENGINE_ERR" ]] \
+       && [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
+      FI_AF_WHY="$FI_AF_ENGINE_ERR"
+      fi_af_requeue "$id" "engine error: $FI_AF_ENGINE_ERR"
+      return 7
+    fi
     case "$FI_AF_RESULT" in
       already-fixed|decide)
         _fi_af_end "$id" "$FI_AF_RESULT" "${FI_AF_RESULT_TEXT:-no reason given}"
@@ -92,13 +105,13 @@ _fi_af_run_one() {
       manual)
         # A fixer that changed code but could not prove it says manual; bash
         # runs the tests and the verifier anyway, so its change still counts.
-        if [[ -z "$(fi_af_diff "$AFI_wt" "$AFI_base")" ]]; then
+        if [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
           _fi_af_end "$id" manual "${FI_AF_RESULT_TEXT:-no reason given}"
           return 0
         fi
         fi_af_log "$id" "attempt $n: fixer said manual but left a change; testing and verifying it" ;;
     esac
-    if [[ -z "$(fi_af_diff "$AFI_wt" "$AFI_base")" ]]; then
+    if [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
       why="no change"; feedback="The attempt changed no files."; continue
     fi
     tlog="$FI_AF_RUNS/$id.tests$n.log"
@@ -137,17 +150,29 @@ _fi_af_next_queued() {
   return 1
 }
 
+# A killed run takes its engine child (and the child's process group) with
+# it; the item stays in running/ for the next claim to reap and requeue.
+_fi_af_on_signal() {
+  [[ -n "$FI_AF_CHILD_PGID" ]] && fi_af_kill_child "$FI_AF_CHILD_PGID"
+  exit 143
+}
+
 # Launcher A: run <id>, then drain the queue while claims succeed.
 _fi_af_run() {
   local id="$1" engine_opt="$2" rc next
   export FI_AF_PID=$$
-  fi_af_reap
+  trap _fi_af_on_signal INT TERM HUP
   while [[ -n "$id" ]]; do
+    # `autofix off` mid-drain stops before the next item, not after the queue.
+    if ! fi_af_enabled; then
+      printf 'Auto-fix: switched off (%s); %s stays queued.\n' "$FI_AF_WHY" "$id"; return 0
+    fi
     rc=0
     _fi_af_run_one "$id" "$engine_opt" || rc=$?
     case $rc in
       3) printf 'Auto-fix: daily cap reached; %s waits for tomorrow.\n' "$id"; return 0 ;;
       4) printf 'Auto-fix: another run holds this repo; %s stays queued.\n' "$id"; return 0 ;;
+      7) printf 'Auto-fix: engine error (%s); %s stays queued.\n' "$FI_AF_WHY" "$id"; return 0 ;;
     esac
     [[ -f "$FI_AF_ST/done/$id" ]] && { fi_af_item_read "$FI_AF_ST/done/$id"; printf '%s: %s\n' "$id" "$AFI_result"; }
     next="$(_fi_af_next_queued || true)"
@@ -206,7 +231,7 @@ cmd_autofix() {
     claim)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix claim <id>"; return 2; }
       fi_af_context || return 1
-      fi_af_reap
+      fi_af_no_prompts
       local rc=0
       fi_af_claim "$1" || rc=$?
       case $rc in
@@ -241,7 +266,8 @@ cmd_autofix() {
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix $sub <id>"; return 2; }
       fi_af_context || return 1
       fi_af_item_read "$FI_AF_ST/running/$1" || { fi_err "autofix: $1 is not claimed"; return 1; }
-      if [[ "$sub" == "diff" ]]; then fi_af_diff "$AFI_wt" "$AFI_base"; return; fi
+      if [[ "$sub" == "diff" ]]; then fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}"; return; fi
+      fi_af_no_prompts
       if fi_af_ship; then
         printf 'Shipped %s as PR #%s (merge: %s)\n' "$1" "$FI_AF_PR" "$FI_AF_MERGE"
         fi_af_finish "$1" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE"
@@ -250,8 +276,12 @@ cmd_autofix() {
         return 1
       fi ;;
     merge-when-green)
-      [[ $# -eq 1 && "$1" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number>"; return 2; }
-      fi_af_merge_when_green "$1" ;;
+      local mpr="${1:-}" mrepo=""
+      [[ $# -gt 0 ]] && shift
+      if [[ "${1:-}" == "--repo" && -n "${2:-}" ]]; then mrepo="$2"; shift 2; fi
+      [[ $# -eq 0 && "$mpr" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number> [--repo owner/name]"; return 2; }
+      fi_af_no_prompts
+      fi_af_merge_when_green "$mpr" "$mrepo" ;;
     run)
       local rid="${1:-}" eng=""
       [[ $# -gt 0 ]] && shift
@@ -266,6 +296,7 @@ cmd_autofix() {
       case "$eng" in ""|claude|codex) ;; *) fi_err "autofix run: --engine takes claude or codex"; return 2 ;; esac
       fi_af_context || return 1
       fi_af_enabled || { fi_err "autofix: not running — $FI_AF_WHY"; return 1; }
+      fi_af_no_prompts
       _fi_af_run "$rid" "$eng" ;;
     status)
       fi_af_context || return 1

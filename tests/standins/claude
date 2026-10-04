@@ -7,11 +7,16 @@
 #                      in order (default {"approve":true,"reason":"ok"})
 #   FI_STANDIN_COST    total_cost_usd per call (default 0.25)
 #   FI_STANDIN_SLEEP   seconds to sleep first (watchdog tests)
+#   FI_STANDIN_ERROR   act like an outage: is_error result with this text, exit 1
 set -euo pipefail
 if [[ -n "${FI_STANDIN_TRACE:-}" ]]; then
   ( IFS=$'\x1f'; printf 'claude\x1f%s\n' "$*" ) >>"$FI_STANDIN_TRACE"
 fi
 [[ -n "${FI_STANDIN_SLEEP:-}" ]] && sleep "$FI_STANDIN_SLEEP"
+if [[ -n "${FI_STANDIN_ERROR:-}" ]]; then
+  jq -n --arg r "$FI_STANDIN_ERROR" '{type:"result",subtype:"success",is_error:true,result:$r,total_cost_usd:0}'
+  exit 1
+fi
 verifier=0 prev=""
 for a in "$@"; do
   [[ "$prev" == "--model" && "$a" == "opus" ]] && verifier=1

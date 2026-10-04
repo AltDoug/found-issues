@@ -16,6 +16,7 @@
 #
 # Functions:
 #   fi_af_child <out> <err> <cwd> cmd...
+#   fi_af_kill_child <pid>
 #   fi_af_allowlist <test-command>
 #   fi_af_fixer_prompt <test-command> <feedback> [<engine>]
 #   fi_af_verifier_prompt <diff>
@@ -30,27 +31,50 @@
 
 FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
 FI_AF_RESULT="" FI_AF_RESULT_TEXT="" FI_AF_APPROVE="false" FI_AF_REASON=""
+FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR=""
 
 # macOS ships no `timeout`. Poll once a second; on the limit, TERM then KILL.
+# The child gets its own process group (perl setpgrp — bash 3.2 has no
+# setsid), so the kill reaches its children too: a hung test runner's node
+# or a codex helper used to outlive both the watchdog and a killed run.
+# While it runs, the repo lock is refreshed so a long run never looks stale.
 fi_af_child() {
   local out="$1" err="$2" cwd="$3" secs cpid waited=0 rc=0
   shift 3
   secs="${FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS:-$(( $(fi_af_int runTimeoutMin 20) * 60 ))}"
-  ( cd "$cwd" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec "$@" ) </dev/null >"$out" 2>"$err" &
-  cpid=$!
+  if command -v perl >/dev/null 2>&1; then
+    ( cd "$cwd" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' "$@" ) </dev/null >"$out" 2>"$err" &
+    cpid=$!
+    FI_AF_CHILD_PGID="$cpid"
+  else
+    ( cd "$cwd" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec "$@" ) </dev/null >"$out" 2>"$err" &
+    cpid=$!
+  fi
   while kill -0 "$cpid" 2>/dev/null; do
     if (( waited >= secs )); then
-      kill -TERM "$cpid" 2>/dev/null || true
-      sleep 2
-      kill -KILL "$cpid" 2>/dev/null || true
+      fi_af_kill_child "$cpid"
       wait "$cpid" 2>/dev/null || true
+      FI_AF_CHILD_PGID=""
       return 124
     fi
     sleep 1
     waited=$((waited + 1))
+    if (( waited % 30 == 0 )) && [[ -n "${FI_AF_ST:-}" && -d "$FI_AF_ST/lock" ]]; then
+      touch "$FI_AF_ST/lock" 2>/dev/null || true
+    fi
   done
   wait "$cpid" || rc=$?
+  FI_AF_CHILD_PGID=""
   return $rc
+}
+
+# TERM then KILL the child's process group (or just the child without perl).
+fi_af_kill_child() {
+  local target="$1"
+  [[ -n "$FI_AF_CHILD_PGID" ]] && target="-$FI_AF_CHILD_PGID"
+  kill -TERM -- "$target" 2>/dev/null || true
+  sleep 2
+  kill -KILL -- "$target" 2>/dev/null || true
 }
 
 # Read/Edit tools plus the repo's test command, exactly and with appended
@@ -160,13 +184,17 @@ fi_af_verifier_cmd() {
 
 fi_af_collect() {
   local engine="$1" out="$2" last="$3" c t
-  FI_AF_TEXT=""
+  FI_AF_TEXT="" FI_AF_ENGINE_ERR=""
   if [[ "$engine" == "codex" ]]; then
     [[ -n "$last" && -f "$last" ]] && FI_AF_TEXT="$(cat "$last")"
     t="$(jq -s '[.[] | select(.type=="turn.completed") | (.usage.input_tokens // 0) + (.usage.output_tokens // 0)] | add // 0' "$out" 2>/dev/null || true)"
     [[ "$t" =~ ^[0-9]+$ ]] && FI_AF_TOKENS=$((FI_AF_TOKENS + t))
   else
     FI_AF_TEXT="$(jq -r '.result // empty' "$out" 2>/dev/null || true)"
+    # An outage (usage limit, logged out, network) is is_error or an error_*
+    # subtype; error_max_* is a run limit this run set, not an outage.
+    FI_AF_ENGINE_ERR="$(jq -r 'if (.is_error == true or ((.subtype // "success") | startswith("error_"))) and (((.subtype // "") | startswith("error_max_")) | not) then (.result // .subtype // "engine error") else empty end' "$out" 2>/dev/null || true)"
+    FI_AF_ENGINE_ERR="${FI_AF_ENGINE_ERR//$'\n'/ }"
     c="$(jq -r '.total_cost_usd // 0' "$out" 2>/dev/null || true)"
     [[ "$c" =~ ^[0-9.eE+-]+$ ]] || c=0
     FI_AF_COST="$(awk -v a="$FI_AF_COST" -v b="$c" 'BEGIN { printf "%.4f", a + b }')"
@@ -188,8 +216,11 @@ fi_af_parse_result() {
 
 fi_af_parse_verdict() {
   FI_AF_APPROVE="false" FI_AF_REASON="no parseable verdict"
-  local t="$1" v
+  local t="$1" v rest="$1" n=0
   [[ "$t" == *"{"*"}"* ]] || return 0
+  # One verdict only: "true then false" must not read as approve.
+  while [[ "$rest" == *'"approve"'* ]]; do n=$((n + 1)); rest="${rest#*\"approve\"}"; done
+  if (( n != 1 )); then FI_AF_REASON="ambiguous verdict ($n approve fields)"; return 0; fi
   t="{${t#*\{}"
   t="${t%\}*}}"
   v="$(printf '%s' "$t" | jq -r 'if (.approve | type) == "boolean" then "\(.approve)\t\(.reason // "")" else empty end' 2>/dev/null || true)"

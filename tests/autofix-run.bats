@@ -23,7 +23,7 @@ teardown() { fi_teardown_tmp; }
   [ ! -d "$ST/lock" ]
   grep -q '(PR: foo/bar#7)' "$REPO/docs/found-issues.md"
   [ "$(grep -c '^claude' "$FI_STANDIN_TRACE")" = 2 ]
-  grep -q '^pr merge 7 --auto --squash$' "$GH_MOCK_TRACE"
+  grep -q '^pr merge 7 --auto --squash --repo foo/bar$' "$GH_MOCK_TRACE"
 }
 
 @test "autofix run: codex engine ships and records tokens" {
@@ -51,7 +51,7 @@ teardown() { fi_teardown_tmp; }
   [ "$status" -eq 0 ]
   grep -q '(autofix-failed: no change after 2 attempts)$' "$REPO/docs/found-issues.md"
   grep -q '^result=failed' "$ST/done/$ID"
-  ! grep -q 'pr create' "$GH_MOCK_TRACE" 2>/dev/null
+  ! grep -q 'pr create' "$GH_MOCK_TRACE" 2>/dev/null || false
   [ ! -d "$REPO/.claude/worktrees/fi-autofix-$ID" ]
 }
 
@@ -137,4 +137,44 @@ teardown() { fi_teardown_tmp; }
   export FI_STANDIN_RESULT="FI-RESULT: decide plus or table?" FI_STANDIN_EDIT=true
   run "$FI_BIN" autofix run "$ID" --engine claude
   grep -q '^cost=0.2500$' "$ST/done/$ID"
+}
+
+@test "autofix run: an engine outage requeues the item untagged and stops the drain" {
+  export FI_STANDIN_ERROR="usage limit reached" FI_STANDIN_EDIT=true
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"engine error"* ]]
+  [ -f "$ST/queue/$ID" ]
+  ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
+  [ "$(grep -c '^claude' "$FI_STANDIN_TRACE")" = 1 ]
+  [ ! -d "$ST/lock" ]
+  [ ! -d "$REPO/.claude/worktrees/fi-autofix-$ID" ]
+}
+
+@test "autofix run: switching auto-fix off stops the drain before the next item" {
+  printf -- '- [open] 2026-10-02 test.sh:2 — second thing (fix: small)\n' >> "$REPO/docs/found-issues.md"
+  sleep 1
+  fi_af_queue_spot "$(grep 'second thing' "$REPO/docs/found-issues.md")" >/dev/null
+  export FI_STANDIN_EDIT="sed -i.bak 's/ - / + /' src/calc.sh && rm -f src/calc.sh.bak && touch '$FOUND_ISSUES_STATE_DIR/autofix/disabled'"
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$(ls "$ST/done" | wc -l | tr -d ' ')" = 1 ]
+  [ "$(ls "$ST/queue" | wc -l | tr -d ' ')" = 1 ]
+}
+
+@test "autofix run: git and gh run with credential prompts disabled" {
+  git config found-issues.autofix.testCommand "env > '$TMP/env.txt'; sh test.sh"
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  grep -q '^GIT_TERMINAL_PROMPT=0$' "$TMP/env.txt"
+  grep -q '^GH_PROMPT_DISABLED=1$' "$TMP/env.txt"
+}
+
+@test "autofix run: a TERM to the run kills the engine child too" {
+  export FI_STANDIN_SLEEP=4712
+  "$FI_BIN" autofix run "$ID" --engine claude >/dev/null 2>&1 &
+  rpid=$!
+  for _ in $(seq 1 40); do pgrep -f 'sleep 4712' >/dev/null && break; sleep 0.25; done
+  pgrep -f 'sleep 4712' >/dev/null
+  kill -TERM "$rpid"; wait "$rpid" || true
+  sleep 1
+  ! pgrep -f 'sleep 4712' >/dev/null || false
 }

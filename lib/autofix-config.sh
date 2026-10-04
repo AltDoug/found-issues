@@ -15,6 +15,7 @@
 #   fi_af_context
 #   fi_af_test_command <dir>
 #   fi_af_engine [<explicit>]
+#   fi_af_no_prompts
 
 FI_AF_ROOT="" FI_AF_WHY="" FI_AF_ST="" FI_AF_RUNS="" FI_AF_SLUG=""
 
@@ -147,4 +148,12 @@ fi_af_engine() {
   command -v claude >/dev/null 2>&1 && { printf 'claude'; return 0; }
   command -v codex >/dev/null 2>&1 && { printf 'codex'; return 0; }
   return 1
+}
+
+# Spec §1: nothing auto-fix launches may prompt. Unattended git/gh must
+# fail instead of waiting on a credential prompt (git asks on /dev/tty even
+# with stdin redirected). A user's own GIT_SSH_COMMAND is kept.
+fi_af_no_prompts() {
+  export GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1
+  [[ -n "${GIT_SSH_COMMAND:-}" ]] || export GIT_SSH_COMMAND="ssh -o BatchMode=yes"
 }

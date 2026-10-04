@@ -26,12 +26,13 @@
 #   fi_af_claim <id>
 #   fi_af_ledger_tag <kind> <text> / fi_af_ledger_resolve
 #   fi_af_finish <id> <outcome> <text>
+#   fi_af_requeue <id> <why>
 
 # shellcheck disable=SC2034  # AFI_* are read by the other autofix libs
 
 AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
 AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
-AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" FI_AF_ID=""
+AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -43,14 +44,14 @@ fi_af_item_write() {
 fi_af_item_read() {
   AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
   AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
-  AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens=""
+  AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -199,6 +200,9 @@ fi_af_worktree_add() {
   mkdir -p "$AFI_root/.claude/worktrees"
   git -C "$AFI_root" worktree add -q -b "$AFI_branch" "$AFI_wt" "origin/$base" >/dev/null 2>&1 \
     || { FI_AF_WHY="git worktree add failed"; return 1; }
+  # origin/<base> is shared with the source checkout and moves with every
+  # fetch there; the run diffs and resets against this commit instead.
+  AFI_base_sha="$(git -C "$AFI_wt" rev-parse HEAD 2>/dev/null || true)"
 }
 
 fi_af_worktree_remove() {
@@ -246,12 +250,15 @@ fi_af_reap() {
 fi_af_claim() {
   local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1"
   fi_af_lock "$id" || { [[ -f "$q" ]] || return 1; return 4; }
+  # Reap only while holding the lock: unlocked, a reaper could take a
+  # half-claimed item (no pid yet) for a crash and unlock a live run.
+  fi_af_reap
   if ! fi_af_item_read "$q"; then fi_af_unlock "$id"; return 1; fi
   if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY"; return 5; fi
   if ! fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"; then fi_af_unlock "$id"; return 3; fi
+  fi_af_item_set "$q" pid "${FI_AF_PID:-$$}"
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
   fi_af_cap_take spot "$id"
-  fi_af_item_set "$r" pid "${FI_AF_PID:-$$}"
   if ! fi_af_worktree_add; then
     fi_af_finish "$id" failed "$FI_AF_WHY"
     return 6
@@ -259,7 +266,20 @@ fi_af_claim() {
   fi_af_item_set "$r" wt "$AFI_wt"
   fi_af_item_set "$r" branch "$AFI_branch"
   fi_af_item_set "$r" base "$AFI_base"
+  fi_af_item_set "$r" base_sha "$AFI_base_sha"
   fi_af_log "$id" "claimed: $AFI_wt ($AFI_branch from origin/$AFI_base)"
+}
+
+# Give a claimed item back to the queue untouched (an engine outage): no
+# ledger tag and no attempt counted, so the next trigger retries it.
+fi_af_requeue() {
+  local id="$1" r="$FI_AF_ST/running/$1"
+  fi_af_item_read "$r" || return 1
+  fi_af_worktree_remove
+  fi_af_item_set "$r" pid ""
+  mv "$r" "$FI_AF_ST/queue/$id"
+  fi_af_unlock "$id"
+  fi_af_log "$id" "requeued: $2"
 }
 
 # Retag the entry in the source checkout's ledger.

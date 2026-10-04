@@ -16,7 +16,7 @@ assert_released() {
   [ ! -e "$ST/running/$ID" ]
   [ ! -d "$ST/lock" ]
   [ ! -d "$WT" ]
-  ! git -C "$REPO" rev-parse --verify -q "refs/heads/fi/autofix/src-calc-sh-1-$ID"
+  ! git -C "$REPO" rev-parse --verify -q "refs/heads/fi/autofix/src-calc-sh-1-$ID" || false
 }
 
 @test "autofix release: --failed tags the entry and keeps the fix tag" {
@@ -31,7 +31,7 @@ assert_released() {
   run "$FI_BIN" autofix release "$ID" --decide "plus or a lookup table?"
   [ "$status" -eq 0 ]
   grep -q 'add subtracts (decide: plus or a lookup table?)$' docs/found-issues.md
-  ! grep -q '(fix: small)' docs/found-issues.md
+  ! grep -q '(fix: small)' docs/found-issues.md || false
   assert_released
 }
 

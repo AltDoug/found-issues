@@ -90,3 +90,22 @@ teardown() { fi_teardown_tmp; }
   run "$FI_BIN" autofix claim nope
   [ "$status" -eq 1 ]
 }
+
+@test "autofix claim: crash reaping happens only under the repo lock" {
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  fi_af_item_set "$ST/running/$ID" pid 999999
+  rm -rf "$ST/lock"
+  fi_af_lock other-run
+  printf -- '- [open] 2026-10-02 test.sh:2 — second (fix: small)\n' >> docs/found-issues.md
+  fi_af_queue_spot "$(grep 'second (fix' docs/found-issues.md)" >/dev/null
+  id2="$(ls "$ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id2"
+  [ "$status" -eq 4 ]
+  [ -f "$ST/running/$ID" ]
+}
+
+@test "autofix claim: the running item carries a pid from the moment it exists" {
+  FI_AF_PID=4242 run "$FI_BIN" autofix claim "$ID"
+  grep -q '^pid=4242$' "$ST/running/$ID"
+  [ "$(grep -c '^pid=' "$ST/running/$ID")" = 1 ]
+}

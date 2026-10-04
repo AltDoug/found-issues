@@ -28,15 +28,15 @@ teardown() { fi_teardown_tmp; }
   grep -qx -- '--max-turns' "$TMP/argv"
   grep -qx 'Bash(sh test.sh)' "$TMP/argv"
   grep -qx 'Bash(sh test.sh \*)' "$TMP/argv"
-  ! grep -q 'Bash(git' "$TMP/argv"
-  ! grep -qx 'bypassPermissions' "$TMP/argv"
+  ! grep -q 'Bash(git' "$TMP/argv" || false
+  ! grep -qx 'bypassPermissions' "$TMP/argv" || false
 }
 
 @test "autofix engine: bats and pytest runners may be called with a single file" {
   fi_af_allowlist 'bats tests/'
   printf '%s\n' "${FI_AF_TOOLS[@]}" | grep -qx 'Bash(bats \*)'
   fi_af_allowlist 'npm test'
-  ! printf '%s\n' "${FI_AF_TOOLS[@]}" | grep -qx 'Bash(npm \*)'
+  ! printf '%s\n' "${FI_AF_TOOLS[@]}" | grep -qx 'Bash(npm \*)' || false
 }
 
 @test "autofix engine: claude verifier argv - opus, high effort, read-only tools" {
@@ -45,8 +45,8 @@ teardown() { fi_teardown_tmp; }
   grep -qx 'opus' "$TMP/argv"
   grep -qx 'high' "$TMP/argv"
   grep -qx 'Read' "$TMP/argv" && grep -qx 'Grep' "$TMP/argv" && grep -qx 'Glob' "$TMP/argv"
-  ! grep -qx 'Edit' "$TMP/argv"
-  ! grep -q '^Bash' "$TMP/argv"
+  ! grep -qx 'Edit' "$TMP/argv" || false
+  ! grep -q '^Bash' "$TMP/argv" || false
   [ "${FI_AF_CMD[${#FI_AF_CMD[@]}-1]}" = "V" ]
 }
 
@@ -141,4 +141,23 @@ teardown() { fi_teardown_tmp; }
   [[ "$p" == *"read-only shell commands"* ]]
   [[ "$p" == *"Never run git or gh"* ]]
   [[ "$p" != *"Read, Edit, Write, Grep and Glob tools"* ]]
+}
+
+@test "autofix engine: the watchdog kills the whole process group, not just the child" {
+  FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS=1 run fi_af_child "$TMP/o" "$TMP/e" "$TMP" bash -c 'sleep 4711; :'
+  [ "$status" -eq 124 ]
+  sleep 1
+  ! pgrep -f 'sleep 4711' >/dev/null || false
+}
+
+@test "autofix engine: two verdict objects are ambiguous and never approve" {
+  fi_af_parse_verdict $'{"approve":true,"reason":"a"}\n{"approve":false,"reason":"b"}'
+  [ "$FI_AF_APPROVE" = false ]
+}
+
+@test "autofix engine: an engine error is reported, not mistaken for a result" {
+  FI_AF_COST=0 FI_AF_TOKENS=0
+  FI_STANDIN_ERROR="You've hit your usage limit" claude -p x --output-format json > "$TMP/c.json" || true
+  fi_af_collect claude "$TMP/c.json" ""
+  [ "$FI_AF_ENGINE_ERR" = "You've hit your usage limit" ]
 }
