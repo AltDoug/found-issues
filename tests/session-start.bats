@@ -504,3 +504,45 @@ run_session_start_hook() {
   run env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" FOUND_ISSUES_BIN="$TEST_REPO_ROOT/bin/found-issues" PATH="$TEST_REPO_ROOT/bin:$PATH" HOME="$TMP" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
   grep -q '^- \[open\] 2026-09-01 a.sh:1 — past$' docs/found-issues.md
 }
+
+@test "session-start: a headless session gets no onboarding hint and keeps the marker unset" {
+  # prompt-11 (2026-10-03 audit): "prepend this line to your reply" must not
+  # reach an unattended run (an auto-fix child, claude -p) nor use up the
+  # one-time hint.
+  FAKE_HOME="$TMP/home-headless"; mkdir -p "$FAKE_HOME"
+  export CLAUDE_CODE_ENTRYPOINT=sdk-cli
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"found-issues setup hint"* ]]
+  [ ! -e "$FAKE_HOME/.claude/found-issues/.onboarded" ]
+}
+
+@test "session-start: a headless session gets no statusline nudge" {
+  FAKE_HOME="$TMP/home-headless2"; mkdir -p "$FAKE_HOME/.claude/found-issues"
+  : > "$FAKE_HOME/.claude/found-issues/.onboarded"
+  printf '#!/usr/bin/env bash\nfound-issues status --format segment\n' > "$FAKE_HOME/.claude/statusline.sh"
+  export CLAUDE_CODE_ENTRYPOINT=sdk-cli
+  run_session_start_hook
+  [[ "$output" != *"install-statusline"* ]]
+}
+
+@test "session-start: an interactive cli session still gets the onboarding hint" {
+  FAKE_HOME="$TMP/home-cli"; mkdir -p "$FAKE_HOME"
+  export CLAUDE_CODE_ENTRYPOINT=cli
+  run_session_start_hook
+  [[ "$output" == *"found-issues setup hint"* ]]
+  [ -e "$FAKE_HOME/.claude/found-issues/.onboarded" ]
+}
+
+@test "session-start: a headless session gets no codex-unwired nudge" {
+  FAKE_HOME="$TMP/home-headless3"; mkdir -p "$FAKE_HOME/.claude/found-issues" "$FAKE_HOME/.codex/plugins/cache/x/found-issues"
+  : > "$FAKE_HOME/.claude/found-issues/.onboarded"
+  export FOUND_ISSUES_CODEX_HOME="$FAKE_HOME/.codex"
+  export CLAUDE_CODE_ENTRYPOINT=sdk-cli
+  run_session_start_hook
+  [[ "$output" != *"install-codex-hooks"* ]]
+  [ -z "$(ls "$FAKE_HOME/.claude/found-issues" | grep codex-unwired || true)" ]
+  export CLAUDE_CODE_ENTRYPOINT=cli
+  run_session_start_hook
+  [[ "$output" == *"install-codex-hooks"* ]]
+}
