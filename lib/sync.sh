@@ -137,6 +137,23 @@ cmd_sync() {
     _fi_pr_memo+="$ref"$'\x1e'"$_fi_pr_ans"$'\n'
   }
 
+  # A PR merged into another branch (a release branch, a stacked PR) reaches
+  # the default branch only when that branch does: the newest merged PR from
+  # <base> into the default branch, as mergedAt, or "" when there is none.
+  # One gh call per repo and base branch per run, memoized like _fi_pr_info.
+  local _fi_prom_memo=$'\n'
+  _fi_promoted_at() {
+    local key=$'\n'"$1#$2"$'\x1e'
+    if [[ "$_fi_prom_memo" == *"$key"* ]]; then
+      _fi_prom_ans="${_fi_prom_memo#*"$key"}"
+      _fi_prom_ans="${_fi_prom_ans%%$'\n'*}"
+      return 0
+    fi
+    _fi_prom_ans="$(gh pr list --repo "$1" --head "$2" --base "$default_branch" --state merged \
+      --limit 100 --json mergedAt --jq 'map(.mergedAt // "") | max // ""' 2>/dev/null || true)"
+    _fi_prom_memo+="$1#$2"$'\x1e'"$_fi_prom_ans"$'\n'
+  }
+
   local line
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   # Worst case of the class: SessionStart runs sync automatically, so the loss
@@ -199,7 +216,17 @@ cmd_sync() {
           fi
           local pr_state pr_branch pr_merged_at
           IFS=$'\x1f' read -r pr_state pr_branch pr_merged_at <<<"$_fi_pr_ans"
-          if [[ "$pr_state" == "MERGED" && ( -z "$default_branch" || "$pr_branch" == "$default_branch" ) ]]; then
+          local pr_landed=0
+          if [[ "$pr_state" == "MERGED" ]]; then
+            if [[ -z "$default_branch" || "$pr_branch" == "$default_branch" ]]; then
+              pr_landed=1
+            elif [[ -n "$pr_branch" && -n "$pr_merged_at" ]]; then
+              # Landed once <base> merged into the default branch after it.
+              _fi_promoted_at "${pr_ref%#*}" "$pr_branch"
+              if [[ "$_fi_prom_ans" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T && ! "$_fi_prom_ans" < "$pr_merged_at" ]]; then pr_landed=1; fi
+            fi
+          fi
+          if (( pr_landed )); then
             closure_kind="pr"
             closure_label="(fixed: $today)"
             closed_pr=$((closed_pr + 1))

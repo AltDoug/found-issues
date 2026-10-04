@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-10-04
+
+### Fixed
+
+- `sync` now closes an entry whose PR merged into a branch other than the default one (a release branch, a stacked PR) once a later merged PR brings that branch into the default branch. Before, such entries stayed `[open]` forever: v3's own phase PRs merged into `release/v3`, so their entries never flipped after 3.0.0 reached `main`. One `gh pr list` call per base branch per sync.
+
 ## [3.0.0] - 2026-10-04
 
 Opt-in auto-fix and auto-sweep (spec: `docs/superpowers/specs/2026-10-03-autofix-v3-design.md`).

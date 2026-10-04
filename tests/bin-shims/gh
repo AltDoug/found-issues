@@ -77,7 +77,9 @@ case "$cmd $sub" in
   "pr list")
     # Mocked PR list. Reads GH_MOCK_PR_LIST (full JSON array, e.g. "[]" or
     # '[{"number":1,"state":"OPEN"}]'). Defaults to "[]" (empty list, valid JSON).
-    if [[ -n "${GH_MOCK_PR_LIST:-}" ]]; then
+    if [[ -n "$jq_filter" ]]; then
+      printf '%s' "${GH_MOCK_PR_LIST:-[]}" | jq -r "$jq_filter"
+    elif [[ -n "${GH_MOCK_PR_LIST:-}" ]]; then
       printf '%s\n' "$GH_MOCK_PR_LIST"
     else
       printf '[]\n'

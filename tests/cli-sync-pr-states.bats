@@ -88,3 +88,70 @@ teardown() {
   # Second sync should produce identical file content
   diff <(echo "$snapshot") docs/found-issues.md
 }
+
+# A PR merged into a release branch (stacked or release-train workflow)
+# lands on main only when that branch does. Sync closes the entry once a
+# merged PR from that branch into the default branch exists, merged after it.
+release_pr() { # mergedAt of PR 42 into release/v3
+  export GH_MOCK_PR_VIEW=$'42\t{"state":"MERGED","baseRefName":"release/v3","mergedAt":"'"$1"'","isDraft":false}'
+}
+
+@test "sync: a PR merged into a release branch that later reached main flips to fixed" {
+  fi_init_github_repo foo/bar main
+  release_pr 2026-10-04T06:00:00Z
+  export GH_MOCK_PR_LIST='[{"mergedAt":"2026-10-04T09:00:00Z"}]'
+  export GH_MOCK_TRACE="$TMP/gh.trace"
+  mkdir -p src && printf 'x\n' > src/foo.py
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[fixed\].*(PR: foo/bar#42)' docs/found-issues.md
+  grep -q '^pr list --repo foo/bar --head release/v3 --base main --state merged' "$TMP/gh.trace"
+}
+
+@test "sync: a PR merged into a branch that never reached main stays open" {
+  fi_init_github_repo foo/bar main
+  release_pr 2026-10-04T06:00:00Z
+  export GH_MOCK_PR_LIST='[]'
+  mkdir -p src && printf 'x\n' > src/foo.py
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*(PR: foo/bar#42)' docs/found-issues.md
+}
+
+@test "sync: a release branch merge to main older than the PR leaves it open" {
+  fi_init_github_repo foo/bar main
+  release_pr 2026-10-04T06:00:00Z
+  export GH_MOCK_PR_LIST='[{"mergedAt":"2026-10-01T09:00:00Z"}]'
+  mkdir -p src && printf 'x\n' > src/foo.py
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*(PR: foo/bar#42)' docs/found-issues.md
+}
+
+@test "sync: a gh answer that is not a timestamp never counts as reaching main" {
+  fi_init_github_repo foo/bar main
+  release_pr 2026-10-04T06:00:00Z
+  export GH_MOCK_PR_LIST='[{"mergedAt":"[not a date]"}]'
+  mkdir -p src && printf 'x\n' > src/foo.py
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*(PR: foo/bar#42)' docs/found-issues.md
+}
+
+@test "sync: release branch promotion is looked up once per base branch" {
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_PR_VIEW=$'42\t{"state":"MERGED","baseRefName":"release/v3","mergedAt":"2026-10-04T06:00:00Z","isDraft":false}\n43\t{"state":"MERGED","baseRefName":"release/v3","mergedAt":"2026-10-04T07:00:00Z","isDraft":false}'
+  export GH_MOCK_PR_LIST='[{"mergedAt":"2026-10-04T09:00:00Z"}]'
+  export GH_MOCK_TRACE="$TMP/gh.trace"
+  mkdir -p src && printf 'x\n' > src/foo.py && printf 'y\n' > src/bar.py
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_seed_entry "src/bar.py:1 — other bug (PR: foo/bar#43)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^- \[fixed\]' docs/found-issues.md)" = 2 ]
+  [ "$(grep -c '^pr list' "$TMP/gh.trace")" = 1 ]
+}
