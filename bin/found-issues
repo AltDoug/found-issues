@@ -428,6 +428,7 @@ main() {
     resolve)          cmd_resolve "$@" ;;
     tag)              cmd_tag "$@" ;;
     decide)           cmd_decide "$@" ;;
+    config)           cmd_config "$@" ;;
     autofix)          cmd_autofix "$@" ;;
     fix)              cmd_fix "$@" ;;
     promote)          cmd_promote "$@" ;;
