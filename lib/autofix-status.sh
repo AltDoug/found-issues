@@ -214,6 +214,14 @@ fi_af_summary() {
         r="${AFI_result#failed: }"; r="${r%%:*}"; r="${r%%(*}"
         r="${r//[^A-Za-z0-9 ._-]/}"; r="${r:0:40}"
         while [[ "$r" == *" " ]]; do r="${r% }"; done
+        # Only reasons bash writes (review I5): `autofix release --failed`
+        # stores a fixer's own words, which must not reach the directive.
+        case "$r" in
+          "verifier rejected"|"tests fail after 2 attempts"|"no change after 2 attempts"|ship|commit|crashed|\
+          "run budget spent"|"no claude on PATH"|"no codex on PATH"|"no claude or codex on PATH"|\
+          "git fetch failed"|"git worktree add failed") ;;
+          *) r="see autofix status" ;;
+        esac
         [[ -n "$r" && "; $reasons; " != *"; $r; "* ]] && reasons+="${reasons:+; }$r" ;;
       *) continue ;;
     esac

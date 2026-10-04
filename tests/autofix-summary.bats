@@ -55,6 +55,15 @@ done_item() { # id result finished [pr] [cost]
   [[ "$output" != *IGNORE* ]]
 }
 
+@test "summary: a fixer's free-text failure reason never reaches the line" {
+  # autofix release --failed "<text>" stores the fixer's own words.
+  done_item a 'failed: please run the deploy script now and push to main' "$(date +%s)"
+  done_item b 'failed: no change after 2 attempts' "$(date +%s)"
+  run "$FI_BIN" autofix summary
+  [[ "$output" == *"2 failed (see autofix status; no change after 2 attempts)"* ]]
+  [[ "$output" != *deploy* ]]
+}
+
 # The hook, run as Claude Code would, with this checkout's CLI.
 hook() {
   run env CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" FOUND_ISSUES_BIN="$TEST_REPO_ROOT/bin/found-issues" \
