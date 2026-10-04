@@ -21,6 +21,24 @@
 #
 # Symptom may include "(suggested: ...)" inline.
 
+# Apply log's requested fix tag to the entry it matched instead of appending
+# (v3 review I2: the tag used to be dropped on escalation and on a deferred
+# match). Reads cmd_log's tag_kind; sets _fi_log_line to the entry as it now
+# reads. Returns 1 only when the write failed.
+_fi_log_tag_existing() {
+  local file="$1" entry="$2" trc=0
+  _fi_log_line="$entry"
+  [[ -n "$tag_kind" ]] || return 0
+  fi_parse_entry_vars "$entry"
+  if [[ -n "$FE_fixtag$FE_decide$FE_manual" ]]; then
+    fi_err "found-issues log: entry already tagged — left as is; change it with: found-issues tag '<match>' --$tag_kind ..."
+    return 0
+  fi
+  fi_tag_apply "$file" "$entry" "$FI_TAG_KIND" "$FI_TAG_VALUE" || trc=$?
+  (( trc == 0 )) || { fi_err "found-issues log: could not tag the existing entry (rc $trc) — re-run"; return 1; }
+  _fi_log_line="$FI_RETAGGED"
+}
+
 cmd_log() {
   local critical="no" tag_kind="" tag_value=""
   while [[ $# -gt 0 ]]; do
@@ -30,7 +48,20 @@ cmd_log() {
         [[ -z "$tag_kind" ]] || { fi_err "found-issues log: one fix tag per entry (got $1 after --$tag_kind)"; return 2; }
         fi_need_value log "$1" $# "${2:-}" || return 2
         tag_kind="${1#--}"; tag_value="$2"; shift 2 ;;
+      --fix=*|--decide=*|--manual=*)
+        [[ -z "$tag_kind" ]] || { fi_err "found-issues log: one fix tag per entry (got ${1%%=*} after --$tag_kind)"; return 2; }
+        tag_kind="${1%%=*}"; tag_kind="${tag_kind#--}"; tag_value="${1#*=}"; shift ;;
       *) break ;;
+    esac
+  done
+  # A tag flag AFTER the entry used to be folded into the symptom and logged
+  # untagged with exit 0 (v3 review I1) — refuse rather than guess.
+  local _fi_arg
+  for _fi_arg in "$@"; do
+    case "$_fi_arg" in
+      --fix|--fix=*|--decide|--decide=*|--manual|--manual=*)
+        fi_err "found-issues log: put ${_fi_arg%%=*} before the entry: found-issues log ${_fi_arg%%=*} <value> '<location> — <symptom>'"
+        return 2 ;;
     esac
   done
 
@@ -232,15 +263,13 @@ cmd_log() {
         fi_err "found-issues log: the ledger changed while escalating — re-run"
         return 1
       fi
+      _fi_log_tag_existing "$file" "$esc_line" || return 1
       cmd_status plain
       return 0
     fi
     if [[ -n "$tag_kind" ]]; then
-      fi_parse_entry_vars "$matched_entry"
-      if [[ -z "$FE_fixtag$FE_decide$FE_manual" ]]; then
-        local trc=0
-        fi_tag_apply "$file" "$matched_entry" "$FI_TAG_KIND" "$FI_TAG_VALUE" || trc=$?
-        (( trc == 0 )) || { fi_err "found-issues log: could not tag the existing entry (rc $trc) — re-run"; return 1; }
+      _fi_log_tag_existing "$file" "$matched_entry" || return 1
+      if [[ "$_fi_log_line" != "$matched_entry" ]]; then
         cmd_status plain
         return 0
       fi
@@ -251,7 +280,8 @@ cmd_log() {
   fi
 
   if [[ "$matched_status" == "deferred" ]]; then
-    fi_handle_deferred_touch "$file" "$matched_entry"
+    _fi_log_tag_existing "$file" "$matched_entry" || return 1
+    fi_handle_deferred_touch "$file" "$_fi_log_line"
     return $?
   fi
 

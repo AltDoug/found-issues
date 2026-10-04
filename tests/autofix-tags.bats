@@ -276,3 +276,26 @@ EOS
   [[ "$output" == *"Woke: 1"* ]]
   cmp "$TMP/before" docs/found-issues.md
 }
+
+@test "log: a tag flag after the entry or in --fix= form is never silently dropped (review I1)" {
+  fi_run log --fix=small "src/a.sh:2 — equals form"
+  [ "$status" -eq 0 ]
+  grep -qx -- "- \[open\] $(date +%Y-%m-%d) src/a.sh:2 — equals form (fix: small)" docs/found-issues.md
+  fi_run log "src/a.sh:1 — crash on empty input" --fix small
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"before the entry"* ]]
+  ! grep -q 'crash on empty input' docs/found-issues.md
+}
+
+@test "log: the tag survives --critical escalation and a deferred match (review I2)" {
+  fi_run log "src/a.sh:1 — escalate me"
+  fi_run log --critical --fix small "src/a.sh:1 — escalate me"
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] \[!\] .*escalate me (fix: small)' docs/found-issues.md
+  printf -- '- [deferred] 2026-10-01 src/a.sh:5 — parked (reason: later)\n' >> docs/found-issues.md
+  fi_run log --fix medium "src/a.sh:5 — parked"
+  [ "$status" -eq 0 ]
+  grep -q '^- \[deferred\] .*parked (reason: later).*(fix: medium)' docs/found-issues.md
+  fi_run log --manual "other" "src/a.sh:5 — parked"
+  [[ "$output" == *"already tagged"* ]]
+}
