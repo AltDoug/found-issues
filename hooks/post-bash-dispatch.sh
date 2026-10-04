@@ -30,7 +30,7 @@
 # one process + one jq parse per Bash call instead of three.
 #
 # Exit code: 0 always (additive; never blocks).
-# Output: via fi_emit_post_context (plain text on Claude, JSON on Codex).
+# Output: via fi_emit_post_context (hookSpecificOutput JSON on both harnesses).
 # Opt-outs: FOUND_ISSUES_AUTO_ANNOTATE=off (prompt-only legacy behavior —
 #           old post-pr-create/post-git-commit scan+prompt, verbatim below),
 #           FOUND_ISSUES_POST_PR_STATE=off (skip merge-route sync).
