@@ -31,7 +31,7 @@
 
 AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
 AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
-AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" FI_AF_ID=""
+AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" FI_AF_ID=""
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -43,14 +43,14 @@ fi_af_item_write() {
 fi_af_item_read() {
   AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
   AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
-  AFI_base="" AFI_result="" AFI_pr="" AFI_cost=""
+  AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens=""
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
