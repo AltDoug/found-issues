@@ -61,6 +61,29 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   [[ "$output" == *"tests: pass"* ]]
 }
 
+# A TAP run whose only failure is far above the last 30 lines.
+tap_fail_cmd() {
+  printf '%s' "printf 'not ok 1 early %s\n# (in test file t.bats, line 3)\n' failure; i=2; while [ \$i -le 40 ]; do echo \"ok \$i fine\"; i=\$((i+1)); done; exit 1"
+}
+
+@test "b: the repo test command runs without FOUND_ISSUES_AUTOFIX_CHILD" {
+  git -C "$REPO" config found-issues.autofix.testCommand '[ -z "${FOUND_ISSUES_AUTOFIX_CHILD:-}" ]'
+  claim
+  run "$FI_BIN" autofix test "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tests: pass"* ]]
+}
+
+@test "b: test lists every failing TAP test with its diagnostics, not just the tail" {
+  git -C "$REPO" config found-issues.autofix.testCommand "$(tap_fail_cmd)"
+  claim
+  run "$FI_BIN" autofix test "$ID"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not ok 1 early failure"* ]]
+  [[ "$output" == *"# (in test file t.bats, line 3)"* ]]
+  [[ "$output" == *"ok 40 fine"* ]]
+}
+
 @test "b: test refreshes the repo lock" {
   claim
   touch -t 202001010000 "$ST/lock"

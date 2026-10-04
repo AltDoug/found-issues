@@ -91,7 +91,7 @@ fi_af_b_test() {
   while [[ -e "$FI_AF_RUNS/$id.btest$n.log" ]]; do n=$((n + 1)); done
   log="$FI_AF_RUNS/$id.btest$n.log"
   fi_af_run_tests "$AFI_wt" "$t" "$log" || rc=$?
-  tail -n 30 "$log" 2>/dev/null
+  fi_af_test_report "$log" 30
   tail -n 5 "$log.err" 2>/dev/null
   fi_af_touch_lock "$id"
   if (( rc == 0 )); then printf 'tests: pass\n'; else printf 'tests: fail (exit %s)\n' "$rc"; fi
@@ -124,7 +124,7 @@ fi_af_b_verify() {
   FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")" || { fi_err "autofix: no test command"; return 2; }
   log="$FI_AF_RUNS/$id.bverify-tests.log"
   if ! fi_af_run_tests "$AFI_wt" "$FI_AF_TESTCMD" "$log"; then
-    tail -n 20 "$log" 2>/dev/null
+    fi_af_test_report "$log" 20
     printf 'tests fail: fix them (found-issues autofix test %s) before verify\n' "$id"; return 3
   fi
   engine="$(fi_af_engine "${AFI_engine:-claude}")" || engine=claude

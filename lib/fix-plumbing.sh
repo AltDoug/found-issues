@@ -48,7 +48,7 @@ _fi_fix_test() {
   t="$(fi_af_test_command "$wt")" || { fi_err "fix test: no test command found (set found-issues.autofix.testCommand)"; return 2; }
   log="$(mktemp "${TMPDIR:-/tmp}/fi-fix-test.XXXXXX")"
   fi_af_run_tests "$wt" "$t" "$log" || rc=$?
-  tail -n 30 "$log" 2>/dev/null
+  fi_af_test_report "$log" 30
   tail -n 5 "$log.err" 2>/dev/null
   rm -f "$log" "$log.err"
   if (( rc == 0 )); then printf 'tests: pass\n'; else printf 'tests: fail (exit %s)\n' "$rc"; fi

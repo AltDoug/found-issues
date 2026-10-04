@@ -526,6 +526,11 @@ run_session_start_hook() {
   [[ "$output" != *"install-statusline"* ]]
 }
 
+@test "session-start: tests start clean of an inherited FOUND_ISSUES_AUTOFIX_CHILD" {
+  run bash -c 'export FOUND_ISSUES_AUTOFIX_CHILD=1; . "$1"; printf "[%s]" "${FOUND_ISSUES_AUTOFIX_CHILD:-}"' _ "$TEST_REPO_ROOT/tests/helpers.bash"
+  [ "$output" = "[]" ]
+}
+
 @test "session-start: an interactive cli session still gets the onboarding hint" {
   FAKE_HOME="$TMP/home-cli"; mkdir -p "$FAKE_HOME"
   export CLAUDE_CODE_ENTRYPOINT=cli

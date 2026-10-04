@@ -11,6 +11,8 @@
 #   fi_af_reset_ledger <wt> <base>
 #   fi_af_diff <wt> <base>
 #   fi_af_run_tests <wt> <cmd> <log>
+#   fi_af_test_failures <log>
+#   fi_af_test_report <log> [n]
 #   fi_af_annotate_ledger <ledger|""> <annotation>
 #   fi_af_spawn <cwd> <found-issues args...>
 #   fi_af_ship
@@ -55,8 +57,35 @@ fi_af_diff() {
   git -C "$1" diff --cached "$2"
 }
 
+# The test command is the repo's suite, not part of the fixer: it runs
+# without the child marker fi_af_child sets, as a developer would run it.
+# Inherited, the marker turned every interactive-path session-start test in
+# this repo red, so every auto-fix of found-issues itself failed (3.0.2).
 fi_af_run_tests() {
-  fi_af_child "$3" "$3.err" "$1" bash -c "$2" || return $?
+  fi_af_child "$3" "$3.err" "$1" bash -c "unset FOUND_ISSUES_AUTOFIX_CHILD; $2" || return $?
+}
+
+# The failing tests in a test log, at most 80 lines: TAP "not ok" lines with
+# their "#" diagnostics, and the failure lines of pytest, go test and jest.
+# A tail alone hid them: a full bats run printed its failures hundreds of
+# lines above the last 30.
+fi_af_test_failures() {
+  awk '
+    n >= 80 { exit }
+    /^not ok / { print; n++; tap = 1; next }
+    tap && /^#/ { print; n++; next }
+    { tap = 0 }
+    /^(FAILED |--- FAIL: |FAIL )/ { print; n++ }
+  ' "$1" 2>/dev/null || true
+}
+
+# What a fixer reads after a run: the failing tests, then the last <n> lines.
+fi_af_test_report() {
+  local f
+  f="$(fi_af_test_failures "$1")"
+  [[ -n "$f" ]] && printf 'Failing tests:\n%s\n\n' "$f"
+  printf 'Last lines:\n'
+  tail -n "${2:-30}" "$1" 2>/dev/null || true
 }
 
 # Append a closing annotation to THIS item's entry (matched by dedup key) in

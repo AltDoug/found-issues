@@ -24,6 +24,11 @@ export FOUND_ISSUES_SEGMENT_AUTOSYNC=off
 # keep it out of the real ~/.cache. Tests that inspect it set their own.
 export FOUND_ISSUES_CACHE_DIR="${BATS_RUN_TMPDIR:-${TMPDIR:-/tmp}}/fi-test-cache"
 
+# A suite started inside an auto-fix run inherits FOUND_ISSUES_AUTOFIX_CHILD=1,
+# which makes session-start take its headless path and fails every test of
+# the interactive one. Tests that want it set it themselves.
+unset FOUND_ISSUES_AUTOFIX_CHILD
+
 # Ensure the CLI is executable (bats clones into a tempdir, may lose +x)
 chmod +x "$FI_BIN" 2>/dev/null || true
 
