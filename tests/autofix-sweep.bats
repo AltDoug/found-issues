@@ -209,3 +209,83 @@ sweep_queue() { # queue a sweep for the fixture; sets SID and ST
   [ "$status" -eq 1 ]
   [ -f "$ST/queue/$SID" ]
 }
+
+sweep_edit() { # the stand-in fixer fixes whichever entry its prompt names, with a test
+  export FI_STANDIN_EDIT='case "$FI_STANDIN_PROMPT" in *"src/calc.sh:1"*) sed -i.bak "s/ - / + /" src/calc.sh; rm -f src/calc.sh.bak; printf "[ \"\$(add 2 3)\" = 5 ]\n" >> test.sh ;; esac; for f in src/f*.sh; do n="${f#src/f}"; n="${n%.sh}"; case "$FI_STANDIN_PROMPT" in *"src/f$n.sh:1"*) sed -i.bak "s/- 1/+ 0/" "$f"; rm -f "$f.bak"; printf "[ \"\$(f%s 2)\" = 2 ]\n" "$n" >> test.sh ;; esac; done'
+}
+gh_mock() {
+  export GH_MOCK_TRACE="$TMP/gh.trace" GH_MOCK_PR_CREATE_URL=https://github.com/foo/bar/pull/9
+  export GH_MOCK_PR_VIEW=$'9\t{"number":9,"state":"OPEN","statusCheckRollup":[]}'
+}
+
+@test "sweep run: fixes every entry, one commit each, one PR, every entry annotated" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  run "$FI_BIN" autofix run "$SID" --engine claude
+  [ "$status" -eq 0 ]
+  [ -f "$ST/done/$SID" ]
+  grep -q '^result=shipped: PR #9, 5 fixed' "$ST/done/$SID"
+  br="fi/sweep/${SID%%-*}-${SID##*-}"
+  [ "$(git -C "$TMP/remote.git" log --format=%s "main..$br" | grep -c '^fix: ')" = 5 ]
+  [ "$(grep -c '^pr create' "$GH_MOCK_TRACE")" = 1 ]
+  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 5 ]
+  [ "$(git -C "$TMP/remote.git" show "$br:docs/found-issues.md" | grep -c '(PR: foo/bar#9)')" = 4 ]
+  grep -q '^pr merge 9 --auto --squash --repo foo/bar$' "$GH_MOCK_TRACE"
+  grep -q 'found-issues sweep (5 entries)' "$GH_MOCK_TRACE"
+  [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
+}
+
+@test "sweep run: a rejected entry is reset and the next entry's diff is clean" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  printf '%s\n' '{"approve":false,"reason":"no"}' '{"approve":false,"reason":"no"}' > "$TMP/verdicts"
+  export FI_STANDIN_VERDICTS="$TMP/verdicts"
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  first="$(head -1 "$ST/sweeps/$SID.entries")"
+  grep -F -- "${first% (fix: medium)}" docs/found-issues.md | grep -q '(autofix-failed: verifier rejected: no after 2 attempts)'
+  [ "$(grep -c '	fixed	' "$ST/sweeps/$SID.outcomes")" = 4 ]
+  f1="$(printf '%s' "$first" | sed -E 's/^.* (src\/[^:]+):1 .*$/\1/')"
+  br="fi/sweep/${SID%%-*}-${SID##*-}"
+  [ -z "$(git -C "$TMP/remote.git" log --format=%H "main..$br" -- "$f1")" ]
+}
+
+@test "sweep run: nothing fixed ends stale with no PR" {
+  fi_af_sweep_fixture 4; fi_use_standins; gh_mock
+  export FI_STANDIN_RESULT='FI-RESULT: manual cannot test'
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=stale: sweep fixed nothing (5 manual)' "$ST/done/$SID"
+  ! grep -q '^pr create' "$GH_MOCK_TRACE" 2>/dev/null || false
+  [ "$(grep -c '(manual: cannot test)' docs/found-issues.md)" = 5 ]
+}
+
+@test "sweep run: ship refuses a tree that differs from the approved commits" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  # $$ differs per run: the ship-time test run rewrites the artifact.
+  git config found-issues.autofix.testCommand 'sh test.sh && echo $$ > artifact.out'
+  git config found-issues.autofix.sweepMax 1
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=failed: ship: the tree differs' "$ST/done/$SID"
+  ! grep -q '^pr create' "$GH_MOCK_TRACE" 2>/dev/null || false
+}
+
+@test "sweep run: the run budget stops the sweep without failing the current entry" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBudget 0.60
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #9, 1 fixed' "$ST/done/$SID"
+  ! grep -q 'autofix-failed' docs/found-issues.md || false
+}
+
+@test "sweep run: a spot item for an entry the sweep shipped retires stale" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  entry="$(grep -m1 'f1 subtracts' docs/found-issues.md)"
+  source "$FI_BIN"; fi_af_context
+  fi_entry_dedup_key_v "$entry" "$REPO"
+  QID=20991231-000000-00001
+  fi_af_item_write "$ST/queue/$QID" "id=$QID" kind=spot "root=$REPO" slug=foo/bar loc=src/f1.sh:1 "key=$FI_KEY" "entry=$entry" engine=claude crashes=0
+  run "$FI_BIN" autofix claim "$QID"
+  [ "$status" -eq 5 ]
+}

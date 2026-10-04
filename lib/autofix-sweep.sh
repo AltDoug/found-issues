@@ -17,6 +17,8 @@
 #   fi_af_sweep_claim <id>
 #   fi_af_sweep_load <id>
 #   fi_af_sweep_commit <id> / fi_af_sweep_settle <id> <outcome> <text>
+#   _fi_af_run_sweep <id> <engine>
+#   fi_af_sweep_finish <id> / fi_af_sweep_ship
 
 # shellcheck disable=SC2034,SC2154  # AFI_*/FE_* are shared with autofix-queue.sh / parse-entries.sh
 
@@ -225,4 +227,117 @@ fi_af_sweep_settle() {
   _fi_af_sweep_record "$outcome" "$text"
   fi_af_log "$id" "sweep: $AFI_loc $outcome: $text"
   _fi_af_sweep_advance
+}
+
+# Launcher A for a claimed sweep: each entry through the shared fix loop,
+# then one PR (spec §6 steps 4-5). A budget stop or an engine outage leaves
+# the current entry untouched and ships what is committed (ruling 7).
+_fi_af_run_sweep() {
+  local id="$1" engine_opt="$2" r="$FI_AF_ST/running/$1" engine
+  fi_af_item_read "$r"
+  FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}"
+  if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
+    fi_af_finish "$id" stale "no test command"; return 0
+  fi
+  if ! engine="$(fi_af_engine "${engine_opt:-$AFI_engine}")" || ! command -v "$engine" >/dev/null 2>&1; then
+    fi_af_finish "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
+  fi
+  AFI_engine="$engine"
+  while fi_af_sweep_load "$id"; do
+    fi_af_enabled || break
+    _fi_af_fix_loop "$id" "$engine"
+    fi_af_item_set "$r" cost "$FI_AF_COST"
+    fi_af_item_set "$r" tokens "$FI_AF_TOKENS"
+    case "$FI_AF_OUTCOME" in
+      outage)
+        fi_af_log "$id" "sweep: engine error: $FI_AF_OUTCOME_TEXT"
+        _fi_af_reset_wt; break ;;
+      approved)
+        fi_af_sweep_commit "$id" || fi_af_sweep_settle "$id" failed "commit: $FI_AF_WHY" ;;
+      failed)
+        if [[ "$FI_AF_OUTCOME_TEXT" == "run budget spent"* ]]; then
+          fi_af_log "$id" "sweep: $FI_AF_OUTCOME_TEXT"
+          _fi_af_reset_wt; break
+        fi
+        fi_af_sweep_settle "$id" failed "$FI_AF_OUTCOME_TEXT" ;;
+      *) fi_af_sweep_settle "$id" "$FI_AF_OUTCOME" "$FI_AF_OUTCOME_TEXT" ;;
+    esac
+  done
+  fi_af_sweep_finish "$id" || true
+  return 0
+}
+
+# "2 fixed, 1 failed" from the outcomes file.
+_fi_af_sweep_tally() {
+  local f="$FI_AF_ST/sweeps/$1.outcomes" k c loc out text t=""
+  for k in fixed already-fixed decide manual failed; do
+    c=0
+    if [[ -f "$f" ]]; then
+      while IFS=$'\t' read -r loc out text || [[ -n "$loc" ]]; do
+        [[ "$out" == "$k" ]] && c=$((c + 1))
+      done <"$f"
+    fi
+    (( c > 0 )) && t+="${t:+, }$c $k"
+  done
+  printf '%s' "${t:-no entries}"
+}
+
+# Ship when anything was committed, else end stale. rc 1 when ship failed.
+fi_af_sweep_finish() {
+  local id="$1" r="$FI_AF_ST/running/$1"
+  fi_af_item_read "$r" || return 1
+  if (( ${AFI_fixed:-0} == 0 )); then
+    fi_af_finish "$id" stale "sweep fixed nothing ($(_fi_af_sweep_tally "$id"))"
+    return 0
+  fi
+  [[ -n "$FI_AF_TESTCMD" ]] || FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt" 2>/dev/null || true)"
+  if fi_af_sweep_ship; then
+    fi_af_item_set "$r" pr "$FI_AF_PR"
+    fi_af_finish "$id" shipped "PR #$FI_AF_PR, $AFI_fixed fixed, merge $FI_AF_MERGE, \$${FI_AF_COST:-0}"
+    return 0
+  fi
+  fi_af_finish "$id" failed "ship: $FI_AF_WHY"
+  return 1
+}
+
+_fi_af_sweep_pr_body() {
+  local tlog="$1" loc out text
+  printf 'Unattended sweep by found-issues auto-fix (launcher %s, engine %s): %s.\n\n' \
+    "${AFI_launcher:-A}" "${AFI_engine:-?}" "$(_fi_af_sweep_tally "$AFI_id")"
+  printf '| Entry | Outcome | Note |\n|---|---|---|\n'
+  while IFS=$'\t' read -r loc out text || [[ -n "$loc" ]]; do
+    printf '| `%s` | %s | %s |\n' "$loc" "$out" "${text//|/\\|}"
+  done <"$FI_AF_ST/sweeps/$AFI_id.outcomes"
+  printf '\nOne commit per fixed entry; the verifier approved each one.\n\n'
+  printf 'Tests: `%s` passed. Last lines:\n\n' "$FI_AF_TESTCMD"
+  tail -n 15 "$tlog" 2>/dev/null | sed 's/^/    /'
+  printf '\nRun cost: $%s (claude), %s tokens (codex)\n\n' "${FI_AF_COST:-0}" "${FI_AF_TOKENS:-0}"
+  printf 'This PR merges itself when its checks pass (found-issues auto-fix policy).\n'
+}
+
+# The commits exist; ship re-runs the tests at head and refuses any tree
+# other than head's (plan Review Focus 3), then publishes one PR.
+fi_af_sweep_ship() {
+  local wt="$AFI_wt" tlog="$FI_AF_RUNS/$AFI_id.ship-tests.log" bodyf="$FI_AF_RUNS/$AFI_id.pr-body.md"
+  local rows="$FI_AF_RUNS/$AFI_id.publish" loc out text line
+  FI_AF_PR="" FI_AF_MERGE="none" FI_AF_WHY=""
+  [[ -n "$FI_AF_TESTCMD" ]] || { FI_AF_WHY="no test command"; return 1; }
+  fi_af_run_tests "$wt" "$FI_AF_TESTCMD" "$tlog" || { FI_AF_WHY="tests fail at ship"; return 1; }
+  fi_af_reset_ledger "$wt" "$AFI_head"
+  git -C "$wt" add -A >/dev/null 2>&1 || true
+  if [[ -z "$AFI_verdict_tree" || "$(git -C "$wt" write-tree 2>/dev/null)" != "$AFI_verdict_tree" ]]; then
+    FI_AF_WHY="the tree differs from the approved commits (did the tests leave files?)"; return 1
+  fi
+  : >"$rows"
+  while IFS=$'\t' read -r loc out text || [[ -n "$loc" ]]; do
+    [[ "$out" == "fixed" ]] || continue
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      fi_entry_loc_v "$line" || continue
+      [[ "$FE_loc" == "$loc" ]] || continue
+      fi_entry_dedup_key_v "$line" "$AFI_root" && printf '%s\t%s\n' "$FI_KEY" "$loc" >>"$rows"
+      break
+    done <"$FI_AF_ST/sweeps/$AFI_id.entries"
+  done <"$FI_AF_ST/sweeps/$AFI_id.outcomes"
+  _fi_af_sweep_pr_body "$tlog" >"$bodyf"
+  _fi_af_publish "fix: found-issues sweep ($AFI_fixed entries)" "$bodyf" "$rows"
 }

@@ -14,6 +14,7 @@
 #   fi_af_annotate_ledger <ledger|""> <annotation>
 #   fi_af_spawn <cwd> <found-issues args...>
 #   fi_af_ship
+#   _fi_af_publish <title> <body-file> <key-loc-rows-file>
 #   fi_af_merge_when_green <N>
 
 # shellcheck disable=SC2154  # AFI_*/FE_* come from autofix-queue.sh / parse-entries.sh
@@ -94,9 +95,9 @@ _fi_af_pr_body() {
 }
 
 fi_af_ship() {
-  local wt="$AFI_wt" base="$AFI_base" br="$AFI_branch" runlog="$FI_AF_RUNS/$AFI_id.log"
+  local wt="$AFI_wt" runlog="$FI_AF_RUNS/$AFI_id.log"
   local ref="${AFI_base_sha:-origin/$AFI_base}"
-  local tlog="$FI_AF_RUNS/$AFI_id.ship-tests.log" bodyf="$FI_AF_RUNS/$AFI_id.pr-body.md" frag url p
+  local tlog="$FI_AF_RUNS/$AFI_id.ship-tests.log" bodyf="$FI_AF_RUNS/$AFI_id.pr-body.md" frag
   FI_AF_PR="" FI_AF_MERGE="none" FI_AF_WHY=""
   [[ -n "$FI_AF_TESTCMD" ]] || FI_AF_TESTCMD="$(fi_af_test_command "$wt")" || { FI_AF_WHY="no test command"; return 1; }
   fi_af_reset_ledger "$wt" "$ref"
@@ -114,27 +115,46 @@ fi_af_ship() {
   frag="${frag:0:60}"
   git -C "$wt" commit -q -m "fix: $frag (found-issues $AFI_loc)" >>"$runlog" 2>&1 \
     || { FI_AF_WHY="git commit refused (a commit hook?)"; return 1; }
-  git -C "$wt" push -q -u origin "$br" >>"$runlog" 2>&1 || { FI_AF_WHY="git push failed"; return 1; }
   _fi_af_pr_body "$tlog" >"$bodyf"
-  url="$(cd "$wt" && gh pr create --repo "$AFI_slug" --base "$base" --head "$br" --title "fix: $frag" --body-file "$bodyf" 2>>"$runlog")" \
+  printf '%s\t%s\n' "$AFI_key" "$AFI_loc" >"$FI_AF_RUNS/$AFI_id.publish"
+  _fi_af_publish "fix: $frag" "$bodyf" "$FI_AF_RUNS/$AFI_id.publish"
+}
+
+# Shared by a spot ship and a sweep ship: push the branch, open the PR,
+# annotate every <key>\t<loc> row on the PR branch's ledger (one commit, so
+# the annotation reaches the default branch, prompt-9) and in the source
+# ledger (where sync closes it on merge), then arm auto-merge.
+_fi_af_publish() {
+  local title="$1" bodyf="$2" rows="$3" wt="$AFI_wt" br="$AFI_branch" base="$AFI_base"
+  local runlog="$FI_AF_RUNS/$AFI_id.log" url p wl="" ann key loc n=0 msg
+  local keep_key="$AFI_key" keep_loc="$AFI_loc"
+  git -C "$wt" push -q -u origin "$br" >>"$runlog" 2>&1 || { FI_AF_WHY="git push failed"; return 1; }
+  url="$(cd "$wt" && gh pr create --repo "$AFI_slug" --base "$base" --head "$br" --title "$title" --body-file "$bodyf" 2>>"$runlog")" \
     || { FI_AF_WHY="gh pr create failed"; return 1; }
   FI_AF_PR="${url##*/}"
   [[ "$FI_AF_PR" =~ ^[0-9]+$ ]] || { FI_AF_WHY="no PR number in: $url"; return 1; }
   fi_af_log "$AFI_id" "opened PR #$FI_AF_PR"
 
-  local ann="(PR: $AFI_slug#$FI_AF_PR)" wl=""
+  ann="(PR: $AFI_slug#$FI_AF_PR)"
   # The PR branch's ledger, when origin already has the entry (prompt-9).
   for p in docs/found-issues.md .found-issues.md; do
     [[ -f "$wt/$p" ]] && { wl="$p"; break; }
   done
-  if [[ -n "$wl" ]] && fi_af_annotate_ledger "$wt/$wl" "$ann"; then
+  while IFS=$'\t' read -r key loc || [[ -n "$key" ]]; do
+    [[ -n "$key" ]] || continue
+    AFI_key="$key" AFI_loc="$loc"
+    if [[ -n "$wl" ]] && fi_af_annotate_ledger "$wt/$wl" "$ann"; then n=$((n + 1)); msg="annotate $loc with PR $FI_AF_PR"; fi
+    # The source checkout's ledger, where sync will close the entry on merge.
+    fi_af_annotate_ledger "" "$ann" || fi_af_log "$AFI_id" "source ledger annotation failed for $loc"
+  done <"$rows"
+  AFI_key="$keep_key" AFI_loc="$keep_loc"
+  if (( n > 0 )); then
+    (( n == 1 )) || msg="annotate $n entries with PR $FI_AF_PR"
     git -C "$wt" add -- "$wl"
-    if git -C "$wt" commit -q -m "docs(found-issues): annotate $AFI_loc with PR $FI_AF_PR" >>"$runlog" 2>&1; then
+    if git -C "$wt" commit -q -m "docs(found-issues): $msg" >>"$runlog" 2>&1; then
       git -C "$wt" push -q origin "$br" >>"$runlog" 2>&1 || fi_af_log "$AFI_id" "ledger annotation push failed"
     fi
   fi
-  # The source checkout's ledger, where sync will close the entry on merge.
-  fi_af_annotate_ledger "" "$ann" || fi_af_log "$AFI_id" "source ledger annotation failed"
 
   if ( cd "$wt" && gh pr merge "$FI_AF_PR" --auto --squash --repo "$AFI_slug" ) >>"$runlog" 2>&1; then
     FI_AF_MERGE="auto"

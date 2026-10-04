@@ -144,6 +144,7 @@ _fi_af_run_one() {
   local id="$1" engine_opt="$2" engine
   fi_af_claim "$id" || return $?
   fi_af_item_read "$FI_AF_ST/running/$id"
+  if [[ "$AFI_kind" == "sweep" ]]; then _fi_af_run_sweep "$id" "$engine_opt"; return; fi
   FI_AF_COST=0 FI_AF_TOKENS=0
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
     _fi_af_end "$id" manual "no test command"; return 0
