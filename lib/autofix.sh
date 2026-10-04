@@ -16,7 +16,10 @@ Usage: found-issues autofix <command>
   status                      Queue, running, today's count, recent results
   run <id> [--engine claude|codex]
                               Fix a queued item headlessly, then the rest of the queue
+                              (exit 1 unknown id, 3 capped, 4 locked, 7 engine outage)
   claim <id>                  Take a queued item: lock, cap, worktree (prints its path)
+  brief <id>                  The in-session fixer's instructions for a claimed item
+  test <id>                   Run the repo's test command in the claimed item's worktree
   diff <id>                   The claimed item's change against origin/<default>
   ship <id>                   Test, commit, push, open the PR, annotate, arm auto-merge
   release <id> --already-fixed|--decide|--manual|--failed "<text>"
@@ -162,6 +165,11 @@ _fi_af_run() {
   local id="$1" engine_opt="$2" rc next
   export FI_AF_PID=$$
   trap _fi_af_on_signal INT TERM HUP
+  # A mistyped id must not silently drain everything else (operator
+  # decision 2026-10-04, ledger lib/autofix.sh:150).
+  if [[ ! -f "$FI_AF_ST/queue/$id" && ! -f "$FI_AF_ST/running/$id" ]]; then
+    fi_err "autofix: no queued item $id"; return 1
+  fi
   while [[ -n "$id" ]]; do
     # `autofix off` mid-drain stops before the next item, not after the queue.
     if ! fi_af_enabled; then
@@ -170,9 +178,11 @@ _fi_af_run() {
     rc=0
     _fi_af_run_one "$id" "$engine_opt" || rc=$?
     case $rc in
-      3) printf 'Auto-fix: daily cap reached; %s waits for tomorrow.\n' "$id"; return 0 ;;
-      4) printf 'Auto-fix: another run holds this repo; %s stays queued.\n' "$id"; return 0 ;;
-      7) printf 'Auto-fix: engine error (%s); %s stays queued.\n' "$FI_AF_WHY" "$id"; return 0 ;;
+      # The capped marker tells the Stop-hook fallback not to relaunch today.
+      3) : >"$FI_AF_ST/day/$(fi_today).capped" 2>/dev/null || true
+         printf 'Auto-fix: daily cap reached; %s waits for tomorrow.\n' "$id"; return 3 ;;
+      4) printf 'Auto-fix: another run holds this repo; %s stays queued.\n' "$id"; return 4 ;;
+      7) printf 'Auto-fix: engine error (%s); %s stays queued.\n' "$FI_AF_WHY" "$id"; return 7 ;;
     esac
     [[ -f "$FI_AF_ST/done/$id" ]] && { fi_af_item_read "$FI_AF_ST/done/$id"; printf '%s: %s\n' "$id" "$AFI_result"; }
     next="$(_fi_af_next_queued || true)"
@@ -266,6 +276,7 @@ cmd_autofix() {
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix $sub <id>"; return 2; }
       fi_af_context || return 1
       fi_af_item_read "$FI_AF_ST/running/$1" || { fi_err "autofix: $1 is not claimed"; return 1; }
+      fi_af_touch_lock "$1"
       if [[ "$sub" == "diff" ]]; then fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}"; return; fi
       fi_af_no_prompts
       if fi_af_ship; then
@@ -282,6 +293,11 @@ cmd_autofix() {
       [[ $# -eq 0 && "$mpr" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number> [--repo owner/name]"; return 2; }
       fi_af_no_prompts
       fi_af_merge_when_green "$mpr" "$mrepo" ;;
+    brief|test)
+      [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix $sub <id>"; return 2; }
+      fi_af_context || return 1
+      fi_af_b_running "$1" || return 1
+      if [[ "$sub" == brief ]]; then fi_af_brief; else fi_af_b_test "$1"; fi ;;
     run)
       local rid="${1:-}" eng=""
       [[ $# -gt 0 ]] && shift

@@ -33,6 +33,7 @@
 AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
 AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
+AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -45,13 +46,14 @@ fi_af_item_read() {
   AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
   AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
+  AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -256,7 +258,12 @@ fi_af_claim() {
   if ! fi_af_item_read "$q"; then fi_af_unlock "$id"; return 1; fi
   if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY"; return 5; fi
   if ! fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"; then fi_af_unlock "$id"; return 3; fi
-  fi_af_item_set "$q" pid "${FI_AF_PID:-$$}"
+  # Launcher A's run passes its own long-lived pid. A standalone claim is an
+  # in-session fixer (launcher B): its claim process exits at once, so there
+  # is no pid to record. The repo lock, refreshed by every B-side call, is
+  # what keeps the item from being reaped (ledger lib/autofix-queue.sh:263).
+  fi_af_item_set "$q" pid "${FI_AF_PID:-}"
+  if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
   fi_af_cap_take spot "$id"
   if ! fi_af_worktree_add; then

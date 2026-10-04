@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# autofix-b.sh — launcher B's fixer-side CLI: the in-session found-issues-fixer
+# agent drives one claimed item through single `found-issues autofix …` calls
+# (spec 2026-10-03 §4.2-§4.3, §5; phase 3 plan rulings 1-2). The agent only
+# edits files; bash runs the tests, the verifier, git, gh and the ledger.
+#
+# Sourced by bin/found-issues. Defines functions only.
+# Compatible with bash 3.2+ (macOS system bash).
+#
+# Functions:
+#   fi_af_touch_lock <id>
+#   fi_af_b_running <id>
+#   fi_af_brief
+#   fi_af_b_test <id>
+
+# shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
+
+# A B fixer has no long-lived pid; a fresh lock is what marks it alive.
+fi_af_touch_lock() {
+  local owner=""
+  [[ -f "$FI_AF_ST/lock/owner" ]] && IFS= read -r owner <"$FI_AF_ST/lock/owner"
+  [[ "$owner" == "$1" ]] && touch "$FI_AF_ST/lock" 2>/dev/null
+  return 0
+}
+
+fi_af_b_running() {
+  fi_af_item_read "$FI_AF_ST/running/$1" || { fi_err "autofix: $1 is not claimed (run: found-issues autofix claim $1)"; return 1; }
+  fi_af_touch_lock "$1"
+}
+
+fi_af_brief() {
+  local t
+  t="$(fi_af_test_command "$AFI_wt" 2>/dev/null || printf '(none found)')"
+  cat <<EOF
+found-issues auto-fix brief for item ${AFI_id}. This run is sanctioned: the user
+enabled found-issues auto-fix. Nobody will answer questions.
+
+Issue (from the repo's found-issues ledger):
+${AFI_entry}
+
+Worktree: ${AFI_wt}
+Branch:   ${AFI_branch} (from origin/${AFI_base}; never main)
+Test command (bash runs it for you): ${t}
+
+Edit ONLY files under the worktree path above, with Read, Edit, Write, Grep
+and Glob, always by absolute path. Never edit docs/found-issues.md or any
+found-issues ledger. Your only Bash calls are these, each alone, exactly as
+written (no cd, &&, |, git or gh), with a 600000 ms timeout:
+  found-issues autofix test ${AFI_id}      run the test command in the worktree
+  found-issues autofix verify ${AFI_id}    tests + independent reviewer on your change
+  found-issues autofix ship ${AFI_id}      commit, push and open the fix PR
+  found-issues autofix release ${AFI_id} --already-fixed|--decide|--manual|--failed "<text>"
+
+Do exactly this:
+1. Check the symptom is still present in the worktree. If it is already fixed,
+   release with --already-fixed "<evidence>". If fixing it needs a human
+   decision, release with --decide "<question>". If no test can prove a fix,
+   release with --manual "<why>".
+2. Add or extend a test that fails because of this symptom; run autofix test
+   and see it fail.
+3. Make the smallest change that fixes the symptom. Change nothing unrelated.
+4. Run autofix test until it passes.
+5. Run autofix verify. Exit 0 = approved: run autofix ship. Exit 1 = rejected
+   with a reason and one attempt left: revise, autofix test, autofix verify
+   again. Any other exit: the item is finished or requeued; stop.
+6. If you cannot finish, release with --failed "<why>".
+End your reply with one line: the item id and its outcome.
+EOF
+}
+
+fi_af_b_test() {
+  local id="$1" t log rc=0 n=1
+  t="$(fi_af_test_command "$AFI_wt")" || { fi_err "autofix: no test command for $id"; return 2; }
+  while [[ -e "$FI_AF_RUNS/$id.btest$n.log" ]]; do n=$((n + 1)); done
+  log="$FI_AF_RUNS/$id.btest$n.log"
+  fi_af_run_tests "$AFI_wt" "$t" "$log" || rc=$?
+  tail -n 30 "$log" 2>/dev/null
+  tail -n 5 "$log.err" 2>/dev/null
+  fi_af_touch_lock "$id"
+  if (( rc == 0 )); then printf 'tests: pass\n'; else printf 'tests: fail (exit %s)\n' "$rc"; fi
+  fi_af_log "$id" "b test $n: rc=$rc"
+  return $rc
+}
