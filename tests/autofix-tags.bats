@@ -146,3 +146,41 @@ teardown() { fi_teardown_tmp; }
   fi_run tag --help;                       [ "$status" -eq 0 ]
   ! grep -q '(fix:' docs/found-issues.md
 }
+
+@test "log: --fix writes the tag; off-limits becomes manual" {
+  fi_run log --fix small "src/a.sh:1 — off by one"
+  [ "$status" -eq 0 ]
+  grep -qx -- "- \[open\] $(date +%Y-%m-%d) src/a.sh:1 — off by one (fix: small)" docs/found-issues.md
+  printf '{}\n' > package.json && git add -A && git commit -q -m pkg
+  fi_run log --critical --fix medium "package.json:1 — wrong engines field"
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] \[!\] .*package.json:1 — wrong engines field (manual: off-limits: dependencies)' docs/found-issues.md
+}
+
+@test "log: --decide and --manual; flags in any order before the entry" {
+  fi_run log --decide "rename or alias?" --critical "src/a.sh:2 — confusing flag name"
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] \[!\] .*src/a.sh:2 — confusing flag name (decide: rename or alias?)' docs/found-issues.md
+  fi_run log --manual "needs prod payload" "src/a.sh:3 — webhook parse"
+  grep -q 'src/a.sh:3 — webhook parse (manual: needs prod payload)' docs/found-issues.md
+  fi_run log --fix small --manual x "src/a.sh:4 — two tags"
+  [ "$status" -eq 2 ]
+}
+
+@test "log: re-logging an untagged entry with a tag tags it instead of skipping" {
+  fi_run log "src/a.sh:1 — off by one"
+  fi_run log --fix small "src/a.sh:1 — off by one"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Tagged:"* ]]
+  [ "$(grep -c 'src/a.sh:1' docs/found-issues.md)" -eq 1 ]
+  grep -q 'off by one (fix: small)' docs/found-issues.md
+}
+
+@test "log/tag: an abstract topic with --fix is tagged manual no-file, not untracked" {
+  fi_run log --fix small "release-process — changelog step is manual"
+  [ "$status" -eq 0 ]
+  grep -q 'changelog step is manual (manual: off-limits: no-file)' docs/found-issues.md
+  fi_run log "ci-flakes — retries hide real failures"
+  fi_run tag "ci-flakes" --fix medium
+  grep -q 'retries hide real failures (manual: off-limits: no-file)' docs/found-issues.md
+}

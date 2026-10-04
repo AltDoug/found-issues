@@ -12,7 +12,7 @@
 
 # === Subcommand: log ===
 #
-# Usage: found-issues log [--critical] <location> — <symptom>
+# Usage: found-issues log [--critical] [--fix S|M|L | --decide Q | --manual W] <location> — <symptom>
 #
 # location can be:
 #   - path/file.ext:42  (concrete file:line)
@@ -22,15 +22,21 @@
 # Symptom may include "(suggested: ...)" inline.
 
 cmd_log() {
-  local critical="no"
-  if [[ "${1:-}" == "--critical" ]]; then
-    critical="yes"
-    shift
-  fi
+  local critical="no" tag_kind="" tag_value=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --critical) critical="yes"; shift ;;
+      --fix|--decide|--manual)
+        [[ -z "$tag_kind" ]] || { fi_err "found-issues log: one fix tag per entry (got $1 after --$tag_kind)"; return 2; }
+        fi_need_value log "$1" $# "${2:-}" || return 2
+        tag_kind="${1#--}"; tag_value="$2"; shift 2 ;;
+      *) break ;;
+    esac
+  done
 
   if [[ $# -eq 0 ]]; then
     fi_err "found-issues log: missing arguments"
-    fi_err "Usage: found-issues log [--critical] <location> — <symptom>"
+    fi_err "Usage: found-issues log [--critical] [--fix small|medium|large | --decide \"<q>\" | --manual \"<why>\"] <location> — <symptom>"
     return 2
   fi
 
@@ -58,7 +64,7 @@ cmd_log() {
   local location symptom
   if [[ "$input" != *" — "* ]]; then
     fi_err "found-issues log: missing ' — ' separator"
-    fi_err "Usage: found-issues log [--critical] <location> — <symptom>"
+    fi_err "Usage: found-issues log [--critical] [--fix small|medium|large | --decide \"<q>\" | --manual \"<why>\"] <location> — <symptom>"
     return 2
   fi
   location="${input%% — *}"
@@ -132,6 +138,19 @@ cmd_log() {
   # Canonicalize path
   if [[ "$path" == */* || "$path" == *.* ]]; then
     path="$(fi_canonicalize_path "$path")"
+  fi
+
+  # v3 fix tag: validated and off-limits-checked up front so a bad value
+  # writes nothing (spec §3.3, §3.5). An abstract topic has no file, so it is
+  # checked as file-less rather than as an untracked path.
+  if [[ -n "$tag_kind" ]]; then
+    local tag_path=""
+    [[ "$path" == */* || "$path" == *.* ]] && tag_path="$path"
+    fi_repo_root_cached
+    fi_tag_resolve "$tag_kind" "$tag_value" "$tag_path" "$FI_REPO_ROOT" || return 2
+    if [[ "$tag_kind" == "fix" && "$FI_TAG_KIND" == "manual" ]]; then
+      fi_err "found-issues log: ${path:-this entry} is off-limits for auto-fix ($FI_TAG_VALUE) — tagged manual instead"
+    fi
   fi
 
   # Resolve issues file
@@ -216,6 +235,16 @@ cmd_log() {
       cmd_status plain
       return 0
     fi
+    if [[ -n "$tag_kind" ]]; then
+      fi_parse_entry_vars "$matched_entry"
+      if [[ -z "$FE_fixtag$FE_decide$FE_manual" ]]; then
+        local trc=0
+        fi_tag_apply "$file" "$matched_entry" "$FI_TAG_KIND" "$FI_TAG_VALUE" || trc=$?
+        (( trc == 0 )) || { fi_err "found-issues log: could not tag the existing entry (rc $trc) — re-run"; return 1; }
+        cmd_status plain
+        return 0
+      fi
+    fi
     printf 'Skipped — already logged: %s\n' "$matched_entry"
     cmd_status plain
     return 0
@@ -247,6 +276,10 @@ cmd_log() {
   fi
 
   local entry="- [open]${crit_flag} $(fi_today)${location_str} — $symptom"
+  if [[ -n "$tag_kind" ]]; then
+    fi_entry_retag "$entry" "$FI_TAG_KIND" "$FI_TAG_VALUE"
+    entry="$FI_RETAGGED"
+  fi
 
   # Append (with leading newline if file doesn't end in one).
   # Note: command substitution strips trailing newlines, so an empty result

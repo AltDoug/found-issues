@@ -79,7 +79,10 @@ cmd_tag() {
   local target="${matches[0]}"
   fi_parse_entry_vars "$target" || return 1
   fi_repo_root_cached
-  fi_tag_resolve "$kind" "$value" "$FE_path" "$FI_REPO_ROOT" || return 2
+  # An abstract topic has no file: checked as file-less, not as untracked.
+  local tag_path=""
+  [[ "$FE_path" == */* || "$FE_path" == *.* ]] && tag_path="$FE_path"
+  fi_tag_resolve "$kind" "$value" "$tag_path" "$FI_REPO_ROOT" || return 2
   if [[ "$kind" == "fix" && "$FI_TAG_KIND" == "manual" ]]; then
     fi_err "tag: $FE_path is off-limits for auto-fix ($FI_TAG_VALUE) — tagged manual instead"
   fi
