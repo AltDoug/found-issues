@@ -91,7 +91,7 @@ cmd_tag() {
   local rc=0
   fi_tag_apply "$file" "$target" "$FI_TAG_KIND" "$FI_TAG_VALUE" || rc=$?
   case $rc in
-    0) return 0 ;;
+    0) fi_af_sweep_check || true; return 0 ;;
     3) fi_err "tag: the ledger changed while writing — re-run"; return 3 ;;
     *) fi_err "tag: the entry changed before it could be tagged — re-run"; return 1 ;;
   esac

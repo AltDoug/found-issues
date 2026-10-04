@@ -8,6 +8,8 @@
 #   FI_STANDIN_COST    total_cost_usd per call (default 0.25)
 #   FI_STANDIN_SLEEP   seconds to sleep first (watchdog tests)
 #   FI_STANDIN_ERROR   act like an outage: is_error result with this text, exit 1
+#   FI_STANDIN_CLASSIFY the sweep classifier's JSON reply (default no tags)
+# FI_STANDIN_EDIT sees the prompt (the last argument) as $FI_STANDIN_PROMPT.
 set -euo pipefail
 if [[ -n "${FI_STANDIN_TRACE:-}" ]]; then
   ( IFS=$'\x1f'; printf 'claude\x1f%s\n' "$*" ) >>"$FI_STANDIN_TRACE"
@@ -16,6 +18,13 @@ fi
 if [[ -n "${FI_STANDIN_ERROR:-}" ]]; then
   jq -n --arg r "$FI_STANDIN_ERROR" '{type:"result",subtype:"success",is_error:true,result:$r,total_cost_usd:0}'
   exit 1
+fi
+export FI_STANDIN_PROMPT="${!#}"
+FI_STANDIN_NO_TAGS='{"tags":[],"wake":[]}'
+if [[ "$FI_STANDIN_PROMPT" == *"found-issues classifier"* ]]; then
+  jq -n --arg r "${FI_STANDIN_CLASSIFY:-$FI_STANDIN_NO_TAGS}" --argjson c "${FI_STANDIN_COST:-0.25}" \
+    '{type:"result",subtype:"success",is_error:false,result:$r,total_cost_usd:$c,permission_denials:[]}'
+  exit 0
 fi
 verifier=0 prev=""
 for a in "$@"; do

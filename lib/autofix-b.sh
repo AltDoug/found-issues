@@ -11,6 +11,7 @@
 #   fi_af_touch_lock <id>
 #   fi_af_b_running <id>
 #   fi_af_b_enabled <id>
+#   fi_af_sweep_brief
 #   fi_af_brief
 #   fi_af_b_test <id>
 #   fi_af_b_verify <id>
@@ -25,9 +26,12 @@ fi_af_touch_lock() {
   return 0
 }
 
+# A sweep also loads its current entry (AFI_entry empty when none is left).
 fi_af_b_running() {
   fi_af_item_read "$FI_AF_ST/running/$1" || { fi_err "autofix: $1 is not claimed (run: found-issues autofix claim $1)"; return 1; }
   fi_af_touch_lock "$1"
+  if [[ "$AFI_kind" == "sweep" ]]; then fi_af_sweep_load "$1" || AFI_entry=""; fi
+  return 0
 }
 
 # `autofix off` (or the repo setting) mid-fix: verify and ship give the
@@ -41,6 +45,7 @@ fi_af_b_enabled() {
 
 fi_af_brief() {
   local t
+  [[ "$AFI_kind" == "sweep" ]] && { fi_af_sweep_brief; return; }
   t="$(fi_af_test_command "$AFI_wt" 2>/dev/null || printf '(none found)')"
   cat <<EOF
 found-issues auto-fix brief for item ${AFI_id}. This run is sanctioned: the user
@@ -101,8 +106,18 @@ fi_af_b_test() {
 # 3 tests fail (no attempt counted), 5 rejected twice (finished failed),
 # 6 run budget spent (finished failed), 7 verifier unavailable (requeued),
 # 8 auto-fix switched off (requeued, from cmd_autofix).
+# A sweep (phase 4 ruling 3) verifies its current entry against the last
+# good commit: approval commits it at once (no window to change the tree);
+# a second reject fails only that entry (5); a budget stop or an outage
+# leaves it untouched and tells the sweeper to ship (6, 7).
 fi_af_b_verify() {
-  local id="$1" r="$FI_AF_ST/running/$1" engine n log
+  local id="$1" r="$FI_AF_ST/running/$1" engine n log sweep=0
+  if [[ "$AFI_kind" == "sweep" ]]; then
+    sweep=1
+    if [[ -z "$AFI_entry" ]]; then
+      printf 'no entry in progress: run found-issues autofix ship %s\n' "$id"; return 2
+    fi
+  fi
   if [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
     printf 'nothing to verify: the worktree has no change\n'; return 2
   fi
@@ -115,6 +130,9 @@ fi_af_b_verify() {
   engine="$(fi_af_engine "${AFI_engine:-claude}")" || engine=claude
   FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}"
   if [[ "$engine" == claude ]] && ! fi_af_budget_left >/dev/null; then
+    if (( sweep )); then
+      printf 'run budget spent ($%s): run found-issues autofix ship %s\n' "$FI_AF_COST" "$id"; return 6
+    fi
     fi_af_finish "$id" failed "run budget spent (\$$FI_AF_COST)"
     printf 'failed: run budget spent; stop\n'; return 6
   fi
@@ -123,22 +141,77 @@ fi_af_b_verify() {
   fi_af_item_set "$r" cost "$FI_AF_COST"
   fi_af_item_set "$r" tokens "$FI_AF_TOKENS"
   if [[ -n "$FI_AF_ENGINE_ERR" ]]; then
+    if (( sweep )); then
+      printf 'verifier unavailable (%s): run found-issues autofix ship %s\n' "$FI_AF_ENGINE_ERR" "$id"; return 7
+    fi
     fi_af_requeue "$id" "verifier unavailable: $FI_AF_ENGINE_ERR"
     printf 'verifier unavailable (%s): the item is requeued; stop\n' "$FI_AF_ENGINE_ERR"; return 7
   fi
   fi_af_item_set "$r" attempts "$n"
   fi_af_item_set "$r" verdict_reason "$FI_AF_REASON"
   fi_af_touch_lock "$id"
+  if [[ "$FI_AF_APPROVE" == "true" ]] && (( sweep )); then
+    FI_AF_VERDICT_REASON="$FI_AF_REASON"
+    if ! fi_af_sweep_commit "$id"; then
+      fi_af_sweep_settle "$id" failed "commit: $FI_AF_WHY"
+      printf 'not committed (%s): entry marked failed.\nNext: found-issues autofix next %s\n' "$FI_AF_WHY" "$id"; return 5
+    fi
+    printf 'approved and committed: %s\nNext: found-issues autofix next %s\n' "$FI_AF_REASON" "$id"; return 0
+  fi
   if [[ "$FI_AF_APPROVE" == "true" ]]; then
     fi_af_item_set "$r" verdict_tree "$FI_AF_TREE"
     fi_af_item_set "$r" verdict approve
     printf 'approved: %s\nNext: found-issues autofix ship %s\n' "$FI_AF_REASON" "$id"; return 0
   fi
   fi_af_item_set "$r" verdict reject
+  if (( n >= 2 )) && (( sweep )); then
+    fi_af_sweep_settle "$id" failed "verifier rejected: $FI_AF_REASON after 2 attempts"
+    printf 'rejected twice (%s): entry marked failed.\nNext: found-issues autofix next %s\n' "$FI_AF_REASON" "$id"; return 5
+  fi
   if (( n >= 2 )); then
     fi_af_finish "$id" failed "verifier rejected: $FI_AF_REASON after 2 attempts"
     printf 'rejected twice (%s): the item is marked failed; stop\n' "$FI_AF_REASON"; return 5
   fi
   printf 'rejected: %s\nOne attempt left: revise, run found-issues autofix test %s, then verify again.\n' "$FI_AF_REASON" "$id"
   return 1
+}
+
+fi_af_sweep_brief() {
+  local t n=0 line
+  t="$(fi_af_test_command "$AFI_wt" 2>/dev/null || printf '(none found)')"
+  while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/sweeps/$AFI_id.entries"
+  cat <<BRIEF
+found-issues auto-fix sweep ${AFI_id}. This run is sanctioned: the user enabled
+found-issues auto-fix. Nobody will answer questions.
+
+Worktree: ${AFI_wt}
+Branch:   ${AFI_branch} (from origin/${AFI_base}; never main)
+Entries:  ${n}, fixed one at a time in the order given
+Test command (bash runs it for you): ${t}
+
+Edit ONLY files under the worktree path above, with Read, Edit, Write, Grep
+and Glob, always by absolute path. Never edit docs/found-issues.md or any
+found-issues ledger. Your only Bash calls are these, each alone, exactly as
+written (no cd, &&, |, git or gh), with a 600000 ms timeout:
+  found-issues autofix next ${AFI_id}      the entry to fix now
+  found-issues autofix test ${AFI_id}      run the test command in the worktree
+  found-issues autofix verify ${AFI_id}    tests + reviewer; on approval bash commits this entry
+  found-issues autofix release ${AFI_id} --already-fixed|--decide|--manual|--failed "<text>"
+                                           give up on THIS entry and move on
+  found-issues autofix ship ${AFI_id}      when next says no entries are left
+
+Loop:
+1. Run autofix next. If it says no entries are left, run autofix ship and stop.
+2. Check the symptom is still present in the worktree. Already fixed: release
+   --already-fixed "<evidence>". Needs a human decision: release --decide
+   "<question>". No test can prove a fix: release --manual "<why>". Then go to 1.
+3. Add or extend a test that fails because of this symptom; run autofix test.
+4. Make the smallest change that fixes it. Change nothing unrelated.
+5. Run autofix test until it passes.
+6. Run autofix verify. Exit 0 or 5: go to 1. Exit 1: revise, autofix test,
+   verify again. Exit 3: the tests fail; fix them, autofix test, verify
+   again. Any other exit: run autofix ship and stop.
+If you cannot fix an entry, release it with --failed "<why>" and go to 1.
+End your reply with one line: the sweep id and its outcome.
+BRIEF
 }

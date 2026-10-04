@@ -17,7 +17,11 @@ for a in "$@"; do
   prev="$a"
 done
 [[ -n "$cd_dir" ]] && cd "$cd_dir"
-if [[ "$sandbox" == "read-only" ]]; then
+export FI_STANDIN_PROMPT="${!#}"
+FI_STANDIN_NO_TAGS='{"tags":[],"wake":[]}'
+if [[ "$FI_STANDIN_PROMPT" == *"found-issues classifier"* ]]; then
+  text="${FI_STANDIN_CLASSIFY:-$FI_STANDIN_NO_TAGS}"
+elif [[ "$sandbox" == "read-only" ]]; then
   text='{"approve":true,"reason":"ok"}'
   if [[ -n "${FI_STANDIN_VERDICTS:-}" && -s "$FI_STANDIN_VERDICTS" ]]; then
     IFS= read -r text <"$FI_STANDIN_VERDICTS"

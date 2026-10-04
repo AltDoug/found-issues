@@ -109,3 +109,27 @@ teardown() { fi_teardown_tmp; }
   grep -q '^pid=4242$' "$ST/running/$ID"
   [ "$(grep -c '^pid=' "$ST/running/$ID")" = 1 ]
 }
+
+@test "autofix claim: a forged worktree path in a dead item never touches the source checkout" {
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  fi_af_context
+  printf 'keep\n' > "$REPO/precious.txt"
+  fi_af_item_set "$ST/running/$ID" wt "$REPO"
+  fi_af_item_set "$ST/running/$ID" pid 999999
+  fi_af_reap
+  [ -f "$REPO/precious.txt" ]
+  [ -f "$REPO/src/calc.sh" ]
+}
+
+@test "autofix claim: B calls refuse an item whose worktree is outside fi- worktrees" {
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  fi_af_context
+  printf 'keep\n' > "$REPO/precious.txt"
+  fi_af_item_set "$ST/running/$ID" wt "$REPO/.claude/worktrees/fi-autofix-$ID/../../../$(basename "$REPO")"
+  run "$FI_BIN" autofix verify "$ID"
+  [ "$status" -ne 0 ]
+  run "$FI_BIN" autofix release "$ID" --failed "x"
+  [ "$status" -ne 0 ]
+  [ -f "$REPO/precious.txt" ]
+  [ -f "$REPO/src/calc.sh" ]
+}

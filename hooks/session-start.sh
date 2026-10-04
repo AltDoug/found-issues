@@ -100,8 +100,14 @@ fi_flush_codex_exit() {
 # Claude-only: this is a "prepend to your reply" directive aimed at Claude
 # Code's response convention, and it points at Claude-only surfaces
 # (statusline, /fi alias). Codex has no equivalent onboarding hook.
-if [[ "$harness" == "claude" ]]; then
+#
+# Interactive only (audit prompt-11): a headless run (an auto-fix child,
+# `claude -p`, CLAUDE_CODE_ENTRYPOINT other than cli) has no human to read
+# the line, and must not use up the one-time hint either.
+fi_ss_interactive=0
+[[ -z "${CLAUDE_CODE_ENTRYPOINT:-}" || "${CLAUDE_CODE_ENTRYPOINT}" == "cli" ]] && fi_ss_interactive=1
 ONBOARD_DIR="$HOME/.claude/found-issues"
+if [[ "$harness" == "claude" && "$fi_ss_interactive" == 1 ]]; then
 ONBOARD_MARKER="$ONBOARD_DIR/.onboarded"
 if [[ ! -f "$ONBOARD_MARKER" ]]; then
   mkdir -p "$ONBOARD_DIR"
@@ -130,8 +136,9 @@ fi
 # until they fix it OR uninstall.
 #
 # Claude-only: targets ~/.claude/statusline.sh, a Claude Code-specific
-# integration point that has no Codex equivalent.
-if [[ "$harness" == "claude" ]]; then
+# integration point that has no Codex equivalent. Interactive only, like the
+# hint above (prompt-11).
+if [[ "$harness" == "claude" && "$fi_ss_interactive" == 1 ]]; then
 mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
 STATUSLINE_NUDGE_MARKER="$ONBOARD_DIR/.statusline-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
 if [[ ! -f "$STATUSLINE_NUDGE_MARKER" ]] && [[ -f "$HOME/.claude/statusline.sh" ]]; then
@@ -200,8 +207,9 @@ fi
 
 # Missing-jq notice — at most once per day per machine (audit hook-18). The
 # blocking hooks fail open without jq, so on a jq-less machine (common on Git
-# Bash) the guards silently allow everything; say so instead.
-if ! command -v jq >/dev/null 2>&1; then
+# Bash) the guards silently allow everything; say so instead. Interactive
+# only (prompt-11), like the notices above.
+if [[ "$fi_ss_interactive" == 1 ]] && ! command -v jq >/dev/null 2>&1; then
   mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
   __fi_jq_marker="$ONBOARD_DIR/.jq-missing-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
   if [[ ! -f "$__fi_jq_marker" ]]; then
@@ -217,8 +225,9 @@ fi
 # operator who runs both harnesses only ever looks at doctor from Claude, and
 # a Codex install with no hooks is otherwise invisible (observed 2026-10-03:
 # months of Codex sessions that never logged anything). Builtins until a
-# found-issues cache dir exists under $CODEX_HOME, then one grep.
-if [[ "$harness" == "claude" ]]; then
+# found-issues cache dir exists under $CODEX_HOME, then one grep. Interactive
+# only (prompt-11): a headless run would use up the day's notice unseen.
+if [[ "$harness" == "claude" && "$fi_ss_interactive" == 1 ]]; then
   __fi_codex_home="${FOUND_ISSUES_CODEX_HOME:-$HOME/.codex}"
   __fi_codex_has=0
   for __fi_d in "$__fi_codex_home"/plugins/cache/*/found-issues; do

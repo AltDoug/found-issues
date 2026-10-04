@@ -25,6 +25,8 @@
 #   fi_af_reap
 #   fi_af_claim <id>
 #   fi_af_ledger_tag <kind> <text> / fi_af_ledger_resolve
+#   _fi_af_ledger_outcome <outcome> <text>
+#   _fi_af_ledger_swap <ledger> <old-line> <new-line>
 #   fi_af_finish <id> <outcome> <text>
 #   fi_af_requeue <id> <why>
 
@@ -34,6 +36,7 @@ AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
 AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
+AFI_head="" AFI_cur="0" AFI_fixed="0"
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -47,16 +50,23 @@ fi_af_item_read() {
   AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
+  AFI_head="" AFI_cur="0" AFI_fixed="0"
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
+  # wt comes from a file: anything but one of our own fi- worktrees under the
+  # item's root (a hand-edited or forged item) would aim reset, add -A and
+  # rm -rf at that path. Refuse the item rather than trust it.
+  if [[ -n "$AFI_wt" ]] && [[ -z "$AFI_root" || "$AFI_wt" != "$AFI_root"/.claude/worktrees/fi-* || "$AFI_wt" == *..* ]]; then
+    AFI_wt=""; return 1
+  fi
 }
 
 fi_af_item_set() {
@@ -102,7 +112,7 @@ fi_af_queue_spot() {
   fi_af_dirs "$slug" || return 0
   for f in "$FI_AF_ST"/queue/* "$FI_AF_ST"/running/*; do
     [[ -f "$f" ]] || continue
-    fi_af_item_read "$f"
+    fi_af_item_read "$f" || true
     if [[ "$AFI_key" == "$key" && "$AFI_root" == "$root" ]]; then
       printf 'Auto-fix: already queued (%s)\n' "$AFI_id"
       return 0
@@ -198,11 +208,17 @@ fi_af_worktree_add() {
   local s base
   base="$(cd "$AFI_root" && fi_resolve_default_branch)"
   git -C "$AFI_root" fetch -q origin "$base" 2>/dev/null || { FI_AF_WHY="git fetch failed"; return 1; }
-  s="${AFI_loc//[^A-Za-z0-9]/-}"
-  s="${s:0:40}"
   AFI_base="$base"
-  AFI_branch="fi/autofix/$s-$AFI_id"
-  AFI_wt="$AFI_root/.claude/worktrees/fi-autofix-$AFI_id"
+  if [[ "$AFI_kind" == "sweep" ]]; then
+    # Phase 4 ruling 5: unique per run (the spec's per-day <n> collided).
+    AFI_branch="fi/sweep/${AFI_id%%-*}-${AFI_id##*-}"
+    AFI_wt="$AFI_root/.claude/worktrees/fi-sweep-$AFI_id"
+  else
+    s="${AFI_loc//[^A-Za-z0-9]/-}"
+    s="${s:0:40}"
+    AFI_branch="fi/autofix/$s-$AFI_id"
+    AFI_wt="$AFI_root/.claude/worktrees/fi-autofix-$AFI_id"
+  fi
   mkdir -p "$AFI_root/.claude/worktrees"
   git -C "$AFI_root" worktree add -q -b "$AFI_branch" "$AFI_wt" "origin/$base" >/dev/null 2>&1 \
     || { FI_AF_WHY="git worktree add failed"; return 1; }
@@ -237,7 +253,12 @@ fi_af_reap() {
   local f
   for f in "$FI_AF_ST"/running/*; do
     [[ -f "$f" ]] || continue
-    fi_af_item_read "$f"
+    if ! fi_af_item_read "$f"; then
+      # A refused item (forged worktree path) is retired untouched.
+      fi_af_item_set "$f" result "failed: refused: worktree path outside its fi- worktrees"
+      mv "$f" "$FI_AF_ST/done/${f##*/}"
+      continue
+    fi
     if [[ -n "$AFI_pid" ]] && kill -0 "$AFI_pid" 2>/dev/null; then continue; fi
     fi_af_worktree_remove
     if (( ${AFI_crashes:-0} < 1 )); then
@@ -260,6 +281,7 @@ fi_af_claim() {
   # half-claimed item (no pid yet) for a crash and unlock a live run.
   fi_af_reap
   if ! fi_af_item_read "$q"; then fi_af_unlock "$id"; return 1; fi
+  if [[ "$AFI_kind" == "sweep" ]]; then fi_af_sweep_claim "$id"; return; fi
   if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY"; return 5; fi
   if ! fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"; then fi_af_unlock "$id"; return 3; fi
   # Launcher A's run passes its own long-lived pid. A standalone claim is an
@@ -300,25 +322,46 @@ fi_af_ledger_tag() {
   fi_tag_apply "$FI_AF_LEDGER" "$FI_AF_ENTRY" "$FI_TAG_KIND" "$FI_TAG_VALUE" >/dev/null
 }
 
-# Already fixed at origin: close it the way `resolve` does.
-fi_af_ledger_resolve() {
-  fi_af_find_entry || return 1
-  local new="- [fixed]${FI_AF_ENTRY#- \[open\]} (verified: ai) (fixed: $(fi_today))"
-  local snapshot tmp line done_one=0
-  snapshot="$(fi_ledger_snapshot "$FI_AF_LEDGER")"
-  tmp="$(fi_ledger_tmp "$FI_AF_LEDGER")"
+# Replace the first line equal to <old> with <new>, serialized like every
+# ledger write: 0 written, 1 line gone, 3 ledger changed underneath.
+_fi_af_ledger_swap() {
+  local file="$1" old="$2" new="$3" snapshot tmp line done_one=0
+  snapshot="$(fi_ledger_snapshot "$file")"
+  tmp="$(fi_ledger_tmp "$file")"
   while IFS= read -r line || [[ -n "$line" ]]; do
-    if (( ! done_one )) && [[ "$line" == "$FI_AF_ENTRY" ]]; then
+    if (( ! done_one )) && [[ "$line" == "$old" ]]; then
       printf '%s\n' "$new" >>"$tmp"; done_one=1
     else
       printf '%s\n' "$line" >>"$tmp"
     fi
-  done <"$FI_AF_LEDGER"
-  fi_ledger_replace "$FI_AF_LEDGER" "$tmp" "$snapshot"
+  done <"$file"
+  (( done_one )) || { rm -f "$tmp"; return 1; }
+  fi_ledger_replace "$file" "$tmp" "$snapshot"
+}
+
+# Already fixed at origin: close it the way `resolve` does.
+fi_af_ledger_resolve() {
+  fi_af_find_entry || return 1
+  _fi_af_ledger_swap "$FI_AF_LEDGER" "$FI_AF_ENTRY" \
+    "- [fixed]${FI_AF_ENTRY#- \[open\]} (verified: ai) (fixed: $(fi_today))"
+}
+
+# The ledger side of an outcome for the loaded entry (AFI_key): resolve,
+# retag or nothing. rc 2 for an unknown outcome.
+_fi_af_ledger_outcome() {
+  case "$1" in
+    already-fixed) fi_af_ledger_resolve ;;
+    decide|manual) fi_af_ledger_tag "$1" "$2" ;;
+    failed)        fi_af_ledger_tag autofix-failed "$2" ;;
+    shipped|stale) return 0 ;;
+    *) fi_err "autofix: unknown outcome $1"; return 2 ;;
+  esac
 }
 
 # Spec §5 steps 2, 4 and 7: end an item with an outcome. The ledger write is
 # best effort — the item always leaves running/, so it never wedges the lock.
+# A sweep item has no entry of its own (phase 4 ruling 7): its entries were
+# settled one by one.
 fi_af_finish() {
   local id="$1" outcome="$2" text="$3" f="$FI_AF_ST/running/$1" rc=0
   [[ -f "$f" ]] || f="$FI_AF_ST/queue/$id"
@@ -326,12 +369,12 @@ fi_af_finish() {
   text="${text//$'\n'/ }"
   text="${text:0:160}"
   case "$outcome" in
-    already-fixed) fi_af_ledger_resolve || rc=$? ;;
-    decide|manual) fi_af_ledger_tag "$outcome" "$text" || rc=$? ;;
-    failed)        fi_af_ledger_tag autofix-failed "$text" || rc=$? ;;
-    shipped|stale) ;;
+    already-fixed|decide|manual|failed|shipped|stale) ;;
     *) fi_err "autofix: unknown outcome $outcome"; return 2 ;;
   esac
+  if [[ "$AFI_kind" != "sweep" ]]; then
+    _fi_af_ledger_outcome "$outcome" "$text" || rc=$?
+  fi
   (( rc == 0 )) || fi_af_log "$id" "ledger not updated for $outcome (rc $rc)"
   fi_af_worktree_remove
   fi_af_retire "$id" "$outcome" "$text"

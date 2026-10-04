@@ -5,6 +5,7 @@
 # Compatible with bash 3.2+ (macOS system bash).
 #
 # Functions:
+#   _fi_af_fix_loop <id> <engine>
 #   _fi_af_run <id> <engine> / _fi_af_run_one <id> <engine>
 #   _fi_af_status
 #   cmd_autofix <sub> [...]
@@ -19,6 +20,8 @@ Usage: found-issues autofix <command>
                               (exit 1 unknown id, 3 capped, 4 locked, 7 engine outage)
   claim <id>                  Take a queued item: lock, cap, worktree (prints its path)
   brief <id>                  The in-session fixer's instructions for a claimed item
+  next <id>                   A sweep's entry to fix now (sweeps fix one entry at a time;
+                              verify commits it, release skips it, ship opens one PR)
   test <id>                   Run the repo's test command in the claimed item's worktree
   verify <id>                 Tests, then the read-only verifier; records the approved tree
   diff <id>                   The claimed item's change against origin/<default>
@@ -28,7 +31,8 @@ Usage: found-issues autofix <command>
   merge-when-green <N> [--repo owner/name]
                               Wait for PR <N>'s checks, then squash-merge it
 Settings: git config found-issues.autofix true|false (local overrides --global),
-found-issues.autofix.{engine,testCommand,dailyFixes,runBudget,runTimeoutMin}.
+found-issues.autofix.{engine,testCommand,dailyFixes,runBudget,runTimeoutMin,
+dailySweeps,sweepThreshold,sweepMax,sweepBudget}.
 EOF
 }
 
@@ -77,20 +81,15 @@ _fi_af_end() {
   fi_af_finish "$@"
 }
 
-# Spec §5 for one claimed item: up to 2 attempts of fix -> bash tests ->
-# verifier, then ship. Every path ends in _fi_af_end.
-_fi_af_run_one() {
-  local id="$1" engine_opt="$2" rc=0 engine n feedback="" why="" tlog
-  fi_af_claim "$id" || return $?
-  fi_af_item_read "$FI_AF_ST/running/$id"
-  FI_AF_COST=0 FI_AF_TOKENS=0
-  if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
-    _fi_af_end "$id" manual "no test command"; return 0
-  fi
-  if ! engine="$(fi_af_engine "${engine_opt:-$AFI_engine}")" || ! command -v "$engine" >/dev/null 2>&1; then
-    _fi_af_end "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
-  fi
-  AFI_engine="$engine"
+# Spec §5 steps 2-5 for the loaded entry (AFI_entry, AFI_wt, AFI_base_sha):
+# up to 2 attempts of fix -> bash tests -> verifier. Shared by a spot run
+# and by each entry of a sweep. Sets FI_AF_OUTCOME (approved | already-fixed
+# | decide | manual | failed | outage) and FI_AF_OUTCOME_TEXT; on approved
+# the worktree holds the verified change and FI_AF_TREE its staged tree.
+_fi_af_fix_loop() {
+  local id="$1" engine="$2" n feedback="" why="" tlog ref
+  ref="${AFI_base_sha:-origin/$AFI_base}"
+  FI_AF_OUTCOME="" FI_AF_OUTCOME_TEXT=""
   for n in 1 2; do
     touch "$FI_AF_ST/lock" 2>/dev/null || true
     if [[ "$engine" == "claude" ]] && ! fi_af_budget_left >/dev/null; then
@@ -98,28 +97,24 @@ _fi_af_run_one() {
     fi
     (( n == 1 )) || _fi_af_reset_wt
     _fi_af_fix_attempt "$engine" "$n" "$feedback"
-    # An outage (usage limit, logged out, network) is not an attempt: the
-    # item goes back to the queue untagged and the drain stops (rc 7).
-    if [[ -n "$FI_AF_ENGINE_ERR" ]] \
-       && [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
-      FI_AF_WHY="$FI_AF_ENGINE_ERR"
-      fi_af_requeue "$id" "engine error: $FI_AF_ENGINE_ERR"
-      return 7
+    # An outage (usage limit, logged out, network) is not an attempt.
+    if [[ -n "$FI_AF_ENGINE_ERR" && -z "$(fi_af_diff "$AFI_wt" "$ref")" ]]; then
+      FI_AF_OUTCOME=outage FI_AF_OUTCOME_TEXT="$FI_AF_ENGINE_ERR"; return 0
     fi
     case "$FI_AF_RESULT" in
       already-fixed|decide)
-        _fi_af_end "$id" "$FI_AF_RESULT" "${FI_AF_RESULT_TEXT:-no reason given}"
+        FI_AF_OUTCOME="$FI_AF_RESULT" FI_AF_OUTCOME_TEXT="${FI_AF_RESULT_TEXT:-no reason given}"
         return 0 ;;
       manual)
         # A fixer that changed code but could not prove it says manual; bash
         # runs the tests and the verifier anyway, so its change still counts.
-        if [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
-          _fi_af_end "$id" manual "${FI_AF_RESULT_TEXT:-no reason given}"
+        if [[ -z "$(fi_af_diff "$AFI_wt" "$ref")" ]]; then
+          FI_AF_OUTCOME=manual FI_AF_OUTCOME_TEXT="${FI_AF_RESULT_TEXT:-no reason given}"
           return 0
         fi
         fi_af_log "$id" "attempt $n: fixer said manual but left a change; testing and verifying it" ;;
     esac
-    if [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
+    if [[ -z "$(fi_af_diff "$AFI_wt" "$ref")" ]]; then
       why="no change"; feedback="The attempt changed no files."; continue
     fi
     tlog="$FI_AF_RUNS/$id.tests$n.log"
@@ -135,22 +130,51 @@ _fi_af_run_one() {
       why="verifier rejected: $FI_AF_REASON"; feedback="The reviewer rejected it: $FI_AF_REASON"; continue
     fi
     FI_AF_VERDICT_REASON="$FI_AF_REASON"
-    AFI_verdict_tree="$FI_AF_TREE"
-    fi_af_item_set "$FI_AF_ST/running/$id" verdict_tree "$FI_AF_TREE"
-    fi_af_item_set "$FI_AF_ST/running/$id" verdict approve
-    if fi_af_ship; then
-      fi_af_item_set "$FI_AF_ST/running/$id" pr "$FI_AF_PR"
-      _fi_af_end "$id" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE, \$$FI_AF_COST"
-      return 0
-    fi
-    _fi_af_end "$id" failed "ship: $FI_AF_WHY"
+    FI_AF_OUTCOME=approved
     return 0
   done
   case "$why" in
     "run budget spent"*) ;;
     *) why="$why after 2 attempts" ;;
   esac
-  _fi_af_end "$id" failed "$why"
+  FI_AF_OUTCOME=failed FI_AF_OUTCOME_TEXT="$why"
+}
+
+# Spec §5 for one claimed item: the fix loop, then ship. Every path ends in
+# _fi_af_end, except an engine outage, which requeues (rc 7).
+_fi_af_run_one() {
+  local id="$1" engine_opt="$2" engine
+  fi_af_claim "$id" || return $?
+  fi_af_item_read "$FI_AF_ST/running/$id" || return 0
+  if [[ "$AFI_kind" == "sweep" ]]; then _fi_af_run_sweep "$id" "$engine_opt"; return; fi
+  FI_AF_COST=0 FI_AF_TOKENS=0
+  if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
+    _fi_af_end "$id" manual "no test command"; return 0
+  fi
+  if ! engine="$(fi_af_engine "${engine_opt:-$AFI_engine}")" || ! command -v "$engine" >/dev/null 2>&1; then
+    _fi_af_end "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
+  fi
+  AFI_engine="$engine"
+  _fi_af_fix_loop "$id" "$engine"
+  case "$FI_AF_OUTCOME" in
+    outage)
+      # The item goes back to the queue untagged and the drain stops.
+      FI_AF_WHY="$FI_AF_OUTCOME_TEXT"
+      fi_af_requeue "$id" "engine error: $FI_AF_OUTCOME_TEXT"
+      return 7 ;;
+    approved)
+      AFI_verdict_tree="$FI_AF_TREE"
+      fi_af_item_set "$FI_AF_ST/running/$id" verdict_tree "$FI_AF_TREE"
+      fi_af_item_set "$FI_AF_ST/running/$id" verdict approve
+      if fi_af_ship; then
+        fi_af_item_set "$FI_AF_ST/running/$id" pr "$FI_AF_PR"
+        _fi_af_end "$id" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE, \$$FI_AF_COST"
+      else
+        _fi_af_end "$id" failed "ship: $FI_AF_WHY"
+      fi ;;
+    *) _fi_af_end "$id" "$FI_AF_OUTCOME" "$FI_AF_OUTCOME_TEXT" ;;
+  esac
+  return 0
 }
 
 _fi_af_next_queued() {
@@ -209,6 +233,11 @@ _fi_af_status() {
     while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/day/$(fi_today).spot"
   fi
   printf 'Today: %s/%s spot fixes\n' "$n" "$(fi_af_int dailyFixes 5)"
+  n=0
+  if [[ -f "$FI_AF_ST/day/$(fi_today).sweep" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/day/$(fi_today).sweep"
+  fi
+  printf 'Today: %s/%s sweeps\n' "$n" "$(fi_af_int dailySweeps 1)"
   local dir label count
   for dir in queue running; do
     count=0
@@ -217,7 +246,7 @@ _fi_af_status() {
     printf '%s (%s)\n' "$label" "$count"
     for f in "$FI_AF_ST/$dir"/*; do
       [[ -f "$f" ]] || continue
-      fi_af_item_read "$f"
+      fi_af_item_read "$f" || true
       printf '  %s  %s\n' "$AFI_id" "$AFI_loc"
     done
   done
@@ -226,7 +255,7 @@ _fi_af_status() {
   for f in "$FI_AF_ST"/done/*; do [[ -f "$f" ]] && recent+=("$f"); done
   local i shown=0
   for (( i = ${#recent[@]} - 1; i >= 0 && shown < 5; i-- )); do
-    fi_af_item_read "${recent[$i]}"
+    fi_af_item_read "${recent[$i]}" || true
     printf '  %s  %s — %s\n' "$AFI_id" "$AFI_loc" "$AFI_result"
     shown=$((shown + 1))
   done
@@ -280,6 +309,14 @@ cmd_autofix() {
       fi
       fi_af_context || return 1
       [[ -f "$FI_AF_ST/running/$rid" || -f "$FI_AF_ST/queue/$rid" ]] || { fi_err "autofix: no queued or running item $rid"; return 1; }
+      # A sweep releases its CURRENT entry and moves on (phase 4 Task 6).
+      if [[ "$(_fi_af_field "$FI_AF_ST/running/$rid" kind 2>/dev/null)" == "sweep" ]]; then
+        fi_af_b_running "$rid" || return 1
+        [[ -n "$AFI_entry" ]] || { fi_err "autofix: no entry in progress in sweep $rid (run: found-issues autofix ship $rid)"; return 1; }
+        fi_af_sweep_settle "$rid" "$outcome" "$text"
+        printf 'Released %s (%s).\nNext: found-issues autofix next %s\n' "$AFI_loc" "$outcome" "$rid"
+        return 0
+      fi
       fi_af_finish "$rid" "$outcome" "$text" ;;
     diff|ship)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix $sub <id>"; return 2; }
@@ -288,6 +325,20 @@ cmd_autofix() {
       fi_af_touch_lock "$1"
       if [[ "$sub" == "diff" ]]; then fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}"; return; fi
       fi_af_b_enabled "$1" || return
+      if [[ "$sub" == "ship" && "$AFI_kind" == "sweep" ]]; then
+        fi_af_no_prompts
+        FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}" FI_AF_TESTCMD=""
+        if fi_af_sweep_finish "$1"; then
+          fi_af_item_read "$FI_AF_ST/done/$1"
+          case "$AFI_result" in
+            shipped:*) printf 'Shipped sweep %s as PR #%s (merge: %s)\n' "$1" "$FI_AF_PR" "$FI_AF_MERGE" ;;
+            *) printf 'Sweep %s %s; finished.\n' "$1" "${AFI_result#stale: sweep }" ;;
+          esac
+          return 0
+        fi
+        fi_err "autofix: sweep ship refused — $FI_AF_WHY"
+        return 1
+      fi
       if [[ "$AFI_verdict" != "approve" ]]; then
         fi_err "autofix: ship needs an approving verdict — run: found-issues autofix verify $1"; return 1
       fi
@@ -307,6 +358,17 @@ cmd_autofix() {
       [[ $# -eq 0 && "$mpr" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number> [--repo owner/name]"; return 2; }
       fi_af_no_prompts
       fi_af_merge_when_green "$mpr" "$mrepo" ;;
+    next)
+      [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix next <id>"; return 2; }
+      fi_af_context || return 1
+      fi_af_b_running "$1" || return 1
+      [[ "$AFI_kind" == "sweep" ]] || { fi_err "autofix: next is for sweeps; $1 is a single item"; return 2; }
+      if [[ -z "$AFI_entry" ]]; then
+        printf 'No entries left. Run: found-issues autofix ship %s\n' "$1"; return 0
+      fi
+      local total=0 eline
+      while IFS= read -r eline || [[ -n "$eline" ]]; do total=$((total + 1)); done <"$FI_AF_ST/sweeps/$1.entries"
+      printf 'Entry %s/%s: %s\nWorktree: %s\n' "$AFI_cur" "$total" "$AFI_entry" "$AFI_wt" ;;
     brief|test|verify)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix $sub <id>"; return 2; }
       fi_af_context || return 1

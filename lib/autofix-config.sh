@@ -36,12 +36,15 @@ fi_af_int() {
   printf '%s' "$((10#$v))"
 }
 
+# A sweep fixes up to sweepMax entries, so it has its own budget (phase 4
+# ruling 4: about $1 per entry was measured in phase 3).
 fi_af_budget() {
-  local v
-  v="$(fi_af_cfg runBudget 3)"
+  local v key=runBudget def=3
+  [[ "${AFI_kind:-}" == "sweep" ]] && key=sweepBudget def=10
+  v="$(fi_af_cfg "$key" "$def")"
   if [[ ! "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-    fi_err "found-issues: found-issues.autofix.runBudget=$v is not a USD amount — using 3"
-    v=3
+    fi_err "found-issues: found-issues.autofix.$key=$v is not a USD amount — using $def"
+    v="$def"
   fi
   printf '%s' "$v"
 }

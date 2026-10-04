@@ -42,3 +42,21 @@ fi_use_standins() {
   export PATH="$TEST_REPO_ROOT/tests/standins:$TEST_REPO_ROOT/tests/bin-shims:$PATH"
   export FI_STANDIN_TRACE="$TMP/standin.trace"
 }
+
+# A ledger with <n> fixable (fix: medium) entries on separate files. Like a
+# real repo, the suite passes at base (no test sees the bugs); each fix adds
+# its own test. The spot fixture's add bug stays in src/calc.sh, untested,
+# and its entry is dropped so nothing spot-queues. cwd = the repo; sets REPO.
+fi_af_sweep_fixture() {
+  local n="${1:-5}" i
+  fi_af_fixture
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf '. ./src/calc.sh\n' > test.sh
+  for (( i = 1; i <= n; i++ )); do
+    printf 'f%s() { echo $(( $1 - 1 )); }\n' "$i" > "src/f$i.sh"
+    printf '. ./src/f%s.sh\n' "$i" >> test.sh
+    printf -- '- [open] 2026-10-0%s src/f%s.sh:1 — f%s subtracts one (fix: medium)\n' "$i" "$i" "$i" >> docs/found-issues.md
+  done
+  printf 'true\n' >> test.sh
+  git add -A && git commit -q -m "sweep fixture" && git push -q origin main
+}
