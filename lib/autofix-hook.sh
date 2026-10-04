@@ -16,6 +16,7 @@
 #   fi_afh_mark <item> <A|B> <epoch>
 #   fi_afh_launch_a <item> <engine> <fi-bin>
 #   fi_afh_context_b <id>
+#   fi_afh_stop <payload> <engine> <fi-bin>
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
@@ -95,4 +96,40 @@ prompt:
 Do not fix the issue yourself and do not wait for the agent; carry on with
 your current task.
 EOF
+}
+
+# Spec §4.3: an item still queued when the session stops gets launcher A, so
+# a skipped launcher B nudge (or an item queued inside a fixer) never
+# strands. Zero forks while the queue is empty: one glob, then return.
+# Skipped: the repo lock is held (a run is draining), today's cap was hit,
+# or the item was launched less than FOUND_ISSUES_AUTOFIX_STOP_GRACE seconds
+# ago (default 60; a B fixer may not have claimed yet).
+fi_afh_stop() {
+  local input="$1" engine="$2" bin="$3" st_root f st cwd
+  local re_agent='"agent_id"[[:space:]]*:[[:space:]]*"[^"]' re_cwd='"cwd"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
+  local -a items=()
+  [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]] && return 0
+  case "${FOUND_ISSUES_AUTOFIX:-}" in off|0|false|no) return 0 ;; esac
+  st_root="$(fi_afh_state)"
+  [[ -e "$st_root/disabled" ]] && return 0
+  for f in "$st_root"/*/queue/*; do [[ -f "$f" ]] && items+=("$f"); done
+  (( ${#items[@]} > 0 )) || return 0
+  [[ "$input" =~ $re_agent ]] && return 0
+  cwd="$PWD"
+  [[ "$input" =~ $re_cwd ]] && cwd="${BASH_REMATCH[1]}"
+  fi_afh_now
+  for f in "${items[@]}"; do
+    st="${f%/queue/*}"
+    [[ -d "$st/lock" || -e "$st/day/$FI_AFH_DAY.capped" ]] && continue
+    fi_af_item_read "$f" || continue
+    [[ -n "$AFI_root" && ( "$cwd" == "$AFI_root" || "$cwd" == "$AFI_root"/* ) ]] || continue
+    if [[ "$AFI_launched" =~ ^[0-9]+$ ]] \
+       && (( FI_AFH_NOW - AFI_launched < ${FOUND_ISSUES_AUTOFIX_STOP_GRACE:-60} )); then
+      continue
+    fi
+    fi_afh_mark "$f" A "$FI_AFH_NOW"
+    fi_afh_launch_a "$f" "$engine" "$bin"
+    return 0
+  done
+  return 0
 }
