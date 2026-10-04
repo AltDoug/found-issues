@@ -273,3 +273,40 @@ mk_mid_hunk_mocks() {
   [ "$(printf '%s' "$parsed" | grep '^prs_auto=')" = "prs_auto=org/repo#7" ]
   [ "$(printf '%s' "$parsed" | grep '^prs=')" = "prs=" ]
 }
+
+# An entry that already carries a closing (PR:)/(commit:) annotation, or is no
+# longer [open], is spoken for: a later change touching the same cited line
+# must not tag it with a fresh suggestion (v3.0.4).
+@test "hook-auto: skips closed/annotated entries on the same line, still tags the open one" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'LEDGER'
+# Found issues
+
+- [open] 2026-10-01 src/foo.py:42 — already shipped fix (PR: org/repo#1)
+- [open] 2026-10-01 src/foo.py:42 — already shipped by commit (commit: abc1234)
+- [fixed] 2026-10-01 src/foo.py:42 — long closed (PR: org/repo#2) (fixed: 2026-10-02)
+- [deferred] 2026-10-01 src/foo.py:42 — parked for later
+- [open] 2026-10-01 src/foo.py:42 — null check missing
+LEDGER
+  mk_pr_mocks
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 0 ]
+  run grep -c 'commit-auto:\|PR-auto:' docs/found-issues.md
+  [ "$(echo "$output" | tr -d '[:space:]')" = "1" ]
+  grep -q 'null check missing (PR-auto: org/repo#7)' docs/found-issues.md
+  run grep -E 'shipped|closed|parked' docs/found-issues.md
+  [[ "$output" != *"-auto:"* ]]
+}
+
+@test "hook-auto: explicit --pick still annotates an entry that already carries a (PR:)" {
+  mkdir -p docs
+  cat > docs/found-issues.md <<'LEDGER'
+# Found issues
+
+- [open] 2026-10-01 src/foo.py:42 — already shipped fix (PR: org/repo#1)
+LEDGER
+  mk_pr_mocks
+  fi_run annotate-pr 7 --pick "src/foo.py:42"
+  [ "$status" -eq 0 ]
+  grep -q '(PR: org/repo#7)' docs/found-issues.md
+}
