@@ -1,7 +1,7 @@
 # found-issues v3.0.0 auto-fix — Phase 4 Finish Handoff
 
 **Date:** 2026-10-04 · **Session:** "v3 phase 3 finish + phase 4 build (operator asleep)"
-**Status:** Phase 3 is MERGED (PR #188, post-merge run green). Phase 4 is built on `v3/phase4-sweep` (Tasks 1-10 done, pushed, HEAD 88c9b34). Task 11 is partial: the opus whole-branch review is DONE and found 6 Important or conditional issues; the fix pass, the final suites, the PR, the merge and the post-merge watch are still to do.
+**Status:** DONE 2026-10-04 — Phase 4 merged into release/v3 as PR #189 (ca747ec); successor handoff: docs/handoffs/autofix-v3-phase5-plan-handoff-2026-10-04.md.
 **Re-verification rule (operator's standing feedback):** do NOT act on this doc's claims without re-verifying against the repo / live state first. Ground truth: `git -C ~/Documents/projects/found-issues/.claude/worktrees/v3-phase4 fetch && git log --oneline 907cdd9..HEAD`, `gh pr list -R AltDoug/found-issues --state all -L 5`, and the git-ignored ledger `.superpowers/sdd/2026-10-04-autofix-v3-phase4-sweep/progress.md` (its `Final:` lines are the findings to fix).
 
 ## TL;DR for the next session
