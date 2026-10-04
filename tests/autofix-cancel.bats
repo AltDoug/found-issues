@@ -128,3 +128,21 @@ SH
   [ ! -d "$wt" ]
   [ ! -d "$ST/lock" ]
 }
+
+@test "autofix claim: an item cancelled during the claim never leaves the lock behind" {
+  # Cancel moves the queue file away while the claim holds the lock and is
+  # checking eligibility; the claim's stale retire then finds no file.
+  fi_af_eligible() { command mv "$QITEM" "$ST/done/$ID"; FI_AF_WHY="gone"; return 1; }
+  run fi_af_claim "$ID"
+  [ "$status" -eq 5 ]
+  [ ! -d "$ST/lock" ]
+}
+
+@test "autofix status: a crash requeue forgets the PR number of the dead run" {
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  sed -i.bak 's/^pid=.*/pid=999999/' "$ST/running/$ID" && rm -f "$ST/running/$ID.bak"
+  fi_af_item_set "$ST/running/$ID" pr 42
+  "$FI_BIN" autofix status >/dev/null
+  [ -f "$ST/queue/$ID" ]
+  ! grep -q '^pr=42' "$ST/queue/$ID" || false
+}

@@ -275,6 +275,8 @@ fi_af_reap() {
     if (( ${AFI_crashes:-0} < 1 )); then
       fi_af_item_set "$f" crashes 1
       fi_af_item_set "$f" pid ""
+      # The dead run's PR number would make cancel refuse the re-run.
+      fi_af_item_set "$f" pr ""
       fi_af_unlock "$AFI_id"
       mv "$f" "$FI_AF_ST/queue/$AFI_id"
       fi_af_seg_write "$AFI_root"
@@ -294,7 +296,9 @@ fi_af_claim() {
   fi_af_reap
   if ! fi_af_item_read "$q"; then fi_af_unlock "$id"; return 1; fi
   if [[ "$AFI_kind" == "sweep" ]]; then fi_af_sweep_claim "$id"; return; fi
-  if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY"; return 5; fi
+  # A cancel may have moved the queue file away meanwhile: then the retire
+  # finds nothing and the lock is still ours to drop.
+  if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY" || fi_af_unlock "$id"; return 5; fi
   if ! fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"; then fi_af_unlock "$id"; return 3; fi
   # Launcher A's run passes its own long-lived pid. A standalone claim is an
   # in-session fixer (launcher B): its claim process exits at once, so there
@@ -323,6 +327,7 @@ fi_af_requeue() {
   fi_af_item_read "$r" || return 1
   fi_af_worktree_remove
   fi_af_item_set "$r" pid ""
+  fi_af_item_set "$r" pr ""
   mv "$r" "$FI_AF_ST/queue/$id"
   fi_af_seg_write "$AFI_root"
   fi_af_unlock "$id"
