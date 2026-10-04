@@ -203,6 +203,17 @@ claude -p --model sonnet --max-budget-usd <runBudget> \
 
 **Headless runs see a clean context (audit prompt-11).** SessionStart onboarding and statusline nudges run only when `CLAUDE_CODE_ENTRYPOINT` is empty or `cli`.
 
+**As built (phase 4, plan `docs/superpowers/plans/2026-10-04-autofix-v3-phase4-sweep.md`; rulings made while the operator was away, for review):**
+- A sweep is a queue item with `kind=sweep`: same lock, reap, launcher selection and Stop fallback as a spot item; its own `day/<date>.sweep` cap.
+- The classify/wake pass runs inside the sweep's claim: one read-only model call over at most 20 untagged `[open]` entries and 10 free-text `[deferred]` entries; every answer is validated and goes through `fi_tag_resolve`/`fi_tag_apply` on the source ledger.
+- Candidates: fixable now (`(fix: small|medium)` or answered), no PR/commit reference or suggestion, never failed, no spot item queued or running for the entry. Order: critical, then file groups (placed by their oldest entry), then oldest. The trigger counts the same set.
+- Each entry's diff, reset and verifier run against the sweep's last good commit; approval commits that exact tree; ship refuses any tree but the last commit's. A budget stop or engine outage leaves the current entry untouched and ships what is committed; a sweep with nothing committed ends `stale` with no PR.
+- Branch `fi/sweep/<YYYYMMDD>-<5-digit id suffix>`, worktree `.claude/worktrees/fi-sweep-<id>` (unique per run).
+- Budget `found-issues.autofix.sweepBudget`, default 10 (the $3 run budget covers about two entries).
+- Launcher B: `found-issues:found-issues-sweeper` drives `autofix claim|brief|next|test|verify|release|ship`; `verify` commits an approved entry itself, `release` settles only the current entry.
+- `/found-issues:fix` plumbing: `found-issues fix workspace|test|ship`. `fix ship` never merges (interactive keeps the merge decision).
+- prompt-11 extends to the daily jq and Codex-unwired notices.
+
 ## 7. Caps
 
 | Setting | Default |
@@ -210,6 +221,7 @@ claude -p --model sonnet --max-budget-usd <runBudget> \
 | Spot fixes per repo per day | 5 |
 | Sweeps per repo per day | 1 |
 | Max entries per sweep | 8 |
+| Per sweep run | $10 (`sweepBudget`; phase 4 ruling 4) |
 | Per background run | $3 (`--max-budget-usd`; was $2, raised after the Phase 2 measurement) |
 | Turn cap per fixer | `maxTurns` in the agent definition (B) and turn limit (A) |
 
@@ -217,7 +229,7 @@ Over the cap, an item waits for the next day and the summary says so.
 
 ## 8. Settings, setup, visibility, safety
 
-- **Settings live in git config.** `found-issues.autofix` (bool; `--global` = default, local = per-repo override), plus `.autofix.engine` (`auto|claude|codex`), `.testCommand`, `.dailyFixes`, `.dailySweeps`, `.sweepThreshold`, `.sweepMax` and `.runBudget`. `found-issues config` wraps them.
+- **Settings live in git config.** `found-issues.autofix` (bool; `--global` = default, local = per-repo override), plus `.autofix.engine` (`auto|claude|codex`), `.testCommand`, `.dailyFixes`, `.dailySweeps`, `.sweepThreshold`, `.sweepMax`, `.runBudget` and `.sweepBudget`. `found-issues config` wraps them.
 - **Kill switches:** `found-issues autofix off` and `FOUND_ISSUES_AUTOFIX=off`.
 - **Setup:** `/found-issues:setup` gains an auto-fix step that states, before enabling:
   - fix PRs merge themselves;

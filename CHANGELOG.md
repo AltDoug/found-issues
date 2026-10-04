@@ -56,12 +56,44 @@ Built on the `release/v3` branch; this section grows with each phase.
 - `found-issues autofix brief | test | verify <id>`. `autofix ship` ships only
   the exact tree the verifier approved, on both launchers. `autofix run`
   refuses an unknown id and exits 3 capped, 4 locked, 7 engine outage.
+- Auto-sweep. When `log`, `tag`, `decide` or `sync` brings the fixable-now
+  count to `found-issues.autofix.sweepThreshold` (default 5), or records a
+  fixable critical `(fix: medium)`, one sweep is queued and
+  `AUTOFIX-SWEEP-DUE <id>` is printed (at most `dailySweeps`, default 1, a
+  day). The sweep:
+  - classifies up to 20 untagged entries and wakes `(until: <text>)`
+    entries whose trigger has happened (one read-only model call; tags go
+    through the same off-limits rules);
+  - fixes up to `sweepMax` (default 8) entries, critical first, then by
+    file, then oldest, each through the same fix → tests → verifier loop,
+    one commit per approved entry; any other outcome is recorded on that
+    entry alone;
+  - opens ONE self-merging PR on `fi/sweep/<date>-<n>`, annotating every
+    fixed entry. Budget: `found-issues.autofix.sweepBudget` (USD estimate,
+    default 10).
+- The hook launches sweeps like single items: the plugin agent
+  `found-issues:found-issues-sweeper` (launcher B, driving
+  `found-issues autofix next|test|verify|release|ship`) or a detached
+  `autofix run` (launcher A).
+- `found-issues fix workspace | test | ship`: `/found-issues:fix` now works
+  in a fresh worktree on its own branch, runs the repo's own test command,
+  and ships through one command that commits the `(PR:)` annotation onto
+  the PR branch. Already-fixed entries close with `resolve --verified ai`
+  instead of an archiving sync.
+
+### Changed
+
+- `/found-issues:fix` no longer needs a `bats`-only tool permission and reads
+  the ledger with `list --json --cwd <repo root>`.
 
 ### Fixed
 
 - PostToolUse context (annotation suggestions, `--pick` prompts) now reaches
   Claude. Claude Code shows `hookSpecificOutput.additionalContext` to the
   model but writes plain PostToolUse stdout to its debug log only.
+- Headless sessions (auto-fix children, `claude -p`) no longer receive the
+  first-run hint or the daily statusline, jq and Codex notices, and no
+  longer use them up before a person sees them.
 
 ## [2.10.4] - 2026-10-03
 
