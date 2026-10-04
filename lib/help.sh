@@ -80,7 +80,7 @@ COMMANDS
                                         commit each, one self-merging PR.
   autofix claim|brief|next|test|verify|diff|ship|release <id>
                                         The steps of a fix or sweep, for in-session fixers.
-  fix workspace | fix test <wt> | fix ship <wt> --title T --body-file F --pick L
+  fix workspace | fix test <wt> | fix ship <wt> [--source R] --title T --body-file F --pick L
                                         /found-issues:fix plumbing: a fresh fix worktree,
                                         the repo's tests there, push + PR + annotations.
   install-statusline [--no-migrate]     Append the counter segment to ~/.claude/statusline.sh.

@@ -213,6 +213,7 @@ claude -p --model sonnet --max-budget-usd <runBudget> \
 - Launcher B: `found-issues:found-issues-sweeper` drives `autofix claim|brief|next|test|verify|release|ship`; `verify` commits an approved entry itself, `release` settles only the current entry.
 - `/found-issues:fix` plumbing: `found-issues fix workspace|test|ship`. `fix ship` never merges (interactive keeps the merge decision).
 - prompt-11 extends to the daily jq and Codex-unwired notices.
+- Review fixes: `autofix off` mid-sweep requeues it on launcher A too; a sweep requeued the same day keeps the cap it took (`cap_day`), and a sweep over the cap retires `stale` (never rc 3, which would write the day's capped marker and stop spot fixes); ship first resets to the last commit, dropping a half-done entry; no sweep is queued inside a fixer child (its cwd is the fixer worktree); `fix ship --source <root>` names the source ledger (default: the checkout the worktree was made under); an item whose `wt` is not one of its root's `.claude/worktrees/fi-*` is refused.
 
 ## 7. Caps
 

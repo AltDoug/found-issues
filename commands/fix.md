@@ -93,8 +93,9 @@ number. With `--auto`: print the report and proceed with bucket 2 only.
 2. One PR for the run; body lists per-entry outcomes
    (FIXED / CLOSED-ALREADY-FIXED / SKIPPED / DEFER-SUGGESTED). Write it to
    a file, then run
-   `found-issues fix ship <worktree> --title "<title>" --body-file <file> --pick <location>,<location>`
-   with exactly the entries this PR fixes — never `--all` (file-level
+   `found-issues fix ship <worktree> --source <source> --title "<title>" --body-file <file> --pick <location>,<location>`
+   (`<source>` is `fix workspace`'s `source=` line) with exactly the
+   entries this PR fixes — never `--all` (file-level
    auto-match over-annotates: the 2026-07-09 incident false-closed 9
    entries that later needed manual de-annotation). It refuses a dirty
    worktree or red tests, then pushes, opens the PR, annotates the

@@ -96,3 +96,37 @@ ws() { out="$("$FI_BIN" fix workspace)"; WT="$(printf '%s\n' "$out" | sed -n 's/
   ! grep -q 'run `/found-issues:sync`' "$f" || false
   grep -q 'line_end' "$f"
 }
+
+linked_session() { # the session runs in a linked worktree of the repo
+  git worktree add -q -b side "$TMP/linked" origin/main
+  cd "$TMP/linked"
+  LINKED="$(pwd -P)"
+}
+
+@test "fix ship: from a linked-worktree session it annotates that session's ledger" {
+  linked_session; ws
+  [[ "$out" == *"source=$LINKED"* ]]
+  sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"
+  git -C "$WT" commit -qam "fix: add subtracts (found-issues src/calc.sh:1)"
+  printf 'b\n' > "$TMP/body"
+  run "$FI_BIN" fix ship "$WT" --title "fix: add" --body-file "$TMP/body" --pick src/calc.sh:1
+  [ "$status" -eq 0 ]
+  grep -q '(PR: foo/bar#11)' "$LINKED/docs/found-issues.md"
+  ! grep -q '(PR: foo/bar#11)' "$REPO/docs/found-issues.md" || false
+}
+
+@test "fix ship: --source names the ledger to annotate" {
+  linked_session; ws
+  sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"
+  git -C "$WT" commit -qam "fix: add subtracts (found-issues src/calc.sh:1)"
+  printf 'b\n' > "$TMP/body"
+  cd "$REPO"
+  run "$FI_BIN" fix ship "$WT" --source "$LINKED" --title "fix: add" --body-file "$TMP/body" --pick src/calc.sh:1
+  [ "$status" -eq 0 ]
+  grep -q '(PR: foo/bar#11)' "$LINKED/docs/found-issues.md"
+  ! grep -q '(PR: foo/bar#11)' "$REPO/docs/found-issues.md" || false
+}
+
+@test "fix.md: fix ship passes --source from fix workspace" {
+  grep -q 'found-issues fix ship <worktree> --source <source>' "$TEST_REPO_ROOT/commands/fix.md"
+}

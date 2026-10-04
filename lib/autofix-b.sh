@@ -209,7 +209,8 @@ Loop:
 4. Make the smallest change that fixes it. Change nothing unrelated.
 5. Run autofix test until it passes.
 6. Run autofix verify. Exit 0 or 5: go to 1. Exit 1: revise, autofix test,
-   verify again. Any other exit: run autofix ship and stop.
+   verify again. Exit 3: the tests fail; fix them, autofix test, verify
+   again. Any other exit: run autofix ship and stop.
 If you cannot fix an entry, release it with --failed "<why>" and go to 1.
 End your reply with one line: the sweep id and its outcome.
 BRIEF

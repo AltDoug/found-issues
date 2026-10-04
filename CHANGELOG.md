@@ -71,6 +71,10 @@ Built on the `release/v3` branch; this section grows with each phase.
   - opens ONE self-merging PR on `fi/sweep/<date>-<n>`, annotating every
     fixed entry. Budget: `found-issues.autofix.sweepBudget` (USD estimate,
     default 10).
+  - `autofix off` mid-sweep requeues it (nothing ships after the switch);
+    a sweep requeued the same day keeps the cap it took, and a sweep over
+    the cap retires stale instead of stopping the day's spot fixes. Ship
+    drops a half-done entry, so only committed, approved entries ship.
 - The hook launches sweeps like single items: the plugin agent
   `found-issues:found-issues-sweeper` (launcher B, driving
   `found-issues autofix next|test|verify|release|ship`) or a detached
@@ -79,7 +83,9 @@ Built on the `release/v3` branch; this section grows with each phase.
   in a fresh worktree on its own branch, runs the repo's own test command,
   and ships through one command that commits the `(PR:)` annotation onto
   the PR branch. Already-fixed entries close with `resolve --verified ai`
-  instead of an archiving sync.
+  instead of an archiving sync. `fix ship --source <root>` names the
+  ledger to annotate (`fix workspace`'s `source=`), so a session in a
+  linked worktree annotates its own ledger, not the main checkout's.
 
 ### Changed
 

@@ -16,9 +16,10 @@ Usage: found-issues fix workspace
          A fresh worktree from origin/<default> on its own fix branch
        found-issues fix test <worktree>
          Run the repo's test command there (any stack)
-       found-issues fix ship <worktree> --title "<title>" --body-file <file> --pick <loc>[,<loc>...]
+       found-issues fix ship <worktree> [--source <root>] --title "<title>" --body-file <file> --pick <loc>[,<loc>...]
          Push, open the PR, annotate the picked entries (source ledger and PR
-         branch). Never merges.
+         branch). --source is fix workspace's source= (default: the checkout
+         the worktree was made under). Never merges.
 EOF
 }
 
@@ -58,21 +59,30 @@ _fi_fix_test() {
 # reaches the default branch on merge, and the run leaves no ledger diff
 # behind in the worktree.
 _fi_fix_ship() {
-  local wt="" title="" bodyf="" picks="" root base br slug url pr p
+  local wt="" title="" bodyf="" picks="" root="" base br slug url pr p
   [[ $# -gt 0 ]] && { wt="$1"; shift; }
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --title) fi_need_value "fix ship" --title $# "${2:-}" || return 2; title="$2"; shift 2 ;;
       --body-file) fi_need_value "fix ship" --body-file $# "${2:-}" || return 2; bodyf="$2"; shift 2 ;;
       --pick) fi_need_value "fix ship" --pick $# "${2:-}" || return 2; picks="$2"; shift 2 ;;
+      --source) fi_need_value "fix ship" --source $# "${2:-}" || return 2; root="$2"; shift 2 ;;
       *) fi_unknown_arg "fix ship" "$1"; return 2 ;;
     esac
   done
   [[ -d "$wt" && -n "$title" && -f "$bodyf" && -n "$picks" ]] || { _fi_fix_usage >&2; return 2; }
-  # The main checkout: the parent of the common git dir (git < 2.31 has no
-  # --path-format, and the dir may be printed relative to the worktree).
-  root="$(cd "$wt" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && cd .. && pwd)" \
-    || { fi_err "fix ship: $wt is not a git worktree"; return 1; }
+  git -C "$wt" rev-parse --git-dir >/dev/null 2>&1 || { fi_err "fix ship: $wt is not a git worktree"; return 1; }
+  # The source ledger is the checkout the session works in (fix workspace's
+  # source=), which is a linked worktree as often as the main checkout:
+  # --source, else the checkout fix workspace made this worktree under.
+  if [[ -z "$root" && "$wt" == */.claude/worktrees/* ]]; then root="${wt%%/.claude/worktrees/*}"; fi
+  if [[ -z "$root" ]]; then
+    # The parent of the common git dir (git < 2.31 has no --path-format,
+    # and the dir may be printed relative to the worktree).
+    root="$(cd "$wt" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && cd .. && pwd)" \
+      || { fi_err "fix ship: $wt is not a git worktree"; return 1; }
+  fi
+  [[ -d "$root" ]] || { fi_err "fix ship: no such source checkout: $root"; return 1; }
   slug="$(cd "$root" && fi_repo_id 2>/dev/null)" || { fi_err "fix ship: origin is not a GitHub repo"; return 1; }
   base="$(cd "$root" && fi_resolve_default_branch)"
   br="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)"

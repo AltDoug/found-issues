@@ -102,11 +102,13 @@ LEDGER
   [[ "$output" == *"AUTOFIX-SWEEP-DUE "* ]]
 }
 
-@test "sweep: inside a fixer the sweep is queued without the marker" {
+@test "sweep: inside a fixer no sweep is queued (its root would be the fixer worktree)" {
   fi_af_sweep_fixture 4
   FOUND_ISSUES_AUTOFIX_CHILD=1 run "$FI_BIN" log --fix medium 'src/calc.sh:1 — add subtracts'
+  [ "$status" -eq 0 ]
   [[ "$output" != *"AUTOFIX-SWEEP-DUE"* ]]
-  [[ "$output" == *"sweep queued"* ]]
+  [[ "$output" != *"sweep queued"* ]]
+  ! grep -lq '^kind=sweep$' "$FOUND_ISSUES_STATE_DIR"/autofix/foo__bar/queue/* 2>/dev/null || false
 }
 
 @test "sweep: an entry sync wakes can make a sweep due" {
@@ -300,4 +302,49 @@ gh_mock() {
   [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 5 ]
   ! grep -q '(PR: foo/bar#9) (PR: foo/bar#9)' docs/found-issues.md || false
   grep -F 'f1 ignores its argument' docs/found-issues.md | grep -q '(PR: foo/bar#9)'
+}
+
+@test "sweep run: switching auto-fix off mid-sweep requeues it and ships nothing" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  export FI_STANDIN_EDIT="$FI_STANDIN_EDIT; touch '$FOUND_ISSUES_STATE_DIR/autofix/disabled'"
+  sweep_queue
+  run "$FI_BIN" autofix run "$SID" --engine claude
+  [ "$status" -eq 0 ]
+  ! grep -q '^pr create' "$GH_MOCK_TRACE" 2>/dev/null || false
+  [ -f "$ST/queue/$SID" ]
+  [ ! -f "$ST/done/$SID" ]
+  [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
+}
+
+@test "sweep claim: a sweep requeued today re-claims without a second cap" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  "$FI_BIN" autofix claim "$SID" >/dev/null
+  "$FI_BIN" autofix off >/dev/null
+  run "$FI_BIN" autofix ship "$SID"
+  [ "$status" -eq 8 ]
+  [ -f "$ST/queue/$SID" ]
+  "$FI_BIN" autofix on >/dev/null
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c . "$ST/day/$(date +%Y-%m-%d).sweep")" = 1 ]
+}
+
+@test "sweep run: a sweep over today's cap retires stale and leaves spot fixes running" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  mkdir -p "$ST/day"
+  printf 'other-sweep\n' > "$ST/day/$(date +%Y-%m-%d).sweep"
+  run "$FI_BIN" autofix run "$SID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q "^result=stale: today's sweep cap" "$ST/done/$SID"
+  [ ! -e "$ST/day/$(date +%Y-%m-%d).capped" ]
+}
+
+@test "sweep claim: over today's cap the claim names the sweep cap" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  mkdir -p "$ST/day"
+  printf 'other-sweep\n' > "$ST/day/$(date +%Y-%m-%d).sweep"
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"today's sweep cap"* ]]
+  [[ "$output" != *"spot-fix"* ]]
 }

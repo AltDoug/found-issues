@@ -145,7 +145,7 @@ _fi_af_fix_loop() {
 _fi_af_run_one() {
   local id="$1" engine_opt="$2" engine
   fi_af_claim "$id" || return $?
-  fi_af_item_read "$FI_AF_ST/running/$id"
+  fi_af_item_read "$FI_AF_ST/running/$id" || return 0
   if [[ "$AFI_kind" == "sweep" ]]; then _fi_af_run_sweep "$id" "$engine_opt"; return; fi
   FI_AF_COST=0 FI_AF_TOKENS=0
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
@@ -246,7 +246,7 @@ _fi_af_status() {
     printf '%s (%s)\n' "$label" "$count"
     for f in "$FI_AF_ST/$dir"/*; do
       [[ -f "$f" ]] || continue
-      fi_af_item_read "$f"
+      fi_af_item_read "$f" || true
       printf '  %s  %s\n' "$AFI_id" "$AFI_loc"
     done
   done
@@ -255,7 +255,7 @@ _fi_af_status() {
   for f in "$FI_AF_ST"/done/*; do [[ -f "$f" ]] && recent+=("$f"); done
   local i shown=0
   for (( i = ${#recent[@]} - 1; i >= 0 && shown < 5; i-- )); do
-    fi_af_item_read "${recent[$i]}"
+    fi_af_item_read "${recent[$i]}" || true
     printf '  %s  %s — %s\n' "$AFI_id" "$AFI_loc" "$AFI_result"
     shown=$((shown + 1))
   done

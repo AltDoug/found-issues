@@ -61,6 +61,12 @@ fi_af_item_read() {
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
+  # wt comes from a file: anything but one of our own fi- worktrees under the
+  # item's root (a hand-edited or forged item) would aim reset, add -A and
+  # rm -rf at that path. Refuse the item rather than trust it.
+  if [[ -n "$AFI_wt" ]] && [[ -z "$AFI_root" || "$AFI_wt" != "$AFI_root"/.claude/worktrees/fi-* || "$AFI_wt" == *..* ]]; then
+    AFI_wt=""; return 1
+  fi
 }
 
 fi_af_item_set() {
@@ -106,7 +112,7 @@ fi_af_queue_spot() {
   fi_af_dirs "$slug" || return 0
   for f in "$FI_AF_ST"/queue/* "$FI_AF_ST"/running/*; do
     [[ -f "$f" ]] || continue
-    fi_af_item_read "$f"
+    fi_af_item_read "$f" || true
     if [[ "$AFI_key" == "$key" && "$AFI_root" == "$root" ]]; then
       printf 'Auto-fix: already queued (%s)\n' "$AFI_id"
       return 0
@@ -247,7 +253,12 @@ fi_af_reap() {
   local f
   for f in "$FI_AF_ST"/running/*; do
     [[ -f "$f" ]] || continue
-    fi_af_item_read "$f"
+    if ! fi_af_item_read "$f"; then
+      # A refused item (forged worktree path) is retired untouched.
+      fi_af_item_set "$f" result "failed: refused: worktree path outside its fi- worktrees"
+      mv "$f" "$FI_AF_ST/done/${f##*/}"
+      continue
+    fi
     if [[ -n "$AFI_pid" ]] && kill -0 "$AFI_pid" 2>/dev/null; then continue; fi
     fi_af_worktree_remove
     if (( ${AFI_crashes:-0} < 1 )); then

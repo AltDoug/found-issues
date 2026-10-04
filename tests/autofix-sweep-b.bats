@@ -103,3 +103,21 @@ fix_current() { # fix the entry `next` names (an fN entry), with a test
   [ "$status" -eq 2 ]
   [[ "$output" == *"autofix ship $SID"* ]]
 }
+
+@test "sweep b: ship after a verify with failing tests keeps the committed entries" {
+  fix_current; "$FI_BIN" autofix verify "$SID" >/dev/null
+  grep -q '^fixed=1$' "$ST/running/$SID"
+  printf 'false\n' >> "$WT/test.sh"
+  run "$FI_BIN" autofix verify "$SID"
+  [ "$status" -eq 3 ]
+  run "$FI_BIN" autofix ship "$SID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR #9"* ]]
+  [ "$(grep -c '^pr create' "$GH_MOCK_TRACE")" = 1 ]
+}
+
+@test "sweep b: brief says a failing-tests verify means fix and verify again" {
+  run "$FI_BIN" autofix brief "$SID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Exit 3: the tests fail"* ]]
+}

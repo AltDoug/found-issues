@@ -90,9 +90,13 @@ fi_af_sweep_pending() {
 
 # Spec §4.1: after log, tag, decide or sync wrote the ledger. One sweep at
 # a time and dailySweeps a day; due at sweepThreshold candidates or on one
-# critical (fix: medium). Never fails its caller.
+# critical (fix: medium). Never fails its caller. Never inside a fixer
+# child: its cwd is the fixer's worktree, so the sweep would get that root
+# (and burn the day's cap on a worktree about to vanish); the main
+# session's next ledger write checks the source ledger instead.
 fi_af_sweep_check() {
   local slug root file entry n=0 crit=0 engine
+  [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]] && return 0
   fi_af_enabled || return 0
   slug="$(fi_repo_id 2>/dev/null)" || return 0
   fi_repo_root_cached
@@ -116,22 +120,26 @@ fi_af_sweep_check() {
   fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID" "id=$FI_AF_ID" "kind=sweep" \
     "root=$root" "slug=$slug" "loc=sweep" "engine=$engine" \
     "queued=$(date +%Y-%m-%dT%H:%M:%S)" "crashes=0"
-  if [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]]; then
-    printf 'Auto-fix: sweep queued %s (inside a fixer; the main session launches it)\n' "$FI_AF_ID"
-  else
-    printf 'AUTOFIX-SWEEP-DUE %s\n' "$FI_AF_ID"
-  fi
+  printf 'AUTOFIX-SWEEP-DUE %s\n' "$FI_AF_ID"
 }
 
 # Spec §6 steps 1-3 at claim time (lock held, queue item read): cap, the
 # fresh worktree, the classify/wake pass, then the ordered entry list.
+# A sweep requeued today (crash, switch-off, outage) already holds today's
+# cap. A sweep over the cap retires stale rather than returning rc 3: rc 3
+# writes the day's capped marker, which would stop spot fixes too.
 fi_af_sweep_claim() {
-  local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1" file n=0 line
-  if ! fi_af_cap_ok sweep "$(fi_af_int dailySweeps 1)"; then fi_af_unlock "$id"; return 3; fi
+  local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1" file n=0 line capped=0
+  [[ "$(_fi_af_field "$q" cap_day)" == "$(fi_today)" ]] && capped=1
+  if (( ! capped )) && ! fi_af_cap_ok sweep "$(fi_af_int dailySweeps 1)"; then
+    FI_AF_WHY="today's sweep cap is reached; the next trigger queues a new sweep"
+    fi_af_retire "$id" stale "$FI_AF_WHY"; return 5
+  fi
   fi_af_item_set "$q" pid "${FI_AF_PID:-}"
   if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
+  (( capped )) || fi_af_item_set "$q" cap_day "$(fi_today)"
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
-  fi_af_cap_take sweep "$id"
+  (( capped )) || fi_af_cap_take sweep "$id"
   if ! fi_af_worktree_add; then fi_af_finish "$id" failed "$FI_AF_WHY"; return 6; fi
   fi_af_item_set "$r" wt "$AFI_wt"
   fi_af_item_set "$r" branch "$AFI_branch"
@@ -236,7 +244,7 @@ fi_af_sweep_settle() {
 # the current entry untouched and ships what is committed (ruling 7).
 _fi_af_run_sweep() {
   local id="$1" engine_opt="$2" r="$FI_AF_ST/running/$1" engine
-  fi_af_item_read "$r"
+  fi_af_item_read "$r" || return 0
   FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}"
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
     fi_af_finish "$id" stale "no test command"; return 0
@@ -265,6 +273,13 @@ _fi_af_run_sweep() {
       *) fi_af_sweep_settle "$id" "$FI_AF_OUTCOME" "$FI_AF_OUTCOME_TEXT" ;;
     esac
   done
+  # `autofix off` mid-sweep gives it back untouched, like B's verify and
+  # ship (exit 8): nothing ships and nothing merges after the switch.
+  if ! fi_af_enabled; then
+    fi_af_requeue "$id" "switched off: $FI_AF_WHY"
+    printf 'Auto-fix: switched off (%s); sweep %s is requeued.\n' "$FI_AF_WHY" "$id"
+    return 0
+  fi
   fi_af_sweep_finish "$id" || true
   return 0
 }
@@ -318,12 +333,16 @@ _fi_af_sweep_pr_body() {
 }
 
 # The commits exist; ship re-runs the tests at head and refuses any tree
-# other than head's (plan Review Focus 3), then publishes one PR.
+# other than head's (plan Review Focus 3), then publishes one PR. An entry
+# left half-done (verify exit 3, 6 or 7) is dropped first: only committed,
+# approved entries ship, and a failed ship would delete their branch.
 fi_af_sweep_ship() {
   local wt="$AFI_wt" tlog="$FI_AF_RUNS/$AFI_id.ship-tests.log" bodyf="$FI_AF_RUNS/$AFI_id.pr-body.md"
   local rows="$FI_AF_RUNS/$AFI_id.publish" loc out key text
   FI_AF_PR="" FI_AF_MERGE="none" FI_AF_WHY=""
   [[ -n "$FI_AF_TESTCMD" ]] || { FI_AF_WHY="no test command"; return 1; }
+  git -C "$wt" reset -q --hard "$AFI_head" >/dev/null 2>&1 || true
+  git -C "$wt" clean -qfd >/dev/null 2>&1 || true
   fi_af_run_tests "$wt" "$FI_AF_TESTCMD" "$tlog" || { FI_AF_WHY="tests fail at ship"; return 1; }
   fi_af_reset_ledger "$wt" "$AFI_head"
   git -C "$wt" add -A >/dev/null 2>&1 || true
