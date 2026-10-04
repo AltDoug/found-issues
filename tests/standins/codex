@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Stand-in `codex` (exec only) for the v3 auto-fix tests. Same FI_STANDIN_*
+# variables as tests/standins/claude. Writes the last message to -o <file>
+# and prints JSONL events with token usage, like `codex exec --json`.
+set -euo pipefail
+if [[ -n "${FI_STANDIN_TRACE:-}" ]]; then
+  ( IFS=$'\x1f'; printf 'codex\x1f%s\n' "$*" ) >>"$FI_STANDIN_TRACE"
+fi
+[[ -n "${FI_STANDIN_SLEEP:-}" ]] && sleep "$FI_STANDIN_SLEEP"
+last="" sandbox="" cd_dir="" prev=""
+for a in "$@"; do
+  case "$prev" in
+    -o|--output-last-message) last="$a" ;;
+    -s|--sandbox) sandbox="$a" ;;
+    -C|--cd) cd_dir="$a" ;;
+  esac
+  prev="$a"
+done
+[[ -n "$cd_dir" ]] && cd "$cd_dir"
+if [[ "$sandbox" == "read-only" ]]; then
+  text='{"approve":true,"reason":"ok"}'
+  if [[ -n "${FI_STANDIN_VERDICTS:-}" && -s "$FI_STANDIN_VERDICTS" ]]; then
+    IFS= read -r text <"$FI_STANDIN_VERDICTS"
+    tail -n +2 "$FI_STANDIN_VERDICTS" >"$FI_STANDIN_VERDICTS.tmp"
+    mv "$FI_STANDIN_VERDICTS.tmp" "$FI_STANDIN_VERDICTS"
+  fi
+else
+  [[ -n "${FI_STANDIN_EDIT:-}" ]] && bash -c "$FI_STANDIN_EDIT"
+  text="Done."$'\n'"${FI_STANDIN_RESULT:-FI-RESULT: fixed}"
+fi
+[[ -n "$last" ]] && printf '%s\n' "$text" >"$last"
+printf '{"type":"thread.started"}\n'
+printf '{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":0,"output_tokens":300}}\n'

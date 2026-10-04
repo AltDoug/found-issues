@@ -9,6 +9,8 @@
 #   GH_MOCK_PR_LIST       full JSON array for `gh pr list --json ...` (default "[]")
 #   GH_MOCK_AUTH          "ok" (default) or "fail" — controls `gh auth status` exit
 #   GH_MOCK_TRACE         path to write each invocation (for assertions)
+#   GH_MOCK_PR_CREATE_URL URL printed by `gh pr create` (default https://github.com/foo/bar/pull/7)
+#   GH_MOCK_PR_MERGE      "ok" (default) or "fail" — exit of `gh pr merge`
 #
 # Behavior: print matching JSON to stdout and exit 0; exit 1 if no match.
 # `pr view --jq <filter>` IS honored when the mocked row is JSON (sync asks gh
@@ -100,6 +102,15 @@ case "$cmd $sub" in
       printf '%s\n' "${GH_MOCK_PR_DIFF//\\n/$'\n'}"
       exit 0
     fi
+    exit 1
+    ;;
+  "pr create")
+    printf '%s\n' "${GH_MOCK_PR_CREATE_URL:-https://github.com/foo/bar/pull/7}"
+    exit 0
+    ;;
+  "pr merge")
+    [[ "${GH_MOCK_PR_MERGE:-ok}" == "ok" ]] && exit 0
+    printf 'auto-merge is not allowed for this repository\n' >&2
     exit 1
     ;;
   "auth status")

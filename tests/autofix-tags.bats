@@ -299,3 +299,12 @@ EOS
   fi_run log --manual "other" "src/a.sh:5 — parked"
   [[ "$output" == *"already tagged"* ]]
 }
+
+@test "autofix-tags: autofix-failed replaces only its own group and keeps the fix tag" {
+  source "$FI_BIN"
+  fi_entry_retag '- [open] 2026-10-01 a.sh:1 — x (fix: small) (autofix-failed: old)' autofix-failed 'tests fail'
+  [ "$FI_RETAGGED" = '- [open] 2026-10-01 a.sh:1 — x (fix: small) (autofix-failed: tests fail)' ]
+  fi_tag_resolve autofix-failed 'verifier said (no)' '' ''
+  [ "$FI_TAG_KIND" = autofix-failed ]
+  [ "$FI_TAG_VALUE" = 'verifier said [no]' ]
+}

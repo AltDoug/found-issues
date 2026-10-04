@@ -39,6 +39,17 @@ _fi_log_tag_existing() {
   _fi_log_line="$FI_RETAGGED"
 }
 
+# v3 spec §4.1: a (fix: small) entry this call wrote or tagged is queued for
+# auto-fix. Reads the line as written: an entry log left "already tagged"
+# (say medium) is not small, whatever this call asked for, and off-limits
+# paths were already turned into manual by fi_tag_resolve.
+_fi_log_autofix() {
+  [[ -n "$tag_kind" ]] || return 0
+  fi_parse_entry_vars "$1" || return 0
+  [[ "$FE_status" == "open" && "$FE_fixtag" == "small" ]] || return 0
+  fi_af_queue_spot "$1" || true
+}
+
 cmd_log() {
   local critical="no" tag_kind="" tag_value=""
   while [[ $# -gt 0 ]]; do
@@ -264,12 +275,14 @@ cmd_log() {
         return 1
       fi
       _fi_log_tag_existing "$file" "$esc_line" || return 1
+      _fi_log_autofix "$_fi_log_line"
       cmd_status plain
       return 0
     fi
     if [[ -n "$tag_kind" ]]; then
       _fi_log_tag_existing "$file" "$matched_entry" || return 1
       if [[ "$_fi_log_line" != "$matched_entry" ]]; then
+        _fi_log_autofix "$_fi_log_line"
         cmd_status plain
         return 0
       fi
@@ -324,6 +337,7 @@ cmd_log() {
   printf '%s\n' "$entry" >>"$file"
 
   printf 'Logged: %s\n' "$entry"
+  _fi_log_autofix "$entry"
   cmd_status plain
 }
 

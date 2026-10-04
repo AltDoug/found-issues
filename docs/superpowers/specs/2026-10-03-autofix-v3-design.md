@@ -130,6 +130,16 @@ claude -p --model sonnet --max-budget-usd <runBudget> \
 - **The allowlist pattern syntax needs test-pinning in phase 2.** `Bash(cat:*)` appeared not to apply.
 - **Context overhead is real.** A single haiku turn cost about $0.09–0.10. The $2 per-run cap is sized for sonnet with that overhead. Phase 2 measures a real fix run and adjusts the default if needed.
 
+**Phase 2 measurements (2026-10-03, Claude Code 2.1.289, codex-cli 0.159.0, `tests/autofix-live.bats`):**
+- **Allowlist contract.** Under `--permission-mode dontAsk --permission-prompts none`:
+  - `Bash(x:*)`, `Bash(x *)` and multi-word `Bash(x sub:*)` are prefix matches; `Bash(x)` is exact.
+  - Claude Code also auto-allows read-only commands (`git status`, `git log`, even `sh test.sh && git log -1`).
+  - Anything that writes is denied without a prompt: `touch`, `git commit`, `curl`, and `sh test.sh; echo "exit=$?"`.
+  - Denials land in `permission_denials`.
+- **Fixer prompts must be engine-specific.** The first live run failed both engines. Sonnet wrapped the test command in `; echo "exit=$?"`, was denied, and gave up. Codex, told to run nothing but the tests, could not read a file. The Claude prompt now says to run the test command alone and to read with tools; the Codex prompt allows read-only shell. A `manual` result that left a change still goes through bash tests and the verifier.
+- **Claude engine.** One fix shipped in 49 s for **$1.58**. That was two sonnet fixer runs and two opus verifier runs: the verifier rejected attempt 1 for adding no test. The `runBudget` default is now **$3** (the next whole dollar above 1.5 × measured).
+- **Codex engine.** One fix shipped in 51 s on 167,389 tokens (ChatGPT plan, no USD cost reported).
+
 ## 5. Fixer flow (both launchers)
 
 1. **Claim.** `autofix claim <id>` checks:
@@ -184,7 +194,7 @@ claude -p --model sonnet --max-budget-usd <runBudget> \
 | Spot fixes per repo per day | 5 |
 | Sweeps per repo per day | 1 |
 | Max entries per sweep | 8 |
-| Per background run | $2 (`--max-budget-usd`) |
+| Per background run | $3 (`--max-budget-usd`; was $2, raised after the Phase 2 measurement) |
 | Turn cap per fixer | `maxTurns` in the agent definition (B) and turn limit (A) |
 
 Over the cap, an item waits for the next day and the summary says so.
