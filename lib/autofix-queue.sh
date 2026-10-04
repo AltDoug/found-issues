@@ -24,6 +24,8 @@
 #   fi_af_retire <id> <outcome> <text>
 #   fi_af_reap
 #   fi_af_claim <id>
+#   fi_af_ledger_tag <kind> <text> / fi_af_ledger_resolve
+#   fi_af_finish <id> <outcome> <text>
 
 # shellcheck disable=SC2034  # AFI_* are read by the other autofix libs
 
@@ -260,5 +262,46 @@ fi_af_claim() {
   fi_af_log "$id" "claimed: $AFI_wt ($AFI_branch from origin/$AFI_base)"
 }
 
-# Task 4 replaces this stub with the ledger-writing fi_af_finish.
-fi_af_finish() { fi_af_retire "$1" "$2" "$3"; }
+# Retag the entry in the source checkout's ledger.
+fi_af_ledger_tag() {
+  fi_af_find_entry || return 1
+  fi_tag_resolve "$1" "$2" "" "" || return 2
+  fi_tag_apply "$FI_AF_LEDGER" "$FI_AF_ENTRY" "$FI_TAG_KIND" "$FI_TAG_VALUE" >/dev/null
+}
+
+# Already fixed at origin: close it the way `resolve` does.
+fi_af_ledger_resolve() {
+  fi_af_find_entry || return 1
+  local new="- [fixed]${FI_AF_ENTRY#- \[open\]} (verified: ai) (fixed: $(fi_today))"
+  local snapshot tmp line done_one=0
+  snapshot="$(fi_ledger_snapshot "$FI_AF_LEDGER")"
+  tmp="$(fi_ledger_tmp "$FI_AF_LEDGER")"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if (( ! done_one )) && [[ "$line" == "$FI_AF_ENTRY" ]]; then
+      printf '%s\n' "$new" >>"$tmp"; done_one=1
+    else
+      printf '%s\n' "$line" >>"$tmp"
+    fi
+  done <"$FI_AF_LEDGER"
+  fi_ledger_replace "$FI_AF_LEDGER" "$tmp" "$snapshot"
+}
+
+# Spec §5 steps 2, 4 and 7: end an item with an outcome. The ledger write is
+# best effort — the item always leaves running/, so it never wedges the lock.
+fi_af_finish() {
+  local id="$1" outcome="$2" text="$3" f="$FI_AF_ST/running/$1" rc=0
+  [[ -f "$f" ]] || f="$FI_AF_ST/queue/$id"
+  fi_af_item_read "$f" || { fi_err "autofix: no queued or running item $id"; return 1; }
+  text="${text//$'\n'/ }"
+  text="${text:0:160}"
+  case "$outcome" in
+    already-fixed) fi_af_ledger_resolve || rc=$? ;;
+    decide|manual) fi_af_ledger_tag "$outcome" "$text" || rc=$? ;;
+    failed)        fi_af_ledger_tag autofix-failed "$text" || rc=$? ;;
+    shipped|stale) ;;
+    *) fi_err "autofix: unknown outcome $outcome"; return 2 ;;
+  esac
+  (( rc == 0 )) || fi_af_log "$id" "ledger not updated for $outcome (rc $rc)"
+  fi_af_worktree_remove
+  fi_af_retire "$id" "$outcome" "$text"
+}

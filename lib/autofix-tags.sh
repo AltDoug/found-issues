@@ -96,7 +96,7 @@ fi_tag_resolve() {
         FI_TAG_KIND="manual"; FI_TAG_VALUE="off-limits: $cat"; return 0
       fi
       FI_TAG_KIND="fix"; FI_TAG_VALUE="$value" ;;
-    decide|manual|decided)
+    decide|manual|decided|autofix-failed)
       fi_tag_text "$value" || { fi_err "--$kind needs a one-line, non-empty text"; return 2; }
       FI_TAG_KIND="$kind"; FI_TAG_VALUE="$FI_TAG_TEXT" ;;
     *) fi_err "unknown tag kind: $kind"; return 2 ;;
@@ -110,6 +110,7 @@ fi_entry_retag() {
   case "$kind" in
     fix|decide|manual) drop='fix|decide|manual' ;;
     decided)           drop='decide|decided' ;;
+    autofix-failed)    drop='autofix-failed' ;;
     drop-until)        drop='until' ;;
     *) return 2 ;;
   esac

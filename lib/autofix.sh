@@ -53,6 +53,25 @@ cmd_autofix() {
         6) fi_err "autofix: $1 failed — $FI_AF_WHY" ;;
       esac
       return $rc ;;
+    release)
+      local rid="${1:-}" outcome="" text=""
+      [[ $# -gt 0 ]] && shift
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --already-fixed|--decide|--manual|--failed)
+            [[ -z "$outcome" ]] || { fi_err "autofix release: one outcome only"; return 2; }
+            fi_need_value "autofix release" "$1" $# "${2:-}" || return 2
+            outcome="${1#--}"; text="$2"; shift 2 ;;
+          *) fi_unknown_arg "autofix release" "$1"; return 2 ;;
+        esac
+      done
+      if [[ -z "$rid" || -z "$outcome" ]]; then
+        fi_err "Usage: found-issues autofix release <id> --already-fixed|--decide|--manual|--failed \"<text>\""
+        return 2
+      fi
+      fi_af_context || return 1
+      [[ -f "$FI_AF_ST/running/$rid" || -f "$FI_AF_ST/queue/$rid" ]] || { fi_err "autofix: no queued or running item $rid"; return 1; }
+      fi_af_finish "$rid" "$outcome" "$text" ;;
     ""|-h|--help|help) _fi_af_usage ;;
     *) fi_unknown_arg autofix "$sub"; return 2 ;;
   esac
