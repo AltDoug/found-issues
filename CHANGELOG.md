@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.2] - 2026-10-04
+
+### Fixed
+
+- Auto-fix runs the repo's test command without `FOUND_ISSUES_AUTOFIX_CHILD`. The command inherited the marker the engine sets on its own children, so in this repo every session-start test of the interactive path went red and the first live auto-fix failed with tests that pass anywhere else. `tests/helpers.bash` also clears an inherited marker, for a fixer that runs `bats` directly.
+- `found-issues autofix test`, `autofix verify`, `fix test` and launcher A's retry feedback now list the failing tests (TAP `not ok` lines with their `#` diagnostics; pytest `FAILED`, go `--- FAIL:`, jest `FAIL` lines) before the last lines of the log. They printed only the tail before, which on a full bats run left the failures out.
+
 ## [3.0.1] - 2026-10-04
 
 ### Fixed

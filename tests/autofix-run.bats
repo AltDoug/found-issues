@@ -61,6 +61,12 @@ teardown() { fi_teardown_tmp; }
   grep -q '(autofix-failed: tests fail after 2 attempts)$' "$REPO/docs/found-issues.md"
 }
 
+@test "autofix run: retry feedback names the failing tests, not just the tail" {
+  git config found-issues.autofix.testCommand "printf 'not ok 1 early %s\n' failure; i=2; while [ \$i -le 40 ]; do echo \"ok \$i fine\"; i=\$((i+1)); done; exit 1"
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  grep -q 'not ok 1 early failure' "$FI_STANDIN_TRACE"
+}
+
 @test "autofix run: FI-RESULT decide releases the entry to the decision queue" {
   export FI_STANDIN_RESULT="FI-RESULT: decide plus, or a lookup table?"
   run "$FI_BIN" autofix run "$ID" --engine claude

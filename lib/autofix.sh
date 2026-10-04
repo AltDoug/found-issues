@@ -121,7 +121,7 @@ _fi_af_fix_loop() {
     fi
     tlog="$FI_AF_RUNS/$id.tests$n.log"
     if ! fi_af_run_tests "$AFI_wt" "$FI_AF_TESTCMD" "$tlog"; then
-      why="tests fail"; feedback="The test command failed. Last lines:"$'\n'"$(tail -n 20 "$tlog" 2>/dev/null)"
+      why="tests fail"; feedback="The test command failed."$'\n'"$(fi_af_test_report "$tlog" 20)"
       continue
     fi
     if [[ "$engine" == "claude" ]] && ! fi_af_budget_left >/dev/null; then
