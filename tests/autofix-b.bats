@@ -83,7 +83,7 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   printf '# touched\n' >>"$WT/src/calc.sh"
   run "$FI_BIN" autofix verify "$ID"
   [ "$status" -eq 3 ]
-  run ! grep -q '^attempts=[1-9]' "$ST/running/$ID"
+  ! grep -q '^attempts=[1-9]' "$ST/running/$ID" || false
 }
 
 @test "b: verify with no change exits 2" {
