@@ -200,7 +200,7 @@ cmd_status() {
   case "$format" in
     json)
       fi_segment_af_suffix "$file"
-      [[ "$FI_SEG_AF" =~ ([0-9]+) ]] && running="${BASH_REMATCH[1]}"
+      running="$FI_SEG_AF_N"
       printf '{"critical":%d,"issues":%d,"in_pr":%d,"stale":%d,"total_open":%d,"decisions":%d,"running":%d}\n' \
         "$critical" "$issues" "$in_pr" "$stale" "$total_open" "$decisions" "$running"
       ;;

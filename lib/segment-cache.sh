@@ -31,7 +31,7 @@
 #   fi_segment_read_ledger <ledger>         sets FI_SEG_LEDGER
 #   fi_segment_cache_get                    sets FI_SEG_OUT on a hit
 #   fi_segment_cache_put <segment>          best effort, never fails
-#   fi_segment_af_suffix <ledger>           sets FI_SEG_AF (🔧N or empty)
+#   fi_segment_af_suffix <ledger>           sets FI_SEG_AF (🔧N or empty), FI_SEG_AF_N (N or 0)
 #   fi_segment_join <segment>               prints segment + FI_SEG_AF
 
 # fi_autosync_stamp_path <cache dir> <ledger> — the per-ledger autosync
@@ -101,7 +101,7 @@ fi_segment_cache_put() {
 # root git reports, so a symlinked checkout still finds its file.
 fi_segment_af_suffix() {
   local file="$1" root saved n="" st
-  FI_SEG_AF=""
+  FI_SEG_AF="" FI_SEG_AF_N=0
   case "$file" in
     */docs/found-issues.md) root="${file%/docs/found-issues.md}" ;;
     */.found-issues.md)     root="${file%/.found-issues.md}" ;;
@@ -117,7 +117,10 @@ fi_segment_af_suffix() {
   root="$st/${root//[^A-Za-z0-9._-]/_}"
   [[ -f "$root" ]] || return 0
   IFS= read -r n <"$root" || true
-  [[ "$n" =~ ^[1-9][0-9]*$ ]] && FI_SEG_AF=$'\033[35m'"🔧$n"$'\033[0m'
+  if [[ "$n" =~ ^[1-9][0-9]*$ ]]; then
+    FI_SEG_AF_N="$n"
+    FI_SEG_AF=$'\033[35m'"🔧$n"$'\033[0m'
+  fi
   return 0
 }
 

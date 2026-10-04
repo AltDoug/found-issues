@@ -62,3 +62,10 @@ seg() { "$FI_BIN" status --format=segment --cwd "${1:-$REPO}"; }
   run seg
   [ "$output" = $' | \033[35m🔧1\033[0m' ]
 }
+
+@test "statusline: json running is the run count, not the color code" {
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  run "$FI_BIN" status --format=json --cwd "$REPO"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"running":1}'* ]]
+}
