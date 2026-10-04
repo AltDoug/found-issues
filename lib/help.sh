@@ -77,6 +77,8 @@ COMMANDS
                                         list with sources, get, set, unset.
   autofix on|off|status                v3 auto-fix: kill switch and what is queued,
                                         running and done today.
+  autofix summary [--peek]              What finished since the last interactive
+                                        session (the SessionStart line).
   autofix cancel <id>                   Stop a queued or running item and its
                                         background run; the ledger is untouched.
   autofix run <id> [--engine E]         Fix a queued (fix: small) entry headlessly:

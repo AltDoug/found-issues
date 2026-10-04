@@ -4,10 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0] - unreleased
+## [3.0.0] - 2026-10-04
 
 Opt-in auto-fix and auto-sweep (spec: `docs/superpowers/specs/2026-10-03-autofix-v3-design.md`).
-Built on the `release/v3` branch; this section grows with each phase.
+
+### Breaking
+
+- See `docs/versioning.md` § "3.0.0 — breaking changes": new ledger tags,
+  the reshaped `/found-issues:fix`, two new statusline buckets, quiet
+  headless sessions, and (only when switched on) self-merging fix PRs.
 
 ### Added
 
@@ -87,6 +92,26 @@ Built on the `release/v3` branch; this section grows with each phase.
   ledger to annotate (`fix workspace`'s `source=`), so a session in a
   linked worktree annotates its own ledger, not the main checkout's.
 
+- `found-issues config [<key> [<value>|--unset]] [--global]`: list, get,
+  set and unset the `found-issues.autofix.*` settings with validation.
+  Turning auto-fix on prints that fix PRs merge themselves.
+- `found-issues autofix cancel <id>`: retires a queued or running item as
+  `cancelled` and stops its background run and engine process group; the
+  ledger is untouched.
+- `found-issues autofix status` shows each running item's launcher,
+  decisions waiting, recent results newest first with PR links and cost,
+  and today's spend.
+- Statusline: `🔧N` (auto-fix runs in progress) and `❓N` (decisions
+  waiting); `status --format=json` adds `decisions` and `running`.
+- SessionStart, interactive sessions only: "Since last session: fixed N
+  (PR …), M failed (reason), K decisions waiting" (`found-issues autofix
+  summary [--peek]`).
+- `found-issues doctor` has an Auto-fix section: on/off and why, test
+  command and its source, gh auth, `claude`/`codex` versions, engine, caps.
+- `/found-issues:setup` has an auto-fix step that states, before enabling,
+  that fix PRs merge themselves and runs bill your account, with the caps
+  and the off switches.
+
 ### Changed
 
 - `/found-issues:fix` no longer needs a `bats`-only tool permission and reads
@@ -100,6 +125,8 @@ Built on the `release/v3` branch; this section grows with each phase.
 - Headless sessions (auto-fix children, `claude -p`) no longer receive the
   first-run hint or the daily statusline, jq and Codex notices, and no
   longer use them up before a person sees them.
+- A launcher A child that inherited `CLAUDE_CODE_ENTRYPOINT=cli` is now
+  treated as headless too (`FOUND_ISSUES_AUTOFIX_CHILD=1`).
 
 ## [2.10.4] - 2026-10-03
 

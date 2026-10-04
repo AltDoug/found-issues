@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**5 lifecycle hooks · 14 slash commands · 1145 tests on Linux/macOS · zero manual bookkeeping**
+**5 lifecycle hooks · 14 slash commands · 1187 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -148,6 +148,7 @@ All namespaced under `/found-issues:` (Claude Code plugin convention):
 | `/found-issues:promote-deferred <path:line>` | Promote a `[deferred]` entry back to `[open]` |
 | `/found-issues:promote` | Carry branch-only entries into main before branch deletion |
 | `/found-issues:status` | Print current counts |
+| `/found-issues:decide` | List the questions blocking `(decide: …)` entries, or record an answer (v3) |
 | `/found-issues:archive` | Move old `[fixed]` entries to `docs/found-issues-archive.md` (50-entry / 30-day thresholds) |
 | `/found-issues:setup` | Optional first-run orientation |
 | `/found-issues:doctor` | General health check — CLI, statusline, gh, mode, hook opt-outs, issues file |
@@ -155,6 +156,27 @@ All namespaced under `/found-issues:` (Claude Code plugin convention):
 
 `/found-issues:setup` offers an optional `/fi` shortcut so `/fi log
 src/foo.py:42 — bug` works as a shortcut for the full namespaced form.
+
+## Auto-fix (opt-in, v3)
+
+Off by default. With `found-issues config autofix true` in a GitHub repo
+(`gh` signed in, a test command), entries tagged `(fix: small)` are fixed
+in the background, each in its own worktree, branch and PR; when 5 are
+fixable, one sweep fixes up to 8 in a single PR. Each fix must pass the
+repo's tests and a read-only reviewer model.
+
+- **Fix PRs merge themselves** — no human approves them.
+- **Runs bill your Claude or Codex account, including in the background.**
+  Default caps per repo: 5 spot fixes and 1 sweep a day, $3 per fix run,
+  $10 per sweep (`found-issues config` changes them).
+- See it: `🔧N` (running) and `❓N` (decisions waiting) in the statusline,
+  `found-issues autofix status`, a "since last session" line at session
+  start, and `found-issues doctor`.
+- Stop it: `found-issues autofix off` (every repo), `found-issues autofix
+  cancel <id>` (one run), `FOUND_ISSUES_AUTOFIX=off` (one shell).
+
+`/found-issues:setup` walks through it. Design:
+[`docs/superpowers/specs/2026-10-03-autofix-v3-design.md`](docs/superpowers/specs/2026-10-03-autofix-v3-design.md).
 
 ## Use the count as soft pressure
 
@@ -203,10 +225,12 @@ regression report is welcome.
 
 ## Status
 
-**v2.7.1** — actively developed and dogfooded (this repo's own ledger is
-maintained by the plugin, including a `/found-issues:fix` run that
-closed it to zero). End-to-end runtime probes exercise the generated
-statusline shims against synthetic Claude Code stdin on every CI run.
+**v3.0.0** — opt-in auto-fix and auto-sweep on top of the ledger;
+actively developed and dogfooded (this repo's own ledger is maintained by
+the plugin). End-to-end runtime probes exercise the generated statusline
+shims against synthetic Claude Code stdin on every CI run, and stand-in
+`claude`/`codex`/`gh` binaries drive the auto-fix flows in CI. Upgrading
+from 2.x: [`docs/versioning.md`](docs/versioning.md#300--breaking-changes).
 
 Have a use case the plugin doesn't cover? [Open an issue](https://github.com/AltDoug/found-issues/issues/new).
 
