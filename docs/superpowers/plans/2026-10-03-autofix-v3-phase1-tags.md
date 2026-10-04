@@ -13,7 +13,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-03-autofix-v3-design.md` (§3 Classification, §6 step 3 wake-ups, §11 phase 1).
 
-**Phase index:** this is plan 1 of 5. Plans for phases 2–5 (§11 of the spec) are written when the previous phase merges into `release/v3`, against the interfaces it actually shipped.
+**Phase index:** this is plan 1 of 6. Plans for phases 2–6 (§11 of the spec) are written when the previous phase merges into `release/v3`, against the interfaces it actually shipped.
 
 ## Global Constraints
 

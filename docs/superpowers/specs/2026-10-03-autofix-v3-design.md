@@ -245,6 +245,8 @@ Over the cap, an item waits for the next day and the summary says so.
 
 ## 11. Delivery
 
+Six phases. Phases 1–5 build and release 3.0.0; phase 6 audits the whole plugin and burns its own ledger down.
+
 - **Phase PRs** target `release/v3` (phase 1 adds `release/v3` to the CI workflow's `push`/`pull_request` branch lists):
   1. Tags, `tag`/`decide`, decision queue, `/found-issues:decide`, off-limits, `until:` parsing and wake-ups.
   2. Queue, claim, lock, caps, `release`, `ship`, `merge-when-green`, launcher A (Claude + Codex engines), allowlist pinning, cost measurement.
@@ -252,6 +254,30 @@ Over the cap, an item waits for the next day and the summary says so.
   4. Sweep, and `/found-issues:fix` on the shared plumbing (prompt-8..11).
   5. Statusline, status, SessionStart summary, setup disclosure, doctor, docs (`docs/versioning.md` breaking-change note), 3.0.0 bump, live E2E.
 - **Final step:** one PR `release/v3` → `main` bumps to 3.0.0, then the marketplace bump follows the source release.
+
+### Phase 6 — whole-plugin audit and ledger burn-down (added 2026-10-03, operator request)
+
+Runs on `main` after 3.0.0 is released, against the **whole plugin**, not just the v3 diff.
+
+1. **Full audit, same method as `docs/audits/2026-10-03-audit/`:**
+   - read-only sonnet finders per area (ledger/sync, hooks, annotate, CLI, statusline, prompts and commands, Codex, and the new auto-fix code);
+   - an adversarial opus verifier per finding;
+   - orchestrator runtime repros, and a re-measurement of process counts.
+
+   Output goes to `docs/audits/<date>-audit/`. No finder or verifier may write files outside its scratch directory or trigger permission prompts.
+2. **Log every confirmed finding** with `found-issues log` and a fix tag (dogfooding §3). Lows are logged too; nothing is "too small to track".
+3. **Burn down found-issues' own ledger to zero**, or as close to zero as can be done properly:
+   - `(fix: …)` entries go through the v3 sweep (dogfooding §6), with interactive `/found-issues:fix` for anything the sweep releases.
+   - `(decide: …)` entries go to the operator via `/found-issues:decide`; once decided, they are fixed.
+   - `(manual: …)` entries are either fixed by hand with a test, or kept with a written reason.
+   - Every fix is TDD, has its own PR, merges on green, and its post-merge macOS run is watched to a terminal state. New problems found along the way are logged and fixed under the same rules.
+   - Releases follow SemVer: 3.0.x for fixes, 3.1.0 if anything is added. Each source release gets its marketplace bump.
+4. **Driven by `/goal`**, drafted via `prompt-handoff`. The condition is reached when:
+   - `docs/found-issues.md` on `main` has no `[open]` entries, or every remaining `[open]` entry carries `(decide:)` awaiting the operator or `(manual:)` with a reason;
+   - the last full `bats tests/` run in the session passed and was shown;
+   - every fix PR is merged with its post-merge `tests` run green.
+
+   It stops after a stated turn cap.
 - **Merge `main` into `release/v3`** whenever `main` moves.
 
 ## 12. Risks
