@@ -104,3 +104,12 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
   wait_spawn
   grep -q "autofix run $ID --engine claude$" "$TMP/spawned"
 }
+
+@test "stop: a queued sweep gets launcher A at Stop" {
+  rm -f "$QITEM"
+  SWID=20261004-000000-00042
+  fi_af_item_write "$ST/queue/$SWID" "id=$SWID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep engine=claude crashes=0
+  run stop "$REPO"
+  wait_spawn
+  grep -q "autofix run $SWID --engine claude$" "$TMP/spawned"
+}

@@ -130,3 +130,37 @@ AUTOFIX-QUEUED $id2")"
   [ "$status" -eq 0 ]
   no_spawn
 }
+
+sweep_item() {
+  SWID=20261004-000000-00042
+  fi_af_item_write "$ST/queue/$SWID" "id=$SWID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep engine=claude crashes=0
+}
+
+@test "hook: a sweep marker in bypass nudges the sweeper agent" {
+  sweep_item
+  run hook "$(payload bypassPermissions "AUTOFIX-SWEEP-DUE $SWID")"
+  [ "$status" -eq 0 ]
+  ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+  [[ "$ctx" == *"found-issues:found-issues-sweeper"* ]]
+  [[ "$ctx" == *"Run found-issues auto-fix sweep $SWID."* ]]
+  [[ "$ctx" != *"found-issues-fixer"* ]]
+  grep -q '^launcher=B$' "$ST/queue/$SWID"
+  no_spawn
+}
+
+@test "hook: a sweep marker in default mode starts launcher A" {
+  sweep_item
+  run hook "$(payload default "AUTOFIX-SWEEP-DUE $SWID")"
+  [ "$status" -eq 0 ]
+  wait_spawn
+  grep -q "autofix run $SWID --engine claude$" "$TMP/spawned"
+}
+
+@test "hook: a spot marker and a sweep marker in one call nudge the fixer and the sweeper" {
+  sweep_item
+  run hook "$(payload auto "AUTOFIX-QUEUED $ID
+AUTOFIX-SWEEP-DUE $SWID")"
+  ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+  [[ "$ctx" == *"Fix found-issues auto-fix item $ID."* ]]
+  [[ "$ctx" == *"Run found-issues auto-fix sweep $SWID."* ]]
+}

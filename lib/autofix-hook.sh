@@ -15,7 +15,7 @@
 #   fi_afh_now
 #   fi_afh_mark <item> <A|B> <epoch>
 #   fi_afh_launch_a <item> <engine> <fi-bin>
-#   fi_afh_context_b <id>
+#   fi_afh_context_b <id> [<item>]
 #   fi_afh_lock_fresh <lock-dir>
 #   fi_afh_stop <payload> <engine> <fi-bin>
 
@@ -41,10 +41,10 @@ fi_afh_launcher() {
 }
 
 fi_afh_ids() {
-  local rest="$1" id seen=" " re='AUTOFIX-QUEUED[[:space:]]+([0-9]{8}-[0-9]{6}-[0-9]{5})'
+  local rest="$1" id seen=" " re='AUTOFIX-(QUEUED|SWEEP-DUE)[[:space:]]+([0-9]{8}-[0-9]{6}-[0-9]{5})'
   FI_AFH_IDS=()
   while [[ "$rest" =~ $re ]]; do
-    id="${BASH_REMATCH[1]}"
+    id="${BASH_REMATCH[2]}"
     rest="${rest#*"${BASH_REMATCH[0]}"}"
     [[ "$seen" == *" $id "* ]] && continue
     seen+="$id "
@@ -83,7 +83,29 @@ fi_afh_launch_a() {
       </dev/null >>"$log" 2>&1 3>&- & ) >/dev/null 2>&1
 }
 
+# <item> (optional) picks the agent: a kind=sweep item gets the sweeper.
 fi_afh_context_b() {
+  local line kind=""
+  if [[ -n "${2:-}" && -f "$2" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" == kind=* ]] && { kind="${line#kind=}"; break; }
+    done <"$2"
+  fi
+  if [[ "$kind" == "sweep" ]]; then
+    cat <<EOF
+## found-issues auto-fix: sweep $1 is queued
+
+The user turned on found-issues auto-fix. Start the plugin agent
+found-issues:found-issues-sweeper now, in the background, with exactly this
+prompt:
+
+  Run found-issues auto-fix sweep $1.
+
+Do not fix anything yourself and do not wait for the agent; carry on with
+your current task.
+EOF
+    return 0
+  fi
   cat <<EOF
 ## found-issues auto-fix: item $1 is queued
 
