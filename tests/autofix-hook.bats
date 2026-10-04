@@ -54,6 +54,8 @@ AUTOFIX-QUEUED $ID")"
     ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
     [[ "$ctx" == *"found-issues:found-issues-fixer"* ]]
     [[ "$ctx" == *"Fix found-issues auto-fix item $ID."* ]]
+    # A user hook may refuse an Agent call with no model (seen live, phase 5).
+    [[ "$ctx" == *"with model sonnet"* ]] || false
     grep -q '^launcher=B$' "$QITEM"
     grep -Eq '^launched=[0-9]+$' "$QITEM"
     no_spawn
@@ -143,6 +145,7 @@ sweep_item() {
   ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
   [[ "$ctx" == *"found-issues:found-issues-sweeper"* ]]
   [[ "$ctx" == *"Run found-issues auto-fix sweep $SWID."* ]]
+  [[ "$ctx" == *"with model sonnet"* ]]
   [[ "$ctx" != *"found-issues-fixer"* ]]
   grep -q '^launcher=B$' "$ST/queue/$SWID"
   no_spawn
