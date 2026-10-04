@@ -530,6 +530,21 @@ EOF
   if (( omitted > 0 )); then
     printf "…and %s more [open] entries — run \`found-issues list\` for the full ledger.\n" "$omitted"
   fi
+  # v3 decision queue (spec §3.4). Fixed text + a number only, so it stays
+  # outside the untrusted-data fence safely. Builtin count over the ledger
+  # text read for the hook-11 gate.
+  local fi_decide_ref='/found-issues:decide' __fi_dec=0 __fi_rest="$__fi_ledger_text" __fi_s="s"
+  # shellcheck disable=SC2016  # $fi- is Codex's literal mention sigil
+  [[ "$harness" == "codex" ]] && fi_decide_ref='$fi-decide'
+  local __fi_re_dec=$'(^|\n)- \\[open\\][^\n]*\\(decide: '
+  while [[ "$__fi_rest" =~ $__fi_re_dec ]]; do
+    __fi_dec=$((__fi_dec + 1))
+    __fi_rest="${__fi_rest#*"${BASH_REMATCH[0]}"}"
+  done
+  (( __fi_dec == 1 )) && __fi_s=""
+  if (( __fi_dec > 0 )); then
+    printf '\n%s decision%s waiting — run `%s` to answer them.\n' "$__fi_dec" "$__fi_s" "$fi_decide_ref"
+  fi
   cat <<EOF
 
 These entries are tracked in \`$display_path\`. If your work fixes any of

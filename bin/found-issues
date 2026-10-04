@@ -118,6 +118,8 @@ source "$FI_LIB_DIR/defer.sh"
 source "$FI_LIB_DIR/resolve.sh"
 # shellcheck source=../lib/tag.sh
 source "$FI_LIB_DIR/tag.sh"
+# shellcheck source=../lib/decide.sh
+source "$FI_LIB_DIR/decide.sh"
 # shellcheck source=../lib/promote-deferred.sh
 source "$FI_LIB_DIR/promote-deferred.sh"
 # shellcheck source=../lib/list-status.sh
@@ -403,6 +405,7 @@ main() {
     promote-deferred)     cmd_promote_deferred "$@" ;;
     resolve)          cmd_resolve "$@" ;;
     tag)              cmd_tag "$@" ;;
+    decide)           cmd_decide "$@" ;;
     promote)          cmd_promote "$@" ;;
     install-statusline)   cmd_install_statusline "$@" ;;
     uninstall-statusline) cmd_uninstall_statusline "$@" ;;

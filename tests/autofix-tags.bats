@@ -184,3 +184,30 @@ teardown() { fi_teardown_tmp; }
   fi_run tag "ci-flakes" --fix medium
   grep -q 'retries hide real failures (manual: off-limits: no-file)' docs/found-issues.md
 }
+
+@test "decide: lists questions critical first, counts, records answers" {
+  printf -- '- [open] 2026-10-01 src/a.sh:1 — naming (decide: rename or alias?)\n- [open] [!] 2026-10-02 src/a.sh:2 — data shape (decide: keep v1 or migrate?)\n- [open] 2026-10-03 src/a.sh:3 — plain bug (fix: small)\n' > docs/found-issues.md
+  fi_run decide
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "1. [!] src/a.sh:2 — keep v1 or migrate?" ]
+  [ "${lines[1]}" = "2. src/a.sh:1 — rename or alias?" ]
+  fi_run decide --count
+  [ "$output" = "2" ]
+  fi_run decide "src/a.sh:1" --answer "alias (keep old name)"
+  [ "$status" -eq 0 ]
+  grep -q 'naming (decided: alias \[keep old name\])' docs/found-issues.md
+  ! grep -q 'rename or alias' docs/found-issues.md
+  fi_run decide "plain bug" --answer x
+  [ "$status" -eq 3 ]
+  fi_run decide "src/a.sh" --answer x
+  [ "$status" -eq 2 ]
+}
+
+@test "decide: empty queue" {
+  printf -- '- [open] 2026-10-03 src/a.sh:3 — plain bug\n' > docs/found-issues.md
+  fi_run decide
+  [ "$status" -eq 0 ]
+  [ "$output" = "No decisions waiting." ]
+  fi_run decide --count
+  [ "$output" = "0" ]
+}
