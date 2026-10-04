@@ -84,7 +84,7 @@ fi_af_spawn() {
 
 _fi_af_pr_body() {
   local tlog="$1"
-  printf 'Unattended fix by found-issues auto-fix (launcher A, engine %s).\n\n' "${AFI_engine:-?}"
+  printf 'Unattended fix by found-issues auto-fix (launcher %s, engine %s).\n\n' "${AFI_launcher:-A}" "${AFI_engine:-?}"
   printf 'Issue:\n\n    %s\n\n' "$AFI_entry"
   printf 'Tests: `%s` passed. Last lines:\n\n' "$FI_AF_TESTCMD"
   tail -n 15 "$tlog" 2>/dev/null | sed 's/^/    /'
@@ -103,6 +103,12 @@ fi_af_ship() {
   fi_af_run_tests "$wt" "$FI_AF_TESTCMD" "$tlog" || { FI_AF_WHY="tests fail at ship"; return 1; }
   git -C "$wt" add -A
   if git -C "$wt" diff --cached --quiet "$ref"; then FI_AF_WHY="nothing to ship"; return 1; fi
+  # Fail closed: an approval with no recorded tree (a write that failed, or
+  # an item file edited by hand) never ships.
+  [[ -n "${AFI_verdict_tree:-}" ]] || { FI_AF_WHY="no verifier-approved tree recorded (run: found-issues autofix verify $AFI_id)"; return 1; }
+  if [[ "$(git -C "$wt" write-tree 2>/dev/null)" != "$AFI_verdict_tree" ]]; then
+    FI_AF_WHY="the change differs from what the verifier approved (did the tests leave files?)"; return 1
+  fi
   fi_parse_entry_vars "$AFI_entry" || true
   frag="${FE_symptom:-$AFI_loc}"
   frag="${frag:0:60}"

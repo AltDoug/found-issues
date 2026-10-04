@@ -44,15 +44,16 @@ fi_detect_harness() {
   fi
 }
 
-# Emit PostToolUse context text for the current harness.
-# Claude Code injects plain stdout; Codex requires JSON.
+# Emit PostToolUse context text. Both harnesses read additionalContext from
+# hookSpecificOutput JSON; Claude Code writes plain PostToolUse stdout to its
+# debug log only and never shows it to the model (hooks docs, re-checked
+# 2026-10-03), so plain text is only the no-jq fallback on Claude.
 fi_emit_post_context() {
   local text="${1:-}"
   [[ -z "$text" ]] && return 0
-  if [[ "$(fi_detect_harness)" == "codex" ]]; then
-    command -v jq >/dev/null 2>&1 || return 0
+  if command -v jq >/dev/null 2>&1; then
     printf '%s' "$text" | jq -Rs '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: .}}'
-  else
+  elif [[ "$(fi_detect_harness)" != "codex" ]]; then
     printf '%s\n' "$text"
   fi
 }

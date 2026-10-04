@@ -24,8 +24,7 @@ Built on the `release/v3` branch; this section grows with each phase.
   passed.
 - Auto-fix queue: with `git config found-issues.autofix true` in a GitHub
   repo, `found-issues log --fix small …` queues the entry and prints
-  `AUTOFIX-QUEUED <id>` (Phase 3 wires the launch). Logged inside a fixer, it
-  queues without the marker.
+  `AUTOFIX-QUEUED <id>`. Logged inside a fixer, it queues without the marker.
 - `found-issues autofix run <id> [--engine claude|codex]` (launcher A). It:
   - claims under a per-repo lock (stale after 60 min) and the daily cap
     (`found-issues.autofix.dailyFixes`, default 5);
@@ -43,6 +42,26 @@ Built on the `release/v3` branch; this section grows with each phase.
   `.runTimeoutMin` (default 20).
 - `found-issues autofix status | on | off | claim | diff | ship | release |
   merge-when-green`.
+- Launchers. On `AUTOFIX-QUEUED`, the PostToolUse hook picks one:
+  - In a Claude Code session in auto or bypassPermissions mode (launcher B),
+    it asks the main agent to start the plugin agent
+    `found-issues:found-issues-fixer` in the background. The agent works only
+    through `found-issues autofix claim|brief|test|verify|ship|release`.
+  - In other modes and on Codex, it starts a detached
+    `found-issues autofix run` (launcher A).
+  - Items still queued when the session stops get launcher A
+    (`FOUND_ISSUES_AUTOFIX_STOP_GRACE`, default 60 s).
+  - Inside a subagent or a fixer, nothing launches.
+  - `FOUND_ISSUES_AUTOFIX_LAUNCHER=headless` forces launcher A.
+- `found-issues autofix brief | test | verify <id>`. `autofix ship` ships only
+  the exact tree the verifier approved, on both launchers. `autofix run`
+  refuses an unknown id and exits 3 capped, 4 locked, 7 engine outage.
+
+### Fixed
+
+- PostToolUse context (annotation suggestions, `--pick` prompts) now reaches
+  Claude. Claude Code shows `hookSpecificOutput.additionalContext` to the
+  model but writes plain PostToolUse stdout to its debug log only.
 
 ## [2.10.4] - 2026-10-03
 

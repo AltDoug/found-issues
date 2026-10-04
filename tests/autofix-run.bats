@@ -103,11 +103,11 @@ teardown() { fi_teardown_tmp; }
   [ -z "$(ls "$ST/queue")" ]
 }
 
-@test "autofix run: capped or locked leaves the item queued and exits 0" {
+@test "autofix run: locked leaves the item queued, starts no engine, exits 4" {
   fi_af_context   # setup already sourced the CLI (a second source hits its readonly vars)
   fi_af_lock someone-else
   run "$FI_BIN" autofix run "$ID" --engine claude
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 4 ]
   [ -f "$ST/queue/$ID" ]
   [ ! -s "$FI_STANDIN_TRACE" ]
 }
@@ -142,7 +142,7 @@ teardown() { fi_teardown_tmp; }
 @test "autofix run: an engine outage requeues the item untagged and stops the drain" {
   export FI_STANDIN_ERROR="usage limit reached" FI_STANDIN_EDIT=true
   run "$FI_BIN" autofix run "$ID" --engine claude
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 7 ]
   [[ "$output" == *"engine error"* ]]
   [ -f "$ST/queue/$ID" ]
   ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
@@ -177,4 +177,33 @@ teardown() { fi_teardown_tmp; }
   kill -TERM "$rpid"; wait "$rpid" || true
   sleep 1
   ! pgrep -f 'sleep 4712' >/dev/null || false
+}
+
+@test "autofix run: a test run that leaves a new file after approval is not shipped" {
+  # $RANDOM, not date +%N: macOS date has no %N, so the artifact would be stable
+  git config found-issues.autofix.testCommand 'sh test.sh && echo $RANDOM$RANDOM > artifact.txt'
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  grep -q 'differs from what the verifier approved' "$ST/done/$ID"
+}
+
+@test "autofix run: an unknown id is refused and the queue is not drained" {
+  run "$FI_BIN" autofix run 20990101-000000-00000 --engine claude
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no queued item 20990101-000000-00000"* ]]
+  [ -f "$ST/queue/$ID" ]
+}
+
+@test "autofix run: a locked repo exits 4 and keeps the item queued" {
+  mkdir "$ST/lock"; echo other >"$ST/lock/owner"
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 4 ]
+  [ -f "$ST/queue/$ID" ]
+}
+
+@test "autofix run: the daily cap exits 3 and leaves a capped marker" {
+  git config found-issues.autofix.dailyFixes 1
+  echo earlier >"$ST/day/$(date +%Y-%m-%d).spot"
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 3 ]
+  [ -f "$ST/day/$(date +%Y-%m-%d).capped" ]
 }
