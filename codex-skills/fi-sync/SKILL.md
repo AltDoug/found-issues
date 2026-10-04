@@ -21,7 +21,7 @@ when unsure; closures are not reversible.)
 
 This handles three closure mechanisms automatically:
 
-- **PR merge** — `[open]` entries with `(PR: org/repo#N)` get checked via `gh pr view`. Merged PRs flip the entry to `[fixed]`.
+- **PR merge** — `[open]` entries with `(PR: org/repo#N)` get checked via `gh pr view`. A PR merged into the default branch flips the entry to `[fixed]`. A PR merged into another branch (a release branch, a stacked PR) flips it once a later merged PR brings that branch into the default branch.
 - **Commit on default branch** — entries with `(commit: <sha>)` get checked via `git merge-base --is-ancestor`. Commits on main flip the entry to `[fixed]`.
 - **Tombstone** — the entry auto-flips with `(closure: tombstone)` only when **git confirms the file was removed**: absent from the current `HEAD` tree AND present somewhere in git history. Everything else stays `[open]`, and you must not close those yourself in Phase 2 either:
   - a file that merely got **SHORTER** than the cited line — that is line drift, not a fix;
