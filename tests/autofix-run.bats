@@ -179,6 +179,13 @@ teardown() { fi_teardown_tmp; }
   ! pgrep -f 'sleep 4712' >/dev/null || false
 }
 
+@test "autofix run: a test run that leaves a new file after approval is not shipped" {
+  # $RANDOM, not date +%N: macOS date has no %N, so the artifact would be stable
+  git config found-issues.autofix.testCommand 'sh test.sh && echo $RANDOM$RANDOM > artifact.txt'
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  grep -q 'differs from what the verifier approved' "$ST/done/$ID"
+}
+
 @test "autofix run: an unknown id is refused and the queue is not drained" {
   run "$FI_BIN" autofix run 20990101-000000-00000 --engine claude
   [ "$status" -eq 1 ]

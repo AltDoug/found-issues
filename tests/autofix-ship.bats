@@ -15,7 +15,8 @@ setup() {
 }
 teardown() { fi_teardown_tmp; }
 
-fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"; }
+# ship only takes a verifier-approved tree (phase 3), so fixing includes verify.
+fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"; "$FI_BIN" autofix verify "$ID" >/dev/null; }
 
 @test "autofix ship: commits the fix, pushes, opens the PR, arms auto-merge" {
   fix_it
@@ -45,6 +46,7 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   "$FI_BIN" autofix claim "$id2" >/dev/null
   wt2="$REPO/.claude/worktrees/fi-autofix-$id2"
   sed -i.bak 's/ - / + /' "$wt2/src/calc.sh"; rm -f "$wt2/src/calc.sh.bak"
+  "$FI_BIN" autofix verify "$id2" >/dev/null
   run "$FI_BIN" autofix ship "$id2"
   [ "$status" -eq 0 ]
   br2="$(git -C "$TMP/remote.git" for-each-ref --format='%(refname:short)' "refs/heads/fi/autofix/*$id2")"
@@ -67,6 +69,8 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
 }
 
 @test "autofix ship: red tests refuse to ship and push nothing" {
+  fix_it
+  sed -i.bak 's/ + / - /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"   # broken again after approval
   run "$FI_BIN" autofix ship "$ID"
   [ "$status" -eq 1 ]
   [[ "$output" == *"tests fail"* ]]

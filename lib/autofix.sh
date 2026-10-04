@@ -20,6 +20,7 @@ Usage: found-issues autofix <command>
   claim <id>                  Take a queued item: lock, cap, worktree (prints its path)
   brief <id>                  The in-session fixer's instructions for a claimed item
   test <id>                   Run the repo's test command in the claimed item's worktree
+  verify <id>                 Tests, then the read-only verifier; records the approved tree
   diff <id>                   The claimed item's change against origin/<default>
   ship <id>                   Test, commit, push, open the PR, annotate, arm auto-merge
   release <id> --already-fixed|--decide|--manual|--failed "<text>"
@@ -48,8 +49,12 @@ _fi_af_fix_attempt() {
 }
 
 _fi_af_verify() {
-  local engine="$1" n="$2" base="$FI_AF_RUNS/$AFI_id.verify$n" rc=0
-  fi_af_verifier_cmd "$engine" "$(fi_af_verifier_prompt "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")")" \
+  local engine="$1" n="$2" base="$FI_AF_RUNS/$AFI_id.verify$n" rc=0 d
+  d="$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")"
+  # The staged tree the verifier is shown; ship refuses any other tree
+  # (ledger lib/autofix-ship.sh:116 — tests could leave artifacts).
+  FI_AF_TREE="$(git -C "$AFI_wt" write-tree 2>/dev/null || true)"
+  fi_af_verifier_cmd "$engine" "$(fi_af_verifier_prompt "$d")" \
     "$base.last" "$FI_AF_RUNS/verdict.schema.json"
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
   fi_af_collect "$engine" "$base.out" "$base.last"
@@ -130,6 +135,9 @@ _fi_af_run_one() {
       why="verifier rejected: $FI_AF_REASON"; feedback="The reviewer rejected it: $FI_AF_REASON"; continue
     fi
     FI_AF_VERDICT_REASON="$FI_AF_REASON"
+    AFI_verdict_tree="$FI_AF_TREE"
+    fi_af_item_set "$FI_AF_ST/running/$id" verdict approve
+    fi_af_item_set "$FI_AF_ST/running/$id" verdict_tree "$FI_AF_TREE"
     if fi_af_ship; then
       fi_af_item_set "$FI_AF_ST/running/$id" pr "$FI_AF_PR"
       _fi_af_end "$id" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE, \$$FI_AF_COST"
@@ -278,6 +286,10 @@ cmd_autofix() {
       fi_af_item_read "$FI_AF_ST/running/$1" || { fi_err "autofix: $1 is not claimed"; return 1; }
       fi_af_touch_lock "$1"
       if [[ "$sub" == "diff" ]]; then fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}"; return; fi
+      if [[ "$AFI_verdict" != "approve" ]]; then
+        fi_err "autofix: ship needs an approving verdict — run: found-issues autofix verify $1"; return 1
+      fi
+      FI_AF_VERDICT_REASON="$AFI_verdict_reason"
       fi_af_no_prompts
       if fi_af_ship; then
         printf 'Shipped %s as PR #%s (merge: %s)\n' "$1" "$FI_AF_PR" "$FI_AF_MERGE"
@@ -293,11 +305,15 @@ cmd_autofix() {
       [[ $# -eq 0 && "$mpr" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number> [--repo owner/name]"; return 2; }
       fi_af_no_prompts
       fi_af_merge_when_green "$mpr" "$mrepo" ;;
-    brief|test)
+    brief|test|verify)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix $sub <id>"; return 2; }
       fi_af_context || return 1
       fi_af_b_running "$1" || return 1
-      if [[ "$sub" == brief ]]; then fi_af_brief; else fi_af_b_test "$1"; fi ;;
+      case "$sub" in
+        brief) fi_af_brief ;;
+        test) fi_af_b_test "$1" ;;
+        verify) fi_af_no_prompts; fi_af_b_verify "$1" ;;
+      esac ;;
     run)
       local rid="${1:-}" eng=""
       [[ $# -gt 0 ]] && shift
