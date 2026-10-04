@@ -5,6 +5,7 @@
 # Compatible with bash 3.2+ (macOS system bash).
 #
 # Functions:
+#   _fi_af_fix_loop <id> <engine>
 #   _fi_af_run <id> <engine> / _fi_af_run_one <id> <engine>
 #   _fi_af_status
 #   cmd_autofix <sub> [...]
@@ -77,20 +78,15 @@ _fi_af_end() {
   fi_af_finish "$@"
 }
 
-# Spec §5 for one claimed item: up to 2 attempts of fix -> bash tests ->
-# verifier, then ship. Every path ends in _fi_af_end.
-_fi_af_run_one() {
-  local id="$1" engine_opt="$2" rc=0 engine n feedback="" why="" tlog
-  fi_af_claim "$id" || return $?
-  fi_af_item_read "$FI_AF_ST/running/$id"
-  FI_AF_COST=0 FI_AF_TOKENS=0
-  if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
-    _fi_af_end "$id" manual "no test command"; return 0
-  fi
-  if ! engine="$(fi_af_engine "${engine_opt:-$AFI_engine}")" || ! command -v "$engine" >/dev/null 2>&1; then
-    _fi_af_end "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
-  fi
-  AFI_engine="$engine"
+# Spec §5 steps 2-5 for the loaded entry (AFI_entry, AFI_wt, AFI_base_sha):
+# up to 2 attempts of fix -> bash tests -> verifier. Shared by a spot run
+# and by each entry of a sweep. Sets FI_AF_OUTCOME (approved | already-fixed
+# | decide | manual | failed | outage) and FI_AF_OUTCOME_TEXT; on approved
+# the worktree holds the verified change and FI_AF_TREE its staged tree.
+_fi_af_fix_loop() {
+  local id="$1" engine="$2" n feedback="" why="" tlog ref
+  ref="${AFI_base_sha:-origin/$AFI_base}"
+  FI_AF_OUTCOME="" FI_AF_OUTCOME_TEXT=""
   for n in 1 2; do
     touch "$FI_AF_ST/lock" 2>/dev/null || true
     if [[ "$engine" == "claude" ]] && ! fi_af_budget_left >/dev/null; then
@@ -98,28 +94,24 @@ _fi_af_run_one() {
     fi
     (( n == 1 )) || _fi_af_reset_wt
     _fi_af_fix_attempt "$engine" "$n" "$feedback"
-    # An outage (usage limit, logged out, network) is not an attempt: the
-    # item goes back to the queue untagged and the drain stops (rc 7).
-    if [[ -n "$FI_AF_ENGINE_ERR" ]] \
-       && [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
-      FI_AF_WHY="$FI_AF_ENGINE_ERR"
-      fi_af_requeue "$id" "engine error: $FI_AF_ENGINE_ERR"
-      return 7
+    # An outage (usage limit, logged out, network) is not an attempt.
+    if [[ -n "$FI_AF_ENGINE_ERR" && -z "$(fi_af_diff "$AFI_wt" "$ref")" ]]; then
+      FI_AF_OUTCOME=outage FI_AF_OUTCOME_TEXT="$FI_AF_ENGINE_ERR"; return 0
     fi
     case "$FI_AF_RESULT" in
       already-fixed|decide)
-        _fi_af_end "$id" "$FI_AF_RESULT" "${FI_AF_RESULT_TEXT:-no reason given}"
+        FI_AF_OUTCOME="$FI_AF_RESULT" FI_AF_OUTCOME_TEXT="${FI_AF_RESULT_TEXT:-no reason given}"
         return 0 ;;
       manual)
         # A fixer that changed code but could not prove it says manual; bash
         # runs the tests and the verifier anyway, so its change still counts.
-        if [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
-          _fi_af_end "$id" manual "${FI_AF_RESULT_TEXT:-no reason given}"
+        if [[ -z "$(fi_af_diff "$AFI_wt" "$ref")" ]]; then
+          FI_AF_OUTCOME=manual FI_AF_OUTCOME_TEXT="${FI_AF_RESULT_TEXT:-no reason given}"
           return 0
         fi
         fi_af_log "$id" "attempt $n: fixer said manual but left a change; testing and verifying it" ;;
     esac
-    if [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
+    if [[ -z "$(fi_af_diff "$AFI_wt" "$ref")" ]]; then
       why="no change"; feedback="The attempt changed no files."; continue
     fi
     tlog="$FI_AF_RUNS/$id.tests$n.log"
@@ -135,22 +127,50 @@ _fi_af_run_one() {
       why="verifier rejected: $FI_AF_REASON"; feedback="The reviewer rejected it: $FI_AF_REASON"; continue
     fi
     FI_AF_VERDICT_REASON="$FI_AF_REASON"
-    AFI_verdict_tree="$FI_AF_TREE"
-    fi_af_item_set "$FI_AF_ST/running/$id" verdict_tree "$FI_AF_TREE"
-    fi_af_item_set "$FI_AF_ST/running/$id" verdict approve
-    if fi_af_ship; then
-      fi_af_item_set "$FI_AF_ST/running/$id" pr "$FI_AF_PR"
-      _fi_af_end "$id" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE, \$$FI_AF_COST"
-      return 0
-    fi
-    _fi_af_end "$id" failed "ship: $FI_AF_WHY"
+    FI_AF_OUTCOME=approved
     return 0
   done
   case "$why" in
     "run budget spent"*) ;;
     *) why="$why after 2 attempts" ;;
   esac
-  _fi_af_end "$id" failed "$why"
+  FI_AF_OUTCOME=failed FI_AF_OUTCOME_TEXT="$why"
+}
+
+# Spec §5 for one claimed item: the fix loop, then ship. Every path ends in
+# _fi_af_end, except an engine outage, which requeues (rc 7).
+_fi_af_run_one() {
+  local id="$1" engine_opt="$2" engine
+  fi_af_claim "$id" || return $?
+  fi_af_item_read "$FI_AF_ST/running/$id"
+  FI_AF_COST=0 FI_AF_TOKENS=0
+  if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
+    _fi_af_end "$id" manual "no test command"; return 0
+  fi
+  if ! engine="$(fi_af_engine "${engine_opt:-$AFI_engine}")" || ! command -v "$engine" >/dev/null 2>&1; then
+    _fi_af_end "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
+  fi
+  AFI_engine="$engine"
+  _fi_af_fix_loop "$id" "$engine"
+  case "$FI_AF_OUTCOME" in
+    outage)
+      # The item goes back to the queue untagged and the drain stops.
+      FI_AF_WHY="$FI_AF_OUTCOME_TEXT"
+      fi_af_requeue "$id" "engine error: $FI_AF_OUTCOME_TEXT"
+      return 7 ;;
+    approved)
+      AFI_verdict_tree="$FI_AF_TREE"
+      fi_af_item_set "$FI_AF_ST/running/$id" verdict_tree "$FI_AF_TREE"
+      fi_af_item_set "$FI_AF_ST/running/$id" verdict approve
+      if fi_af_ship; then
+        fi_af_item_set "$FI_AF_ST/running/$id" pr "$FI_AF_PR"
+        _fi_af_end "$id" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE, \$$FI_AF_COST"
+      else
+        _fi_af_end "$id" failed "ship: $FI_AF_WHY"
+      fi ;;
+    *) _fi_af_end "$id" "$FI_AF_OUTCOME" "$FI_AF_OUTCOME_TEXT" ;;
+  esac
+  return 0
 }
 
 _fi_af_next_queued() {
