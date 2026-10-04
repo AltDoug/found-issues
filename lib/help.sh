@@ -72,6 +72,11 @@ COMMANDS
   decide [--count] | decide <match> --answer "<text>"
                                         The decision queue: list open
                                         (decide: ...) questions, or record one.
+  autofix on|off|status                 v3 auto-fix: kill switch and what is queued,
+                                        running and done today.
+  autofix run <id> [--engine E]         Fix a queued (fix: small) entry headlessly:
+                                        worktree, fixer, tests, verifier, self-merging PR.
+  autofix claim|diff|ship|release <id>  The steps of a fix, for in-session fixers.
   install-statusline [--no-migrate]     Append the counter segment to ~/.claude/statusline.sh.
                                         Self-healing: auto-rewrites broken v1.0.0/1.0.1 marker blocks
                                         AND auto-migrates pre-v0.1.7 handwritten snippets (with a

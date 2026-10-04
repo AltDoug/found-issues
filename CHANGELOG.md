@@ -22,6 +22,27 @@ Built on the `release/v3` branch; this section grows with each phase.
 - `found-issues defer --until pr:<owner/repo#N>|date:<YYYY-MM-DD>|"<text>"`;
   `sync` returns a deferred entry to `[open]` when its PR merged or its date
   passed.
+- Auto-fix queue: with `git config found-issues.autofix true` in a GitHub
+  repo, `found-issues log --fix small …` queues the entry and prints
+  `AUTOFIX-QUEUED <id>` (Phase 3 wires the launch). Logged inside a fixer, it
+  queues without the marker.
+- `found-issues autofix run <id> [--engine claude|codex]` (launcher A). It:
+  - claims under a per-repo lock (stale after 60 min) and the daily cap
+    (`found-issues.autofix.dailyFixes`, default 5);
+  - cuts a `fi/autofix/*` worktree from `origin/<default>`;
+  - runs a headless fixer (`claude -p … --permission-mode dontAsk
+    --permission-prompts none`, sonnet, or `codex exec --sandbox
+    workspace-write`);
+  - re-runs the tests itself;
+  - gets an opus/high read-only verdict;
+  - opens a PR, annotates the ledger on the PR branch and in the checkout,
+    and arms auto-merge (falling back to `autofix merge-when-green`).
+
+  At most 2 attempts. A failure tags `(autofix-failed: <reason>)`. Spend is
+  capped by `found-issues.autofix.runBudget` (USD, default 3) and
+  `.runTimeoutMin` (default 20).
+- `found-issues autofix status | on | off | claim | diff | ship | release |
+  merge-when-green`.
 
 ## [2.10.4] - 2026-10-03
 
