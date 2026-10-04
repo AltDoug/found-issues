@@ -11,6 +11,7 @@
 #   fi_af_status
 #   fi_af_seg_write <root> / fi_af_seg_refresh
 #   fi_af_summary [--peek]
+#   fi_af_doctor <pass> <warn> <fail> <gh-user>
 
 # shellcheck disable=SC2154  # AFI_*/FI_AF_* come from autofix-queue.sh / autofix-config.sh
 
@@ -209,4 +210,40 @@ fi_af_summary() {
   if (( dec == 1 )); then s+=", 1 decision waiting"; elif (( dec > 1 )); then s+=", $dec decisions waiting"; fi
   [[ "$cost" != 0 && "$cost" != 0.00 ]] && s+=" — \$$cost spent"
   printf '%s.\n' "$s"
+}
+
+# Phase 5 ruling 9: auto-fix readiness at a glance, on or off (spec §8).
+fi_af_doctor() {
+  local p="$1" w="$2" x="$3" gh_user="$4" e v
+  git rev-parse --show-toplevel >/dev/null 2>&1 || return 0
+  printf '== Auto-fix ==\n'
+  if fi_af_enabled; then
+    fi_cfg_show_line autofix
+    printf '%s Auto-fix: on (found-issues.autofix=true, %s)\n' "$p" "$FI_CFG_SRC"
+  else
+    printf '%s Auto-fix: off — %s\n' "$w" "$FI_AF_WHY"
+    printf '   Turn on: found-issues config autofix true (read the disclosure in /found-issues:setup first)\n'
+  fi
+  fi_cfg_show_line autofix.testCommand
+  if [[ "$FI_CFG_SRC" == none ]]; then
+    printf '%s No test command — set one: found-issues config autofix.testCommand "<cmd>"\n' "$x"
+  else
+    printf '%s Test command: %s (%s)\n' "$p" "$FI_CFG_VAL" "$FI_CFG_SRC"
+  fi
+  if [[ -n "$gh_user" ]]; then printf '%s gh authenticated as %s\n' "$p" "$gh_user"
+  else printf '%s gh not authenticated — auto-fix cannot open PRs\n' "$x"; fi
+  for e in claude codex; do
+    if command -v "$e" >/dev/null 2>&1; then
+      v="$("$e" --version 2>/dev/null | head -n 1 || true)"
+      printf '%s %s: %s (%s)\n' "$p" "$e" "$(command -v "$e")" "${v:-version unknown}"
+    else
+      printf '%s %s not on PATH\n' "$w" "$e"
+    fi
+  done
+  e="$(fi_af_engine 2>/dev/null || true)"
+  printf '   Engine: %s -> %s\n' "$(fi_af_cfg engine auto)" "${e:-none available}"
+  printf '   Caps: %s spot fixes/day, %s sweep(s)/day (at %s fixable, up to %s entries), $%s per run, $%s per sweep, %s min per run\n' \
+    "$(fi_af_int dailyFixes 5)" "$(fi_af_int dailySweeps 1)" "$(fi_af_int sweepThreshold 5)" \
+    "$(fi_af_int sweepMax 8)" "$(fi_af_cfg runBudget 3)" "$(fi_af_cfg sweepBudget 10)" "$(fi_af_int runTimeoutMin 20)"
+  printf '   Fix PRs merge themselves once checks pass. Stop: found-issues autofix off\n\n'
 }

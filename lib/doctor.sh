@@ -288,6 +288,9 @@ cmd_doctor() {
     printf '\n'
   fi
 
+  # --- Auto-fix (v3, spec §8) — lib/autofix-status.sh ---
+  fi_af_doctor "$section_pass" "$section_warn" "$section_fail" "${gh_user:-}"
+
   # --- Hook opt-outs ---
   printf '== Hook opt-outs ==\n'
   local any_off=0
