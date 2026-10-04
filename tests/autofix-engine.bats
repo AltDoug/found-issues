@@ -126,3 +126,19 @@ teardown() { fi_teardown_tmp; }
   [[ "$p" == *"tests fail: expected 5"* ]]
   [[ "$p" == *"Do not edit docs/found-issues.md"* ]]
 }
+
+@test "autofix engine: the claude prompt says to run the test command alone and to read with tools" {
+  AFI_branch=b AFI_entry=e
+  p="$(fi_af_fixer_prompt 'sh test.sh' '' claude)"
+  [[ "$p" == *"exactly as: sh test.sh"* ]]
+  [[ "$p" == *'no cd, ;, &&, |, redirection or echo $?'* ]]
+  [[ "$p" == *"Read, Edit, Write, Grep and Glob tools"* ]]
+}
+
+@test "autofix engine: the codex prompt allows reading but never git or gh" {
+  AFI_branch=b AFI_entry=e
+  p="$(fi_af_fixer_prompt 'sh test.sh' '' codex)"
+  [[ "$p" == *"read-only shell commands"* ]]
+  [[ "$p" == *"Never run git or gh"* ]]
+  [[ "$p" != *"Read, Edit, Write, Grep and Glob tools"* ]]
+}

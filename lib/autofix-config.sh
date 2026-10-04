@@ -37,10 +37,10 @@ fi_af_int() {
 
 fi_af_budget() {
   local v
-  v="$(fi_af_cfg runBudget 2)"
+  v="$(fi_af_cfg runBudget 3)"
   if [[ ! "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-    fi_err "found-issues: found-issues.autofix.runBudget=$v is not a USD amount — using 2"
-    v=2
+    fi_err "found-issues: found-issues.autofix.runBudget=$v is not a USD amount — using 3"
+    v=3
   fi
   printf '%s' "$v"
 }

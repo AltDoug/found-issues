@@ -76,11 +76,13 @@ src() {
   git config found-issues.autofix.dailyFixes lots
   run fi_af_int dailyFixes 5
   [ "${lines[${#lines[@]}-1]}" = 5 ]
+  # default 3: a measured live claude fix (2 attempts) cost $1.58 (2026-10-03)
+  [ "$(fi_af_budget)" = 3 ]
   git config found-issues.autofix.runBudget 1.5
   [ "$(fi_af_budget)" = 1.5 ]
   git config found-issues.autofix.runBudget '$2'
   run fi_af_budget
-  [ "${lines[${#lines[@]}-1]}" = 2 ]
+  [ "${lines[${#lines[@]}-1]}" = 3 ]
 }
 
 @test "autofix config: dirs are per repo under the state and cache roots" {

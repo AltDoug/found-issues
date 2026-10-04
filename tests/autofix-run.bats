@@ -125,3 +125,16 @@ teardown() { fi_teardown_tmp; }
   run "$FI_BIN" autofix status
   [[ "$output" == *"Auto-fix: off"* ]]
 }
+
+@test "autofix run: a fixer that left a change but said manual is still tested and verified" {
+  export FI_STANDIN_RESULT="FI-RESULT: manual could not run the tests"
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped: PR #7' "$ST/done/$ID"
+}
+
+@test "autofix run: cost is recorded for every outcome, not only shipped" {
+  export FI_STANDIN_RESULT="FI-RESULT: decide plus or table?" FI_STANDIN_EDIT=true
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  grep -q '^cost=0.2500$' "$ST/done/$ID"
+}

@@ -17,7 +17,7 @@
 # Functions:
 #   fi_af_child <out> <err> <cwd> cmd...
 #   fi_af_allowlist <test-command>
-#   fi_af_fixer_prompt <test-command> <feedback>
+#   fi_af_fixer_prompt <test-command> <feedback> [<engine>]
 #   fi_af_verifier_prompt <diff>
 #   fi_af_fixer_cmd <engine> <prompt> <last-file>
 #   fi_af_verifier_cmd <engine> <prompt> <last-file> <schema-file>
@@ -64,7 +64,23 @@ fi_af_allowlist() {
 }
 
 fi_af_fixer_prompt() {
-  local testcmd="$1" feedback="$2"
+  local testcmd="$1" feedback="$2" engine="${3:-claude}" tools
+  # Measured live 2026-10-03: sonnet wrapped the test command as
+  # `sh test.sh; echo "exit=$?"`, the allowlist refused the compound, and the
+  # fixer gave up; codex, told to run nothing but the tests, could not even
+  # read a file. So each engine is told exactly what its sandbox allows.
+  if [[ "$engine" == "codex" ]]; then
+    tools="You may read files and run read-only shell commands; your edits stay
+inside this worktree. Never run git or gh: the orchestrator commits, pushes
+and opens the PR."
+  else
+    tools="Read and edit files with the Read, Edit, Write, Grep and Glob tools. The
+only shell command you may run is the test command, as its own Bash call,
+exactly as: ${testcmd} (a test file may be appended). Run it alone,
+with no cd, ;, &&, |, redirection or echo \$? around it (the Bash tool
+already reports the exit code), and no git or gh: anything else is refused.
+The orchestrator commits, pushes and opens the PR."
+  fi
   cat <<EOF
 You are the found-issues auto-fixer. This run is sanctioned and unattended:
 you are in a dedicated git worktree on branch ${AFI_branch} (never main), and
@@ -80,8 +96,7 @@ Do exactly this:
 3. Make the smallest change that fixes the symptom. Change nothing unrelated.
    Do not edit docs/found-issues.md or any found-issues ledger.
 4. Run the test command until it passes.
-Never run git, gh, or any command other than the test command; the
-orchestrator commits, pushes and opens the PR.
+${tools}
 
 End your reply with exactly one line, one of:
 FI-RESULT: fixed

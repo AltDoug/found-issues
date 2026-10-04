@@ -31,7 +31,7 @@ EOF
 _fi_af_fix_attempt() {
   local engine="$1" n="$2" feedback="$3" base="$FI_AF_RUNS/$AFI_id.fix$n" rc=0
   fi_af_allowlist "$FI_AF_TESTCMD"
-  fi_af_fixer_cmd "$engine" "$(fi_af_fixer_prompt "$FI_AF_TESTCMD" "$feedback")" "$base.last"
+  fi_af_fixer_cmd "$engine" "$(fi_af_fixer_prompt "$FI_AF_TESTCMD" "$feedback" "$engine")" "$base.last"
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
   fi_af_collect "$engine" "$base.out" "$base.last"
   fi_af_parse_result "$FI_AF_TEXT"
@@ -54,18 +54,28 @@ _fi_af_reset_wt() {
   git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
 }
 
+# Every outcome records what the run spent (spec §8: status shows cost).
+_fi_af_end() {
+  local r="$FI_AF_ST/running/$1"
+  if [[ -f "$r" ]]; then
+    fi_af_item_set "$r" cost "$FI_AF_COST"
+    fi_af_item_set "$r" tokens "$FI_AF_TOKENS"
+  fi
+  fi_af_finish "$@"
+}
+
 # Spec §5 for one claimed item: up to 2 attempts of fix -> bash tests ->
-# verifier, then ship. Every path ends in fi_af_finish.
+# verifier, then ship. Every path ends in _fi_af_end.
 _fi_af_run_one() {
   local id="$1" engine_opt="$2" rc=0 engine n feedback="" why="" tlog
   fi_af_claim "$id" || return $?
   fi_af_item_read "$FI_AF_ST/running/$id"
   FI_AF_COST=0 FI_AF_TOKENS=0
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
-    fi_af_finish "$id" manual "no test command"; return 0
+    _fi_af_end "$id" manual "no test command"; return 0
   fi
   if ! engine="$(fi_af_engine "${engine_opt:-$AFI_engine}")" || ! command -v "$engine" >/dev/null 2>&1; then
-    fi_af_finish "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
+    _fi_af_end "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
   fi
   AFI_engine="$engine"
   for n in 1 2; do
@@ -76,9 +86,17 @@ _fi_af_run_one() {
     (( n == 1 )) || _fi_af_reset_wt
     _fi_af_fix_attempt "$engine" "$n" "$feedback"
     case "$FI_AF_RESULT" in
-      already-fixed|decide|manual)
-        fi_af_finish "$id" "$FI_AF_RESULT" "${FI_AF_RESULT_TEXT:-no reason given}"
+      already-fixed|decide)
+        _fi_af_end "$id" "$FI_AF_RESULT" "${FI_AF_RESULT_TEXT:-no reason given}"
         return 0 ;;
+      manual)
+        # A fixer that changed code but could not prove it says manual; bash
+        # runs the tests and the verifier anyway, so its change still counts.
+        if [[ -z "$(fi_af_diff "$AFI_wt" "$AFI_base")" ]]; then
+          _fi_af_end "$id" manual "${FI_AF_RESULT_TEXT:-no reason given}"
+          return 0
+        fi
+        fi_af_log "$id" "attempt $n: fixer said manual but left a change; testing and verifying it" ;;
     esac
     if [[ -z "$(fi_af_diff "$AFI_wt" "$AFI_base")" ]]; then
       why="no change"; feedback="The attempt changed no files."; continue
@@ -98,21 +116,17 @@ _fi_af_run_one() {
     FI_AF_VERDICT_REASON="$FI_AF_REASON"
     if fi_af_ship; then
       fi_af_item_set "$FI_AF_ST/running/$id" pr "$FI_AF_PR"
-      fi_af_item_set "$FI_AF_ST/running/$id" cost "$FI_AF_COST"
-      fi_af_item_set "$FI_AF_ST/running/$id" tokens "$FI_AF_TOKENS"
-      fi_af_finish "$id" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE, \$$FI_AF_COST"
+      _fi_af_end "$id" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE, \$$FI_AF_COST"
       return 0
     fi
-    fi_af_finish "$id" failed "ship: $FI_AF_WHY"
+    _fi_af_end "$id" failed "ship: $FI_AF_WHY"
     return 0
   done
-  fi_af_item_set "$FI_AF_ST/running/$id" cost "$FI_AF_COST"
-  fi_af_item_set "$FI_AF_ST/running/$id" tokens "$FI_AF_TOKENS"
   case "$why" in
     "run budget spent"*) ;;
     *) why="$why after 2 attempts" ;;
   esac
-  fi_af_finish "$id" failed "$why"
+  _fi_af_end "$id" failed "$why"
 }
 
 _fi_af_next_queued() {
