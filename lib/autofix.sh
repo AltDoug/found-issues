@@ -7,7 +7,6 @@
 # Functions:
 #   _fi_af_fix_loop <id> <engine>
 #   _fi_af_run <id> <engine> / _fi_af_run_one <id> <engine>
-#   _fi_af_status
 #   cmd_autofix <sub> [...]
 
 _fi_af_usage() {
@@ -227,43 +226,6 @@ _fi_af_run() {
   done
 }
 
-_fi_af_status() {
-  local f n=0 line
-  if fi_af_enabled; then printf 'Auto-fix: on (%s)\n' "$FI_AF_SLUG"
-  else printf 'Auto-fix: off — %s\n' "$FI_AF_WHY"; fi
-  if [[ -f "$FI_AF_ST/day/$(fi_today).spot" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/day/$(fi_today).spot"
-  fi
-  printf 'Today: %s/%s spot fixes\n' "$n" "$(fi_af_int dailyFixes 5)"
-  n=0
-  if [[ -f "$FI_AF_ST/day/$(fi_today).sweep" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/day/$(fi_today).sweep"
-  fi
-  printf 'Today: %s/%s sweeps\n' "$n" "$(fi_af_int dailySweeps 1)"
-  local dir label count
-  for dir in queue running; do
-    count=0
-    for f in "$FI_AF_ST/$dir"/*; do [[ -f "$f" ]] && count=$((count + 1)); done
-    label="Queued"; [[ "$dir" == running ]] && label="Running"
-    printf '%s (%s)\n' "$label" "$count"
-    for f in "$FI_AF_ST/$dir"/*; do
-      [[ -f "$f" ]] || continue
-      fi_af_item_read "$f" || true
-      printf '  %s  %s\n' "$AFI_id" "$AFI_loc"
-    done
-  done
-  printf 'Recent:\n'
-  local -a recent=()
-  for f in "$FI_AF_ST"/done/*; do [[ -f "$f" ]] && recent+=("$f"); done
-  local i shown=0
-  for (( i = ${#recent[@]} - 1; i >= 0 && shown < 5; i-- )); do
-    fi_af_item_read "${recent[$i]}" || true
-    printf '  %s  %s — %s\n' "$AFI_id" "$AFI_loc" "$AFI_result"
-    shown=$((shown + 1))
-  done
-  return 0
-}
-
 cmd_autofix() {
   local sub="${1:-}"
   [[ $# -gt 0 ]] && shift
@@ -402,7 +364,7 @@ cmd_autofix() {
       fi_af_cancel "$1" ;;
     status)
       fi_af_context || return 1
-      _fi_af_status ;;
+      fi_af_status ;;
     ""|-h|--help|help) _fi_af_usage ;;
     *) fi_unknown_arg autofix "$sub"; return 2 ;;
   esac

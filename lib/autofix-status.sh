@@ -8,6 +8,7 @@
 #
 # Functions:
 #   fi_af_cancel <id>
+#   fi_af_status
 
 # shellcheck disable=SC2154  # AFI_*/FI_AF_* come from autofix-queue.sh / autofix-config.sh
 
@@ -48,4 +49,81 @@ fi_af_cancel() {
   fi_af_worktree_remove
   fi_af_retire "$id" cancelled "$how"
   printf 'Cancelled %s.\n' "$id"
+}
+
+FI_AF_PRNUM=""
+# The PR number of the loaded item: its pr field, else "PR #N" in its result.
+_fi_af_pr_num() {
+  FI_AF_PRNUM="$AFI_pr"
+  if [[ -z "$FI_AF_PRNUM" && "$AFI_result" =~ PR\ \#([0-9]+) ]]; then FI_AF_PRNUM="${BASH_REMATCH[1]}"; fi
+  return 0
+}
+
+_fi_af_count_lines() {
+  local n=0 line
+  if [[ -f "$1" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$1"
+  fi
+  printf '%s' "$n"
+}
+
+# Spec §8: queue, running, today's counts against caps, decisions waiting,
+# recent results with PR links and cost.
+fi_af_status() {
+  local f n dir label count today midnight spent=0 file
+  if fi_af_enabled; then printf 'Auto-fix: on (%s)\n' "$FI_AF_SLUG"
+  else printf 'Auto-fix: off — %s\n' "$FI_AF_WHY"; fi
+  today="$(fi_today)"
+  printf 'Today: %s/%s spot fixes\n' "$(_fi_af_count_lines "$FI_AF_ST/day/$today.spot")" "$(fi_af_int dailyFixes 5)"
+  printf 'Today: %s/%s sweeps\n' "$(_fi_af_count_lines "$FI_AF_ST/day/$today.sweep")" "$(fi_af_int dailySweeps 1)"
+  [[ -e "$FI_AF_ST/day/$today.capped" ]] && printf 'Capped for today: queued items wait for tomorrow.\n'
+  for dir in running queue; do
+    count=0
+    for f in "$FI_AF_ST/$dir"/*; do [[ -f "$f" ]] && count=$((count + 1)); done
+    label="Queued"; [[ "$dir" == running ]] && label="Running"
+    printf '%s (%s)\n' "$label" "$count"
+    for f in "$FI_AF_ST/$dir"/*; do
+      [[ -f "$f" ]] || continue
+      fi_af_item_read "$f" || true
+      if [[ "$dir" == running ]]; then
+        printf '  %s  %s  %s (launcher %s)\n' "$AFI_id" "${AFI_kind:-spot}" "${AFI_loc:-sweep}" "${AFI_launcher:-?}"
+      else
+        printf '  %s  %s  %s\n' "$AFI_id" "${AFI_kind:-spot}" "${AFI_loc:-sweep}"
+      fi
+    done
+  done
+  file="$(fi_find_issues_file "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" 2>/dev/null || true)"
+  if [[ -n "$file" ]]; then
+    n="$(fi_count_decide "$file")"
+    (( n > 0 )) && printf 'Decisions waiting: %s — answer with found-issues decide\n' "$n"
+  fi
+  # BSD date fills unspecified fields from the current time: pass midnight.
+  midnight="$(date -j -f '%Y-%m-%d %H:%M:%S' "$today 00:00:00" +%s 2>/dev/null \
+    || date -d "$today" +%s 2>/dev/null || echo 0)"
+  printf 'Recent:\n'
+  local -a rows=()
+  for f in "$FI_AF_ST"/done/*; do
+    [[ -f "$f" ]] || continue
+    fi_af_item_read "$f" || true
+    [[ "$AFI_finished" =~ ^[0-9]+$ ]] || AFI_finished=0
+    rows+=("$AFI_finished $f")
+    if (( AFI_finished >= midnight )) && [[ "$AFI_cost" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+      spent="$(awk -v a="$spent" -v b="$AFI_cost" 'BEGIN { printf "%.2f", a + b }')"
+    fi
+  done
+  if (( ${#rows[@]} > 0 )); then
+    # Newest first by finished stamp (items from before phase 5 sort as 0).
+    while IFS= read -r f; do
+      fi_af_item_read "${f#* }" || true
+      printf '  %s  %s — %s\n' "$AFI_id" "${AFI_loc:-sweep}" "$AFI_result"
+      _fi_af_pr_num
+      if [[ -n "$FI_AF_PRNUM" ]]; then
+        printf '      https://github.com/%s/pull/%s' "${AFI_slug:-$FI_AF_SLUG}" "$FI_AF_PRNUM"
+        [[ -n "$AFI_cost" && "$AFI_cost" != 0 ]] && printf '  ($%s)' "$AFI_cost"
+        printf '\n'
+      fi
+    done < <(printf '%s\n' "${rows[@]}" | sort -rn | head -n 5)
+  fi
+  printf 'Spent today: $%s (Claude Code estimate; Codex runs report $0)\n' "$spent"
+  return 0
 }
