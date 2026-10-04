@@ -526,9 +526,9 @@ run_session_start_hook() {
   [[ "$output" != *"install-statusline"* ]]
 }
 
-@test "session-start: tests start clean of an inherited FOUND_ISSUES_AUTOFIX_CHILD" {
-  run bash -c 'export FOUND_ISSUES_AUTOFIX_CHILD=1; . "$1"; printf "[%s]" "${FOUND_ISSUES_AUTOFIX_CHILD:-}"' _ "$TEST_REPO_ROOT/tests/helpers.bash"
-  [ "$output" = "[]" ]
+@test "session-start: tests start clean of an inherited FOUND_ISSUES_AUTOFIX_CHILD and FI_AF_PID" {
+  run bash -c 'export FOUND_ISSUES_AUTOFIX_CHILD=1 FI_AF_PID=4242; . "$1"; printf "[%s][%s]" "${FOUND_ISSUES_AUTOFIX_CHILD:-}" "${FI_AF_PID:-}"' _ "$TEST_REPO_ROOT/tests/helpers.bash"
+  [ "$output" = "[][]" ]
 }
 
 @test "session-start: an interactive cli session still gets the onboarding hint" {
