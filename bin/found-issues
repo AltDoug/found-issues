@@ -82,6 +82,9 @@ fi
 source "$FI_LIB_DIR/canonicalize.sh"
 # shellcheck source=../lib/parse-entries.sh
 source "$FI_LIB_DIR/parse-entries.sh"
+# v3 fix tags: off-limits, tag text, retag (spec 2026-10-03 §3).
+# shellcheck source=../lib/autofix-tags.sh
+source "$FI_LIB_DIR/autofix-tags.sh"
 # shellcheck source=../lib/detect-mode.sh
 source "$FI_LIB_DIR/detect-mode.sh"
 # The statusline family lives in lib/ (extracted v2.2.5, tracked §12 split).

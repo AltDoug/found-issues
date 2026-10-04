@@ -50,3 +50,66 @@ teardown() { fi_teardown_tmp; }
   [[ "$output" == *"already logged"* ]]
   [ "$(grep -c 'src/a.sh:1' docs/found-issues.md)" -eq 1 ]
 }
+
+@test "offlimits: categories" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  for p in .github/workflows/ci.yml .gitlab-ci.yml .circleci/config.yml Jenkinsfile; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "ci" ]
+  done
+  for p in .env .env.local certs/server.pem keys/id.key src/auth/login.py lib/auth.sh config/secrets/x.yml credentials.json; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "secrets" ]
+  done
+  for p in package.json web/package-lock.json yarn.lock pnpm-lock.yaml go.sum Cargo.lock pyproject.toml uv.lock requirements-dev.txt Gemfile.lock; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "dependencies" ]
+  done
+  for p in db/migrate/001_init.rb app/migrations/0002.py; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "migrations" ]
+  done
+  for p in /etc/hosts ../other/x.sh; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "outside-repo" ]
+  done
+}
+
+@test "offlimits: lookalikes are not off-limits" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  for p in src/author.py lib/clock.py blocklist.py tools/migrate_helpers.py docs/package.json.md src/authority/x.ts README.md; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 1 ]
+  done
+}
+
+@test "offlimits_check: untracked and no-file" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  printf 'y\n' > src/new.sh
+  run fi_offlimits_check src/new.sh "$TMP"; [ "$status" -eq 0 ]; [ "$output" = "untracked" ]
+  run fi_offlimits_check src/a.sh "$TMP"; [ "$status" -eq 1 ]
+  run fi_offlimits_check "" "$TMP"; [ "$status" -eq 0 ]; [ "$output" = "no-file" ]
+}
+
+@test "tag text: parentheses become brackets, whitespace collapses, empty is refused" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  fi_tag_text "  use fix() or   patch()?  "
+  [ "$FI_TAG_TEXT" = "use fix[] or patch[]?" ]
+  run fi_tag_text "   "; [ "$status" -eq 1 ]
+  run fi_tag_text $'a\nb'; [ "$status" -eq 1 ]
+}
+
+@test "retag: replaces the previous tag, keeps closing annotations, decided clears decide" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  fi_entry_retag "- [open] 2026-10-03 src/a.sh:1 — bug (PR: o/r#1) (fix: small)" decide "A or B?"
+  [ "$FI_RETAGGED" = "- [open] 2026-10-03 src/a.sh:1 — bug (PR: o/r#1) (decide: A or B?)" ]
+  fi_entry_retag "$FI_RETAGGED" decided "A"
+  [ "$FI_RETAGGED" = "- [open] 2026-10-03 src/a.sh:1 — bug (PR: o/r#1) (decided: A)" ]
+  fi_entry_retag "- [deferred] 2026-10-03 src/a.sh:1 — bug (reason: x) (until: date:2026-01-01)" drop-until ""
+  [ "$FI_RETAGGED" = "- [deferred] 2026-10-03 src/a.sh:1 — bug (reason: x)" ]
+}
+
+@test "tag_resolve: --fix on an off-limits path becomes manual off-limits" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  fi_tag_resolve fix small .github/workflows/ci.yml "$TMP"
+  [ "$FI_TAG_KIND" = "manual" ] && [ "$FI_TAG_VALUE" = "off-limits: ci" ]
+  fi_tag_resolve fix small src/a.sh "$TMP"
+  [ "$FI_TAG_KIND" = "fix" ] && [ "$FI_TAG_VALUE" = "small" ]
+  run fi_tag_resolve fix tiny src/a.sh "$TMP"; [ "$status" -eq 2 ]
+  fi_tag_resolve decide "x (y)" "" ""
+  [ "$FI_TAG_KIND" = "decide" ] && [ "$FI_TAG_VALUE" = "x [y]" ]
+}
