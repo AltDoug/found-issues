@@ -246,9 +246,11 @@ fi_parse_entry_vars() {
   [[ "$line" =~ $re_prefix ]] && after_date="${line#"${BASH_REMATCH[0]}"}"
   local location_part="${after_date%% — *}"
 
-  local re_path_line='^([^:[:space:]]+):([0-9]+)(-([0-9]+))?$'
+  # An optional trailing ",N" / ",N-M" list (`file:157,341`) is accepted; the
+  # first number stays .line, the extra specs are not tracked.
+  local re_path_line='^([^:[:space:]]+):([0-9]+)(-([0-9]+))?(,[0-9]+(-[0-9]+)?)*$'
   local re_path_only='^([^:[:space:]]+)$'
-  local re_repo_line='^(.+):([0-9]+)(-([0-9]+))?$'
+  local re_repo_line='^(.+):([0-9]+)(-([0-9]+))?(,[0-9]+(-[0-9]+)?)*$'
   local first_token="${location_part%%[[:space:]]*}"
   if [[ "$first_token" =~ $re_path_line ]]; then
     FE_path="${BASH_REMATCH[1]}"

@@ -590,6 +590,16 @@ EOF
   [ "$(printf '%s' "$out" | grep '^line_end=')" = "line_end=75" ]
 }
 
+@test "parse_entry: comma-separated line list parses path and keeps the first number as line" {
+  out="$(fi_parse_entry '- [open] 2026-09-14 tests/handoff-spawn-contract.bats:157,341 — two sites')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=tests/handoff-spawn-contract.bats" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=157" ]
+  out="$(fi_parse_entry '- [open] 2026-09-14 tests/a.bats:10-12,30 — mixed list')"
+  [ "$(printf '%s' "$out" | grep '^path=')" = "path=tests/a.bats" ]
+  [ "$(printf '%s' "$out" | grep '^line=')" = "line=10" ]
+  [ "$(printf '%s' "$out" | grep '^line_end=')" = "line_end=12" ]
+}
+
 @test "parse_entry: wide line range parses both bounds" {
   out="$(fi_parse_entry '- [open] 2026-07-21 repos/Engine/tools/config-seeder/src/adapters/global_permissions.rs:353-425 — mutates machine-global settings')"
   [ "$(printf '%s' "$out" | grep '^path=')" = "path=repos/Engine/tools/config-seeder/src/adapters/global_permissions.rs" ]
