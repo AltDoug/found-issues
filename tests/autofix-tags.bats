@@ -113,3 +113,36 @@ teardown() { fi_teardown_tmp; }
   fi_tag_resolve decide "x (y)" "" ""
   [ "$FI_TAG_KIND" = "decide" ] && [ "$FI_TAG_VALUE" = "x [y]" ]
 }
+
+@test "tag: sets, replaces, keeps closing annotations; matches open and deferred" {
+  printf -- '- [open] 2026-10-03 src/a.sh:1 — bug one (PR: o/r#1)\n- [deferred] 2026-10-03 src/a.sh:2 — bug two (reason: later)\n' > docs/found-issues.md
+  fi_run tag "bug one" --fix small
+  [ "$status" -eq 0 ]
+  grep -qx -- '- \[open\] 2026-10-03 src/a.sh:1 — bug one (PR: o/r#1) (fix: small)' docs/found-issues.md
+  fi_run tag "bug one" --decide "A or B?"
+  grep -qx -- '- \[open\] 2026-10-03 src/a.sh:1 — bug one (PR: o/r#1) (decide: A or B?)' docs/found-issues.md
+  [ "$(grep -c '(fix:' docs/found-issues.md)" -eq 0 ]
+  fi_run tag "bug two" --manual "needs a captured payload"
+  [ "$status" -eq 0 ]
+  grep -q 'bug two (reason: later) (manual: needs a captured payload)' docs/found-issues.md
+}
+
+@test "tag: off-limits path is forced to manual and says so" {
+  mkdir -p .github/workflows && printf 'x\n' > .github/workflows/ci.yml && git add -A && git commit -q -m ci
+  printf -- '- [open] 2026-10-03 .github/workflows/ci.yml:3 — wrong runner\n' > docs/found-issues.md
+  fi_run tag "wrong runner" --fix small
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"off-limits"* ]]
+  grep -q '(manual: off-limits: ci)' docs/found-issues.md
+}
+
+@test "tag: usage errors, ambiguity and no match" {
+  printf -- '- [open] 2026-10-03 src/a.sh:1 — bug one\n- [open] 2026-10-03 src/a.sh:2 — bug two\n' > docs/found-issues.md
+  fi_run tag "bug" --fix small;            [ "$status" -eq 2 ]
+  fi_run tag "nothing here" --fix small;   [ "$status" -eq 1 ]
+  fi_run tag "bug one";                    [ "$status" -eq 2 ]
+  fi_run tag "bug one" --fix tiny;         [ "$status" -eq 2 ]
+  fi_run tag "bug one" --bogus x;          [ "$status" -eq 2 ]
+  fi_run tag --help;                       [ "$status" -eq 0 ]
+  ! grep -q '(fix:' docs/found-issues.md
+}
