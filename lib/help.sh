@@ -76,7 +76,13 @@ COMMANDS
                                         running and done today.
   autofix run <id> [--engine E]         Fix a queued (fix: small) entry headlessly:
                                         worktree, fixer, tests, verifier, self-merging PR.
-  autofix claim|diff|ship|release <id>  The steps of a fix, for in-session fixers.
+  autofix run <sweep-id>                A sweep: up to sweepMax fixable entries, one
+                                        commit each, one self-merging PR.
+  autofix claim|brief|next|test|verify|diff|ship|release <id>
+                                        The steps of a fix or sweep, for in-session fixers.
+  fix workspace | fix test <wt> | fix ship <wt> --title T --body-file F --pick L
+                                        /found-issues:fix plumbing: a fresh fix worktree,
+                                        the repo's tests there, push + PR + annotations.
   install-statusline [--no-migrate]     Append the counter segment to ~/.claude/statusline.sh.
                                         Self-healing: auto-rewrites broken v1.0.0/1.0.1 marker blocks
                                         AND auto-migrates pre-v0.1.7 handwritten snippets (with a
