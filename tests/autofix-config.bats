@@ -68,6 +68,14 @@ src() {
   [ "$output" = "foo/bar" ]
 }
 
+@test "autofix config: fi_repo_id fails on a GitHub URL with no org/repo" {
+  git remote add origin https://github.com/onlyorg
+  src
+  run fi_repo_id
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
 @test "autofix config: integer settings fall back on garbage" {
   src
   [ "$(fi_af_int dailyFixes 5)" = 5 ]
