@@ -26,30 +26,50 @@ _fi_af_is_run_pid() {
 # Phase 5 ruling 6: retire a queued or running item as cancelled, stopping
 # an A run and its engine child first. No ledger write.
 fi_af_cancel() {
-  local id="$1" r="$FI_AF_ST/running/$1" q="$FI_AF_ST/queue/$1" n=0 how
-  if [[ -f "$FI_AF_ST/done/$id" ]]; then fi_err "autofix: $id already finished"; return 1; fi
-  if [[ -f "$q" ]]; then
-    fi_af_item_read "$q" || true
-    fi_af_retire "$id" cancelled "by autofix cancel while queued"
+  local id="$1" r="$FI_AF_ST/running/$1" q="$FI_AF_ST/queue/$1" d="$FI_AF_ST/done/$1" n=0 how owner=""
+  if [[ -f "$d" ]]; then fi_err "autofix: $id already finished"; return 1; fi
+  # One atomic move out of the queue (review I6): a claim that wins the race
+  # has moved the item to running/, which the branch below handles; never a
+  # running-first retire that would unlock the claimer's live run.
+  if [[ -f "$q" ]] && mv "$q" "$d" 2>/dev/null; then
+    how="by autofix cancel while queued"
+    fi_af_item_set "$d" result "cancelled: $how" || true
+    fi_af_item_set "$d" finished "$(date +%s)" || true
+    fi_af_log "$id" "cancelled: $how"
     printf 'Cancelled %s (it was queued).\n' "$id"
     return 0
   fi
   [[ -f "$r" ]] || { fi_err "autofix: no queued or running item $id"; return 1; }
   fi_af_item_read "$r" || true
-  how="by autofix cancel (in-session fixer)"
-  if _fi_af_is_run_pid "$AFI_pid"; then
-    how="by autofix cancel (background run $AFI_pid stopped)"
-    kill -TERM "$AFI_pid" 2>/dev/null || true
-    while kill -0 "$AFI_pid" 2>/dev/null && (( n < 40 )); do sleep 0.25; n=$((n + 1)); done
-    kill -KILL "$AFI_pid" 2>/dev/null || true
+  # A PR that is open is already arming or armed to merge itself (review I4).
+  if [[ -n "$AFI_pr" ]]; then
+    fi_err "autofix: $id already opened PR #$AFI_pr, which merges itself; to stop it: gh pr close $AFI_pr --repo $AFI_slug"
+    return 1
   fi
-  if [[ "$AFI_cpgid" =~ ^[0-9]+$ ]]; then
-    kill -TERM -- "-$AFI_cpgid" 2>/dev/null || true
+  how="by autofix cancel (in-session fixer)"
+  # Signal only the run that owns this item now (review I3): a drain that
+  # moved on to another item keeps the same pid but owns the lock under
+  # that item's id.
+  [[ -f "$FI_AF_ST/lock/owner" ]] && { IFS= read -r owner <"$FI_AF_ST/lock/owner" || true; }
+  if [[ "$owner" == "$id" ]]; then
+    if _fi_af_is_run_pid "$AFI_pid"; then
+      how="by autofix cancel (background run $AFI_pid stopped)"
+      kill -TERM "$AFI_pid" 2>/dev/null || true
+      while kill -0 "$AFI_pid" 2>/dev/null && (( n < 40 )); do sleep 0.25; n=$((n + 1)); done
+      kill -KILL "$AFI_pid" 2>/dev/null || true
+    fi
+    if [[ "$AFI_cpgid" =~ ^[0-9]+$ ]]; then
+      kill -TERM -- "-$AFI_cpgid" 2>/dev/null || true
+    fi
   fi
   # The run may have finished the item while it was stopping.
   if [[ ! -f "$r" ]]; then fi_err "autofix: $id already finished"; return 1; fi
   fi_af_item_read "$r" || true
   fi_af_worktree_remove
+  if [[ -n "$AFI_pr" ]]; then
+    how="$how; PR #$AFI_pr was already open"
+    fi_err "autofix: PR #$AFI_pr was opened before the run stopped; to stop it: gh pr close $AFI_pr --repo $AFI_slug"
+  fi
   fi_af_retire "$id" cancelled "$how"
   printf 'Cancelled %s.\n' "$id"
 }

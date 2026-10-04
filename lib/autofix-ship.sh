@@ -133,6 +133,8 @@ _fi_af_publish() {
     || { FI_AF_WHY="gh pr create failed"; return 1; }
   FI_AF_PR="${url##*/}"
   [[ "$FI_AF_PR" =~ ^[0-9]+$ ]] || { FI_AF_WHY="no PR number in: $url"; return 1; }
+  # On the item at once, so a cancel from now on sees the open PR (review I4).
+  fi_af_item_set "$FI_AF_ST/running/$AFI_id" pr "$FI_AF_PR" || true
   fi_af_log "$AFI_id" "opened PR #$FI_AF_PR"
 
   ann="(PR: $AFI_slug#$FI_AF_PR)"
