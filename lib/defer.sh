@@ -29,6 +29,7 @@ cmd_defer() {
   local match="${1:-}"
   local reason=""
   local mute_until=""
+  local until_spec=""
 
   # Argument parsing
   shift || true
@@ -42,6 +43,10 @@ cmd_defer() {
         fi_need_value defer --mute-until $# "${2:-}" || return 2
         mute_until="$2"; shift 2 ;;
       --mute-until=*) mute_until="${1#--mute-until=}"; shift ;;
+      --until)
+        fi_need_value defer --until $# "${2:-}" || return 2
+        until_spec="$2"; shift 2 ;;
+      --until=*) until_spec="${1#--until=}"; shift ;;
       # A typo'd flag used to be dropped and the entry deferred anyway
       # (audit cli-6).
       *) fi_unknown_arg defer "$1"; return 2 ;;
@@ -50,7 +55,7 @@ cmd_defer() {
 
   if [[ -z "$match" ]]; then
     fi_err "defer: missing <match> argument"
-    fi_err "Usage: found-issues defer <match> [--reason \"<text>\"] [--mute-until YYYY-MM-DD]"
+    fi_err "Usage: found-issues defer <match> [--reason \"<text>\"] [--mute-until YYYY-MM-DD] [--until pr:<o/r#N>|date:<YYYY-MM-DD>|\"<text>\"]"
     return 2
   fi
 
@@ -70,6 +75,22 @@ cmd_defer() {
     today="$(fi_today)"
     if [[ "$mute_until" < "$today" ]] || [[ "$mute_until" == "$today" ]]; then
       fi_err "defer: warning — --mute-until $mute_until is not in the future (today: $today). The mute will be a no-op; nudges resume on the next touch."
+    fi
+  fi
+
+  # v3 wake-up trigger (spec §6 step 3): pr:<owner/repo#N> and
+  # date:<YYYY-MM-DD> are checked by sync; anything else is free text the
+  # sweep re-judges.
+  if [[ -n "$until_spec" ]]; then
+    local re_until_pr='^pr:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$'
+    local re_until_date='^date:[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'
+    if [[ "$until_spec" == pr:* ]]; then
+      [[ "$until_spec" =~ $re_until_pr ]] || { fi_err "defer: --until pr: needs pr:<owner/repo#N>"; return 2; }
+    elif [[ "$until_spec" == date:* ]]; then
+      [[ "$until_spec" =~ $re_until_date ]] || { fi_err "defer: --until date: needs date:YYYY-MM-DD"; return 2; }
+    else
+      fi_tag_text "$until_spec" || { fi_err "defer: --until needs a one-line, non-empty trigger"; return 2; }
+      until_spec="$FI_TAG_TEXT"
     fi
   fi
 
@@ -156,6 +177,10 @@ cmd_defer() {
       # Append new (mute-until: ...) if --mute-until was provided.
       if [[ -n "$mute_until" ]]; then
         new_line="${new_line} (mute-until: ${mute_until})"
+      fi
+      if [[ -n "$until_spec" ]]; then
+        fi_entry_retag "$new_line" drop-until ""
+        new_line="$FI_RETAGGED (until: ${until_spec})"
       fi
       flipped_entry="$new_line"
       printf '%s\n' "$new_line" >> "$tmp"

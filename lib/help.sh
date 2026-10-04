@@ -66,6 +66,12 @@ COMMANDS
                                         (verified: ...) (fixed: <today>). Use this
                                         instead of editing the ledger by hand.
                                         Refuses entries with an active (PR: ...).
+  tag <match> --fix S|M|L | --decide "<q>" | --manual "<why>"
+                                        Set the entry's one fix tag (v3).
+                                        Off-limits paths are tagged manual.
+  decide [--count] | decide <match> --answer "<text>"
+                                        The decision queue: list open
+                                        (decide: ...) questions, or record one.
   install-statusline [--no-migrate]     Append the counter segment to ~/.claude/statusline.sh.
                                         Self-healing: auto-rewrites broken v1.0.0/1.0.1 marker blocks
                                         AND auto-migrates pre-v0.1.7 handwritten snippets (with a

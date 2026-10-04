@@ -490,3 +490,17 @@ run_session_start_hook() {
   [ "$status" -eq 0 ]
   fi_assert_synced_not_archived
 }
+
+@test "session-start: says how many decisions are waiting" {
+  mkdir -p docs
+  printf -- '- [open] 2026-10-01 a.sh:1 — x (decide: A or B?)\n- [open] 2026-10-01 b.sh:1 — y (decide: C or D?)\n- [open] 2026-10-01 c.sh:1 — z\n' > docs/found-issues.md
+  run env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" HOME="$TMP" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
+  [[ "$output" == *"2 decisions waiting"*"/found-issues:decide"* ]]
+}
+
+@test "session-start: a deferred-only ledger with a due until-trigger still syncs" {
+  mkdir -p docs
+  printf -- '- [deferred] 2026-09-01 a.sh:1 — past (until: date:2026-01-01)\n' > docs/found-issues.md
+  run env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" FOUND_ISSUES_BIN="$TEST_REPO_ROOT/bin/found-issues" PATH="$TEST_REPO_ROOT/bin:$PATH" HOME="$TMP" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
+  grep -q '^- \[open\] 2026-09-01 a.sh:1 — past$' docs/found-issues.md
+}
