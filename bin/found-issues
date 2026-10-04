@@ -100,6 +100,8 @@ source "$FI_LIB_DIR/autofix-b.sh"
 source "$FI_LIB_DIR/autofix-classify.sh"
 # shellcheck source=../lib/autofix-sweep.sh
 source "$FI_LIB_DIR/autofix-sweep.sh"
+# shellcheck source=../lib/autofix-status.sh
+source "$FI_LIB_DIR/autofix-status.sh"
 # shellcheck source=../lib/fix-plumbing.sh
 source "$FI_LIB_DIR/fix-plumbing.sh"
 # shellcheck source=../lib/detect-mode.sh

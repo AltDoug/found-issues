@@ -36,7 +36,7 @@ AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
 AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
-AFI_head="" AFI_cur="0" AFI_fixed="0"
+AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid=""
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -50,14 +50,14 @@ fi_af_item_read() {
   AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
-  AFI_head="" AFI_cur="0" AFI_fixed="0"
+  AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid=""
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"

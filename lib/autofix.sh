@@ -15,6 +15,8 @@ _fi_af_usage() {
 Usage: found-issues autofix <command>
   on | off                    Clear or set the kill switch (all repos)
   status                      Queue, running, today's count, recent results
+  cancel <id>                 Stop a queued or running item (and its background run);
+                              no ledger change
   run <id> [--engine claude|codex]
                               Fix a queued item headlessly, then the rest of the queue
                               (exit 1 unknown id, 3 capped, 4 locked, 7 engine outage)
@@ -394,6 +396,10 @@ cmd_autofix() {
       fi_af_enabled || { fi_err "autofix: not running — $FI_AF_WHY"; return 1; }
       fi_af_no_prompts
       _fi_af_run "$rid" "$eng" ;;
+    cancel)
+      [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix cancel <id>"; return 2; }
+      fi_af_context || return 1
+      fi_af_cancel "$1" ;;
     status)
       fi_af_context || return 1
       _fi_af_status ;;

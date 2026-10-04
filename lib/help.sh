@@ -77,6 +77,8 @@ COMMANDS
                                         list with sources, get, set, unset.
   autofix on|off|status                v3 auto-fix: kill switch and what is queued,
                                         running and done today.
+  autofix cancel <id>                   Stop a queued or running item and its
+                                        background run; the ledger is untouched.
   autofix run <id> [--engine E]         Fix a queued (fix: small) entry headlessly:
                                         worktree, fixer, tests, verifier, self-merging PR.
   autofix run <sweep-id>                A sweep: up to sweepMax fixable entries, one
