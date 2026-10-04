@@ -424,6 +424,15 @@ fi_annotate_auto() {
       if [[ "$line" == *"$b"* ]]; then may_match=1; break; fi
     done
     (( may_match )) || continue
+    # Hook mode never re-tags an entry that already carries a closing
+    # (PR: ...) / (commit: ...) annotation (v3.0.4): it is spoken for, and a
+    # later change touching the same cited line is not evidence about it. The
+    # suggestion forms (PR-auto:/commit-auto:) do not match these tokens. An
+    # explicit --pick/--all is a deliberate choice and keeps these candidates.
+    if [[ "$hook_auto" == "yes" ]] \
+       && [[ "$line" == *"(PR: "* || "$line" == *"(commit: "* ]]; then
+      continue
+    fi
     local e_path e_line e_line_end e_symptom
     fi_entry_loc_v "$line" || continue
     e_path="$FE_path"

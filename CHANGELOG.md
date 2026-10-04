@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.4] - 2026-10-04
+
+### Fixed
+
+- Commit and PR hook auto-annotation no longer tags an entry that already carries a closing `(PR: ...)` or `(commit: ...)` annotation. An unrelated, already-fixed entry citing the same line a commit touched used to receive `commit-auto: <sha>`, because nothing skipped entries that were already annotated. Hook mode now leaves them out of its candidates (they also stop counting as a file contest); an explicit `--pick` or `--all` is unchanged.
+
 ## [3.0.3] - 2026-10-04
 
 ### Fixed
