@@ -244,6 +244,7 @@ fi_af_retire() {
   fi_af_item_set "$f" result "$outcome: $text"
   fi_af_item_set "$f" finished "$(date +%s)"
   mv "$f" "$FI_AF_ST/done/$id"
+  fi_af_seg_write "$(_fi_af_field "$FI_AF_ST/done/$id" root)"
   fi_af_unlock "$id"
   fi_af_log "$id" "$outcome: $text"
 }
@@ -258,6 +259,7 @@ fi_af_reap() {
       # A refused item (forged worktree path) is retired untouched.
       fi_af_item_set "$f" result "failed: refused: worktree path outside its fi- worktrees"
       mv "$f" "$FI_AF_ST/done/${f##*/}"
+      fi_af_seg_write "$(_fi_af_field "$FI_AF_ST/done/${f##*/}" root)"
       continue
     fi
     if [[ -n "$AFI_pid" ]] && kill -0 "$AFI_pid" 2>/dev/null; then continue; fi
@@ -267,6 +269,7 @@ fi_af_reap() {
       fi_af_item_set "$f" pid ""
       fi_af_unlock "$AFI_id"
       mv "$f" "$FI_AF_ST/queue/$AFI_id"
+      fi_af_seg_write "$AFI_root"
       fi_af_log "$AFI_id" "requeued after a crash"
     else
       fi_af_finish "$AFI_id" failed "crashed"
@@ -292,6 +295,7 @@ fi_af_claim() {
   fi_af_item_set "$q" pid "${FI_AF_PID:-}"
   if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
+  fi_af_seg_write "$AFI_root"
   fi_af_cap_take spot "$id"
   if ! fi_af_worktree_add; then
     fi_af_finish "$id" failed "$FI_AF_WHY"
@@ -312,6 +316,7 @@ fi_af_requeue() {
   fi_af_worktree_remove
   fi_af_item_set "$r" pid ""
   mv "$r" "$FI_AF_ST/queue/$id"
+  fi_af_seg_write "$AFI_root"
   fi_af_unlock "$id"
   fi_af_log "$id" "requeued: $2"
 }

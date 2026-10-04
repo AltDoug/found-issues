@@ -110,7 +110,7 @@ cmd_status() {
     _seg_cacheable=1
   fi
 
-  local critical=0 issues=0 in_pr=0 stale=0 total_open=0
+  local critical=0 issues=0 in_pr=0 stale=0 total_open=0 decisions=0 running=0
   if [[ -n "$file" && -f "$file" ]]; then
     critical="$(fi_count_critical "$file")"
     # Only the json format prints it (audit status-14).
@@ -122,6 +122,8 @@ cmd_status() {
     # vanish from every rendered counter.
     issues="$(fi_count_residual "$file")"
     stale="$(fi_count_stale "$file" "${FOUND_ISSUES_STALE_DAYS:-30}")"
+    # v3: entries waiting on a decision (❓N), ledger-derived so cached.
+    decisions="$(fi_count_decide "$file")"
   fi
 
   # Segment-autosync: when called for statusline rendering, opportunistically
@@ -197,8 +199,10 @@ cmd_status() {
 
   case "$format" in
     json)
-      printf '{"critical":%d,"issues":%d,"in_pr":%d,"stale":%d,"total_open":%d}\n' \
-        "$critical" "$issues" "$in_pr" "$stale" "$total_open"
+      fi_segment_af_suffix "$file"
+      [[ "$FI_SEG_AF" =~ ([0-9]+) ]] && running="${BASH_REMATCH[1]}"
+      printf '{"critical":%d,"issues":%d,"in_pr":%d,"stale":%d,"total_open":%d,"decisions":%d,"running":%d}\n' \
+        "$critical" "$issues" "$in_pr" "$stale" "$total_open" "$decisions" "$running"
       ;;
     plain)
       # Label policy (2026-05-10 UX audit, surfaces 2.1 + 9.1):
@@ -261,6 +265,7 @@ cmd_status() {
       [[ "$issues" -gt 0 ]] && parts+=($'\033[31m'"$issues $issues_word"$'\033[0m')
       [[ "$in_pr" -gt 0 ]] && parts+=($'\033[33m'"$in_pr in PR"$'\033[0m')
       [[ "$stale" -gt 0 ]] && parts+=($'\033[2m'"$stale stale"$'\033[0m')
+      [[ "$decisions" -gt 0 ]] && parts+=($'\033[36m'"❓$decisions"$'\033[0m')
       local seg=""
       if [[ ${#parts[@]} -gt 0 ]]; then
         local out=""
@@ -275,7 +280,9 @@ cmd_status() {
         printf -v seg ' | %s' "$out"
       fi
       (( _seg_cacheable )) && fi_segment_cache_put "$seg"
-      printf '%s' "$seg"
+      # 🔧N is not ledger-derived: appended after the cache, never stored.
+      if [[ -n "$file" ]]; then fi_segment_af_suffix "$file"; else FI_SEG_AF=""; fi
+      fi_segment_join "$seg"
       ;;
     *)
       fi_err "Unknown format: $format (expected segment|plain|json)"

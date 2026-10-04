@@ -9,6 +9,7 @@
 # Functions:
 #   fi_af_cancel <id>
 #   fi_af_status
+#   fi_af_seg_write <root> / fi_af_seg_refresh
 
 # shellcheck disable=SC2154  # AFI_*/FI_AF_* come from autofix-queue.sh / autofix-config.sh
 
@@ -73,6 +74,10 @@ fi_af_status() {
   local f n dir label count today midnight spent=0 file
   if fi_af_enabled; then printf 'Auto-fix: on (%s)\n' "$FI_AF_SLUG"
   else printf 'Auto-fix: off — %s\n' "$FI_AF_WHY"; fi
+  # A run that died (SIGKILL, sleep) is reaped here too, so status and the
+  # statusline stop calling it running. Never steals a live lock.
+  if fi_af_lock "status-$$"; then fi_af_reap; fi_af_unlock "status-$$"; fi
+  fi_af_seg_refresh
   today="$(fi_today)"
   printf 'Today: %s/%s spot fixes\n' "$(_fi_af_count_lines "$FI_AF_ST/day/$today.spot")" "$(fi_af_int dailyFixes 5)"
   printf 'Today: %s/%s sweeps\n' "$(_fi_af_count_lines "$FI_AF_ST/day/$today.sweep")" "$(fi_af_int dailySweeps 1)"
@@ -125,5 +130,42 @@ fi_af_status() {
     done < <(printf '%s\n' "${rows[@]}" | sort -rn | head -n 5)
   fi
   printf 'Spent today: $%s (Claude Code estimate; Codex runs report $0)\n' "$spent"
+  return 0
+}
+
+# Phase 5 ruling 1: the statusline reads runs in progress from one small
+# file per repo root, written here on every move in or out of running/.
+# The name is the physical root (git's toplevel), sanitized like the
+# segment cache's; lib/segment-cache.sh reads it with builtins only.
+fi_af_seg_write() {
+  local root="$1" f n=0 name dir
+  [[ -n "$root" && -n "$FI_AF_ST" ]] || return 0
+  fi_af_root
+  for f in "$FI_AF_ST"/running/*; do
+    [[ -f "$f" ]] || continue
+    [[ "$(_fi_af_field "$f" root 2>/dev/null)" == "$root" ]] && n=$((n + 1))
+  done
+  name="${root//[^A-Za-z0-9._-]/_}"
+  dir="$FI_AF_ROOT/seg"
+  if (( n == 0 )); then rm -f "$dir/$name" 2>/dev/null; return 0; fi
+  mkdir -p "$dir" 2>/dev/null || return 0
+  if printf '%s\n' "$n" >"$dir/$name.$$" 2>/dev/null; then
+    mv -f "$dir/$name.$$" "$dir/$name" 2>/dev/null || rm -f "$dir/$name.$$"
+  fi
+  return 0
+}
+
+# Recount this repo's roots: drop their files, rewrite those still running.
+fi_af_seg_refresh() {
+  local f root
+  fi_af_root
+  for f in "$FI_AF_ST"/done/* "$FI_AF_ST"/queue/* "$FI_AF_ST"/running/*; do
+    [[ -f "$f" ]] || continue
+    root="$(_fi_af_field "$f" root 2>/dev/null || true)"
+    [[ -n "$root" ]] && rm -f "$FI_AF_ROOT/seg/${root//[^A-Za-z0-9._-]/_}" 2>/dev/null
+  done
+  for f in "$FI_AF_ST"/running/*; do
+    [[ -f "$f" ]] && fi_af_seg_write "$(_fi_af_field "$f" root 2>/dev/null || true)"
+  done
   return 0
 }
