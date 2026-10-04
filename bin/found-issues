@@ -85,6 +85,9 @@ source "$FI_LIB_DIR/parse-entries.sh"
 # v3 fix tags: off-limits, tag text, retag (spec 2026-10-03 §3).
 # shellcheck source=../lib/autofix-tags.sh
 source "$FI_LIB_DIR/autofix-tags.sh"
+# v3 auto-fix settings, state paths, test command, engine (spec §5, §8, §9).
+# shellcheck source=../lib/autofix-config.sh
+source "$FI_LIB_DIR/autofix-config.sh"
 # shellcheck source=../lib/detect-mode.sh
 source "$FI_LIB_DIR/detect-mode.sh"
 # The statusline family lives in lib/ (extracted v2.2.5, tracked §12 split).
@@ -120,6 +123,8 @@ source "$FI_LIB_DIR/resolve.sh"
 source "$FI_LIB_DIR/tag.sh"
 # shellcheck source=../lib/decide.sh
 source "$FI_LIB_DIR/decide.sh"
+# shellcheck source=../lib/autofix.sh
+source "$FI_LIB_DIR/autofix.sh"
 # shellcheck source=../lib/promote-deferred.sh
 source "$FI_LIB_DIR/promote-deferred.sh"
 # shellcheck source=../lib/list-status.sh
@@ -270,7 +275,10 @@ fi_repo_id() {
   local remote_url
   remote_url="$(git remote get-url origin 2>/dev/null || true)"
   if [[ "$remote_url" != *"github.com"* ]]; then
-    return 1
+    # get-url expands url.<x>.insteadOf; the configured URL still names the
+    # GitHub repo (a mirror or a local bare remote in tests).
+    remote_url="$(git config --get remote.origin.url 2>/dev/null || true)"
+    [[ "$remote_url" == *"github.com"* ]] || return 1
   fi
   # Strip trailing slashes, then a literal .git suffix, then capture the
   # last two path segments verbatim. The earlier single-pass form used
@@ -406,6 +414,7 @@ main() {
     resolve)          cmd_resolve "$@" ;;
     tag)              cmd_tag "$@" ;;
     decide)           cmd_decide "$@" ;;
+    autofix)          cmd_autofix "$@" ;;
     promote)          cmd_promote "$@" ;;
     install-statusline)   cmd_install_statusline "$@" ;;
     uninstall-statusline) cmd_uninstall_statusline "$@" ;;
