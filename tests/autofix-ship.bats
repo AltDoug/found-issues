@@ -1,0 +1,106 @@
+#!/usr/bin/env bats
+# v3 auto-fix ship (spec §5 step 6, audit prompt-9).
+
+load 'helpers'
+load 'autofix-helpers'
+
+setup() {
+  fi_setup_tmp; fi_af_fixture; fi_use_standins
+  export GH_MOCK_TRACE="$TMP/gh.trace"
+  export GH_MOCK_PR_VIEW=$'7\t{"number":7,"state":"OPEN","statusCheckRollup":[]}'
+  fi_af_queue_fixture; ST="$FI_AF_ST"
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  WT="$REPO/.claude/worktrees/fi-autofix-$ID"
+  BR="fi/autofix/src-calc-sh-1-$ID"
+}
+teardown() { fi_teardown_tmp; }
+
+fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"; }
+
+@test "autofix ship: commits the fix, pushes, opens the PR, arms auto-merge" {
+  fix_it
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR #7"* ]]
+  git -C "$TMP/remote.git" rev-parse --verify -q "refs/heads/$BR"
+  msg="$(git -C "$TMP/remote.git" log -1 --format=%s "$BR~1")"
+  [ "$msg" = "fix: add subtracts (found-issues src/calc.sh:1)" ]
+  grep -q '^pr create --base main --head '"$BR" "$GH_MOCK_TRACE"
+  grep -q '^pr merge 7 --auto --squash$' "$GH_MOCK_TRACE"
+}
+
+@test "autofix ship: annotates both the PR branch ledger and the source ledger" {
+  fix_it
+  "$FI_BIN" autofix ship "$ID"
+  git -C "$TMP/remote.git" show "$BR:docs/found-issues.md" | grep -q 'add subtracts (fix: small) (PR: foo/bar#7)$'
+  grep -q 'add subtracts (fix: small) (PR: foo/bar#7)$' "$REPO/docs/found-issues.md"
+}
+
+@test "autofix ship: an entry that origin never saw annotates only the source ledger" {
+  printf -- '- [open] 2026-10-02 src/calc.sh:1 — add ignores negatives (fix: small)\n' >> "$REPO/docs/found-issues.md"
+  fi_af_context   # setup already sourced the CLI (a second source hits its readonly vars)
+  fi_af_queue_spot "$(grep 'ignores negatives' docs/found-issues.md)" >/dev/null
+  id2="$(ls "$ST/queue" | head -1)"
+  "$FI_BIN" autofix release "$ID" --manual "test reshuffle" >/dev/null
+  "$FI_BIN" autofix claim "$id2" >/dev/null
+  wt2="$REPO/.claude/worktrees/fi-autofix-$id2"
+  sed -i.bak 's/ - / + /' "$wt2/src/calc.sh"; rm -f "$wt2/src/calc.sh.bak"
+  run "$FI_BIN" autofix ship "$id2"
+  [ "$status" -eq 0 ]
+  br2="$(git -C "$TMP/remote.git" for-each-ref --format='%(refname:short)' "refs/heads/fi/autofix/*$id2")"
+  [ "$(git -C "$TMP/remote.git" rev-list --count "main..$br2")" = 1 ]
+  grep -q 'add ignores negatives (fix: small) (PR: foo/bar#7)$' "$REPO/docs/found-issues.md"
+  # same file:line, different entry: left alone on both sides
+  ! grep -q 'add subtracts .*(PR: foo/bar#7)' "$REPO/docs/found-issues.md"
+  ! git -C "$TMP/remote.git" show "$br2:docs/found-issues.md" | grep -q '(PR: foo/bar#7)'
+}
+
+@test "autofix ship: ledger edits made in the worktree never reach the fix commit" {
+  fix_it
+  printf -- '- [open] 2026-10-03 junk.sh — child sync noise\n' >> "$WT/docs/found-issues.md"
+  "$FI_BIN" autofix diff "$ID" > "$TMP/diff"
+  ! grep -q 'child sync noise' "$TMP/diff"
+  grep -qF '+add() { echo $(( $1 + $2 )); }' "$TMP/diff"
+  "$FI_BIN" autofix ship "$ID"
+  ! git -C "$TMP/remote.git" show "$BR~1" -- docs/found-issues.md | grep -q 'child sync noise'
+  ! git -C "$TMP/remote.git" show "$BR:docs/found-issues.md" | grep -q 'child sync noise'
+}
+
+@test "autofix ship: red tests refuse to ship and push nothing" {
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tests fail"* ]]
+  ! git -C "$TMP/remote.git" rev-parse --verify -q "refs/heads/$BR"
+  [ ! -s "$GH_MOCK_TRACE" ] || ! grep -q 'pr create' "$GH_MOCK_TRACE"
+}
+
+@test "autofix ship: auto-merge refused falls back to merge-when-green, which merges a check-less PR" {
+  fix_it
+  export GH_MOCK_PR_MERGE=fail FOUND_ISSUES_AUTOFIX_MERGE_SLEEP=0
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"merge-when-green"* ]]
+  # the detached watcher inherited GH_MOCK_PR_MERGE=fail, so its merge call
+  # exits 1 — the trace line proves it saw a check-less PR and tried to merge
+  for _ in $(seq 1 40); do grep -q '^pr merge 7 --squash$' "$GH_MOCK_TRACE" && break; sleep 0.25; done
+  grep -q '^pr merge 7 --squash$' "$GH_MOCK_TRACE"
+}
+
+@test "autofix merge-when-green: waits on pending, merges on green, refuses red" {
+  export FOUND_ISSUES_AUTOFIX_MERGE_SLEEP=0 FOUND_ISSUES_AUTOFIX_MERGE_POLLS=2
+  export GH_MOCK_PR_VIEW=$'7\t{"state":"OPEN","statusCheckRollup":[{"conclusion":"","status":"IN_PROGRESS"}]}'
+  run "$FI_BIN" autofix merge-when-green 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"still pending"* ]]
+  export GH_MOCK_PR_VIEW=$'7\t{"state":"OPEN","statusCheckRollup":[{"conclusion":"FAILURE"}]}'
+  run "$FI_BIN" autofix merge-when-green 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"checks failed"* ]]
+  export GH_MOCK_PR_VIEW=$'7\t{"state":"OPEN","statusCheckRollup":[{"conclusion":"SUCCESS"},{"state":"SUCCESS"}]}'
+  run "$FI_BIN" autofix merge-when-green 7
+  [ "$status" -eq 0 ]
+  grep -q '^pr merge 7 --squash$' "$GH_MOCK_TRACE"
+  export GH_MOCK_PR_VIEW=$'7\t{"state":"MERGED","statusCheckRollup":[]}'
+  run "$FI_BIN" autofix merge-when-green 7
+  [ "$status" -eq 0 ]
+}

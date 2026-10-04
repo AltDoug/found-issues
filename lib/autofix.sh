@@ -72,6 +72,21 @@ cmd_autofix() {
       fi_af_context || return 1
       [[ -f "$FI_AF_ST/running/$rid" || -f "$FI_AF_ST/queue/$rid" ]] || { fi_err "autofix: no queued or running item $rid"; return 1; }
       fi_af_finish "$rid" "$outcome" "$text" ;;
+    diff|ship)
+      [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix $sub <id>"; return 2; }
+      fi_af_context || return 1
+      fi_af_item_read "$FI_AF_ST/running/$1" || { fi_err "autofix: $1 is not claimed"; return 1; }
+      if [[ "$sub" == "diff" ]]; then fi_af_diff "$AFI_wt" "$AFI_base"; return; fi
+      if fi_af_ship; then
+        printf 'Shipped %s as PR #%s (merge: %s)\n' "$1" "$FI_AF_PR" "$FI_AF_MERGE"
+        fi_af_finish "$1" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE"
+      else
+        fi_err "autofix: ship refused — $FI_AF_WHY"
+        return 1
+      fi ;;
+    merge-when-green)
+      [[ $# -eq 1 && "$1" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number>"; return 2; }
+      fi_af_merge_when_green "$1" ;;
     ""|-h|--help|help) _fi_af_usage ;;
     *) fi_unknown_arg autofix "$sub"; return 2 ;;
   esac

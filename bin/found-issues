@@ -92,6 +92,8 @@ source "$FI_LIB_DIR/autofix-config.sh"
 source "$FI_LIB_DIR/autofix-queue.sh"
 # shellcheck source=../lib/autofix-engine.sh
 source "$FI_LIB_DIR/autofix-engine.sh"
+# shellcheck source=../lib/autofix-ship.sh
+source "$FI_LIB_DIR/autofix-ship.sh"
 # shellcheck source=../lib/detect-mode.sh
 source "$FI_LIB_DIR/detect-mode.sh"
 # The statusline family lives in lib/ (extracted v2.2.5, tracked §12 split).
