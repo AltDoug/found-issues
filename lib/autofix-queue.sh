@@ -36,7 +36,7 @@ AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
 AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
-AFI_head="" AFI_cur="0" AFI_fixed="0"
+AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -50,14 +50,14 @@ fi_af_item_read() {
   AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
-  AFI_head="" AFI_cur="0" AFI_fixed="0"
+  AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -134,15 +134,23 @@ FI_AF_ENTRY="" FI_AF_LEDGER=""
 
 # Spec §5.1: one fixer per repo at a time. mkdir is the atomic test-and-set;
 # a lock older than 60 min (FOUND_ISSUES_AUTOFIX_LOCK_STALE seconds) belonged
-# to a dead run and is broken by rename, so only one breaker wins.
+# to a dead run and is broken by rename, so only one breaker wins. So is a
+# lock whose owner is a running A item with a dead pid (SIGKILL, sleep): it
+# would otherwise block the reap for the full hour.
 fi_af_lock() {
-  local id="$1" lock="$FI_AF_ST/lock" now age
+  local id="$1" lock="$FI_AF_ST/lock" now age owner="" opid=""
   if mkdir "$lock" 2>/dev/null; then
     printf '%s\n' "$id" >"$lock/owner"; return 0
   fi
-  now="$(date +%s)"
-  age=$(( now - $(fi_file_mtime "$lock") ))
-  (( age >= ${FOUND_ISSUES_AUTOFIX_LOCK_STALE:-3600} )) || return 1
+  [[ -f "$lock/owner" ]] && { IFS= read -r owner <"$lock/owner" || true; }
+  if [[ -n "$owner" ]]; then
+    opid="$(_fi_af_field "$FI_AF_ST/running/$owner" pid)" || opid=""
+  fi
+  if [[ ! "$opid" =~ ^[1-9][0-9]*$ ]] || kill -0 "$opid" 2>/dev/null; then
+    now="$(date +%s)"
+    age=$(( now - $(fi_file_mtime "$lock") ))
+    (( age >= ${FOUND_ISSUES_AUTOFIX_LOCK_STALE:-3600} )) || return 1
+  fi
   mv "$lock" "$lock.stale.$$" 2>/dev/null || return 1
   rm -rf "$lock.stale.$$"
   mkdir "$lock" 2>/dev/null || return 1
@@ -242,7 +250,9 @@ fi_af_retire() {
   [[ -f "$f" ]] || f="$FI_AF_ST/queue/$id"
   [[ -f "$f" ]] || return 1
   fi_af_item_set "$f" result "$outcome: $text"
+  fi_af_item_set "$f" finished "$(date +%s)"
   mv "$f" "$FI_AF_ST/done/$id"
+  fi_af_seg_write "$(_fi_af_field "$FI_AF_ST/done/$id" root)"
   fi_af_unlock "$id"
   fi_af_log "$id" "$outcome: $text"
 }
@@ -257,6 +267,7 @@ fi_af_reap() {
       # A refused item (forged worktree path) is retired untouched.
       fi_af_item_set "$f" result "failed: refused: worktree path outside its fi- worktrees"
       mv "$f" "$FI_AF_ST/done/${f##*/}"
+      fi_af_seg_write "$(_fi_af_field "$FI_AF_ST/done/${f##*/}" root)"
       continue
     fi
     if [[ -n "$AFI_pid" ]] && kill -0 "$AFI_pid" 2>/dev/null; then continue; fi
@@ -264,8 +275,11 @@ fi_af_reap() {
     if (( ${AFI_crashes:-0} < 1 )); then
       fi_af_item_set "$f" crashes 1
       fi_af_item_set "$f" pid ""
+      # The dead run's PR number would make cancel refuse the re-run.
+      fi_af_item_set "$f" pr ""
       fi_af_unlock "$AFI_id"
       mv "$f" "$FI_AF_ST/queue/$AFI_id"
+      fi_af_seg_write "$AFI_root"
       fi_af_log "$AFI_id" "requeued after a crash"
     else
       fi_af_finish "$AFI_id" failed "crashed"
@@ -282,7 +296,9 @@ fi_af_claim() {
   fi_af_reap
   if ! fi_af_item_read "$q"; then fi_af_unlock "$id"; return 1; fi
   if [[ "$AFI_kind" == "sweep" ]]; then fi_af_sweep_claim "$id"; return; fi
-  if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY"; return 5; fi
+  # A cancel may have moved the queue file away meanwhile: then the retire
+  # finds nothing and the lock is still ours to drop.
+  if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY" || fi_af_unlock "$id"; return 5; fi
   if ! fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"; then fi_af_unlock "$id"; return 3; fi
   # Launcher A's run passes its own long-lived pid. A standalone claim is an
   # in-session fixer (launcher B): its claim process exits at once, so there
@@ -291,6 +307,7 @@ fi_af_claim() {
   fi_af_item_set "$q" pid "${FI_AF_PID:-}"
   if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
+  fi_af_seg_write "$AFI_root"
   fi_af_cap_take spot "$id"
   if ! fi_af_worktree_add; then
     fi_af_finish "$id" failed "$FI_AF_WHY"
@@ -310,7 +327,9 @@ fi_af_requeue() {
   fi_af_item_read "$r" || return 1
   fi_af_worktree_remove
   fi_af_item_set "$r" pid ""
+  fi_af_item_set "$r" pr ""
   mv "$r" "$FI_AF_ST/queue/$id"
+  fi_af_seg_write "$AFI_root"
   fi_af_unlock "$id"
   fi_af_log "$id" "requeued: $2"
 }

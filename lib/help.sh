@@ -72,8 +72,15 @@ COMMANDS
   decide [--count] | decide <match> --answer "<text>"
                                         The decision queue: list open
                                         (decide: ...) questions, or record one.
-  autofix on|off|status                 v3 auto-fix: kill switch and what is queued,
+  config [<key> [<value>|--unset]] [--global]
+                                        Auto-fix settings (found-issues.autofix.*):
+                                        list with sources, get, set, unset.
+  autofix on|off|status                v3 auto-fix: kill switch and what is queued,
                                         running and done today.
+  autofix summary [--peek]              What finished since the last interactive
+                                        session (the SessionStart line).
+  autofix cancel <id>                   Stop a queued or running item and its
+                                        background run; the ledger is untouched.
   autofix run <id> [--engine E]         Fix a queued (fix: small) entry headlessly:
                                         worktree, fixer, tests, verifier, self-merging PR.
   autofix run <sweep-id>                A sweep: up to sweepMax fixable entries, one

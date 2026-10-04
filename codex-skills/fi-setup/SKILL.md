@@ -107,6 +107,9 @@ re-running setup after an upgrade.
 The detailed install mechanics for each option are below — those describe
 the CLI subcommand to invoke once the user picks.
 
+Auto-fix is not in this picker: it spends money and merges code, so it has
+its own disclosure step after it (Optional 4).
+
 ## Optional 1 — Statusline integration
 
 The plugin offers a counter segment for the user's Claude Code statusline
@@ -315,6 +318,41 @@ Flow:
 
 To uninstall later: `found-issues uninstall-fi-alias` removes the file
 only if it's ours.
+
+## Optional 4 — Auto-fix (off by default)
+
+Run this step after the polish picker, every time setup runs. First check
+the current state:
+
+```bash
+found-issues config autofix
+```
+
+If it prints `true`, say "auto-fix is already on here" and skip to
+Reporting. Otherwise show this disclosure **verbatim** before asking
+anything:
+
+> **Auto-fix is off.** When it's on, in a GitHub repo with `gh` signed in and a test command:
+>
+> - Entries tagged `(fix: small)` are fixed in the background, each in its own worktree, branch and PR. When 5 entries are fixable, one sweep fixes up to 8 entries in a single PR.
+> - **Fix PRs merge themselves.** Each fix must pass the repo's tests and a read-only reviewer model, then its PR is set to auto-merge. No human approves it.
+> - **Runs bill your Claude or Codex account, including in the background** where you don't see them. Default caps per repo: 5 spot fixes and 1 sweep a day, up to 8 entries per sweep, $3 per fix run, $10 per sweep, 20 minutes per run (`found-issues config` changes them).
+> - Issues that need a decision are never auto-fixed; they wait in `$fi-decide`.
+> - Turn it off any time: `found-issues autofix off` stops it in every repo at once; `found-issues config autofix false` turns this repo off; `FOUND_ISSUES_AUTOFIX=off` stops it for one shell.
+
+Then ask with a single-select `AskUserQuestion` (not part of the
+multi-select above):
+
+1. `Not now (Recommended)` — description: "Leave auto-fix off; turn it on
+   later with `found-issues config autofix true`." Recommended because it
+   spends money and merges code without a human review, so it should be a
+   deliberate opt-in.
+2. `Turn on in this repo` — run `found-issues config autofix true`.
+3. `Turn on in every repo` — run `found-issues config autofix true --global`.
+
+After turning it on, run `found-issues doctor` and show its
+`== Auto-fix ==` section, so the user sees anything still missing (a test
+command, the `gh` sign-in, `claude` or `codex` on PATH).
 
 ## Reporting
 

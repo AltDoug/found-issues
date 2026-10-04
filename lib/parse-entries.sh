@@ -14,6 +14,7 @@
 #   fi_count <file> [<status_filter>]
 #   fi_count_in_pr <file>
 #   fi_count_critical <file>
+#   fi_count_decide <file>
 #   fi_count_residual <file>
 #   fi_count_stale <file> [<days=30>]
 
@@ -415,6 +416,15 @@ fi_count_critical() {
   local count
   count="$(fi_entries "$file" open 2>/dev/null \
     | grep -cE '^- \[open\] \[!\]' || true)"
+  printf '%s' "${count:-0}"
+}
+
+# Count [open] entries waiting on a decision: a (decide: ...) tag in the
+# entry (v3 decision queue, spec §3.4). Conflict-aware via fi_entries.
+fi_count_decide() {
+  local file="$1" count
+  if [[ ! -f "$file" ]]; then printf '0'; return; fi
+  count="$(fi_entries "$file" open 2>/dev/null | grep -cE '\(decide: [^)]*\)' || true)"
   printf '%s' "${count:-0}"
 }
 

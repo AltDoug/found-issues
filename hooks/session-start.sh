@@ -105,7 +105,12 @@ fi_flush_codex_exit() {
 # `claude -p`, CLAUDE_CODE_ENTRYPOINT other than cli) has no human to read
 # the line, and must not use up the one-time hint either.
 fi_ss_interactive=0
-[[ -z "${CLAUDE_CODE_ENTRYPOINT:-}" || "${CLAUDE_CODE_ENTRYPOINT}" == "cli" ]] && fi_ss_interactive=1
+# A launcher A child (FOUND_ISSUES_AUTOFIX_CHILD=1) is headless whatever
+# entrypoint it inherited.
+if [[ -z "${CLAUDE_CODE_ENTRYPOINT:-}" || "${CLAUDE_CODE_ENTRYPOINT}" == "cli" ]] \
+    && [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" != 1 ]]; then
+  fi_ss_interactive=1
+fi
 ONBOARD_DIR="$HOME/.claude/found-issues"
 if [[ "$harness" == "claude" && "$fi_ss_interactive" == 1 ]]; then
 ONBOARD_MARKER="$ONBOARD_DIR/.onboarded"
@@ -276,6 +281,26 @@ fi
 if [[ -n "${FOUND_ISSUES_DEBUG_BIN:-}" ]]; then
   printf 'found-issues: hook resolved FI_BIN=%s\n' \
     "$(command -v "$FI_BIN" 2>/dev/null || printf '%s' "$FI_BIN")" >&2
+fi
+
+# v3 auto-fix summary (spec §8, phase 5 rulings 3-4): interactive sessions
+# only, and only on a machine that has used auto-fix (a builtin test, so no
+# fork otherwise). Emitted before the ledger checks, so it shows even when
+# every entry is now fixed. Fixed text, numbers and bash-authored reasons.
+if [[ "$fi_ss_interactive" == 1 && -d "${FOUND_ISSUES_STATE_DIR:-$HOME/.claude/found-issues}/autofix" ]]; then
+  __fi_af_sum="$("$FI_BIN" autofix summary 2>/dev/null || true)"
+  if [[ -n "$__fi_af_sum" ]]; then
+    __fi_af_block="## found-issues auto-fix — since the last session
+
+$__fi_af_sum
+
+Tell the user this line once, near the top of your next reply."
+    if [[ "$harness" == "codex" ]]; then
+      codex_rules_block+="${codex_rules_block:+$'\n\n'}$__fi_af_block"
+    else
+      printf '%s\n\n' "$__fi_af_block"
+    fi
+  fi
 fi
 
 # --- broken custom-target marker migration (auto-trigger) ---

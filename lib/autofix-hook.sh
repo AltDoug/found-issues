@@ -96,8 +96,8 @@ fi_afh_context_b() {
 ## found-issues auto-fix: sweep $1 is queued
 
 The user turned on found-issues auto-fix. Start the plugin agent
-found-issues:found-issues-sweeper now, in the background, with exactly this
-prompt:
+found-issues:found-issues-sweeper now, in the background, with model sonnet
+(its own setting) and exactly this prompt:
 
   Run found-issues auto-fix sweep $1.
 
@@ -110,8 +110,8 @@ EOF
 ## found-issues auto-fix: item $1 is queued
 
 The user turned on found-issues auto-fix. Start the plugin agent
-found-issues:found-issues-fixer now, in the background, with exactly this
-prompt:
+found-issues:found-issues-fixer now, in the background, with model sonnet
+(its own setting) and exactly this prompt:
 
   Fix found-issues auto-fix item $1.
 

@@ -31,6 +31,8 @@
 #   fi_segment_read_ledger <ledger>         sets FI_SEG_LEDGER
 #   fi_segment_cache_get                    sets FI_SEG_OUT on a hit
 #   fi_segment_cache_put <segment>          best effort, never fails
+#   fi_segment_af_suffix <ledger>           sets FI_SEG_AF (🔧N or empty), FI_SEG_AF_N (N or 0)
+#   fi_segment_join <segment>               prints segment + FI_SEG_AF
 
 # fi_autosync_stamp_path <cache dir> <ledger> — the per-ledger autosync
 # stamp (shared by this fast path and cmd_status). A name too long for one
@@ -57,7 +59,7 @@ fi_segment_cache_key() {
   name="${file//[^A-Za-z0-9._-]/_}"
   (( ${#name} <= 200 )) || return 1
   FI_SEG_CACHE="${FOUND_ISSUES_CACHE_DIR:-$HOME/.cache/found-issues}/segment/$name"
-  FI_SEG_KEY="seg1|${FI_VERSION:-}|${FOUND_ISSUES_STALE_DAYS:-30}|$today|${LC_ALL:-}|${LC_CTYPE:-}|${LANG:-}|$file"
+  FI_SEG_KEY="seg2|${FI_VERSION:-}|${FOUND_ISSUES_STALE_DAYS:-30}|$today|${LC_ALL:-}|${LC_CTYPE:-}|${LANG:-}|$file"
 }
 
 # read -d '' succeeds only when it stops at a NUL byte — content a bash string
@@ -91,6 +93,41 @@ fi_segment_cache_put() {
     rm -f "$tmp" 2>/dev/null || true
   fi
   return 0
+}
+
+# 🔧N: auto-fix runs in progress in the ledger's repo (phase 5 ruling 1),
+# from the state file lib/autofix-status.sh writes per physical repo root.
+# Read AFTER the cache, never cached. Builtins only: cd -P resolves the
+# root git reports, so a symlinked checkout still finds its file.
+fi_segment_af_suffix() {
+  local file="$1" root saved n="" st
+  FI_SEG_AF="" FI_SEG_AF_N=0
+  case "$file" in
+    */docs/found-issues.md) root="${file%/docs/found-issues.md}" ;;
+    */.found-issues.md)     root="${file%/.found-issues.md}" ;;
+    *) return 0 ;;
+  esac
+  [[ -n "${FOUND_ISSUES_STATE_DIR:-}" || -n "${HOME:-}" ]] || return 0
+  st="${FOUND_ISSUES_STATE_DIR:-$HOME/.claude/found-issues}/autofix/seg"
+  [[ -d "$st" ]] || return 0
+  saved="$PWD"
+  cd -P "$root" 2>/dev/null || return 0
+  root="$PWD"
+  cd "$saved" 2>/dev/null || return 0
+  root="$st/${root//[^A-Za-z0-9._-]/_}"
+  [[ -f "$root" ]] || return 0
+  IFS= read -r n <"$root" || true
+  if [[ "$n" =~ ^[1-9][0-9]*$ ]]; then
+    FI_SEG_AF_N="$n"
+    FI_SEG_AF=$'\033[35m'"🔧$n"$'\033[0m'
+  fi
+  return 0
+}
+
+fi_segment_join() {
+  if [[ -z "$FI_SEG_AF" ]]; then printf '%s' "$1"
+  elif [[ -z "$1" ]]; then printf ' | %s' "$FI_SEG_AF"
+  else printf '%s · %s' "$1" "$FI_SEG_AF"; fi
 }
 
 # Mirrors main()'s `status` argument loop and cmd_status's file resolution
@@ -147,6 +184,7 @@ fi_segment_fast_path() {
   fi_segment_cache_key "$file" || return 1
   fi_segment_read_ledger "$file" || return 1
   fi_segment_cache_get || return 1
-  printf '%s' "$FI_SEG_OUT"
+  fi_segment_af_suffix "$file"
+  fi_segment_join "$FI_SEG_OUT"
   return 0
 }

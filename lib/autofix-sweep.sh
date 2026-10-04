@@ -133,12 +133,13 @@ fi_af_sweep_claim() {
   [[ "$(_fi_af_field "$q" cap_day)" == "$(fi_today)" ]] && capped=1
   if (( ! capped )) && ! fi_af_cap_ok sweep "$(fi_af_int dailySweeps 1)"; then
     FI_AF_WHY="today's sweep cap is reached; the next trigger queues a new sweep"
-    fi_af_retire "$id" stale "$FI_AF_WHY"; return 5
+    fi_af_retire "$id" stale "$FI_AF_WHY" || fi_af_unlock "$id"; return 5
   fi
   fi_af_item_set "$q" pid "${FI_AF_PID:-}"
   if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
   (( capped )) || fi_af_item_set "$q" cap_day "$(fi_today)"
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
+  fi_af_seg_write "$AFI_root"
   (( capped )) || fi_af_cap_take sweep "$id"
   if ! fi_af_worktree_add; then fi_af_finish "$id" failed "$FI_AF_WHY"; return 6; fi
   fi_af_item_set "$r" wt "$AFI_wt"

@@ -46,6 +46,10 @@ fi_af_child() {
     ( cd "$cwd" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' "$@" ) </dev/null >"$out" 2>"$err" &
     cpid=$!
     FI_AF_CHILD_PGID="$cpid"
+    # autofix cancel (another process) needs the group to kill.
+    if [[ -n "${AFI_id:-}" && -f "$FI_AF_ST/running/$AFI_id" ]]; then
+      fi_af_item_set "$FI_AF_ST/running/$AFI_id" cpgid "$cpid" 2>/dev/null || true
+    fi
   else
     ( cd "$cwd" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec "$@" ) </dev/null >"$out" 2>"$err" &
     cpid=$!

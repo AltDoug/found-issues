@@ -16,6 +16,8 @@
 #   fi_af_test_command <dir>
 #   fi_af_engine [<explicit>]
 #   fi_af_no_prompts
+#   fi_cfg_show_line <key>
+#   cmd_config [<key> [<value>|--unset]] [--global]
 
 FI_AF_ROOT="" FI_AF_WHY="" FI_AF_ST="" FI_AF_RUNS="" FI_AF_SLUG=""
 
@@ -159,4 +161,130 @@ fi_af_engine() {
 fi_af_no_prompts() {
   export GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1
   [[ -n "${GIT_SSH_COMMAND:-}" ]] || export GIT_SSH_COMMAND="ssh -o BatchMode=yes"
+}
+
+# Spec §8 settings: key|kind|default ("" = detected or none).
+_FI_CFG_KEYS='autofix|bool|false
+autofix.engine|engine|auto
+autofix.testCommand|text|
+autofix.dailyFixes|int|5
+autofix.dailySweeps|int|1
+autofix.sweepThreshold|int|5
+autofix.sweepMax|int|8
+autofix.runBudget|usd|3
+autofix.sweepBudget|usd|10
+autofix.runTimeoutMin|int|20'
+
+FI_CFG_KEY="" FI_CFG_KIND="" FI_CFG_DEF="" FI_CFG_VAL="" FI_CFG_SRC=""
+
+# Canonical key for a name given with or without the found-issues. prefix,
+# in any case (git config names are case-insensitive). rc 1 = unknown.
+_fi_cfg_spec() {
+  local want line k
+  want="$(printf '%s' "${1#found-issues.}" | tr '[:upper:]' '[:lower:]')"
+  while IFS= read -r line; do
+    k="${line%%|*}"
+    if [[ "$(printf '%s' "$k" | tr '[:upper:]' '[:lower:]')" == "$want" ]]; then
+      FI_CFG_KEY="$k"; line="${line#*|}"; FI_CFG_KIND="${line%%|*}"; FI_CFG_DEF="${line#*|}"
+      return 0
+    fi
+  done <<<"$_FI_CFG_KEYS"
+  return 1
+}
+
+# Normalizes FI_CFG_VAL for the key's kind; rc 1 with a reason on stderr.
+_fi_cfg_valid() {
+  case "$FI_CFG_KIND" in
+    bool)
+      case "$FI_CFG_VAL" in
+        true|on|yes|1) FI_CFG_VAL=true ;;
+        false|off|no|0) FI_CFG_VAL=false ;;
+        *) fi_err "config: found-issues.$FI_CFG_KEY takes true or false"; return 1 ;;
+      esac ;;
+    engine)
+      [[ "$FI_CFG_VAL" =~ ^(auto|claude|codex)$ ]] \
+        || { fi_err "config: found-issues.$FI_CFG_KEY takes auto, claude or codex"; return 1; } ;;
+    int)
+      if [[ ! "$FI_CFG_VAL" =~ ^[0-9]+$ ]] || (( 10#$FI_CFG_VAL < 1 )); then
+        fi_err "config: found-issues.$FI_CFG_KEY takes a whole number of 1 or more"; return 1
+      fi ;;
+    usd)
+      if [[ ! "$FI_CFG_VAL" =~ ^[0-9]+(\.[0-9]+)?$ || "$FI_CFG_VAL" =~ ^0+(\.0+)?$ ]]; then
+        fi_err "config: found-issues.$FI_CFG_KEY takes a USD amount above 0, e.g. 3 or 2.5"; return 1
+      fi ;;
+    text)
+      [[ -n "$FI_CFG_VAL" ]] || { fi_err "config: found-issues.$FI_CFG_KEY needs a value"; return 1; } ;;
+  esac
+}
+
+# Effective value and where it comes from (local, global, default,
+# detected or none) for one key; sets FI_CFG_VAL and FI_CFG_SRC.
+fi_cfg_show_line() {
+  local out root
+  _fi_cfg_spec "$1" || return 1
+  out="$(git config --show-scope --get "found-issues.$FI_CFG_KEY" 2>/dev/null || true)"
+  if [[ -n "$out" ]]; then
+    FI_CFG_SRC="${out%%$'\t'*}" FI_CFG_VAL="${out#*$'\t'}"
+    return 0
+  fi
+  FI_CFG_VAL="$FI_CFG_DEF" FI_CFG_SRC=default
+  if [[ "$FI_CFG_KEY" == autofix.testCommand ]]; then
+    root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$root" ]] && FI_CFG_VAL="$(fi_af_test_command "$root")"; then
+      FI_CFG_SRC=detected
+    else
+      FI_CFG_VAL="(none detected)" FI_CFG_SRC=none
+    fi
+  fi
+}
+
+# Phase 5 ruling 7: list, get, set (this repo, or --global), --unset.
+cmd_config() {
+  local key="" val="" unset_it=0 scope=--local line
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global) scope=--global; shift ;;
+      --unset) unset_it=1; shift ;;
+      -h|--help)
+        printf 'Usage: found-issues config                          List the auto-fix settings\n'
+        printf '       found-issues config <key>                    Print one value\n'
+        printf '       found-issues config <key> <value> [--global] Set it (this repo, or every repo)\n'
+        printf '       found-issues config <key> --unset [--global] Remove it\n'
+        return 0 ;;
+      -*) fi_unknown_arg config "$1"; return 2 ;;
+      *)
+        if [[ -z "$key" ]]; then key="$1"
+        elif [[ -z "$val" ]]; then val="$1"
+        else fi_unknown_arg config "$1"; return 2; fi
+        shift ;;
+    esac
+  done
+  if [[ -z "$key" ]]; then
+    while IFS= read -r line; do
+      fi_cfg_show_line "${line%%|*}"
+      printf 'found-issues.%-24s %s  (%s)\n' "$FI_CFG_KEY" "$FI_CFG_VAL" "$FI_CFG_SRC"
+    done <<<"$_FI_CFG_KEYS"
+    return 0
+  fi
+  _fi_cfg_spec "$key" || { fi_err "config: unknown setting $key (run: found-issues config)"; return 2; }
+  if [[ "$scope" == --local ]] && { (( unset_it )) || [[ -n "$val" ]]; }; then
+    git rev-parse --git-dir >/dev/null 2>&1 \
+      || { fi_err "config: not in a git repo — use --global to set it for every repo"; return 1; }
+  fi
+  if (( unset_it )); then
+    git config "$scope" --unset "found-issues.$FI_CFG_KEY" 2>/dev/null || true
+    printf 'Unset found-issues.%s (%s)\n' "$FI_CFG_KEY" "${scope#--}"
+    return 0
+  fi
+  if [[ -z "$val" ]]; then
+    fi_cfg_show_line "$FI_CFG_KEY"; printf '%s\n' "$FI_CFG_VAL"; return 0
+  fi
+  FI_CFG_VAL="$val"
+  _fi_cfg_valid || return 2
+  git config "$scope" "found-issues.$FI_CFG_KEY" "$FI_CFG_VAL" || return 1
+  printf 'Set found-issues.%s = %s (%s)\n' "$FI_CFG_KEY" "$FI_CFG_VAL" "${scope#--}"
+  if [[ "$FI_CFG_KEY" == autofix && "$FI_CFG_VAL" == true ]]; then
+    printf 'Fix PRs merge themselves once their checks pass, and runs bill your Claude or Codex account, including in the background.\n'
+    printf 'Stop it any time: found-issues autofix off (every repo) or found-issues config autofix false.\n'
+  fi
 }
