@@ -10,6 +10,7 @@
 # Functions:
 #   fi_af_touch_lock <id>
 #   fi_af_b_running <id>
+#   fi_af_b_enabled <id>
 #   fi_af_brief
 #   fi_af_b_test <id>
 #   fi_af_b_verify <id>
@@ -27,6 +28,15 @@ fi_af_touch_lock() {
 fi_af_b_running() {
   fi_af_item_read "$FI_AF_ST/running/$1" || { fi_err "autofix: $1 is not claimed (run: found-issues autofix claim $1)"; return 1; }
   fi_af_touch_lock "$1"
+}
+
+# `autofix off` (or the repo setting) mid-fix: verify and ship give the
+# claimed item back untouched, so `autofix on` later retries it. Exit 8.
+fi_af_b_enabled() {
+  fi_af_enabled && return 0
+  fi_af_requeue "$1" "switched off: $FI_AF_WHY"
+  printf 'auto-fix is off (%s): the item is requeued; stop\n' "$FI_AF_WHY"
+  return 8
 }
 
 fi_af_brief() {
@@ -64,7 +74,8 @@ Do exactly this:
 5. Run autofix verify. Exit 0 = approved: run autofix ship. Exit 1 = rejected
    with a reason and one attempt left: revise, autofix test, autofix verify
    again. Any other exit: the item is finished or requeued; stop.
-6. If you cannot finish, release with --failed "<why>".
+6. If you cannot finish, release with --failed "<why>". If any command says
+   the item is requeued or finished, stop.
 End your reply with one line: the item id and its outcome.
 EOF
 }
@@ -88,7 +99,8 @@ fi_af_b_test() {
 # staged tree are recorded; ship refuses anything else (phase 3 ruling 2).
 # Exit: 0 approved, 1 rejected (an attempt left), 2 nothing to verify,
 # 3 tests fail (no attempt counted), 5 rejected twice (finished failed),
-# 6 run budget spent (finished failed), 7 verifier unavailable (requeued).
+# 6 run budget spent (finished failed), 7 verifier unavailable (requeued),
+# 8 auto-fix switched off (requeued, from cmd_autofix).
 fi_af_b_verify() {
   local id="$1" r="$FI_AF_ST/running/$1" engine n log
   if [[ -z "$(fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}")" ]]; then
@@ -118,8 +130,8 @@ fi_af_b_verify() {
   fi_af_item_set "$r" verdict_reason "$FI_AF_REASON"
   fi_af_touch_lock "$id"
   if [[ "$FI_AF_APPROVE" == "true" ]]; then
-    fi_af_item_set "$r" verdict approve
     fi_af_item_set "$r" verdict_tree "$FI_AF_TREE"
+    fi_af_item_set "$r" verdict approve
     printf 'approved: %s\nNext: found-issues autofix ship %s\n' "$FI_AF_REASON" "$id"; return 0
   fi
   fi_af_item_set "$r" verdict reject

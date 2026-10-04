@@ -123,3 +123,10 @@ AUTOFIX-QUEUED $id2")"
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -s 'length')" = 1 ]
 }
+
+@test "hook: a queued item whose repo root is gone still exits 0" {
+  fi_af_item_set "$QITEM" root "$TMP/gone"
+  run hook "$(payload default "AUTOFIX-QUEUED $ID")"
+  [ "$status" -eq 0 ]
+  no_spawn
+}

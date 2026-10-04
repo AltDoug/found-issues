@@ -16,6 +16,7 @@
 #   fi_afh_mark <item> <A|B> <epoch>
 #   fi_afh_launch_a <item> <engine> <fi-bin>
 #   fi_afh_context_b <id>
+#   fi_afh_lock_fresh <lock-dir>
 #   fi_afh_stop <payload> <engine> <fi-bin>
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
@@ -68,8 +69,7 @@ fi_afh_now() {
 }
 
 fi_afh_mark() {
-  fi_af_item_set "$1" launcher "$2"
-  fi_af_item_set "$1" launched "$3"
+  fi_af_item_set "$1" launcher "$2" && fi_af_item_set "$1" launched "$3"
 }
 
 # Detached and fd-clean: the session never waits on it and bats never hangs
@@ -98,10 +98,21 @@ your current task.
 EOF
 }
 
+# A lock older than FOUND_ISSUES_AUTOFIX_LOCK_STALE belonged to a dead run
+# (killed A run, B fixer out of turns); the run we start breaks it in
+# fi_af_lock. Forks only while a lock exists.
+fi_afh_lock_fresh() {
+  local m
+  m="$(stat -c %Y -- "$1" 2>/dev/null)" || m=""
+  [[ "$m" =~ ^[0-9]+$ ]] || m="$(stat -f %m -- "$1" 2>/dev/null)" || m=""
+  [[ "$m" =~ ^[0-9]+$ ]] || return 0
+  (( FI_AFH_NOW - m < ${FOUND_ISSUES_AUTOFIX_LOCK_STALE:-3600} ))
+}
+
 # Spec §4.3: an item still queued when the session stops gets launcher A, so
 # a skipped launcher B nudge (or an item queued inside a fixer) never
 # strands. Zero forks while the queue is empty: one glob, then return.
-# Skipped: the repo lock is held (a run is draining), today's cap was hit,
+# Skipped: a fresh repo lock is held (a run is draining), today's cap was hit,
 # or the item was launched less than FOUND_ISSUES_AUTOFIX_STOP_GRACE seconds
 # ago (default 60; a B fixer may not have claimed yet).
 fi_afh_stop() {
@@ -120,7 +131,8 @@ fi_afh_stop() {
   fi_afh_now
   for f in "${items[@]}"; do
     st="${f%/queue/*}"
-    [[ -d "$st/lock" || -e "$st/day/$FI_AFH_DAY.capped" ]] && continue
+    [[ -e "$st/day/$FI_AFH_DAY.capped" ]] && continue
+    [[ -d "$st/lock" ]] && fi_afh_lock_fresh "$st/lock" && continue
     fi_af_item_read "$f" || continue
     [[ -n "$AFI_root" && ( "$cwd" == "$AFI_root" || "$cwd" == "$AFI_root"/* ) ]] || continue
     if [[ "$AFI_launched" =~ ^[0-9]+$ ]] \

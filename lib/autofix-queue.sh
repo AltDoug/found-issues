@@ -61,16 +61,20 @@ fi_af_item_read() {
 
 fi_af_item_set() {
   local path="$1" key="$2" val="$3" line tmp found=0
+  # The hooks stamp items without the repo lock: a claimer may move the
+  # file away at any moment. Give up rather than recreate a stub.
+  [[ -f "$path" ]] || return 1
   tmp="$path.tmp.$$"
-  : >"$tmp"
+  : >"$tmp" || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "${line%%=*}" == "$key" ]]; then
       printf '%s=%s\n' "$key" "$val" >>"$tmp"; found=1
     else
       printf '%s\n' "$line" >>"$tmp"
     fi
-  done <"$path"
+  done <"$path" || { rm -f "$tmp"; return 1; }
   (( found )) || printf '%s=%s\n' "$key" "$val" >>"$tmp"
+  [[ -f "$path" ]] || { rm -f "$tmp"; return 1; }
   mv "$tmp" "$path"
 }
 

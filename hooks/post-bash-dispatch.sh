@@ -324,14 +324,14 @@ if [[ "$input" == *AUTOFIX-QUEUED* && -f "$lib_dir/autofix-queue.sh" && -f "$lib
       __fi_first=""
       for __fi_id in "${FI_AFH_IDS[@]}"; do
         fi_afh_item "$__fi_id" || continue
-        fi_afh_mark "$FI_AFH_ITEM" "$FI_AFH_LAUNCHER" "$FI_AFH_NOW"
+        fi_afh_mark "$FI_AFH_ITEM" "$FI_AFH_LAUNCHER" "$FI_AFH_NOW" || continue
         if [[ "$FI_AFH_LAUNCHER" == B ]]; then
           ctx+="$(fi_afh_context_b "$__fi_id")"$'\n\n'
         elif [[ -z "$__fi_first" ]]; then
           __fi_first="$FI_AFH_ITEM"
         fi
       done
-      [[ -n "$__fi_first" ]] && fi_afh_launch_a "$__fi_first" "$__fi_harness" "$FI_BIN"
+      if [[ -n "$__fi_first" ]]; then fi_afh_launch_a "$__fi_first" "$__fi_harness" "$FI_BIN" || true; fi
     fi
   fi
 fi

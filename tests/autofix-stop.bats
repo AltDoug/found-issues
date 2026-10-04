@@ -95,3 +95,12 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
   grep -q "autofix run $ID --engine codex$" "$TMP/spawned"
   printf '%s' "$out" | jq -e '.decision == "block"'
 }
+
+@test "stop: a stale repo lock left by a dead run does not strand the queue" {
+  mkdir "$ST/lock"
+  touch -t 202001010000 "$ST/lock"
+  run stop "$REPO"
+  [ "$status" -eq 0 ]
+  wait_spawn
+  grep -q "autofix run $ID --engine claude$" "$TMP/spawned"
+}

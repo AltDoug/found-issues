@@ -136,8 +136,8 @@ _fi_af_run_one() {
     fi
     FI_AF_VERDICT_REASON="$FI_AF_REASON"
     AFI_verdict_tree="$FI_AF_TREE"
-    fi_af_item_set "$FI_AF_ST/running/$id" verdict approve
     fi_af_item_set "$FI_AF_ST/running/$id" verdict_tree "$FI_AF_TREE"
+    fi_af_item_set "$FI_AF_ST/running/$id" verdict approve
     if fi_af_ship; then
       fi_af_item_set "$FI_AF_ST/running/$id" pr "$FI_AF_PR"
       _fi_af_end "$id" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE, \$$FI_AF_COST"
@@ -249,6 +249,7 @@ cmd_autofix() {
     claim)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix claim <id>"; return 2; }
       fi_af_context || return 1
+      fi_af_enabled || { fi_err "autofix: not running — $FI_AF_WHY; $1 stays queued"; return 1; }
       fi_af_no_prompts
       local rc=0
       fi_af_claim "$1" || rc=$?
@@ -286,6 +287,7 @@ cmd_autofix() {
       fi_af_item_read "$FI_AF_ST/running/$1" || { fi_err "autofix: $1 is not claimed"; return 1; }
       fi_af_touch_lock "$1"
       if [[ "$sub" == "diff" ]]; then fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}"; return; fi
+      fi_af_b_enabled "$1" || return
       if [[ "$AFI_verdict" != "approve" ]]; then
         fi_err "autofix: ship needs an approving verdict — run: found-issues autofix verify $1"; return 1
       fi
@@ -312,7 +314,7 @@ cmd_autofix() {
       case "$sub" in
         brief) fi_af_brief ;;
         test) fi_af_b_test "$1" ;;
-        verify) fi_af_no_prompts; fi_af_b_verify "$1" ;;
+        verify) fi_af_b_enabled "$1" || return; fi_af_no_prompts; fi_af_b_verify "$1" ;;
       esac ;;
     run)
       local rid="${1:-}" eng=""

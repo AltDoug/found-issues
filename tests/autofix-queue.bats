@@ -109,3 +109,11 @@ teardown() { fi_teardown_tmp; }
   [ "$AFI_pid" = 4242 ]
   [ "$AFI_entry" = "- [open] a = b (fix: small)" ]
 }
+
+@test "autofix queue: item_set on a vanished item recreates nothing" {
+  source "$FI_BIN"
+  mkdir -p "$QDIR"
+  ! fi_af_item_set "$QDIR/gone" launched 1 || false
+  [ ! -e "$QDIR/gone" ]
+  [ -z "$(ls -A "$QDIR" 2>/dev/null)" ]
+}

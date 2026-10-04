@@ -103,7 +103,10 @@ fi_af_ship() {
   fi_af_run_tests "$wt" "$FI_AF_TESTCMD" "$tlog" || { FI_AF_WHY="tests fail at ship"; return 1; }
   git -C "$wt" add -A
   if git -C "$wt" diff --cached --quiet "$ref"; then FI_AF_WHY="nothing to ship"; return 1; fi
-  if [[ -n "${AFI_verdict_tree:-}" && "$(git -C "$wt" write-tree 2>/dev/null)" != "$AFI_verdict_tree" ]]; then
+  # Fail closed: an approval with no recorded tree (a write that failed, or
+  # an item file edited by hand) never ships.
+  [[ -n "${AFI_verdict_tree:-}" ]] || { FI_AF_WHY="no verifier-approved tree recorded (run: found-issues autofix verify $AFI_id)"; return 1; }
+  if [[ "$(git -C "$wt" write-tree 2>/dev/null)" != "$AFI_verdict_tree" ]]; then
     FI_AF_WHY="the change differs from what the verifier approved (did the tests leave files?)"; return 1
   fi
   fi_parse_entry_vars "$AFI_entry" || true

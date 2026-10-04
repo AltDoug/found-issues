@@ -142,3 +142,45 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   grep -q 'launcher B' "$FI_AF_RUNS/$ID.pr-body.md"
   [ -f "$ST/done/$ID" ]
 }
+
+@test "b: claim refuses while auto-fix is switched off and leaves the item queued" {
+  "$FI_BIN" autofix off >/dev/null
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"switched off"* ]]
+  [ -f "$ST/queue/$ID" ]
+  [ ! -d "$REPO/.claude/worktrees/fi-autofix-$ID" ]
+}
+
+@test "b: verify switched off mid-fix requeues the item and runs no verifier" {
+  claim; fix_it
+  "$FI_BIN" autofix off >/dev/null
+  run "$FI_BIN" autofix verify "$ID"
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"requeued; stop"* ]]
+  [ -f "$ST/queue/$ID" ]
+  [ ! -e "$ST/running/$ID" ]
+  ! grep -q 'opus' "$FI_STANDIN_TRACE" 2>/dev/null || false
+}
+
+@test "b: ship switched off after approval requeues the item and opens no PR" {
+  export GH_MOCK_TRACE="$TMP/gh.trace"
+  claim; fix_it
+  "$FI_BIN" autofix verify "$ID" >/dev/null
+  FOUND_ISSUES_AUTOFIX=off run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"requeued; stop"* ]]
+  [ -f "$ST/queue/$ID" ]
+  ! grep -q '^pr create' "$GH_MOCK_TRACE" 2>/dev/null || false
+}
+
+@test "b: ship refuses an approving verdict with no recorded tree" {
+  export GH_MOCK_TRACE="$TMP/gh.trace"
+  claim; fix_it
+  "$FI_BIN" autofix verify "$ID" >/dev/null
+  fi_af_item_set "$ST/running/$ID" verdict_tree ""
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"autofix verify"* ]]
+  ! grep -q '^pr create' "$GH_MOCK_TRACE" 2>/dev/null || false
+}
