@@ -42,12 +42,15 @@ _fi_log_tag_existing() {
 # v3 spec §4.1: a (fix: small) entry this call wrote or tagged is queued for
 # auto-fix. Reads the line as written: an entry log left "already tagged"
 # (say medium) is not small, whatever this call asked for, and off-limits
-# paths were already turned into manual by fi_tag_resolve.
+# paths were already turned into manual by fi_tag_resolve. Any tagged write
+# may then make a sweep due.
 _fi_log_autofix() {
   [[ -n "$tag_kind" ]] || return 0
   fi_parse_entry_vars "$1" || return 0
-  [[ "$FE_status" == "open" && "$FE_fixtag" == "small" ]] || return 0
-  fi_af_queue_spot "$1" || true
+  if [[ "$FE_status" == "open" && "$FE_fixtag" == "small" ]]; then
+    fi_af_queue_spot "$1" || true
+  fi
+  fi_af_sweep_check || true
 }
 
 cmd_log() {

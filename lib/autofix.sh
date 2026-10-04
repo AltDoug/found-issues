@@ -29,7 +29,8 @@ Usage: found-issues autofix <command>
   merge-when-green <N> [--repo owner/name]
                               Wait for PR <N>'s checks, then squash-merge it
 Settings: git config found-issues.autofix true|false (local overrides --global),
-found-issues.autofix.{engine,testCommand,dailyFixes,runBudget,runTimeoutMin}.
+found-issues.autofix.{engine,testCommand,dailyFixes,runBudget,runTimeoutMin,
+dailySweeps,sweepThreshold,sweepMax,sweepBudget}.
 EOF
 }
 
@@ -229,6 +230,11 @@ _fi_af_status() {
     while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/day/$(fi_today).spot"
   fi
   printf 'Today: %s/%s spot fixes\n' "$n" "$(fi_af_int dailyFixes 5)"
+  n=0
+  if [[ -f "$FI_AF_ST/day/$(fi_today).sweep" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/day/$(fi_today).sweep"
+  fi
+  printf 'Today: %s/%s sweeps\n' "$n" "$(fi_af_int dailySweeps 1)"
   local dir label count
   for dir in queue running; do
     count=0

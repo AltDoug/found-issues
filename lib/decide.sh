@@ -78,4 +78,5 @@ cmd_decide() {
   local rc=0
   fi_tag_apply "$file" "${matches[0]}" decided "$FI_TAG_VALUE" || rc=$?
   (( rc == 0 )) || { fi_err "decide: the ledger changed while writing — re-run"; return 1; }
+  fi_af_sweep_check || true
 }

@@ -438,6 +438,8 @@ cmd_sync() {
     elif (( replace_rc != 0 )); then
       return "$replace_rc"
     fi
+    # v3 spec §4.1: woken entries may make a sweep due.
+    (( woke > 0 )) && { fi_af_sweep_check || true; }
   fi
 
   local total_closed=$((closed_pr + closed_commit + closed_tomb))
