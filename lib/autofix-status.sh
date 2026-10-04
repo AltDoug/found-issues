@@ -10,6 +10,7 @@
 #   fi_af_cancel <id>
 #   fi_af_status
 #   fi_af_seg_write <root> / fi_af_seg_refresh
+#   fi_af_summary [--peek]
 
 # shellcheck disable=SC2154  # AFI_*/FI_AF_* come from autofix-queue.sh / autofix-config.sh
 
@@ -168,4 +169,44 @@ fi_af_seg_refresh() {
     [[ -f "$f" ]] && fi_af_seg_write "$(_fi_af_field "$f" root 2>/dev/null || true)"
   done
   return 0
+}
+
+# Phase 5 rulings 3-4: what finished since the last interactive session, for
+# SessionStart. The stamp moves BEFORE printing, so two sessions starting
+# together show it once. Failure reasons keep only the bash-authored prefix
+# (text before the first ':' or '('): model text never reaches the line.
+fi_af_summary() {
+  local peek="${1:-}" seen=0 f fixed=0 failed=0 prs="" reasons="" r cost=0 dec=0 file s
+  [[ -f "$FI_AF_ST/seen" ]] && IFS= read -r seen <"$FI_AF_ST/seen"
+  [[ "$seen" =~ ^[0-9]+$ ]] || seen=0
+  for f in "$FI_AF_ST"/done/*; do
+    [[ -f "$f" ]] || continue
+    fi_af_item_read "$f" || true
+    [[ "$AFI_finished" =~ ^[0-9]+$ ]] || continue
+    (( AFI_finished > seen )) || continue
+    case "$AFI_result" in
+      shipped:*)
+        fixed=$((fixed + 1)); _fi_af_pr_num
+        [[ -n "$FI_AF_PRNUM" ]] && prs+="${prs:+, }#$FI_AF_PRNUM" ;;
+      failed:*)
+        failed=$((failed + 1))
+        r="${AFI_result#failed: }"; r="${r%%:*}"; r="${r%%(*}"
+        r="${r//[^A-Za-z0-9 ._-]/}"; r="${r:0:40}"
+        while [[ "$r" == *" " ]]; do r="${r% }"; done
+        [[ -n "$r" && "; $reasons; " != *"; $r; "* ]] && reasons+="${reasons:+; }$r" ;;
+      *) continue ;;
+    esac
+    [[ "$AFI_cost" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
+      && cost="$(awk -v a="$cost" -v b="$AFI_cost" 'BEGIN { printf "%.2f", a + b }')"
+  done
+  (( fixed + failed > 0 )) || return 0
+  [[ "$peek" == --peek ]] || printf '%s\n' "$(date +%s)" >"$FI_AF_ST/seen" 2>/dev/null || true
+  file="$(fi_find_issues_file "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" 2>/dev/null || true)"
+  [[ -n "$file" ]] && dec="$(fi_count_decide "$file")"
+  s="Since last session: fixed $fixed"
+  [[ -n "$prs" ]] && s+=" (PR $prs)"
+  (( failed > 0 )) && s+=", $failed failed${reasons:+ ($reasons)}"
+  if (( dec == 1 )); then s+=", 1 decision waiting"; elif (( dec > 1 )); then s+=", $dec decisions waiting"; fi
+  [[ "$cost" != 0 && "$cost" != 0.00 ]] && s+=" — \$$cost spent"
+  printf '%s.\n' "$s"
 }
