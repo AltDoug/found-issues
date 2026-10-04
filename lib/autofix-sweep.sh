@@ -18,7 +18,7 @@
 #   fi_af_sweep_load <id>
 #   fi_af_sweep_commit <id> / fi_af_sweep_settle <id> <outcome> <text>
 
-# shellcheck disable=SC2154  # AFI_*/FE_* come from autofix-queue.sh / parse-entries.sh
+# shellcheck disable=SC2034,SC2154  # AFI_*/FE_* are shared with autofix-queue.sh / parse-entries.sh
 
 FI_AF_SPOT_KEYS=""
 

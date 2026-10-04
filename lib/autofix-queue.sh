@@ -26,6 +26,7 @@
 #   fi_af_claim <id>
 #   fi_af_ledger_tag <kind> <text> / fi_af_ledger_resolve
 #   _fi_af_ledger_outcome <outcome> <text>
+#   _fi_af_ledger_swap <ledger> <old-line> <new-line>
 #   fi_af_finish <id> <outcome> <text>
 #   fi_af_requeue <id> <why>
 
@@ -310,21 +311,28 @@ fi_af_ledger_tag() {
   fi_tag_apply "$FI_AF_LEDGER" "$FI_AF_ENTRY" "$FI_TAG_KIND" "$FI_TAG_VALUE" >/dev/null
 }
 
-# Already fixed at origin: close it the way `resolve` does.
-fi_af_ledger_resolve() {
-  fi_af_find_entry || return 1
-  local new="- [fixed]${FI_AF_ENTRY#- \[open\]} (verified: ai) (fixed: $(fi_today))"
-  local snapshot tmp line done_one=0
-  snapshot="$(fi_ledger_snapshot "$FI_AF_LEDGER")"
-  tmp="$(fi_ledger_tmp "$FI_AF_LEDGER")"
+# Replace the first line equal to <old> with <new>, serialized like every
+# ledger write: 0 written, 1 line gone, 3 ledger changed underneath.
+_fi_af_ledger_swap() {
+  local file="$1" old="$2" new="$3" snapshot tmp line done_one=0
+  snapshot="$(fi_ledger_snapshot "$file")"
+  tmp="$(fi_ledger_tmp "$file")"
   while IFS= read -r line || [[ -n "$line" ]]; do
-    if (( ! done_one )) && [[ "$line" == "$FI_AF_ENTRY" ]]; then
+    if (( ! done_one )) && [[ "$line" == "$old" ]]; then
       printf '%s\n' "$new" >>"$tmp"; done_one=1
     else
       printf '%s\n' "$line" >>"$tmp"
     fi
-  done <"$FI_AF_LEDGER"
-  fi_ledger_replace "$FI_AF_LEDGER" "$tmp" "$snapshot"
+  done <"$file"
+  (( done_one )) || { rm -f "$tmp"; return 1; }
+  fi_ledger_replace "$file" "$tmp" "$snapshot"
+}
+
+# Already fixed at origin: close it the way `resolve` does.
+fi_af_ledger_resolve() {
+  fi_af_find_entry || return 1
+  _fi_af_ledger_swap "$FI_AF_LEDGER" "$FI_AF_ENTRY" \
+    "- [fixed]${FI_AF_ENTRY#- \[open\]} (verified: ai) (fixed: $(fi_today))"
 }
 
 # The ledger side of an outcome for the loaded entry (AFI_key): resolve,
