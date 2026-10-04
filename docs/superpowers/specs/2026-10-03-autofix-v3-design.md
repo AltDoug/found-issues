@@ -102,10 +102,26 @@ The list lives in one function with a test per category.
 - **Why B is restricted to auto and bypass:** docs (2026-10-03) say plugin agents ignore `permissionMode`, a subagent inherits the parent's mode in auto/acceptEdits/bypass, and background subagents surface prompts in the main session otherwise.
 - **The auto-mode classifier:** in auto mode it allows pushes and PRs in the working repo. Three blocks in a row pause auto mode and bring back prompting. So the B fixer never runs raw git or gh; it makes single `found-issues autofix …` calls.
 
+**Re-verified 2026-10-03 (Claude Code docs at code.claude.com, CLI 2.1.289; phase 3 plan):**
+- Plugin agents ignore `permissionMode`, `hooks`, `mcpServers` and `initialPrompt`. They support `model`, `effort`, `maxTurns`, `tools`, `background` and `isolation`, and are named `<plugin>:<name>`.
+- A subagent runs in the parent's mode under `bypassPermissions`, `acceptEdits` and auto. Background subagents surface every permission prompt in the main session.
+- Nested subagents are allowed, up to three layers below the main conversation. Phase 3 still keeps the verifier in bash (§5 step 5).
+- **Plain PostToolUse stdout never reaches Claude.** Claude Code writes it to the debug log; only `hookSpecificOutput.additionalContext` reaches the model. The B nudge, and every other PostToolUse context, is emitted as that JSON on both harnesses.
+- Auto mode blocks after 3 blocks in a row or 20 in total. The blocked list includes "Merging a pull request no human has approved". The merge runs inside the bash `autofix ship`, which the user enabled at setup; the Phase 5 live E2E checks that the classifier lets `found-issues autofix ship <id>` through.
+- Tool events inside a subagent carry `agent_id` (Claude Code; also in the Codex 0.159 PostToolUse schema). Stop does not fire for subagents.
+- The launcher is chosen per marker: `FOUND_ISSUES_AUTOFIX_LAUNCHER=headless` forces A.
+
 ### 4.3 Claim-or-fallback
 
 - A fixer's first action is `found-issues autofix claim <id>`.
 - If an item queued for launcher B is still unclaimed when the session's Stop hook runs, the Stop hook starts launcher A for it. The check is a builtin glob over the queue directory. A skipped nudge therefore never strands an item.
+- **As built (phase 3):** the fallback covers every item still in `queue/` whose repo root contains the session's `cwd`. That includes items queued inside a fixer, which were never launched. It skips the item when:
+  - the repo lock is held (a run is draining);
+  - today's `day/<date>.capped` marker exists (written by `autofix run` on exit 3);
+  - the item was launched less than `FOUND_ISSUES_AUTOFIX_STOP_GRACE` seconds ago (default 60), so a B fixer has time to claim.
+
+  The fallback runs before the marker reminder's opt-outs.
+- A standalone `claim` (launcher B) records no pid and `launcher=B`. The repo lock, refreshed by every B-side `autofix` call, is what keeps the item from being reaped.
 
 ### 4.4 Recursion guard
 
@@ -147,7 +163,7 @@ claude -p --model sonnet --max-budget-usd <runBudget> \
    - the daily cap allows it;
    - the repo lock is free (atomic `mkdir`; stale after 60 min).
 
-   For A it then runs `git fetch` and `git worktree add <repo>/.claude/worktrees/fi-autofix-<id> -b fi/autofix/<slug>-<ts> origin/<default>`. For B it renames the Claude Code worktree branch to the same scheme.
+   For A it then runs `git fetch` and `git worktree add <repo>/.claude/worktrees/fi-autofix-<id> -b fi/autofix/<slug>-<ts> origin/<default>`. B uses the same claim worktree, not a Claude Code subagent worktree (phase 3 ruling 1: subagent worktree branch names are not controllable, and `diff`/`ship` depend on the claim's pinned `base_sha`).
 2. **Re-check.** Is the symptom still present at `origin/<default>`?
    - Already fixed → `autofix release <id> --already-fixed "<evidence>"`.
    - Hidden decision → `--decide "<question>"`, which retags the entry.
@@ -157,7 +173,7 @@ claude -p --model sonnet --max-budget-usd <runBudget> \
    - If no command is found, the issue is released as `(manual: no test command)`.
 4. **Minimal fix**, then full tests and build. At most 2 attempts. If it still fails, the worktree is discarded and the entry gets `(autofix-failed: <reason>)`, which is never retried automatically.
 5. **Verifier**, on opus at high effort. It gets only `autofix diff <id>` output and the entry `raw`.
-   - **B:** a nested plugin agent `found-issues-verifier` with tools `Read, Grep, Glob`.
+   - **B:** `found-issues autofix verify <id>` re-runs the tests, then runs the same headless verifier as A. It records the verdict and the approved staged tree (`git write-tree`); `ship` refuses without an approval, and refuses any other tree on both launchers (phase 3 ruling 2, replacing a nested `found-issues-verifier` agent whose verdict bash could not enforce).
    - **A:** a second `claude -p --model opus --allowedTools Read Grep Glob`, or `codex exec -s read-only`.
    - **Verdict:** JSON `{approve, reason}`. Approve only if the diff fixes the cited symptom, changes nothing else, and the test reproduces the symptom. A reject counts as an attempt.
 6. **Ship.** `autofix ship <id>` is bash and does the following, in order:
@@ -260,8 +276,8 @@ Six phases. Phases 1–5 build and release 3.0.0; phase 6 audits the whole plugi
 - **Phase PRs** target `release/v3` (phase 1 adds `release/v3` to the CI workflow's `push`/`pull_request` branch lists):
   1. Tags, `tag`/`decide`, decision queue, `/found-issues:decide`, off-limits, `until:` parsing and wake-ups.
   2. Queue, claim, lock, caps, `release`, `ship`, `merge-when-green`, launcher A (Claude + Codex engines), allowlist pinning, cost measurement.
-  3. Plugin agents `found-issues-fixer`/`-verifier`/`-sweeper`, launcher B, hook launcher selection, Stop fallback, recursion guard.
-  4. Sweep, and `/found-issues:fix` on the shared plumbing (prompt-8..11).
+  3. Plugin agent `found-issues-fixer`, launcher B CLI (`claim`/`brief`/`test`/`verify`), hook launcher selection, Stop fallback, recursion guard, the `autofix run` exit contract (1 unknown id, 3 capped, 4 locked, 7 outage).
+  4. Sweep, the `found-issues-sweeper` agent (moved from phase 3: it drives the sweep CLI), and `/found-issues:fix` on the shared plumbing (prompt-8..11).
   5. Statusline, status, SessionStart summary, setup disclosure, doctor, docs (`docs/versioning.md` breaking-change note), 3.0.0 bump, live E2E.
 - **Final step:** one PR `release/v3` → `main` bumps to 3.0.0, then the marketplace bump follows the source release.
 
