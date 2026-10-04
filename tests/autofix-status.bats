@@ -54,3 +54,8 @@ teardown() { fi_teardown_tmp; }
   printf '# f\n\n- [open] 2026-10-01 a.sh:1 — q (decide: x?)\n- [fixed] 2026-10-01 b.sh:1 — q (decide: y?)\n- [open] 2026-10-01 c.sh:1 — mentions decide: in text\n' > l.md
   [ "$(fi_count_decide l.md)" = 1 ]   # the CLI was sourced by setup
 }
+
+@test "autofix status: spend reads as dollars and cents with nothing finished" {
+  run "$FI_BIN" autofix status
+  [[ "$output" == *'Spent today: $0.00 '* ]]
+}

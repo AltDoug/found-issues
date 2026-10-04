@@ -73,7 +73,7 @@ _fi_af_count_lines() {
 # Spec §8: queue, running, today's counts against caps, decisions waiting,
 # recent results with PR links and cost.
 fi_af_status() {
-  local f n dir label count today midnight spent=0 file
+  local f n dir label count today midnight spent=0.00 file
   if fi_af_enabled; then printf 'Auto-fix: on (%s)\n' "$FI_AF_SLUG"
   else printf 'Auto-fix: off — %s\n' "$FI_AF_WHY"; fi
   # A run that died (SIGKILL, sleep) is reaped here too, so status and the
