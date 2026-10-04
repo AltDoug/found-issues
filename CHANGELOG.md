@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - unreleased
+
+Opt-in auto-fix and auto-sweep (spec: `docs/superpowers/specs/2026-10-03-autofix-v3-design.md`).
+Built on the `release/v3` branch; this section grows with each phase.
+
+### Added
+
+- Fix tags on entries — `(fix: small|medium|large)`, `(decide: <question>)`,
+  `(manual: <why>)` — set with `found-issues log --fix|--decide|--manual` or
+  `found-issues tag`. Off-limits paths (CI, secrets/auth, dependency
+  manifests and lockfiles, migrations, untracked or outside the repo) are
+  always tagged `(manual: off-limits: <category>)`.
+- Decision queue: `found-issues decide` lists open questions;
+  `found-issues decide <match> --answer "<text>"` records `(decided: <text>)`.
+  New `/found-issues:decide` command; SessionStart says how many are waiting.
+- `found-issues defer --until pr:<owner/repo#N>|date:<YYYY-MM-DD>|"<text>"`;
+  `sync` returns a deferred entry to `[open]` when its PR merged or its date
+  passed.
+
 ## [2.10.4] - 2026-10-03
 
 Fix batch 5 of the 2026-10-03 audit: CLI hygiene.
