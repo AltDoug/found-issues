@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.3] - 2026-10-04
+
+### Fixed
+
+- Children of an auto-fix run (the fixer, the verifier, the test command) no longer inherit `FI_AF_PID`, the launcher A run's own pid. A test suite that claims and cancels an item in its own fixture state recorded that real pid and sent the run a TERM: in this repo every launcher A sweep died a minute or two in, as soon as its fixer ran `tests/autofix-cancel.bats`. `tests/helpers.bash` clears it too.
+
 ## [3.0.2] - 2026-10-04
 
 ### Fixed

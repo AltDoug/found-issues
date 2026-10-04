@@ -26,8 +26,9 @@ export FOUND_ISSUES_CACHE_DIR="${BATS_RUN_TMPDIR:-${TMPDIR:-/tmp}}/fi-test-cache
 
 # A suite started inside an auto-fix run inherits FOUND_ISSUES_AUTOFIX_CHILD=1,
 # which makes session-start take its headless path and fails every test of
-# the interactive one. Tests that want it set it themselves.
-unset FOUND_ISSUES_AUTOFIX_CHILD
+# the interactive one, and FI_AF_PID, which a test's claim records and its
+# cancel then TERMs: the real run. Tests that want either set it themselves.
+unset FOUND_ISSUES_AUTOFIX_CHILD FI_AF_PID
 
 # Ensure the CLI is executable (bats clones into a tempdir, may lose +x)
 chmod +x "$FI_BIN" 2>/dev/null || true

@@ -68,6 +68,13 @@ teardown() { fi_teardown_tmp; }
   [ "$(head -1 "$TMP/o")" = "$(cd "$TMP" && pwd)" ]
 }
 
+@test "autofix engine: children do not inherit the launcher A run pid" {
+  export FI_AF_PID=4242
+  run fi_af_child "$TMP/o" "$TMP/e" "$TMP" sh -c 'echo "pid=[${FI_AF_PID:-}]"'
+  [ "$status" -eq 0 ]
+  grep -q 'pid=\[\]' "$TMP/o"
+}
+
 @test "autofix engine: the watchdog kills a hung child with 124" {
   FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS=1 run fi_af_child "$TMP/o" "$TMP/e" "$TMP" sleep 30
   [ "$status" -eq 124 ]
