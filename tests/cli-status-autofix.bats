@@ -49,8 +49,8 @@ seg() { "$FI_BIN" status --format=segment --cwd "${1:-$REPO}"; }
   "$FI_BIN" autofix claim "$ID" >/dev/null
   run seg
   [[ "$output" == *"🔧1"* ]]
-  printf 'pid=999999\n' >> "$ST/running/$ID"   # a dead A run
-  rmdir "$ST/lock" 2>/dev/null || rm -rf "$ST/lock"
+  # A SIGKILLed A run: its pid is dead and it still owns the repo lock.
+  sed -i.bak 's/^pid=.*/pid=999999/' "$ST/running/$ID" && rm -f "$ST/running/$ID.bak"
   "$FI_BIN" autofix status >/dev/null
   run seg
   [[ "$output" != *"🔧"* ]]
@@ -68,4 +68,13 @@ seg() { "$FI_BIN" status --format=segment --cwd "${1:-$REPO}"; }
   run "$FI_BIN" status --format=json --cwd "$REPO"
   [ "$status" -eq 0 ]
   [[ "$output" == *'"running":1}'* ]]
+}
+
+@test "statusline: a lock owned by a live A run is never broken" {
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  sed -i.bak "s/^pid=.*/pid=$$/" "$ST/running/$ID" && rm -f "$ST/running/$ID.bak"
+  "$FI_BIN" autofix status >/dev/null
+  [ -f "$ST/running/$ID" ]
+  run seg
+  [[ "$output" == *"🔧1"* ]]
 }

@@ -134,15 +134,23 @@ FI_AF_ENTRY="" FI_AF_LEDGER=""
 
 # Spec §5.1: one fixer per repo at a time. mkdir is the atomic test-and-set;
 # a lock older than 60 min (FOUND_ISSUES_AUTOFIX_LOCK_STALE seconds) belonged
-# to a dead run and is broken by rename, so only one breaker wins.
+# to a dead run and is broken by rename, so only one breaker wins. So is a
+# lock whose owner is a running A item with a dead pid (SIGKILL, sleep): it
+# would otherwise block the reap for the full hour.
 fi_af_lock() {
-  local id="$1" lock="$FI_AF_ST/lock" now age
+  local id="$1" lock="$FI_AF_ST/lock" now age owner="" opid=""
   if mkdir "$lock" 2>/dev/null; then
     printf '%s\n' "$id" >"$lock/owner"; return 0
   fi
-  now="$(date +%s)"
-  age=$(( now - $(fi_file_mtime "$lock") ))
-  (( age >= ${FOUND_ISSUES_AUTOFIX_LOCK_STALE:-3600} )) || return 1
+  [[ -f "$lock/owner" ]] && { IFS= read -r owner <"$lock/owner" || true; }
+  if [[ -n "$owner" ]]; then
+    opid="$(_fi_af_field "$FI_AF_ST/running/$owner" pid)" || opid=""
+  fi
+  if [[ ! "$opid" =~ ^[1-9][0-9]*$ ]] || kill -0 "$opid" 2>/dev/null; then
+    now="$(date +%s)"
+    age=$(( now - $(fi_file_mtime "$lock") ))
+    (( age >= ${FOUND_ISSUES_AUTOFIX_LOCK_STALE:-3600} )) || return 1
+  fi
   mv "$lock" "$lock.stale.$$" 2>/dev/null || return 1
   rm -rf "$lock.stale.$$"
   mkdir "$lock" 2>/dev/null || return 1
