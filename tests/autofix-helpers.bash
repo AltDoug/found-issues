@@ -36,3 +36,9 @@ fi_af_queue_fixture() {
   ID="$(ls "$FI_AF_ST/queue" | head -1)"
   QITEM="$FI_AF_ST/queue/$ID"
 }
+
+# Put the stand-in claude/codex (and the gh shim) first on PATH.
+fi_use_standins() {
+  export PATH="$TEST_REPO_ROOT/tests/standins:$TEST_REPO_ROOT/tests/bin-shims:$PATH"
+  export FI_STANDIN_TRACE="$TMP/standin.trace"
+}
