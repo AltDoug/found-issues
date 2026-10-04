@@ -211,3 +211,68 @@ teardown() { fi_teardown_tmp; }
   fi_run decide --count
   [ "$output" = "0" ]
 }
+
+@test "defer --until: validates pr:/date:/text and writes the annotation" {
+  printf -- '- [open] 2026-10-03 src/a.sh:1 — one\n- [open] 2026-10-03 src/a.sh:2 — two\n- [open] 2026-10-03 src/a.sh:3 — three\n' > docs/found-issues.md
+  fi_run defer "one" --until "pr:foo/bar#12"
+  [ "$status" -eq 0 ]
+  grep -q 'one (until: pr:foo/bar#12)' docs/found-issues.md
+  fi_run defer "two" --until "date:2026-13-45x"
+  [ "$status" -eq 2 ]
+  fi_run defer "two" --until "after phase 3 (auth rewrite)"
+  [ "$status" -eq 0 ]
+  grep -q 'two (until: after phase 3 \[auth rewrite\])' docs/found-issues.md
+  fi_run defer "three" --until "pr:not-a-ref"
+  [ "$status" -eq 2 ]
+}
+
+@test "sync: wakes a deferred entry whose date passed, keeps a future one" {
+  printf -- '- [deferred] 2026-09-01 src/a.sh:1 — past (reason: wait) (until: date:2026-01-01)\n- [deferred] 2026-09-01 src/a.sh:2 — future (until: date:2999-01-01)\n- [deferred] 2026-09-01 src/a.sh:3 — vague (until: after the redesign)\n' > docs/found-issues.md
+  FOUND_ISSUES_AUTO_ARCHIVE=off fi_run sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Woke: 1"* ]]
+  grep -qx -- '- \[open\] 2026-09-01 src/a.sh:1 — past (reason: wait)' docs/found-issues.md
+  grep -q '^- \[deferred\].*future (until: date:2999-01-01)' docs/found-issues.md
+  grep -q '^- \[deferred\].*vague (until: after the redesign)' docs/found-issues.md
+}
+
+@test "sync: wakes on a merged PR trigger; an unanswered or open PR leaves it deferred" {
+  fi_init_github_repo foo/bar main
+  mkdir -p "$TMP/stub" && cat > "$TMP/stub/gh" <<'EOS'
+#!/usr/bin/env bash
+case "$*" in
+  "auth status"*) exit 0 ;;
+  "repo view"*) echo foo/bar ;;
+  "pr view 12 "*) printf 'MERGED\037main\0372026-10-01T00:00:00Z\n' ;;
+  *) exit 1 ;;
+esac
+EOS
+  chmod +x "$TMP/stub/gh"
+  printf -- '- [deferred] 2026-09-01 src/a.sh:1 — after pr (until: pr:foo/bar#12)\n' > docs/found-issues.md
+  PATH="$TMP/stub:$PATH" FOUND_ISSUES_AUTO_ARCHIVE=off fi_run sync
+  grep -q '^- \[open\] 2026-09-01 src/a.sh:1 — after pr$' docs/found-issues.md
+  # gh cannot answer for #13, and #14 is still OPEN: both stay deferred.
+  printf -- '- [deferred] 2026-09-01 src/a.sh:2 — unknown pr (until: pr:foo/bar#13)\n' >> docs/found-issues.md
+  cat > "$TMP/stub/gh" <<'EOS'
+#!/usr/bin/env bash
+case "$*" in
+  "auth status"*) exit 0 ;;
+  "repo view"*) echo foo/bar ;;
+  "pr view 14 "*) printf 'OPEN\037main\037\n' ;;
+  *) exit 1 ;;
+esac
+EOS
+  printf -- '- [deferred] 2026-09-01 src/a.sh:3 — open pr (until: pr:foo/bar#14)\n' >> docs/found-issues.md
+  PATH="$TMP/stub:$PATH" FOUND_ISSUES_AUTO_ARCHIVE=off fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[deferred\].*unknown pr (until: pr:foo/bar#13)' docs/found-issues.md
+  grep -q '^- \[deferred\].*open pr (until: pr:foo/bar#14)' docs/found-issues.md
+}
+
+@test "sync --dry-run reports a wake-up but writes nothing" {
+  printf -- '- [deferred] 2026-09-01 src/a.sh:1 — past (until: date:2026-01-01)\n' > docs/found-issues.md
+  cp docs/found-issues.md "$TMP/before"
+  FOUND_ISSUES_AUTO_ARCHIVE=off fi_run sync --dry-run
+  [[ "$output" == *"Woke: 1"* ]]
+  cmp "$TMP/before" docs/found-issues.md
+}

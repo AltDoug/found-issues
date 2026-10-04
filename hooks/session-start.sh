@@ -407,7 +407,10 @@ fi
 # sync process and the status process both (audit hook-11). Builtin read.
 __fi_ledger_text="$(<"$issues_file")"
 __fi_re_open=$'(^|\n)- \\[open\\]'
-if [[ ! "$__fi_ledger_text" =~ $__fi_re_open ]]; then
+# A deferred entry with an (until: ...) trigger also needs the sync: it may
+# be due to wake (v3, spec §6 step 3).
+__fi_re_until=$'(^|\n)- \\[deferred\\][^\n]*\\(until: '
+if [[ ! "$__fi_ledger_text" =~ $__fi_re_open && ! "$__fi_ledger_text" =~ $__fi_re_until ]]; then
   fi_flush_codex_exit
 fi
 

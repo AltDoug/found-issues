@@ -14,6 +14,7 @@
 #   fi_tag_text <text>
 #   fi_tag_resolve <kind> <value> <path> <repo_root>
 #   fi_entry_retag <line> <kind> <value>
+#   fi_until_due <until-spec> <today>
 
 # Off-limits paths are never auto-fixed, whatever the logging agent tagged:
 # a wrong guess there costs a broken pipeline, a leaked secret or a bad
@@ -126,4 +127,22 @@ fi_entry_retag() {
   done
   FI_RETAGGED="${head}${kept}"
   [[ "$kind" == "drop-until" ]] || FI_RETAGGED+=" ($kind: $value)"
+}
+
+# fi_until_due <until-spec> <today> — 0 when a mechanically checkable
+# trigger has fired. pr: needs gh and is answered through sync's memoized
+# _fi_pr_info; free text is never "due" here (the sweep re-judges it).
+fi_until_due() {
+  local spec="$1" today="$2"
+  case "$spec" in
+    date:*)
+      local d="${spec#date:}"
+      [[ ! "$d" > "$today" ]] ;;
+    pr:*)
+      declare -F _fi_pr_info >/dev/null 2>&1 || return 1
+      command -v gh >/dev/null 2>&1 || return 1
+      _fi_pr_info "${spec#pr:}"
+      [[ "${_fi_pr_ans%%$'\x1f'*}" == "MERGED" ]] ;;
+    *) return 1 ;;
+  esac
 }
