@@ -20,6 +20,8 @@ Usage: found-issues autofix <command>
                               (exit 1 unknown id, 3 capped, 4 locked, 7 engine outage)
   claim <id>                  Take a queued item: lock, cap, worktree (prints its path)
   brief <id>                  The in-session fixer's instructions for a claimed item
+  next <id>                   A sweep's entry to fix now (sweeps fix one entry at a time;
+                              verify commits it, release skips it, ship opens one PR)
   test <id>                   Run the repo's test command in the claimed item's worktree
   verify <id>                 Tests, then the read-only verifier; records the approved tree
   diff <id>                   The claimed item's change against origin/<default>
@@ -307,6 +309,14 @@ cmd_autofix() {
       fi
       fi_af_context || return 1
       [[ -f "$FI_AF_ST/running/$rid" || -f "$FI_AF_ST/queue/$rid" ]] || { fi_err "autofix: no queued or running item $rid"; return 1; }
+      # A sweep releases its CURRENT entry and moves on (phase 4 Task 6).
+      if [[ "$(_fi_af_field "$FI_AF_ST/running/$rid" kind 2>/dev/null)" == "sweep" ]]; then
+        fi_af_b_running "$rid" || return 1
+        [[ -n "$AFI_entry" ]] || { fi_err "autofix: no entry in progress in sweep $rid (run: found-issues autofix ship $rid)"; return 1; }
+        fi_af_sweep_settle "$rid" "$outcome" "$text"
+        printf 'Released %s (%s).\nNext: found-issues autofix next %s\n' "$AFI_loc" "$outcome" "$rid"
+        return 0
+      fi
       fi_af_finish "$rid" "$outcome" "$text" ;;
     diff|ship)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix $sub <id>"; return 2; }
@@ -315,6 +325,20 @@ cmd_autofix() {
       fi_af_touch_lock "$1"
       if [[ "$sub" == "diff" ]]; then fi_af_diff "$AFI_wt" "${AFI_base_sha:-origin/$AFI_base}"; return; fi
       fi_af_b_enabled "$1" || return
+      if [[ "$sub" == "ship" && "$AFI_kind" == "sweep" ]]; then
+        fi_af_no_prompts
+        FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}" FI_AF_TESTCMD=""
+        if fi_af_sweep_finish "$1"; then
+          fi_af_item_read "$FI_AF_ST/done/$1"
+          case "$AFI_result" in
+            shipped:*) printf 'Shipped sweep %s as PR #%s (merge: %s)\n' "$1" "$FI_AF_PR" "$FI_AF_MERGE" ;;
+            *) printf 'Sweep %s %s; finished.\n' "$1" "${AFI_result#stale: sweep }" ;;
+          esac
+          return 0
+        fi
+        fi_err "autofix: sweep ship refused — $FI_AF_WHY"
+        return 1
+      fi
       if [[ "$AFI_verdict" != "approve" ]]; then
         fi_err "autofix: ship needs an approving verdict — run: found-issues autofix verify $1"; return 1
       fi
@@ -334,6 +358,17 @@ cmd_autofix() {
       [[ $# -eq 0 && "$mpr" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number> [--repo owner/name]"; return 2; }
       fi_af_no_prompts
       fi_af_merge_when_green "$mpr" "$mrepo" ;;
+    next)
+      [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix next <id>"; return 2; }
+      fi_af_context || return 1
+      fi_af_b_running "$1" || return 1
+      [[ "$AFI_kind" == "sweep" ]] || { fi_err "autofix: next is for sweeps; $1 is a single item"; return 2; }
+      if [[ -z "$AFI_entry" ]]; then
+        printf 'No entries left. Run: found-issues autofix ship %s\n' "$1"; return 0
+      fi
+      local total=0 eline
+      while IFS= read -r eline || [[ -n "$eline" ]]; do total=$((total + 1)); done <"$FI_AF_ST/sweeps/$1.entries"
+      printf 'Entry %s/%s: %s\nWorktree: %s\n' "$AFI_cur" "$total" "$AFI_entry" "$AFI_wt" ;;
     brief|test|verify)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix $sub <id>"; return 2; }
       fi_af_context || return 1
