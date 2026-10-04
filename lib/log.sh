@@ -37,6 +37,14 @@ cmd_log() {
   # Reassemble full input from remaining args
   local input="$*"
 
+  # One entry is one line. An embedded newline wrote continuation lines into
+  # the ledger, and one starting "- [open] " became an unvalidated entry
+  # (audit cli-16).
+  if [[ "$input" == *$'\n'* || "$input" == *$'\r'* ]]; then
+    fi_err "found-issues log: the entry must be a single line (no newlines)"
+    return 2
+  fi
+
   # `--critical` is only honored as the first argument. Anywhere else it was
   # folded into the location (`src/a.sh:1 --critical`), logged as a spaced
   # pseudo-path with no [!] and no error (audit prompt-14).
@@ -135,14 +143,20 @@ cmd_log() {
   # per existing entry (audit cli-10).
   fi_repo_root_cached
   local repo_root="$FI_REPO_ROOT"
-  local new_key
-  if [[ -n "$line_num" ]]; then
-    fi_dedup_key_v "$path" "$line_num" "$symptom" "$repo_root"
-  elif [[ "$path" == */* || "$path" == *.* ]]; then
-    fi_dedup_key_v "$path" "" "$symptom" "$repo_root"
-  else
-    fi_dedup_key_abstract_v "$symptom"
+  # Key the NEW entry exactly the way the scan keys existing ones: build the
+  # line it would write and parse it. Keying from log's own split disagreed
+  # with the parser for repo-prefixed locations ("Repo:src/a.go:12"), so every
+  # re-log appended a duplicate (audit cli-2).
+  local new_key cand_loc="$path"
+  if [[ -n "$line_num" && -n "$line_end" ]]; then
+    cand_loc="$path:$line_num-$line_end"
+  elif [[ -n "$line_num" ]]; then
+    cand_loc="$path:$line_num"
   fi
+  fi_entry_dedup_key_v "- [open] 2000-01-01 $cand_loc — $symptom" "$repo_root" || {
+    fi_err "found-issues log: could not parse the entry it would write"
+    return 2
+  }
   new_key="$FI_KEY"
 
   # Dedup against [open] AND [deferred] entries.
@@ -179,6 +193,29 @@ cmd_log() {
 
   # Branch on match
   if [[ "$matched_status" == "open" ]]; then
+    # --critical on an entry that is already open escalates it instead of
+    # being dropped with the "Skipped" message (audit cli-15).
+    if [[ "$critical" == "yes" && "$matched_entry" != "- [open] [!] "* ]]; then
+      local esc_line="- [open] [!] ${matched_entry#- \[open\] }" tmp line snapshot
+      snapshot="$(fi_ledger_snapshot "$file")"
+      tmp="$(fi_ledger_tmp "$file")"
+      local done_one=0
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        if (( ! done_one )) && [[ "$line" == "$matched_entry" ]]; then
+          printf '%s\n' "$esc_line" >>"$tmp"; done_one=1
+        else
+          printf '%s\n' "$line" >>"$tmp"
+        fi
+      done <"$file"
+      if fi_ledger_replace "$file" "$tmp" "$snapshot"; then
+        printf 'Escalated to critical: %s\n' "$esc_line"
+      else
+        fi_err "found-issues log: the ledger changed while escalating — re-run"
+        return 1
+      fi
+      cmd_status plain
+      return 0
+    fi
     printf 'Skipped — already logged: %s\n' "$matched_entry"
     cmd_status plain
     return 0

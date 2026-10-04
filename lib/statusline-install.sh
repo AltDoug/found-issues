@@ -38,6 +38,9 @@ cmd_install_statusline() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --target)
+        # A bare `--target` crashed on the unset $2 under set -u, and
+        # `--target --apply` took "--apply" as the path (audit status-17).
+        fi_need_value install-statusline --target $# "${2:-}" || return 2
         target_path="$2"
         shift 2
         ;;
@@ -62,12 +65,28 @@ cmd_install_statusline() {
         positional_args+=("$1")
         shift
         ;;
-      *)
+      --force)
         positional_args+=("$1")
         shift
         ;;
+      -h|--help)
+        printf 'Usage: found-issues install-statusline [--no-migrate]\n'
+        printf '       found-issues install-statusline --target <path> [--language=<bash|node|python>] [--dry-run|--apply]\n'
+        return 0
+        ;;
+      # It rewrites the user's statusline and settings.json: refuse what it
+      # does not understand (ledger entry lib/archive.sh:36).
+      *) fi_unknown_arg install-statusline "$1"; return 2 ;;
     esac
   done
+
+  # --dry-run / --apply / --language only exist in --target mode. Without
+  # --target they were ignored and the canonical path WROTE the marker block
+  # — a dry run that mutated (audit status-8).
+  if [[ -z "$target_path" && ( -n "$target_mode" || "$target_language" != "auto" ) ]]; then
+    fi_err "install-statusline: --dry-run, --apply and --language need --target <path>"
+    return 2
+  fi
 
   # --target mode dispatches to custom-target handler; otherwise fall through
   # to the existing canonical-path logic.
@@ -104,6 +123,15 @@ cmd_install_statusline() {
     return 1
   fi
 
+  # Every rewrite below strips from a start marker to an exact end marker; an
+  # unbalanced pair deleted the user's lines to EOF (audit status-6).
+  if grep -Fq "$FI_STATUSLINE_START_MARKER" "$FI_STATUSLINE_FILE" \
+     && ! fi_markers_balanced "$FI_STATUSLINE_FILE" "^${FI_STATUSLINE_START_MARKER}\$" "^${FI_STATUSLINE_END_MARKER}\$"; then
+    fi_err "install-statusline: unbalanced found-issues markers in $FI_STATUSLINE_FILE — refusing"
+    fi_err "  Restore the missing start/end marker line by hand, then re-run."
+    return 1
+  fi
+
   local state
   state="$(fi_statusline_state)"
 
@@ -119,7 +147,7 @@ cmd_install_statusline() {
       # Auto-migrate: the markers give us safe block boundaries, and the
       # rewrite is a strict upgrade.
       printf 'install-statusline: detected outdated marker-bracketed segment (missing cwd/--cwd handling) — rewriting in place.\n'
-      cmd_uninstall_statusline >/dev/null
+      cmd_uninstall_statusline >/dev/null || return 1
       ;;
     legacy-handwritten)
       if (( migrate == 0 )); then
@@ -431,7 +459,9 @@ cmd_install_statusline_inline() {
     }
   ' "$FI_STATUSLINE_FILE" >"$tmp"
 
-  mv "$tmp" "$FI_STATUSLINE_FILE"
+  # Rename onto the resolved file so a symlinked statusline keeps its link
+  # (audit status-7).
+  mv "$tmp" "$(fi_resolve_link "$FI_STATUSLINE_FILE")"
   # Restore original mode — mktemp creates files at 0600, so without this
   # the statusline loses its execute bit and Claude Code silently can't run it.
   chmod "$original_mode" "$FI_STATUSLINE_FILE" 2>/dev/null \

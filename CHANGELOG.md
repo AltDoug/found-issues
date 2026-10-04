@@ -4,6 +4,63 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.4] - 2026-10-03
+
+Fix batch 5 of the 2026-10-03 audit: CLI hygiene.
+
+### Fixed
+
+- **Unknown flags are refused, not ignored.** `uninstall`, `archive`,
+  `promote`, `defer`, `resolve`, `promote-deferred`, `install-statusline`
+  and `uninstall-statusline` swallowed anything they did not recognise, so
+  `uninstall --help` ran a real uninstall and `archive --dry-runn` archived
+  for real. Each now exits 2 on an unknown flag or a flag missing its value,
+  and answers `-h`/`--help`. `defer` accepts `--reason=x` and
+  `--mute-until=YYYY-MM-DD`; `resolve` accepts `--match=` and `--verified=`
+  and refuses a misspelled `--verified` instead of defaulting to `ai`.
+  `install-statusline --dry-run`/`--apply`/`--language` require `--target`,
+  and a bare `--target` prints usage instead of an unbound-variable crash.
+- **`log` input.** A newline or carriage return in the input is refused (it
+  could forge a second ledger entry). `log --critical` on an
+  already-open entry escalates it to `[!]` instead of reporting a duplicate.
+- **Dedup keys.** Two symptoms that differ only after a `(` (for example
+  `parse() returns None` and `parse() raises on unicode`) were the same key,
+  so the second was dropped as a duplicate; keys now strip only the
+  annotation tail. Re-logging a repo-prefixed location (`Repo:src/a.go:12`)
+  or a path containing a space is deduped: the new entry is keyed by the
+  same parser that keys existing ones.
+- **Ledger lookup.** `log` from a subdirectory of a repo whose ledger is the
+  root `.found-issues.md` created a new nested `docs/found-issues.md`; it now
+  uses the repo's ledger.
+- **Default branch.** With `origin/HEAD` unset and no answer from `gh`, the
+  default branch was the literal `main`, so in a `master` or `trunk` repo a
+  commit annotation never closed. The fallback now takes the first of
+  `main`/`master`/`trunk` that exists (remote-tracking, then local), then
+  `init.defaultBranch`. The branch-delete guard uses the same order.
+- **`promote` dedup.** `promote` and `promote --apply` compared lines
+  verbatim, so an entry the default branch had already fixed or archived was
+  listed and re-copied as `[open]`. They now match by entry against the
+  default branch's ledger (any status) and its archive.
+- **Deferred touches.** A non-critical deferred entry whose symptom contains
+  `[!]` was treated as critical and auto-promoted. And the touched entry was
+  re-found by prefix, so with `— foo` and `— foo bar` side by side the count,
+  threshold and auto-promote could be read from the wrong one.
+- **Statusline install/uninstall.**
+  - `uninstall-statusline --target` left the `__fiSeg(...)` / `_fi_seg(...)`
+    call behind for plain `console.log("x")` / `print("x")` hosts while
+    removing the block that defined it; it now uses the same literal strip
+    as the migration path.
+  - A start marker with no matching end marker made install and uninstall
+    delete every line after it. Both now refuse, and uninstall takes a
+    `.fi-bak-<timestamp>` backup first.
+  - A symlinked statusline (dotfiles repo) was replaced by a regular file on
+    every rewrite. Install and uninstall now write through to the link's
+    target and keep the link.
+  - `install-statusline --target` spliced every `LINE1=` assignment (the
+    segment rendered twice) and spliced echoes that pipe or redirect (into
+    jq's filter or a `>&2` word). It now splices only the last `LINE1=`, and
+    skips echo/printf lines with a pipe or redirect outside quotes.
+
 ## [2.10.3] - 2026-10-03
 
 ### Fixed

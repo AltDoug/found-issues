@@ -35,16 +35,16 @@ cmd_defer() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --reason)
-        reason="${2:-}"
-        shift 2 || break
-        ;;
+        fi_need_value defer --reason $# "${2:-}" || return 2
+        reason="$2"; shift 2 ;;
+      --reason=*) reason="${1#--reason=}"; shift ;;
       --mute-until)
-        mute_until="${2:-}"
-        shift 2 || break
-        ;;
-      *)
-        shift
-        ;;
+        fi_need_value defer --mute-until $# "${2:-}" || return 2
+        mute_until="$2"; shift 2 ;;
+      --mute-until=*) mute_until="${1#--mute-until=}"; shift ;;
+      # A typo'd flag used to be dropped and the entry deferred anyway
+      # (audit cli-6).
+      *) fi_unknown_arg defer "$1"; return 2 ;;
     esac
   done
 

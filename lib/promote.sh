@@ -18,6 +18,20 @@
 # Does NOT auto-edit the default branch — prints entries for the user/agent
 # to consolidate manually (consistent with "no direct push to main").
 
+# _fi_promote_keys <ledger text> [<repo_root>] — append the dedup key of every
+# entry in <ledger text>, ANY status, to $_fi_pkeys as "\n<key>\n" lines. An
+# entry the default branch already fixed or archived has a different line but
+# the same key, so promote no longer re-opens it (2026-10-03 audit, prompt-7 /
+# cli-8). Builtin-only.
+_fi_pkeys=$'\n'
+_fi_promote_keys() {
+  local l
+  while IFS= read -r l || [[ -n "$l" ]]; do
+    fi_entry_dedup_key_v "$l" "${2-}" || continue
+    _fi_pkeys+="$FI_KEY"$'\n'
+  done <<< "$1"
+}
+
 # Copy [open] entries from <source-branch>'s ledger into the current branch's
 # ledger, verbatim and serialized. Backs `promote --apply --from <branch>`.
 #
@@ -53,6 +67,13 @@ fi_promote_apply() {
     printf '\n' >> "$file"
   fi
 
+  local repo_root archive
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  archive="$(dirname "$file")/found-issues-archive.md"
+  _fi_pkeys=$'\n'
+  _fi_promote_keys "$(cat "$file")" "$repo_root"
+  [[ -f "$archive" ]] && _fi_promote_keys "$(cat "$archive")" "$repo_root"
+
   local tmp added=0 line
   tmp="$(fi_ledger_tmp "$file")"
   cat "$file" > "$tmp"
@@ -67,6 +88,11 @@ fi_promote_apply() {
     # accumulates this run's additions, so a source ledger carrying the same
     # line twice collapses to one instead of copying both.
     grep -Fxq -- "$line" "$tmp" && continue
+    # Same entry under another status or annotation set — here or archived.
+    if fi_entry_dedup_key_v "$line" "$repo_root"; then
+      [[ "$_fi_pkeys" == *$'\n'"$FI_KEY"$'\n'* ]] && continue
+      _fi_pkeys+="$FI_KEY"$'\n'
+    fi
     printf '%s\n' "$line" >> "$tmp"
     added=$(( added + 1 ))
   done <<< "$source_content"
@@ -87,13 +113,15 @@ cmd_promote() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --apply)   apply=1; shift ;;
-      --from)    from_branch="${2:-}"; shift 2 || break ;;
+      --from)    fi_need_value promote --from $# "${2:-}" || return 2
+                 from_branch="$2"; shift 2 ;;
+      --from=*)  from_branch="${1#--from=}"; shift ;;
       -h|--help)
         printf 'Usage: found-issues promote                              List branch-only [open] entries\n'
         printf '       found-issues promote --apply --from <branch>      Copy them onto the current branch\n'
         return 0
         ;;
-      *) shift ;;
+      *) fi_unknown_arg promote "$1"; return 2 ;;
     esac
   done
 
@@ -143,8 +171,19 @@ cmd_promote() {
   main_content="$(git show "origin/$default_branch:$rel_path" 2>/dev/null \
     || git show "$default_branch:$rel_path" 2>/dev/null \
     || true)"
+  local main_archive arch_rel
+  arch_rel="${rel_path%/*}"
+  [[ "$arch_rel" == "$rel_path" ]] && arch_rel="" || arch_rel="$arch_rel/"
+  arch_rel="${arch_rel}found-issues-archive.md"
+  main_archive="$(git show "origin/$default_branch:$arch_rel" 2>/dev/null \
+    || git show "$default_branch:$arch_rel" 2>/dev/null \
+    || true)"
+  _fi_pkeys=$'\n'
+  _fi_promote_keys "$main_content" "$repo_root"
+  _fi_promote_keys "$main_archive" "$repo_root"
 
-  # Get [open] entries on current branch that don't appear verbatim on main
+  # Get [open] entries on current branch whose entry is not on main under any
+  # status, and not in main's archive
   local needs_promotion=0
   printf 'Entries on %s not yet on %s:\n\n' "$current_branch" "$default_branch"
 
@@ -154,7 +193,8 @@ cmd_promote() {
   # the one an unguarded loop omits.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^-\ \[open\] ]]; then
-      if [[ -z "$main_content" ]] || ! printf '%s' "$main_content" | grep -Fxq -- "$line"; then
+      fi_entry_dedup_key_v "$line" "$repo_root" || FI_KEY="$line"
+      if [[ "$_fi_pkeys" != *$'\n'"$FI_KEY"$'\n'* ]]; then
         printf '%s\n' "$line"
         needs_promotion=$((needs_promotion + 1))
       fi

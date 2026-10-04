@@ -31,6 +31,36 @@ readonly FI_STATUSLINE_FILE="$HOME/.claude/statusline.sh"
 readonly FI_STATUSLINE_START_MARKER="# === found-issues plugin segment ==="
 readonly FI_STATUSLINE_END_MARKER="# === end found-issues plugin segment ==="
 
+# fi_resolve_link <path> — the final target of a symlink chain, else <path>.
+# A dotfiles-managed statusline is a symlink; `mv tmp path` replaced the link
+# with a regular file and silently forked the user's config (audit status-7).
+# Every rewrite now renames onto the resolved file. Portable: macOS readlink
+# has no -f.
+fi_resolve_link() {
+  local p="$1" t n=0
+  while [[ -L "$p" ]] && (( n < 40 )); do
+    t="$(readlink "$p")" || break
+    case "$t" in
+      /*) p="$t" ;;
+      *)  p="$(dirname "$p")/$t" ;;
+    esac
+    n=$(( n + 1 ))
+  done
+  printf '%s' "$p"
+}
+
+# fi_markers_balanced <file> <start-ERE> <end-ERE> — 0 when every start marker
+# is closed by an end marker before the next start and at EOF. The strip awks
+# skip from a start marker to an exact end marker, so a missing or edited end
+# marker deleted every user line to EOF (audit status-6).
+fi_markers_balanced() {
+  LC_ALL=C awk -v s="$2" -v e="$3" '
+    $0 ~ s { if (open) bad = 1; open = 1; next }
+    $0 ~ e { if (!open) bad = 1; open = 0 }
+    END { exit (bad || open) ? 1 : 0 }
+  ' "$1"
+}
+
 # Capture the mode of a file as octal (e.g. "755"). Cross-platform: BSD stat
 # uses -f '%Lp', GNU stat uses -c '%a'. Falls back to 755 if neither works,
 # which is correct for executable scripts (the common case for statusline).
@@ -322,9 +352,10 @@ fi_strip_target_markers() {
   local node_tpl="\${__fiSeg(typeof dir!=='undefined'?dir:(typeof cwd!=='undefined'?cwd:undefined))}"
   local node_cat=" + __fiSeg(typeof dir!=='undefined'?dir:(typeof cwd!=='undefined'?cwd:undefined))"
   local py_fstr="{_fi_seg(locals().get(\"dir\") or locals().get(\"cwd\"))}"
+  local py_cat=" + _fi_seg(locals().get(\"dir\") or locals().get(\"cwd\"))"
   local bash_seg="\${__FI_SEG}"
   LC_ALL=C awk -v start="$start_marker" -v endm="$end_marker" -v trailer="$trailer_pattern" \
-      -v seg_tpl="$node_tpl" -v seg_cat="$node_cat" -v seg_fstr="$py_fstr" -v seg_bash="$bash_seg" \
+      -v seg_tpl="$node_tpl" -v seg_cat="$node_cat" -v seg_fstr="$py_fstr" -v seg_pycat="$py_cat" -v seg_bash="$bash_seg" \
       -v lang="$language" '
     function strip_lit(line, lit,    idx) {
       while (lit != "" && (idx = index(line, lit)) > 0) {
@@ -348,6 +379,7 @@ fi_strip_target_markers() {
         line = strip_lit(line, seg_tpl)
         line = strip_lit(line, seg_cat)
         line = strip_lit(line, seg_fstr)
+        line = strip_lit(line, seg_pycat)
         line = strip_lit(line, seg_bash)
         if (lang == "bash") {
           # Hand-edited bash variants: ${__FI_SEG:-} (set -u style) and the

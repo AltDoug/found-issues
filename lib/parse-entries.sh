@@ -64,6 +64,32 @@ fi_icontains() {
   return $rc
 }
 
+# === Argument hygiene (2026-10-03 audit, cli-5 / cli-6 / status-17) ===
+#
+# Mutating commands used to `shift` past anything they did not recognise, so
+# `archive --help` archived, `uninstall --help` deleted state and a typo'd
+# `--verifed human` closed an entry as `(verified: ai)`. Every parser now
+# refuses unknown options (exit 2) through these two helpers.
+#
+# fi_need_value <cmd> <flag> <argc> <next> — exit-2 check that a value-taking
+# flag got a value (not end of args, not another option).
+fi_need_value() {
+  if (( $3 < 2 )) || [[ "$4" == -* ]]; then
+    fi_err "$1: $2 needs a value"
+    return 2
+  fi
+}
+
+# fi_unknown_arg <cmd> <arg> — the shared refusal.
+fi_unknown_arg() {
+  if [[ "$2" == -* ]]; then
+    fi_err "$1: unknown option '$2' (see: found-issues $1 --help)"
+  else
+    fi_err "$1: unexpected argument '$2' (see: found-issues $1 --help)"
+  fi
+  return 2
+}
+
 # === Ledger rewrites ===
 #
 # Every mutator builds the new ledger in a temp file and moves it over the
@@ -232,8 +258,13 @@ fi_parse_entry_vars() {
   fi
 
   if [[ "$after_date" == *" — "* ]]; then
+    # Drop only the trailing run of recognised "(key: …)" annotations. Cutting
+    # at the first "(" made "parse() returns None" and "parse() raises" the
+    # same symptom ("parse"), so the second log was skipped as a duplicate
+    # (2026-10-03 audit, cli-3).
     local rest="${after_date#* — }"
-    FE_symptom="${rest%%(*}"
+    fi_annotation_tail_v "$rest"
+    FE_symptom="${rest%"$FI_ANN_TAIL"}"
     FE_symptom="${FE_symptom%"${FE_symptom##*[![:space:]]}"}"
   fi
 
@@ -656,6 +687,7 @@ fi_append_touch() {
   local tmp
   tmp="$(fi_ledger_tmp "$file")"
 
+  FI_TOUCHED_LINE=""
   local found=0
   local re_touched='\(touched: ([^)]+)\)'
   local line
@@ -697,6 +729,10 @@ fi_append_touch() {
         # No existing annotation: append at end of line.
         new_line="${line} (touched: ${date})"
       fi
+      # The rewritten line, for callers that must re-find exactly this entry
+      # (a prefix search hits a same-prefix neighbour — audit cli-14).
+      # shellcheck disable=SC2034  # read by fi_handle_deferred_touch (help.sh)
+      FI_TOUCHED_LINE="$new_line"
       printf '%s\n' "$new_line" >> "$tmp"
     else
       printf '%s\n' "$line" >> "$tmp"

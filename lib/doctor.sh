@@ -231,7 +231,7 @@ cmd_doctor() {
   fi
 
   # origin/HEAD symref (5.2: default-branch detection for PR-state sync).
-  # When unset, fi_default_branch falls back to `gh repo view` then literal "main".
+  # When unset, fi_default_branch falls back to `gh repo view` then the first existing main/master/trunk, then init.defaultBranch.
   if git rev-parse --git-dir >/dev/null 2>&1; then
     if git symbolic-ref refs/remotes/origin/HEAD >/dev/null 2>&1; then
       local origin_head
@@ -239,7 +239,7 @@ cmd_doctor() {
       printf '%s origin/HEAD: set (%s)\n' "$section_pass" "$origin_head"
     else
       if git remote get-url origin >/dev/null 2>&1; then
-        printf '%s origin/HEAD: unset. Sync falls back to `gh repo view`, then literal "main".\n' "$section_warn"
+        printf '%s origin/HEAD: unset. Sync falls back to `gh repo view`, then the first existing main/master/trunk branch.\n' "$section_warn"
         printf '   Fix: git remote set-head origin --auto\n'
       else
         printf '%s origin/HEAD: no `origin` remote — default-branch detection skipped.\n' "$section_warn"
