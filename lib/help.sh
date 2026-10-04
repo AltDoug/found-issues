@@ -121,18 +121,10 @@ fi_handle_deferred_touch() {
   # only suppresses the nudge / auto-promote, not the audit trail.
   fi_append_touch "$file" "$matched_entry" "$today"
 
-  # Re-read the updated entry to compute current count + threshold.
-  # The entry's path may have changed (annotation appended), so match by
-  # the original entry's dedup-stable prefix.
-  local updated_entry=""
-  local prefix="${matched_entry%% (touched:*}"
-  prefix="${prefix%% (defer-cycle:*}"  # be defensive about ordering
-  while IFS= read -r line; do
-    if [[ "$line" == "$prefix"* ]]; then
-      updated_entry="$line"
-      break
-    fi
-  done < <(fi_entries "$file" deferred 2>/dev/null || true)
+  # The line exactly as fi_append_touch rewrote it. A prefix search over the
+  # deferred list used to land on a same-prefix neighbour ("— foo" vs
+  # "— foo bar") and read/promote the wrong entry (audit cli-14).
+  local updated_entry="${FI_TOUCHED_LINE:-}"
 
   if [[ -z "$updated_entry" ]]; then
     # Should not happen if append succeeded; fail soft.
@@ -171,7 +163,7 @@ fi_handle_deferred_touch() {
 
   # Determine criticality
   local is_critical=0
-  if [[ "$updated_entry" == *"[!]"* ]]; then
+  if [[ "$updated_entry" == '- [deferred] [!] '* ]]; then
     is_critical=1
   fi
 

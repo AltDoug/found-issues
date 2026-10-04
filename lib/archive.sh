@@ -30,12 +30,25 @@ cmd_archive() {
     case "$1" in
       --dry-run)  dry_run=1; shift ;;
       --days=*)   threshold_days="${1#--days=}"; shift ;;
-      --days)     threshold_days="$2"; shift 2 ;;
+      --days)     fi_need_value archive --days $# "${2:-}" || return 2
+                  threshold_days="$2"; shift 2 ;;
       --count=*)  threshold_count="${1#--count=}"; shift ;;
-      --count)    threshold_count="$2"; shift 2 ;;
-      *)          shift ;;
+      --count)    fi_need_value archive --count $# "${2:-}" || return 2
+                  threshold_count="$2"; shift 2 ;;
+      -h|--help)
+        printf 'Usage: found-issues archive [--dry-run] [--days N] [--count N]\n'
+        printf 'Move [fixed] entries older than N days (default 30), or beyond the newest N\n'
+        printf '(default 50), to found-issues-archive.md.\n'
+        return 0 ;;
+      # Archive moves entries out of the ledger: never guess at an option
+      # (`--dry-runn` used to archive for real — ledger entry lib/archive.sh:36).
+      *)          fi_unknown_arg archive "$1"; return 2 ;;
     esac
   done
+  if [[ ! "$threshold_days" =~ ^[0-9]+$ || ! "$threshold_count" =~ ^[0-9]+$ ]]; then
+    fi_err "archive: --days and --count take a whole number"
+    return 2
+  fi
 
   local file
   file="$(fi_find_issues_file)" || {

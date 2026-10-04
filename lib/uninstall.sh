@@ -24,6 +24,19 @@
 # plugin's CLI is still on PATH while the cleanup runs.
 
 cmd_uninstall() {
+  # Refuse anything before touching anything: this command deletes state, and
+  # `uninstall --help` used to run the full cleanup (audit cli-5).
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        printf 'Usage: found-issues uninstall\n\n'
+        printf 'Remove everything found-issues installed outside the plugin: the statusline\n'
+        printf 'segment, ~/.claude/found-issues, ~/.cache/found-issues and the /fi alias.\n'
+        printf 'Per-repo docs/found-issues.md ledgers are never touched.\n'
+        return 0 ;;
+      *) fi_unknown_arg uninstall "$1"; return 2 ;;
+    esac
+  done
   local removed_count=0
 
   # 1a. Statusline integration — marker-bracketed block (v1.0.0+ installs)

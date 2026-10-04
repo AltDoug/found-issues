@@ -40,20 +40,24 @@ cmd_resolve() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --match)
-        match="${2:-}"
-        shift 2 || break
-        ;;
+        fi_need_value resolve --match $# "${2:-}" || return 2
+        match="$2"; shift 2 ;;
+      --match=*) match="${1#--match=}"; shift ;;
       --verified)
-        verified="${2:-}"
-        shift 2 || break
-        ;;
+        fi_need_value resolve --verified $# "${2:-}" || return 2
+        verified="$2"; shift 2 ;;
+      --verified=*) verified="${1#--verified=}"; shift ;;
       -h|--help)
         printf 'Usage: found-issues resolve <match>   OR   --match <match>\n'
         printf '       [--verified ai|human]   (default: ai)\n'
         return 0
         ;;
+      # `--verifed human` used to become the match-less default (verified:
+      # ai) closure (audit cli-6).
+      -*) fi_unknown_arg resolve "$1"; return 2 ;;
       *)
-        [[ -z "$match" ]] && match="$1"
+        [[ -z "$match" ]] || { fi_unknown_arg resolve "$1"; return 2; }
+        match="$1"
         shift
         ;;
     esac

@@ -88,6 +88,16 @@ cmd_install_statusline_custom_target() {
     return 13
   fi
 
+  # A symlinked target (dotfiles repo) is edited at its real path: the atomic
+  # rename below replaced the link with a regular file, and the old post-mv
+  # -L warning could never fire (audit status-7).
+  if [[ -L "$target_path" ]]; then
+    local real_target
+    real_target="$(fi_resolve_link "$target_path")"
+    fi_err "note: $target_path is a symlink — editing its target $real_target"
+    target_path="$real_target"
+  fi
+
   # Step 2: detect language
   local detected_lang
   if [[ "$target_language" == "auto" ]]; then
@@ -113,22 +123,33 @@ cmd_install_statusline_custom_target() {
 }
 
 # Returns line number of the splice point in a bash statusline, or empty.
-# Priority: LINE1= assignment, then first echo, then first printf.
+# Priority: the last LINE1= assignment, then every plain echo, then every plain
+# printf (no pipe or redirect outside quotes).
 # Lines that already reference __FI_SEG are never splice points — they are
 # user placements of the segment, and appending a second ${__FI_SEG} would
 # render the counter twice on that line (found during v1.5.7 verify).
 fi_find_bash_splice_point() {
   local path="$1"
   local lines
-  # Priority 1: LINE1= assignment
-  lines="$(LC_ALL=C awk '/^[[:space:]]*LINE1=/ && !/__FI_SEG/ { print NR }' "$path")"
+  # Priority 1: the LAST LINE1= assignment — the canonical installer's rule.
+  # Splicing every one rendered the segment twice for LINE1="a"; LINE1="$LINE1 b"
+  # (audit status-11).
+  lines="$(LC_ALL=C awk '/^[[:space:]]*LINE1=/ && !/__FI_SEG/ { n = NR } END { if (n) print n }' "$path")"
   [[ -n "$lines" ]] && { echo "$lines"; return 0; }
-  # Priority 2: echo
-  lines="$(LC_ALL=C awk '/^[[:space:]]*echo[[:space:]]/ && !/__FI_SEG/ { print NR }' "$path")"
-  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
-  # Priority 3: printf
-  lines="$(LC_ALL=C awk '/^[[:space:]]*printf[[:space:]]/ && !/__FI_SEG/ { print NR }' "$path")"
-  [[ -n "$lines" ]] && { echo "$lines"; return 0; }
+  # Priority 2/3: every echo, else every printf (if/else branches each emit
+  # the line) — but never one that pipes or redirects outside quotes: the
+  # splice would land in jq's filter or a `>&2` redirect word (status-11).
+  local verb
+  for verb in echo printf; do
+    lines="$(LC_ALL=C awk -v verb="$verb" '
+      $0 ~ ("^[[:space:]]*" verb "[[:space:]]") && !/__FI_SEG/ {
+        bare = $0
+        gsub(/"[^"]*"/, "", bare)
+        gsub(/'"'"'[^'"'"']*'"'"'/, "", bare)
+        if (bare !~ /[|<>]/) print NR
+      }' "$path")"
+    [[ -n "$lines" ]] && { echo "$lines"; return 0; }
+  done
   return 1
 }
 
@@ -356,12 +377,6 @@ cmd_install_statusline_target_bash() {
   }
   rm -f "$tmp_modified"
 
-  # Symlink warning
-  if [[ -L "$path" ]]; then
-    local real
-    real="$(readlink "$path")"
-    fi_err "note: $path is a symlink to $real; your sync system may overwrite changes on next render"
-  fi
 
   printf 'install-statusline --target: applied to %s (backup: %s)\n' "$path" "$backup_path"
   printf 'Restart your Claude Code session to see the segment render.\n'
@@ -578,11 +593,6 @@ cmd_install_statusline_target_node() {
   }
   rm -f "$tmp_modified" "$tmp_block"
 
-  if [[ -L "$path" ]]; then
-    local real
-    real="$(readlink "$path")"
-    fi_err "note: $path is a symlink to $real; your sync system may overwrite changes on next render"
-  fi
 
   printf 'install-statusline --target: applied to %s (backup: %s)\n' "$path" "$backup_path"
   printf 'Restart your Claude Code session to see the segment render.\n'
@@ -815,11 +825,6 @@ cmd_install_statusline_target_python() {
   }
   rm -f "$tmp_modified" "$tmp_block"
 
-  if [[ -L "$path" ]]; then
-    local real
-    real="$(readlink "$path")"
-    fi_err "note: $path is a symlink to $real; your sync system may overwrite changes on next render"
-  fi
 
   printf 'install-statusline --target: applied to %s (backup: %s)\n' "$path" "$backup_path"
   printf 'Restart your Claude Code session to see the segment render.\n'

@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="2.10.3"
+readonly FI_VERSION="2.10.4"
 
 # Statusline fast path (lib/segment-cache.sh): `status --format=segment` runs
 # every few seconds per session, so it is answered from a content-checked
@@ -221,17 +221,25 @@ fi_detect_rename() {
 # Find or create the issues file based on detected mode.
 # Echoes the path. Creates parent directory + initial header if missing.
 fi_resolve_issues_file() {
-  # Only "local or not" matters here, and fi_detect_mode answers "local"
-  # exactly for these two cases — calling it ran `gh auth status` (a network
-  # token check) and an hourly `gh pr list` on every log/defer/resolve
-  # (audit cli-11 / ledger-8a).
-  local target=""
+  # Find the EXISTING ledger the readers (status, sync, SessionStart) will
+  # find, and create one only when there is none. Deciding from the mode
+  # alone made `log` from a subdirectory of a local tree, or in a repo whose
+  # ledger is the root .found-issues.md, create a nearer ledger that hid the
+  # real one (2026-10-03 audit, cli-1). Never walks above the repo root.
+  local target="" found=""
   if [[ "${FOUND_ISSUES_MODE:-}" == "local" ]] || ! git rev-parse --git-dir >/dev/null 2>&1; then
-    target="$PWD/.found-issues.md"
+    found="$(fi_find_issues_file "$PWD" 2>/dev/null || true)"
+    target="${found:-$PWD/.found-issues.md}"
   else
     local repo_root
     repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    target="$repo_root/docs/found-issues.md"
+    if [[ -f "$repo_root/docs/found-issues.md" ]]; then
+      target="$repo_root/docs/found-issues.md"
+    elif [[ -f "$repo_root/.found-issues.md" ]]; then
+      target="$repo_root/.found-issues.md"
+    else
+      target="$repo_root/docs/found-issues.md"
+    fi
   fi
 
   if [[ ! -f "$target" ]]; then
@@ -275,7 +283,8 @@ fi_repo_id() {
 # Resolve the default branch with a layered fallback chain:
 #   1. git symbolic-ref refs/remotes/origin/HEAD (primary, fast, no network)
 #   2. gh repo view --json defaultBranchRef.name (fallback when origin/HEAD unset)
-#   3. literal "main" (last-resort guess)
+#   3. the first of main/master/trunk that exists (origin/ then local),
+#      then init.defaultBranch, then literal "main"
 #
 # Caches the gh-result per-repo for 1h to avoid repeated network calls.
 # Cache file: ${XDG_CACHE_HOME:-$HOME/.cache}/found-issues/default-branch-<slug>.txt
@@ -338,8 +347,19 @@ fi_resolve_default_branch() {
     : > "$cache_file.miss" 2>/dev/null || true
   fi
 
-  # Last resort
-  printf 'main'
+  # Last resort: the first conventional default branch that actually exists
+  # (remote-tracking first), then init.defaultBranch. A literal "main" made
+  # every commit annotation in a master/trunk repo silently never close
+  # (2026-10-03 audit, cli-13 / ledger-10).
+  local b
+  for b in main master trunk; do
+    git rev-parse --verify --quiet "refs/remotes/origin/$b" >/dev/null 2>&1 && { printf '%s' "$b"; return 0; }
+  done
+  for b in main master trunk; do
+    git rev-parse --verify --quiet "refs/heads/$b" >/dev/null 2>&1 && { printf '%s' "$b"; return 0; }
+  done
+  b="$(git config init.defaultBranch 2>/dev/null || true)"
+  printf '%s' "${b:-main}"
   return 0
 }
 

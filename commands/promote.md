@@ -23,7 +23,9 @@ found-issues promote
 The CLI:
 - Confirms you're on a non-default branch
 - Compares this branch's `docs/found-issues.md` against the default branch's version
-- Lists `[open]` entries on this branch not yet on the default
+- Lists `[open]` entries on this branch not yet on the default branch
+  under any status (matched by entry, so one the default branch already
+  fixed or archived is not listed)
 - Prints zero or more entries that need to be carried over
 
 ### Step 2 — If there are entries to promote

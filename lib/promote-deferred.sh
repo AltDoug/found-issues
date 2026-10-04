@@ -32,13 +32,13 @@ cmd_promote_deferred() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --match)
-        match="${2:-}"
-        shift 2 || break
-        ;;
+        fi_need_value promote-deferred --match $# "${2:-}" || return 2
+        match="$2"; shift 2 ;;
+      --match=*) match="${1#--match=}"; shift ;;
+      -*) fi_unknown_arg promote-deferred "$1"; return 2 ;;
       *)
-        if [[ -z "$match" ]]; then
-          match="$1"
-        fi
+        [[ -z "$match" ]] || { fi_unknown_arg promote-deferred "$1"; return 2; }
+        match="$1"
         shift
         ;;
     esac

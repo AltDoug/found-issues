@@ -135,7 +135,8 @@ _fi_canon_symptom_v() {
 # fi_dedup_key_v <path> <line> <symptom> [<repo_root>] — $FI_KEY
 fi_dedup_key_v() {
   local path="$1" line="$2" symptom="$3" root="${4-}"
-  local bare="${symptom%%(*}"
+  fi_annotation_tail_v "$symptom"
+  local bare="${symptom%"$FI_ANN_TAIL"}"
   bare="${bare%"${bare##*[![:space:]]}"}"
   path="${path#"${path%%[![:space:]]*}"}"
   path="${path%"${path##*[![:space:]]}"}"
@@ -152,7 +153,8 @@ fi_dedup_key_v() {
 
 # fi_dedup_key_abstract_v <symptom> — $FI_KEY
 fi_dedup_key_abstract_v() {
-  local bare="${1%%(*}"
+  fi_annotation_tail_v "$1"
+  local bare="${1%"$FI_ANN_TAIL"}"
   bare="${bare%"${bare##*[![:space:]]}"}"
   _fi_canon_symptom_v "$bare" 80
   FI_KEY="abstract::$_fi_canon"

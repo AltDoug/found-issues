@@ -303,7 +303,16 @@ while IFS= read -r _fi_dir; do
   # Determine default branch
   default_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
     | sed 's|^refs/remotes/origin/||' || true)"
-  [[ -z "$default_branch" ]] && default_branch="main"
+  if [[ -z "$default_branch" ]]; then
+    # Same fallback order as fi_resolve_default_branch (audit cli-13).
+    for _fi_b in main master trunk; do
+      if git rev-parse --verify --quiet "refs/remotes/origin/$_fi_b" >/dev/null 2>&1 \
+         || git rev-parse --verify --quiet "refs/heads/$_fi_b" >/dev/null 2>&1; then
+        default_branch="$_fi_b"; break
+      fi
+    done
+    [[ -z "$default_branch" ]] && default_branch="main"
+  fi
 
   # Path to the issues file inside the repo (relative)
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
