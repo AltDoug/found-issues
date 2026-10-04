@@ -124,3 +124,88 @@ LEDGER
   run "$FI_BIN" autofix status
   [[ "$output" == *"Today: 0/1 sweeps"* ]]
 }
+
+sweep_queue() { # queue a sweep for the fixture; sets SID and ST
+  run "$FI_BIN" log --fix medium 'src/calc.sh:1 — add subtracts'
+  SID="$(printf '%s\n' "$output" | sed -n 's/^AUTOFIX-SWEEP-DUE //p')"
+  ST="$FOUND_ISSUES_STATE_DIR/autofix/foo__bar"
+  [ -n "$SID" ]
+}
+
+@test "sweep claim: a worktree on fi/sweep/<date>-<n>, the ordered entry list, cur 1" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 0 ]
+  WT="$REPO/.claude/worktrees/fi-sweep-$SID"
+  [ "$output" = "$WT" ]
+  [ "$(git -C "$WT" rev-parse --abbrev-ref HEAD)" = "fi/sweep/${SID%%-*}-${SID##*-}" ]
+  [ "$(wc -l < "$ST/sweeps/$SID.entries" | tr -d ' ')" = 5 ]
+  grep -q '^cur=1$' "$ST/running/$SID"
+  grep -q '^fixed=0$' "$ST/running/$SID"
+  [ "$(sed -n 's/^head=//p' "$ST/running/$SID")" = "$(git -C "$WT" rev-parse HEAD)" ]
+  [ -s "$ST/day/$(date +%Y-%m-%d).sweep" ]
+}
+
+@test "sweep claim: honours sweepMax" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  git config found-issues.autofix.sweepMax 2
+  "$FI_BIN" autofix claim "$SID" >/dev/null
+  [ "$(wc -l < "$ST/sweeps/$SID.entries" | tr -d ' ')" = 2 ]
+}
+
+@test "sweep claim: nothing fixable any more finishes the sweep stale" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  sed -i.bak 's/(fix: medium)/(fix: large)/' docs/found-issues.md; rm -f docs/found-issues.md.bak
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 5 ]
+  [ -f "$ST/done/$SID" ]
+  grep -q '^result=stale: nothing fixable now$' "$ST/done/$SID"
+}
+
+@test "sweep state: commit moves head and advances; settle resets and tags the source ledger" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  "$FI_BIN" autofix claim "$SID" >/dev/null
+  WT="$REPO/.claude/worktrees/fi-sweep-$SID"
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_read "$ST/running/$SID"
+  fi_af_sweep_load "$SID"
+  first="$AFI_loc"
+  sed -i.bak 's/- 1/+ 0/' "$WT/${AFI_loc%%:*}"; rm -f "$WT/${AFI_loc%%:*}.bak"
+  git -C "$WT" add -A; FI_AF_TREE="$(git -C "$WT" write-tree)"
+  fi_af_sweep_commit "$SID"
+  grep -q '^cur=2$' "$ST/running/$SID"
+  grep -q '^fixed=1$' "$ST/running/$SID"
+  [[ "$(git -C "$WT" log -1 --format=%s)" == "fix: "*"(found-issues $first)" ]]
+  [ "$(sed -n 's/^head=//p' "$ST/running/$SID")" = "$(git -C "$WT" rev-parse HEAD)" ]
+  fi_af_item_read "$ST/running/$SID"
+  fi_af_sweep_load "$SID"
+  second="$AFI_loc"
+  printf 'junk\n' > "$WT/junk.txt"
+  fi_af_sweep_settle "$SID" failed "tests fail after 2 attempts"
+  [ ! -e "$WT/junk.txt" ]
+  grep -q '^cur=3$' "$ST/running/$SID"
+  grep -F "$second — " docs/found-issues.md | grep -q '(autofix-failed: tests fail after 2 attempts)'
+  grep -q "^$first	fixed	" "$ST/sweeps/$SID.outcomes"
+  grep -q "^$second	failed	" "$ST/sweeps/$SID.outcomes"
+}
+
+@test "sweep state: commit refuses a tree the verifier did not approve" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  "$FI_BIN" autofix claim "$SID" >/dev/null
+  WT="$REPO/.claude/worktrees/fi-sweep-$SID"
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_read "$ST/running/$SID"; fi_af_sweep_load "$SID"
+  sed -i.bak 's/- 1/+ 0/' "$WT/${AFI_loc%%:*}"; rm -f "$WT/${AFI_loc%%:*}.bak"
+  git -C "$WT" add -A; FI_AF_TREE="$(git -C "$WT" write-tree)"
+  printf 'late\n' > "$WT/late.txt"
+  ! fi_af_sweep_commit "$SID" || false
+  grep -q '^cur=1$' "$ST/running/$SID"
+}
+
+@test "sweep claim: the kill switch refuses it like a spot claim" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  "$FI_BIN" autofix off >/dev/null
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 1 ]
+  [ -f "$ST/queue/$SID" ]
+}

@@ -14,6 +14,9 @@
 #   fi_af_sweep_candidates <ledger> <root> <max>
 #   fi_af_sweep_pending
 #   fi_af_sweep_check
+#   fi_af_sweep_claim <id>
+#   fi_af_sweep_load <id>
+#   fi_af_sweep_commit <id> / fi_af_sweep_settle <id> <outcome> <text>
 
 # shellcheck disable=SC2154  # AFI_*/FE_* come from autofix-queue.sh / parse-entries.sh
 
@@ -116,4 +119,110 @@ fi_af_sweep_check() {
   else
     printf 'AUTOFIX-SWEEP-DUE %s\n' "$FI_AF_ID"
   fi
+}
+
+# Spec §6 steps 1-3 at claim time (lock held, queue item read): cap, the
+# fresh worktree, the classify/wake pass, then the ordered entry list.
+fi_af_sweep_claim() {
+  local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1" file n=0 line
+  if ! fi_af_cap_ok sweep "$(fi_af_int dailySweeps 1)"; then fi_af_unlock "$id"; return 3; fi
+  fi_af_item_set "$q" pid "${FI_AF_PID:-}"
+  if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
+  mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
+  fi_af_cap_take sweep "$id"
+  if ! fi_af_worktree_add; then fi_af_finish "$id" failed "$FI_AF_WHY"; return 6; fi
+  fi_af_item_set "$r" wt "$AFI_wt"
+  fi_af_item_set "$r" branch "$AFI_branch"
+  fi_af_item_set "$r" base "$AFI_base"
+  fi_af_item_set "$r" base_sha "$AFI_base_sha"
+  fi_af_item_set "$r" head "$AFI_base_sha"
+  fi_af_item_set "$r" cur 1
+  fi_af_item_set "$r" fixed 0
+  AFI_head="$AFI_base_sha" AFI_cur=1 AFI_fixed=0
+  mkdir -p "$FI_AF_ST/sweeps"
+  file="$(fi_find_issues_file "$AFI_root" 2>/dev/null)" || file=""
+  if [[ -n "$file" && -f "$file" ]]; then
+    if declare -F fi_af_classify >/dev/null; then fi_af_classify "$file" "$id" || true; fi
+    fi_af_sweep_candidates "$file" "$AFI_root" "$(fi_af_int sweepMax 8)" >"$FI_AF_ST/sweeps/$id.entries"
+  else
+    : >"$FI_AF_ST/sweeps/$id.entries"
+  fi
+  : >"$FI_AF_ST/sweeps/$id.outcomes"
+  while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/sweeps/$id.entries"
+  if (( n == 0 )); then fi_af_finish "$id" stale "nothing fixable now"; return 5; fi
+  fi_af_log "$id" "claimed sweep: $n entries in $AFI_wt ($AFI_branch from origin/$AFI_base)"
+}
+
+# Entry number AFI_cur of the sweep, with its base pinned to the last good
+# commit, so diff, reset and the verifier see only this entry's change.
+fi_af_sweep_load() {
+  local f="$FI_AF_ST/sweeps/$1.entries" i=0 line
+  [[ "$AFI_cur" =~ ^[0-9]+$ && -f "$f" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    i=$((i + 1))
+    (( i == AFI_cur )) || continue
+    AFI_entry="$line"
+    fi_entry_loc_v "$line" || return 1
+    AFI_loc="$FE_loc"
+    fi_entry_dedup_key_v "$line" "$AFI_root" || return 1
+    AFI_key="$FI_KEY"
+    AFI_base_sha="${AFI_head:-$AFI_base_sha}"
+    return 0
+  done <"$f"
+  return 1
+}
+
+_fi_af_sweep_record() {
+  local text="${2//$'\t'/ }"
+  printf '%s\t%s\t%s\n' "$AFI_loc" "$1" "${text//$'\n'/ }" >>"$FI_AF_ST/sweeps/$AFI_id.outcomes"
+}
+
+_fi_af_sweep_advance() {
+  local r="$FI_AF_ST/running/$AFI_id"
+  AFI_cur=$(( AFI_cur + 1 ))
+  fi_af_item_set "$r" cur "$AFI_cur"
+  fi_af_item_set "$r" attempts 0
+  fi_af_item_set "$r" verdict ""
+  AFI_attempts=0 AFI_verdict=""
+}
+
+# The verifier approved FI_AF_TREE: commit exactly that tree as this entry's
+# one commit (spec §6 step 4).
+fi_af_sweep_commit() {
+  local id="$1" r="$FI_AF_ST/running/$1" frag
+  FI_AF_WHY=""
+  fi_af_reset_ledger "$AFI_wt" "$AFI_head"
+  git -C "$AFI_wt" add -A >/dev/null 2>&1 || true
+  if [[ -z "$FI_AF_TREE" || "$(git -C "$AFI_wt" write-tree 2>/dev/null)" != "$FI_AF_TREE" ]]; then
+    FI_AF_WHY="the change differs from what the verifier approved"; return 1
+  fi
+  fi_parse_entry_vars "$AFI_entry" || true
+  frag="${FE_symptom:-$AFI_loc}"
+  frag="${frag:0:60}"
+  git -C "$AFI_wt" commit -q -m "fix: $frag (found-issues $AFI_loc)" >>"$FI_AF_RUNS/$id.log" 2>&1 \
+    || { FI_AF_WHY="git commit refused (a commit hook?)"; return 1; }
+  AFI_head="$(git -C "$AFI_wt" rev-parse HEAD)"
+  AFI_fixed=$(( ${AFI_fixed:-0} + 1 ))
+  AFI_verdict_tree="$(git -C "$AFI_wt" rev-parse 'HEAD^{tree}')"
+  fi_af_item_set "$r" head "$AFI_head"
+  fi_af_item_set "$r" fixed "$AFI_fixed"
+  fi_af_item_set "$r" verdict_tree "$AFI_verdict_tree"
+  _fi_af_sweep_record fixed "${FI_AF_VERDICT_REASON:-approved}"
+  fi_af_log "$id" "sweep: committed $AFI_loc"
+  _fi_af_sweep_advance
+}
+
+# Any outcome but fixed: drop this entry's change, record the outcome on the
+# source ledger, move on (plan Review Focus 2).
+fi_af_sweep_settle() {
+  local id="$1" outcome="$2" text="$3" rc=0
+  text="${text//$'\n'/ }"
+  text="${text:0:160}"
+  git -C "$AFI_wt" reset -q --hard "$AFI_head" >/dev/null 2>&1 || true
+  git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
+  _fi_af_ledger_outcome "$outcome" "$text" || rc=$?
+  (( rc == 0 )) || fi_af_log "$id" "ledger not updated for $AFI_loc $outcome (rc $rc)"
+  _fi_af_sweep_record "$outcome" "$text"
+  fi_af_log "$id" "sweep: $AFI_loc $outcome: $text"
+  _fi_af_sweep_advance
 }

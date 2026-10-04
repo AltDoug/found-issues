@@ -25,6 +25,7 @@
 #   fi_af_reap
 #   fi_af_claim <id>
 #   fi_af_ledger_tag <kind> <text> / fi_af_ledger_resolve
+#   _fi_af_ledger_outcome <outcome> <text>
 #   fi_af_finish <id> <outcome> <text>
 #   fi_af_requeue <id> <why>
 
@@ -200,11 +201,17 @@ fi_af_worktree_add() {
   local s base
   base="$(cd "$AFI_root" && fi_resolve_default_branch)"
   git -C "$AFI_root" fetch -q origin "$base" 2>/dev/null || { FI_AF_WHY="git fetch failed"; return 1; }
-  s="${AFI_loc//[^A-Za-z0-9]/-}"
-  s="${s:0:40}"
   AFI_base="$base"
-  AFI_branch="fi/autofix/$s-$AFI_id"
-  AFI_wt="$AFI_root/.claude/worktrees/fi-autofix-$AFI_id"
+  if [[ "$AFI_kind" == "sweep" ]]; then
+    # Phase 4 ruling 5: unique per run (the spec's per-day <n> collided).
+    AFI_branch="fi/sweep/${AFI_id%%-*}-${AFI_id##*-}"
+    AFI_wt="$AFI_root/.claude/worktrees/fi-sweep-$AFI_id"
+  else
+    s="${AFI_loc//[^A-Za-z0-9]/-}"
+    s="${s:0:40}"
+    AFI_branch="fi/autofix/$s-$AFI_id"
+    AFI_wt="$AFI_root/.claude/worktrees/fi-autofix-$AFI_id"
+  fi
   mkdir -p "$AFI_root/.claude/worktrees"
   git -C "$AFI_root" worktree add -q -b "$AFI_branch" "$AFI_wt" "origin/$base" >/dev/null 2>&1 \
     || { FI_AF_WHY="git worktree add failed"; return 1; }
@@ -262,6 +269,7 @@ fi_af_claim() {
   # half-claimed item (no pid yet) for a crash and unlock a live run.
   fi_af_reap
   if ! fi_af_item_read "$q"; then fi_af_unlock "$id"; return 1; fi
+  if [[ "$AFI_kind" == "sweep" ]]; then fi_af_sweep_claim "$id"; return; fi
   if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY"; return 5; fi
   if ! fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"; then fi_af_unlock "$id"; return 3; fi
   # Launcher A's run passes its own long-lived pid. A standalone claim is an
@@ -319,8 +327,22 @@ fi_af_ledger_resolve() {
   fi_ledger_replace "$FI_AF_LEDGER" "$tmp" "$snapshot"
 }
 
+# The ledger side of an outcome for the loaded entry (AFI_key): resolve,
+# retag or nothing. rc 2 for an unknown outcome.
+_fi_af_ledger_outcome() {
+  case "$1" in
+    already-fixed) fi_af_ledger_resolve ;;
+    decide|manual) fi_af_ledger_tag "$1" "$2" ;;
+    failed)        fi_af_ledger_tag autofix-failed "$2" ;;
+    shipped|stale) return 0 ;;
+    *) fi_err "autofix: unknown outcome $1"; return 2 ;;
+  esac
+}
+
 # Spec §5 steps 2, 4 and 7: end an item with an outcome. The ledger write is
 # best effort — the item always leaves running/, so it never wedges the lock.
+# A sweep item has no entry of its own (phase 4 ruling 7): its entries were
+# settled one by one.
 fi_af_finish() {
   local id="$1" outcome="$2" text="$3" f="$FI_AF_ST/running/$1" rc=0
   [[ -f "$f" ]] || f="$FI_AF_ST/queue/$id"
@@ -328,12 +350,12 @@ fi_af_finish() {
   text="${text//$'\n'/ }"
   text="${text:0:160}"
   case "$outcome" in
-    already-fixed) fi_af_ledger_resolve || rc=$? ;;
-    decide|manual) fi_af_ledger_tag "$outcome" "$text" || rc=$? ;;
-    failed)        fi_af_ledger_tag autofix-failed "$text" || rc=$? ;;
-    shipped|stale) ;;
+    already-fixed|decide|manual|failed|shipped|stale) ;;
     *) fi_err "autofix: unknown outcome $outcome"; return 2 ;;
   esac
+  if [[ "$AFI_kind" != "sweep" ]]; then
+    _fi_af_ledger_outcome "$outcome" "$text" || rc=$?
+  fi
   (( rc == 0 )) || fi_af_log "$id" "ledger not updated for $outcome (rc $rc)"
   fi_af_worktree_remove
   fi_af_retire "$id" "$outcome" "$text"
