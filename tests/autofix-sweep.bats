@@ -78,6 +78,21 @@ LEDGER
   [[ "$output" == *"AUTOFIX-SWEEP-DUE "* ]]
 }
 
+@test "sweep: untagged entries the classifier was already shown stop counting" {
+  fi_af_sweep_fixture 0
+  for i in 1 2 3 4 5; do printf -- '- [open] 2026-09-0%s src/u%s.sh:1 — old untagged %s\n' "$i" "$i" "$i" >> docs/found-issues.md; done
+  git add -A && git commit -q -m backlog && git push -q origin main
+  source "$FI_BIN"; fi_af_context
+  [ "$(_fi_af_untagged_count docs/found-issues.md "$REPO")" -eq 5 ]
+  : > "$TMP/list"
+  for i in 1 2 3 4; do printf 'U%s\t- [open] 2026-09-0%s src/u%s.sh:1 — old untagged %s\n' "$i" "$i" "$i" "$i" >> "$TMP/list"; done
+  AFI_root="$REPO" _fi_af_classify_mark_offered "$TMP/list"
+  [ "$(_fi_af_untagged_count docs/found-issues.md "$REPO")" -eq 1 ]
+  export PATH="$TEST_REPO_ROOT/tests/bin-shims:$PATH"
+  run "$FI_BIN" sync
+  [[ "$output" != *"AUTOFIX-SWEEP-DUE"* ]]
+}
+
 @test "sweep: four untagged entries do not queue a sweep, nor do decide or manual ones" {
   fi_af_sweep_fixture 0
   for i in 1 2 3; do printf -- '- [open] 2026-09-0%s src/u%s.sh:1 — old untagged %s\n' "$i" "$i" "$i" >> docs/found-issues.md; done

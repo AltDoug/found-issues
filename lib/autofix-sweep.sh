@@ -94,13 +94,18 @@ fi_af_sweep_pending() {
 # child: its cwd is the fixer's worktree, so the sweep would get that root
 # (and burn the day's cap on a worktree about to vanish); the main
 # session's next ledger write checks the source ledger instead.
-# [open] entries the classify pass would take (_fi_af_classify_list's rule).
+# [open] entries the classify pass would take (_fi_af_classify_list's rule)
+# and has not been shown before: one it left untagged waits for a human tag.
 _fi_af_untagged_count() {
-  local entry c=0
+  local entry c=0 seen="$FI_AF_ST/classify-offered"
   while IFS= read -r entry; do
     [[ -n "$entry" ]] || continue
     fi_parse_entry_vars "$entry" || continue
-    [[ -z "$FE_fixtag$FE_decide$FE_decided$FE_manual$FE_autofix_failed$FE_prs$FE_prs_auto$FE_commits$FE_commits_auto" ]] && c=$((c + 1))
+    [[ -z "$FE_fixtag$FE_decide$FE_decided$FE_manual$FE_autofix_failed$FE_prs$FE_prs_auto$FE_commits$FE_commits_auto" ]] || continue
+    if [[ -s "$seen" ]] && fi_entry_dedup_key_v "$entry" "$2" && grep -Fqx -- "$FI_KEY" "$seen"; then
+      continue
+    fi
+    c=$((c + 1))
   done < <(fi_entries "$1" open 2>/dev/null || true)
   printf '%s' "$c"
 }
@@ -127,7 +132,7 @@ fi_af_sweep_check() {
   # Untagged entries count too: only a sweep's classify pass tags them, so
   # a backlog logged before tags existed could otherwise never reach the
   # threshold (ledger lib/autofix-sweep.sh:97).
-  n=$((n + $(_fi_af_untagged_count "$file")))
+  n=$((n + $(_fi_af_untagged_count "$file" "$root")))
   (( n > 0 )) || return 0
   (( crit || n >= $(fi_af_int sweepThreshold 5) )) || return 0
   engine="$(fi_af_engine 2>/dev/null || true)"

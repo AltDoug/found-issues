@@ -160,6 +160,13 @@ teardown() { fi_teardown_tmp; }
   [[ "$p" != *"Grep"* ]]
 }
 
+@test "autofix engine: the verifier prompt says how to search" {
+  AFI_entry=e
+  p="$(fi_af_verifier_prompt 'diff')"
+  [[ "$p" == *"found-issues autofix search t1 '<regex>'"* ]]
+  [[ "$p" == *"found-issues autofix search t1 --files"* ]]
+}
+
 @test "autofix engine: the codex prompt allows reading but never git or gh" {
   AFI_branch=b AFI_entry=e
   p="$(fi_af_fixer_prompt 'sh test.sh' '' codex)"

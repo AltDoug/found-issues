@@ -151,7 +151,9 @@ fi_af_verifier_prompt() {
   [[ ${#diff} -gt 60000 ]] && diff="${diff:0:60000}"$'\n[diff truncated]'
   cat <<EOF
 You are a strict reviewer of an unattended bug fix. You may read files in this
-checkout; do not edit anything.
+checkout; do not edit anything. To search it, run
+found-issues autofix search ${AFI_id:-<id>} '<regex>' [<path>...] or
+found-issues autofix search ${AFI_id:-<id>} --files [<path>...], each as its own Bash call.
 
 The issue:
 ${AFI_entry}

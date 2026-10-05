@@ -80,6 +80,20 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   [ "$status" -eq 2 ]
 }
 
+@test "b: search sees a file the fixer just created, but not ignored ones" {
+  claim
+  printf 'brand_new_marker\n' > "$WT/new.bats"
+  printf 'brand_new_marker\n' > "$WT/skip.log"
+  printf '*.log\n' > "$WT/.gitignore"
+  run "$FI_BIN" autofix search "$ID" brand_new_marker
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"new.bats:1:brand_new_marker"* ]]
+  [[ "$output" != *"skip.log"* ]]
+  run "$FI_BIN" autofix search "$ID" --files
+  [[ "$output" == *"new.bats"* ]]
+  [[ "$output" != *"skip.log"* ]]
+}
+
 @test "b: search caps long output and says how much was cut" {
   claim
   for i in $(seq 1 230); do printf 'needle %s\n' "$i"; done > "$WT/many.txt"

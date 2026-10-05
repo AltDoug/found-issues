@@ -221,7 +221,8 @@ End your reply with one line: the sweep id and its outcome.
 BRIEF
 }
 
-# Read-only search for the unattended models: some Claude Code builds give
+# Read-only search for the unattended models (tracked and new untracked
+# files, .gitignore honoured): some Claude Code builds give
 # them no Grep/Glob tools, and rg/fd/git grep can each launch a program
 # through their own flags (--pre, --exec, -O), so only this fixed form is
 # allowed. The regex follows -e and paths follow --, so neither can become
@@ -233,12 +234,12 @@ fi_af_search() {
   local g=(git -C "$wt" -c core.fsmonitor=false --no-pager)
   if [[ "${1:-}" == "--files" ]]; then
     shift
-    out="$("${g[@]}" ls-files -- "$@" 2>&1)" || rc=2
+    out="$("${g[@]}" ls-files --cached --others --exclude-standard -- "$@" 2>&1)" || rc=2
   else
     [[ -n "${1:-}" ]] || { fi_err "Usage: found-issues autofix search <id> <regex> [<path>...] | --files [<path>...]"; return 2; }
     local re="$1"
     shift
-    out="$("${g[@]}" grep -n -I -E -e "$re" -- "$@" 2>&1)" || rc=$?
+    out="$("${g[@]}" grep --untracked -n -I -E -e "$re" -- "$@" 2>&1)" || rc=$?
     (( rc > 1 )) && rc=2
   fi
   if (( rc == 2 )); then fi_err "autofix search: ${out:-git failed}"; return 2; fi
