@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.4] - 2026-10-05
+
+### Fixed
+
+Two auto-fix fixes found by watching AltDoug/kh2-midgar on dougstation, each written by the auto-fixer:
+
+- A sweep whose fresh worktree has no test command now retires as stale before it takes the day's sweep slot or runs the classifier. Before, a repo whose `origin/<base>` has no test command spent its daily sweep, and a classify run, on a sweep that could only end stale (PR #209).
+- The sweep classifier writes `classify: skipped (no engine resolved)` or `classify: skipped (no engine on PATH)` to the run log when it cannot start, instead of returning silently, so a classifier that never ran no longer looks like one that classified nothing (PR #208).
+
 ## [3.1.3] - 2026-10-05
 
 ### Fixed
