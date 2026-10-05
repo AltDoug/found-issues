@@ -323,6 +323,9 @@ fi_af_reap() {
       fi_af_item_set "$f" pid ""
       # The dead run's PR number would make cancel refuse the re-run.
       fi_af_item_set "$f" pr ""
+      # Back in the queue: the landing branch resolves fresh at re-claim.
+      fi_af_item_set "$f" base ""
+      fi_af_item_set "$f" base_why ""
       fi_af_unlock "$AFI_id"
       mv "$f" "$FI_AF_ST/queue/$AFI_id"
       fi_af_seg_write "$AFI_root"
@@ -375,6 +378,9 @@ fi_af_requeue() {
   fi_af_worktree_remove
   fi_af_item_set "$r" pid ""
   fi_af_item_set "$r" pr ""
+  # A queued item resolves its landing branch fresh at its next claim.
+  fi_af_item_set "$r" base ""
+  fi_af_item_set "$r" base_why ""
   mv "$r" "$FI_AF_ST/queue/$id"
   fi_af_seg_write "$AFI_root"
   fi_af_unlock "$id"

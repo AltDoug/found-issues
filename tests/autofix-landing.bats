@@ -95,3 +95,38 @@ teardown() { fi_teardown_tmp; }
   grep -q '^base_why=tracks origin/gsd/phase-01$' "$FI_AF_ST/running/$id"
   [ -f "$REPO/.claude/worktrees/fi-autofix-$id/src/gsd/phase-01.sh" ]
 }
+
+@test "landing: a requeued item resolves its landing branch again" {
+  fi_af_remote_branch gsd/phase-01
+  fi_af_queue_spot "$(grep -m1 '^- \[open\]' docs/found-issues.md)" >/dev/null
+  id="$(ls "$FI_AF_ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 0 ]
+  grep -q '^base=gsd/phase-01$' "$FI_AF_ST/running/$id"
+  fi_af_requeue "$id" "engine outage"
+  [ -f "$FI_AF_ST/queue/$id" ]
+  grep -q '^base=$' "$FI_AF_ST/queue/$id"
+  grep -q '^base_why=$' "$FI_AF_ST/queue/$id"
+  fi_af_remote_branch gsd/phase-02
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 0 ]
+  grep -q '^base=gsd/phase-02$' "$FI_AF_ST/running/$id"
+  grep -q '^base_why=tracks origin/gsd/phase-02$' "$FI_AF_ST/running/$id"
+  [ -f "$REPO/.claude/worktrees/fi-autofix-$id/src/gsd/phase-02.sh" ]
+}
+
+@test "landing: a crash-requeued item resolves its landing branch again" {
+  fi_af_remote_branch gsd/phase-01
+  fi_af_queue_spot "$(grep -m1 '^- \[open\]' docs/found-issues.md)" >/dev/null
+  id="$(ls "$FI_AF_ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 0 ]
+  fi_af_item_set "$FI_AF_ST/running/$id" pid 999999
+  fi_af_reap
+  [ -f "$FI_AF_ST/queue/$id" ]
+  grep -q '^base=$' "$FI_AF_ST/queue/$id"
+  fi_af_remote_branch gsd/phase-02
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 0 ]
+  grep -q '^base=gsd/phase-02$' "$FI_AF_ST/running/$id"
+}
