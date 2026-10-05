@@ -177,10 +177,15 @@ fi_af_sweep_claim() {
   (( capped )) || fi_af_item_set "$q" cap_day "$(fi_today)"
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
   fi_af_seg_write "$AFI_root"
-  (( capped )) || fi_af_cap_take sweep "$id"
   if ! fi_af_worktree_add; then fi_af_finish "$id" failed "$FI_AF_WHY"; return 6; fi
   fi_af_item_set "$r" wt "$AFI_wt"
   fi_af_item_set "$r" branch "$AFI_branch"
+  # No test command at origin/<base>: retire before the day's slot is spent
+  # and before the classifier runs.
+  if ! fi_af_test_command "$AFI_wt" >/dev/null 2>&1; then
+    fi_af_finish "$id" stale "no test command"; return 5
+  fi
+  (( capped )) || fi_af_cap_take sweep "$id"
   fi_af_item_set "$r" base "$AFI_base"
   fi_af_item_set "$r" base_sha "$AFI_base_sha"
   fi_af_item_set "$r" head "$AFI_base_sha"

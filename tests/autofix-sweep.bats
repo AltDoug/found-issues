@@ -226,6 +226,17 @@ sweep_queue() { # queue a sweep for the fixture; sets SID and ST
   grep -q '^result=stale: nothing fixable now$' "$ST/done/$SID"
 }
 
+@test "sweep claim: no test command retires stale without taking the day's sweep slot or classifying" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  git config --unset found-issues.autofix.testCommand
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 5 ]
+  grep -q '^result=stale: no test command$' "$ST/done/$SID"
+  [ ! -s "$ST/day/$(date +%Y-%m-%d).sweep" ]
+  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q . "$FI_STANDIN_TRACE"
+  [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
+}
+
 @test "sweep state: commit moves head and advances; settle resets and tags the source ledger" {
   fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
   "$FI_BIN" autofix claim "$SID" >/dev/null
