@@ -15,6 +15,7 @@
 #   fi_af_brief
 #   fi_af_b_test <id>
 #   fi_af_b_verify <id>
+#   fi_af_search <worktree> <regex> [<path>...] | --files [<path>...]
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
@@ -58,10 +59,12 @@ Worktree: ${AFI_wt}
 Branch:   ${AFI_branch} (from origin/${AFI_base}; never main)
 Test command (bash runs it for you): ${t}
 
-Edit ONLY files under the worktree path above, with Read, Edit, Write, Grep
-and Glob, always by absolute path. Never edit docs/found-issues.md or any
+Edit ONLY files under the worktree path above, with Read, Edit and Write,
+always by absolute path; search with autofix search below. Never edit docs/found-issues.md or any
 found-issues ledger. Your only Bash calls are these, each alone, exactly as
 written (no cd, &&, |, git or gh), with a 600000 ms timeout:
+  found-issues autofix search ${AFI_id} '<regex>' [<path>...]   search the worktree
+  found-issues autofix search ${AFI_id} --files [<path>...]     list its files
   found-issues autofix test ${AFI_id}      run the test command in the worktree
   found-issues autofix verify ${AFI_id}    tests + independent reviewer on your change
   found-issues autofix ship ${AFI_id}      commit, push and open the fix PR
@@ -189,11 +192,13 @@ Branch:   ${AFI_branch} (from origin/${AFI_base}; never main)
 Entries:  ${n}, fixed one at a time in the order given
 Test command (bash runs it for you): ${t}
 
-Edit ONLY files under the worktree path above, with Read, Edit, Write, Grep
-and Glob, always by absolute path. Never edit docs/found-issues.md or any
+Edit ONLY files under the worktree path above, with Read, Edit and Write,
+always by absolute path; search with autofix search below. Never edit docs/found-issues.md or any
 found-issues ledger. Your only Bash calls are these, each alone, exactly as
 written (no cd, &&, |, git or gh), with a 600000 ms timeout:
   found-issues autofix next ${AFI_id}      the entry to fix now
+  found-issues autofix search ${AFI_id} '<regex>' [<path>...]   search the worktree
+  found-issues autofix search ${AFI_id} --files [<path>...]     list its files
   found-issues autofix test ${AFI_id}      run the test command in the worktree
   found-issues autofix verify ${AFI_id}    tests + reviewer; on approval bash commits this entry
   found-issues autofix release ${AFI_id} --already-fixed|--decide|--manual|--failed "<text>"
@@ -214,4 +219,35 @@ Loop:
 If you cannot fix an entry, release it with --failed "<why>" and go to 1.
 End your reply with one line: the sweep id and its outcome.
 BRIEF
+}
+
+# Read-only search for the unattended models (tracked and new untracked
+# files, .gitignore honoured): some Claude Code builds give
+# them no Grep/Glob tools, and rg/fd/git grep can each launch a program
+# through their own flags (--pre, --exec, -O), so only this fixed form is
+# allowed. The regex follows -e and paths follow --, so neither can become
+# a flag. Exit: 0 matches, 1 none, 2 bad usage or a git error.
+FI_AF_SEARCH_MAX=200
+fi_af_search() {
+  local wt="$1" out rc=0 n
+  shift
+  local g=(git -C "$wt" -c core.fsmonitor=false --no-pager)
+  if [[ "${1:-}" == "--files" ]]; then
+    shift
+    out="$("${g[@]}" ls-files --cached --others --exclude-standard -- "$@" 2>&1)" || rc=2
+  else
+    [[ -n "${1:-}" ]] || { fi_err "Usage: found-issues autofix search <id> <regex> [<path>...] | --files [<path>...]"; return 2; }
+    local re="$1"
+    shift
+    out="$("${g[@]}" grep --untracked -n -I -E -e "$re" -- "$@" 2>&1)" || rc=$?
+    (( rc > 1 )) && rc=2
+  fi
+  if (( rc == 2 )); then fi_err "autofix search: ${out:-git failed}"; return 2; fi
+  if [[ -z "$out" ]]; then printf 'no matches\n'; return 1; fi
+  n="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
+  printf '%s\n' "$out" | head -n "$FI_AF_SEARCH_MAX"
+  if (( n > FI_AF_SEARCH_MAX )); then
+    printf '[%s more lines; narrow the regex or pass a path]\n' "$((n - FI_AF_SEARCH_MAX))"
+  fi
+  return 0
 }

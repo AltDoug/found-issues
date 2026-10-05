@@ -85,7 +85,7 @@ COMMANDS
                                         worktree, fixer, tests, verifier, self-merging PR.
   autofix run <sweep-id>                A sweep: up to sweepMax fixable entries, one
                                         commit each, one self-merging PR.
-  autofix claim|brief|next|test|verify|diff|ship|release <id>
+  autofix claim|brief|next|search|test|verify|diff|ship|release <id>
                                         The steps of a fix or sweep, for in-session fixers.
   fix workspace | fix test <wt> | fix ship <wt> [--source R] --title T --body-file F --pick L
                                         /found-issues:fix plumbing: a fresh fix worktree,

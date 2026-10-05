@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-10-05
+
+### Added
+
+- `found-issues autofix search <id> <regex> [<path>...]` and `autofix search <id> --files [<path>...]`: read-only `git grep` / `git ls-files` in a claimed item's worktree, capped at 200 lines. The regex follows `-e` and paths follow `--`, so no argument becomes a git flag. The fixer and sweeper briefs, the headless fixer prompt and allowlist, and the headless verifier's prompt and allowlist all offer it. It covers new untracked files (honouring `.gitignore`), so a fixer can find the test file it just wrote. Some Claude Code builds give these unattended runs no Grep/Glob tools (a headless `claude -p` here exposes only Bash, Edit, Read and Write), and `rg`/`fd`/`git grep` can each launch a program through their own flags, so this fixed form is the only search they are allowed. Headless children now find this CLI's own `found-issues` first on PATH.
+
+### Fixed
+
+- A repo whose open entries are untagged now gets auto-swept. Untagged entries count toward `sweepThreshold`, and every `log` and `sync` re-checks the threshold (before, only a tagged `log`, `tag`, `decide` or a sync that woke an entry did). Only a sweep's classify pass tags entries, so a backlog logged before fix tags existed could never trigger one: on dougstation, `kh2-midgar` sat at 34 untagged entries and `0/1 sweeps` with auto-fix on. An untagged entry counts only until a sweep's classifier has been shown it once: one it leaves out as unsure (or whose tag is refused) then waits for a human `tag`, so a repo of vague entries cannot queue a paid sweep every day.
+
 ## [3.0.5] - 2026-10-04
 
 ### Fixed

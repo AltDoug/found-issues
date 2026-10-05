@@ -44,8 +44,10 @@ fi_af_child() {
   local out="$1" err="$2" cwd="$3" secs cpid waited=0 rc=0
   shift 3
   secs="${FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS:-$(( $(fi_af_int runTimeoutMin 20) * 60 ))}"
+  # PATH changes only inside the child's subshell, on purpose.
+  # shellcheck disable=SC2030,SC2031
   if command -v perl >/dev/null 2>&1; then
-    ( cd "$cwd" && unset FI_AF_PID && FOUND_ISSUES_AUTOFIX_CHILD=1 exec perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' "$@" ) </dev/null >"$out" 2>"$err" &
+    ( cd "$cwd" && unset FI_AF_PID && PATH="${FI_BIN_DIR:+$FI_BIN_DIR:}$PATH" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' "$@" ) </dev/null >"$out" 2>"$err" &
     cpid=$!
     FI_AF_CHILD_PGID="$cpid"
     # autofix cancel (another process) needs the group to kill.
@@ -53,7 +55,7 @@ fi_af_child() {
       fi_af_item_set "$FI_AF_ST/running/$AFI_id" cpgid "$cpid" 2>/dev/null || true
     fi
   else
-    ( cd "$cwd" && unset FI_AF_PID && FOUND_ISSUES_AUTOFIX_CHILD=1 exec "$@" ) </dev/null >"$out" 2>"$err" &
+    ( cd "$cwd" && unset FI_AF_PID && PATH="${FI_BIN_DIR:+$FI_BIN_DIR:}$PATH" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec "$@" ) </dev/null >"$out" 2>"$err" &
     cpid=$!
   fi
   while kill -0 "$cpid" 2>/dev/null; do
@@ -84,10 +86,12 @@ fi_af_kill_child() {
 }
 
 # Read/Edit tools plus the repo's test command, exactly and with appended
-# arguments. Pure test runners may also run a single test file.
+# arguments, and the item's read-only search. Pure test runners may also run
+# a single test file.
 fi_af_allowlist() {
-  local t="$1" first="${1%% *}"
+  local t="$1" first="${1%% *}" id="${2:-}"
   FI_AF_TOOLS=(Read Edit Write Glob Grep "Bash($t)" "Bash($t *)")
+  [[ -n "$id" ]] && FI_AF_TOOLS+=("Bash(found-issues autofix search $id *)")
   case "$first" in
     bats|pytest) FI_AF_TOOLS+=("Bash($first *)") ;;
   esac
@@ -104,8 +108,11 @@ fi_af_fixer_prompt() {
 inside this worktree. Never run git or gh: the orchestrator commits, pushes
 and opens the PR."
   else
-    tools="Read and edit files with the Read, Edit, Write, Grep and Glob tools. The
-only shell command you may run is the test command, as its own Bash call,
+    tools="Read and edit files with the Read, Edit and Write tools. Search with
+found-issues autofix search ${AFI_id:-<id>} '<regex>' [<path>...] (git grep in this
+worktree) or found-issues autofix search ${AFI_id:-<id>} --files [<path>...] (list
+files), each as its own Bash call. The only other shell command you may run
+is the test command, as its own Bash call,
 exactly as: ${testcmd} (a test file may be appended). Run it alone,
 with no cd, ;, &&, |, redirection or echo \$? around it (the Bash tool
 already reports the exit code), and no git or gh: anything else is refused.
@@ -144,7 +151,9 @@ fi_af_verifier_prompt() {
   [[ ${#diff} -gt 60000 ]] && diff="${diff:0:60000}"$'\n[diff truncated]'
   cat <<EOF
 You are a strict reviewer of an unattended bug fix. You may read files in this
-checkout; do not edit anything.
+checkout; do not edit anything. To search it, run
+found-issues autofix search ${AFI_id:-<id>} '<regex>' [<path>...] or
+found-issues autofix search ${AFI_id:-<id>} --files [<path>...], each as its own Bash call.
 
 The issue:
 ${AFI_entry}
@@ -183,7 +192,7 @@ fi_af_verifier_cmd() {
     FI_AF_CMD=(claude -p --model opus --effort high --max-budget-usd "$(fi_af_budget_left || printf '0.10')"
       --max-turns 15 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
-      --allowedTools Read Grep Glob
+      --allowedTools Read Grep Glob "Bash(found-issues autofix search ${AFI_id:-} *)"
       --output-format json "$prompt")
   fi
 }

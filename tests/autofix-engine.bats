@@ -39,6 +39,20 @@ teardown() { fi_teardown_tmp; }
   ! printf '%s\n' "${FI_AF_TOOLS[@]}" | grep -qx 'Bash(npm \*)' || false
 }
 
+@test "autofix engine: the fixer allowlist adds the item's search, and nothing without an id" {
+  fi_af_allowlist 'sh test.sh' t1
+  printf '%s\n' "${FI_AF_TOOLS[@]}" | grep -qx 'Bash(found-issues autofix search t1 \*)'
+  fi_af_allowlist 'sh test.sh'
+  ! printf '%s\n' "${FI_AF_TOOLS[@]}" | grep -q 'autofix search' || false
+}
+
+@test "autofix engine: a child finds this CLI's found-issues first on PATH" {
+  [ -n "$FI_BIN_DIR" ]
+  run fi_af_child "$TMP/o" "$TMP/e" "$TMP" bash -c 'printf %s "$PATH"'
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TMP/o")" == "$FI_BIN_DIR:"* ]]
+}
+
 @test "autofix engine: claude verifier argv - opus, high effort, read-only tools" {
   fi_af_verifier_cmd claude "V" "$TMP/last" "$TMP/schema"
   printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
@@ -46,7 +60,8 @@ teardown() { fi_teardown_tmp; }
   grep -qx 'high' "$TMP/argv"
   grep -qx 'Read' "$TMP/argv" && grep -qx 'Grep' "$TMP/argv" && grep -qx 'Glob' "$TMP/argv"
   ! grep -qx 'Edit' "$TMP/argv" || false
-  ! grep -q '^Bash' "$TMP/argv" || false
+  [ "$(grep -c '^Bash' "$TMP/argv")" -eq 1 ]
+  grep -qx 'Bash(found-issues autofix search t1 \*)' "$TMP/argv"
   [ "${FI_AF_CMD[${#FI_AF_CMD[@]}-1]}" = "V" ]
 }
 
@@ -134,12 +149,22 @@ teardown() { fi_teardown_tmp; }
   [[ "$p" == *"Do not edit docs/found-issues.md"* ]]
 }
 
-@test "autofix engine: the claude prompt says to run the test command alone and to read with tools" {
+@test "autofix engine: the claude prompt says to run the test command alone and to search with autofix search" {
   AFI_branch=b AFI_entry=e
   p="$(fi_af_fixer_prompt 'sh test.sh' '' claude)"
   [[ "$p" == *"exactly as: sh test.sh"* ]]
   [[ "$p" == *'no cd, ;, &&, |, redirection or echo $?'* ]]
-  [[ "$p" == *"Read, Edit, Write, Grep and Glob tools"* ]]
+  [[ "$p" == *"Read, Edit and Write tools"* ]]
+  [[ "$p" == *"found-issues autofix search t1 '<regex>'"* ]]
+  [[ "$p" == *"found-issues autofix search t1 --files"* ]]
+  [[ "$p" != *"Grep"* ]]
+}
+
+@test "autofix engine: the verifier prompt says how to search" {
+  AFI_entry=e
+  p="$(fi_af_verifier_prompt 'diff')"
+  [[ "$p" == *"found-issues autofix search t1 '<regex>'"* ]]
+  [[ "$p" == *"found-issues autofix search t1 --files"* ]]
 }
 
 @test "autofix engine: the codex prompt allows reading but never git or gh" {
@@ -147,7 +172,7 @@ teardown() { fi_teardown_tmp; }
   p="$(fi_af_fixer_prompt 'sh test.sh' '' codex)"
   [[ "$p" == *"read-only shell commands"* ]]
   [[ "$p" == *"Never run git or gh"* ]]
-  [[ "$p" != *"Read, Edit, Write, Grep and Glob tools"* ]]
+  [[ "$p" != *"autofix search"* ]]
 }
 
 @test "autofix engine: the watchdog kills the whole process group, not just the child" {

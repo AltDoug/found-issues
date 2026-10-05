@@ -10,6 +10,7 @@
 # Functions:
 #   fi_af_classify <ledger> <id>
 #   fi_af_classify_apply <ledger> <json> <list-file>
+#   _fi_af_classify_mark_offered <list-file>
 
 # shellcheck disable=SC2154  # AFI_*/FE_* come from autofix-queue.sh / parse-entries.sh
 
@@ -128,5 +129,18 @@ fi_af_classify() {
   [[ "$t" == *"{"*"}"* ]] || return 0
   t="{${t#*\{}"
   t="${t%\}*}}"
+  _fi_af_classify_mark_offered "$list"
   fi_af_classify_apply "$file" "$t" "$list"
+}
+
+# The classifier answered: every U entry it was shown stops counting toward
+# the sweep threshold, so entries it leaves out as unsure (or whose tag is
+# refused) cannot queue a fresh sweep every day.
+_fi_af_classify_mark_offered() {
+  local row entry seen="$FI_AF_ST/classify-offered"
+  while IFS=$'\t' read -r row entry || [[ -n "$row" ]]; do
+    [[ "$row" == U* && -n "$entry" ]] || continue
+    fi_entry_dedup_key_v "$entry" "${AFI_root:-}" || continue
+    grep -Fqx -- "$FI_KEY" "$seen" 2>/dev/null || printf '%s\n' "$FI_KEY" >>"$seen"
+  done <"$1"
 }

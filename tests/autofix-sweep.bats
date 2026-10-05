@@ -60,6 +60,49 @@ LEDGER
   [[ "$output" != *"AUTOFIX-SWEEP-DUE"* ]]
 }
 
+@test "sweep: untagged entries count toward the threshold" {
+  fi_af_sweep_fixture 0
+  for i in 1 2 3 4; do printf -- '- [open] 2026-09-0%s src/u%s.sh:1 — old untagged %s\n' "$i" "$i" "$i" >> docs/found-issues.md; done
+  run "$FI_BIN" log 'src/u5.sh:1 — old untagged 5'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"AUTOFIX-SWEEP-DUE "* ]]
+}
+
+@test "sweep: sync re-checks an untagged backlog with nothing to wake" {
+  fi_af_sweep_fixture 0
+  for i in 1 2 3 4 5; do printf -- '- [open] 2026-09-0%s src/u%s.sh:1 — old untagged %s\n' "$i" "$i" "$i" >> docs/found-issues.md; done
+  git add -A && git commit -q -m backlog && git push -q origin main
+  export PATH="$TEST_REPO_ROOT/tests/bin-shims:$PATH"
+  run "$FI_BIN" sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"AUTOFIX-SWEEP-DUE "* ]]
+}
+
+@test "sweep: untagged entries the classifier was already shown stop counting" {
+  fi_af_sweep_fixture 0
+  for i in 1 2 3 4 5; do printf -- '- [open] 2026-09-0%s src/u%s.sh:1 — old untagged %s\n' "$i" "$i" "$i" >> docs/found-issues.md; done
+  git add -A && git commit -q -m backlog && git push -q origin main
+  source "$FI_BIN"; fi_af_context
+  [ "$(_fi_af_untagged_count docs/found-issues.md "$REPO")" -eq 5 ]
+  : > "$TMP/list"
+  for i in 1 2 3 4; do printf 'U%s\t- [open] 2026-09-0%s src/u%s.sh:1 — old untagged %s\n' "$i" "$i" "$i" "$i" >> "$TMP/list"; done
+  AFI_root="$REPO" _fi_af_classify_mark_offered "$TMP/list"
+  [ "$(_fi_af_untagged_count docs/found-issues.md "$REPO")" -eq 1 ]
+  export PATH="$TEST_REPO_ROOT/tests/bin-shims:$PATH"
+  run "$FI_BIN" sync
+  [[ "$output" != *"AUTOFIX-SWEEP-DUE"* ]]
+}
+
+@test "sweep: four untagged entries do not queue a sweep, nor do decide or manual ones" {
+  fi_af_sweep_fixture 0
+  for i in 1 2 3; do printf -- '- [open] 2026-09-0%s src/u%s.sh:1 — old untagged %s\n' "$i" "$i" "$i" >> docs/found-issues.md; done
+  printf -- '- [open] 2026-09-05 src/d.sh:1 — needs a call (decide: which?)\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-09-06 src/m.sh:1 — untestable (manual: hardware)\n' >> docs/found-issues.md
+  run "$FI_BIN" log 'src/u4.sh:1 — old untagged 4'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"AUTOFIX-SWEEP-DUE"* ]]
+}
+
 @test "sweep: a critical fix medium queues a sweep on its own" {
   fi_af_fixture
   printf '# found-issues\n\n' > docs/found-issues.md
@@ -88,7 +131,9 @@ LEDGER
 
 @test "sweep: tag and decide also trigger" {
   fi_af_sweep_fixture 4
-  "$FI_BIN" log 'src/calc.sh:1 — add subtracts' >/dev/null
+  # Logged manual so the entry does not count yet (untagged ones now do).
+  run "$FI_BIN" log --manual 'unsure' 'src/calc.sh:1 — add subtracts'
+  [[ "$output" != *"AUTOFIX-SWEEP-DUE"* ]]
   run "$FI_BIN" tag 'add subtracts' --fix medium
   [ "$status" -eq 0 ]
   [[ "$output" == *"AUTOFIX-SWEEP-DUE "* ]]

@@ -68,11 +68,12 @@ teardown() { fi_teardown_tmp; }
 
 @test "classify: a sweep claim classifies before it picks entries" {
   printf '# found-issues\n\n' > docs/found-issues.md
-  for i in 1 2 3 4; do printf -- '- [open] 2026-10-01 src/calc.sh:1 — bug %s (fix: medium)\n' "$i" >> docs/found-issues.md; done
+  # 3 tagged + 1 untagged = 4: below the threshold (untagged entries count).
+  for i in 1 2 3; do printf -- '- [open] 2026-10-01 src/calc.sh:1 — bug %s (fix: medium)\n' "$i" >> docs/found-issues.md; done
   printf -- '- [open] 2026-10-01 src/calc.sh:1 — untagged bug\n' >> docs/found-issues.md
   git add -A && git commit -q -m l && git push -q origin main
   export FI_STANDIN_CLASSIFY='{"tags":[{"n":"U1","kind":"fix","value":"medium"}],"wake":[]}'
-  run "$FI_BIN" tag 'bug 4' --fix medium
+  run "$FI_BIN" tag 'bug 3' --fix medium
   SID="$(printf '%s\n' "$output" | sed -n 's/^AUTOFIX-SWEEP-DUE //p')"
   [ -z "$SID" ]
   run "$FI_BIN" log --fix medium 'src/calc.sh:1 — bug 5'

@@ -24,6 +24,10 @@ Usage: found-issues autofix <command>
   brief <id>                  The in-session fixer's instructions for a claimed item
   next <id>                   A sweep's entry to fix now (sweeps fix one entry at a time;
                               verify commits it, release skips it, ship opens one PR)
+  search <id> <regex> [<path>...]
+                              Read-only git grep in the claimed item's worktree
+  search <id> --files [<path>...]
+                              List the claimed item's tracked files
   test <id>                   Run the repo's test command in the claimed item's worktree
   verify <id>                 Tests, then the read-only verifier; records the approved tree
   diff <id>                   The claimed item's change against origin/<default>
@@ -41,7 +45,7 @@ EOF
 # One fixer child plus its bookkeeping. Sets FI_AF_RESULT/_TEXT.
 _fi_af_fix_attempt() {
   local engine="$1" n="$2" feedback="$3" base="$FI_AF_RUNS/$AFI_id.fix$n" rc=0
-  fi_af_allowlist "$FI_AF_TESTCMD"
+  fi_af_allowlist "$FI_AF_TESTCMD" "$AFI_id"
   fi_af_fixer_cmd "$engine" "$(fi_af_fixer_prompt "$FI_AF_TESTCMD" "$feedback" "$engine")" "$base.last"
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
   fi_af_collect "$engine" "$base.out" "$base.last"
@@ -334,6 +338,13 @@ cmd_autofix() {
       local total=0 eline
       while IFS= read -r eline || [[ -n "$eline" ]]; do total=$((total + 1)); done <"$FI_AF_ST/sweeps/$1.entries"
       printf 'Entry %s/%s: %s\nWorktree: %s\n' "$AFI_cur" "$total" "$AFI_entry" "$AFI_wt" ;;
+    search)
+      [[ $# -ge 2 ]] || { fi_err "Usage: found-issues autofix search <id> <regex> [<path>...] | --files [<path>...]"; return 2; }
+      local sid="$1"
+      shift
+      fi_af_context || return 1
+      fi_af_b_running "$sid" || return 1
+      fi_af_search "$AFI_wt" "$@" ;;
     brief|test|verify)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix $sub <id>"; return 2; }
       fi_af_context || return 1
