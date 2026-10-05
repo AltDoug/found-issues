@@ -44,6 +44,59 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   [[ "$output" == *"found-issues autofix release $ID"* ]]
 }
 
+@test "b: brief offers autofix search instead of Grep and Glob" {
+  claim
+  run "$FI_BIN" autofix brief "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"found-issues autofix search $ID '<regex>'"* ]]
+  [[ "$output" == *"found-issues autofix search $ID --files"* ]]
+  [[ "$output" != *"Grep"* ]]
+}
+
+@test "b: search greps the claimed worktree, lists its files, and says when nothing matches" {
+  claim
+  run "$FI_BIN" autofix search "$ID" 'echo \$\(\('
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"src/calc.sh:1:add()"* ]]
+  run "$FI_BIN" autofix search "$ID" 'add' test.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test.sh:2:"* ]]
+  [[ "$output" != *"src/calc.sh"* ]]
+  run "$FI_BIN" autofix search "$ID" --files 'src/*'
+  [ "$status" -eq 0 ]
+  [ "$output" = "src/calc.sh" ]
+  run "$FI_BIN" autofix search "$ID" 'no_such_symbol_anywhere'
+  [ "$status" -eq 1 ]
+  [ "$output" = "no matches" ]
+}
+
+@test "b: search never turns its arguments into git flags" {
+  claim
+  run "$FI_BIN" autofix search "$ID" "--open-files-in-pager=touch $TMP/pwned" "--output=$TMP/pwned2"
+  [ "$status" -le 1 ]
+  [ ! -e "$TMP/pwned" ]
+  [ ! -e "$TMP/pwned2" ]
+  run "$FI_BIN" autofix search "$ID" '('
+  [ "$status" -eq 2 ]
+}
+
+@test "b: search caps long output and says how much was cut" {
+  claim
+  for i in $(seq 1 230); do printf 'needle %s\n' "$i"; done > "$WT/many.txt"
+  git -C "$WT" add many.txt
+  run "$FI_BIN" autofix search "$ID" needle
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"many.txt:200:needle 200"* ]]
+  [[ "$output" != *"many.txt:201:"* ]]
+  [[ "$output" == *"[30 more lines; narrow the regex or pass a path]"* ]]
+}
+
+@test "b: search refuses an item that is not claimed" {
+  run "$FI_BIN" autofix search "$ID" add
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not claimed"* ]]
+}
+
 @test "b: brief refuses an item that is not claimed" {
   run "$FI_BIN" autofix brief "$ID"
   [ "$status" -eq 1 ]
