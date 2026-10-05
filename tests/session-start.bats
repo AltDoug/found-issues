@@ -515,6 +515,27 @@ run_session_start_hook() {
   fi_assert_synced_not_archived
 }
 
+@test "session-start: only (until: pr:|date:) deferred entries trigger a sync; free text does not" {
+  fi_init_git
+  mkdir -p docs
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  stub="$TMP/fi-stub"
+  printf '#!/usr/bin/env bash\necho "$1" >> "%s/calls"\nexec "%s" "$@"\n' "$TMP" "$FI_BIN" > "$stub"
+  chmod +x "$stub"
+  printf '%s\n' '- [deferred] 2026-10-03 src/a.py:1 — x (until: the vendor ships a fix)' > docs/found-issues.md
+  HOME="$FAKE_HOME" FOUND_ISSUES_BIN="$stub" CLAUDE_CODE_ENTRYPOINT=cli \
+    run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  [ "$status" -eq 0 ]
+  ! grep -qx sync "$TMP/calls" 2>/dev/null || false
+  printf '%s\n' '- [deferred] 2026-10-03 src/a.py:1 — x (until: date:2099-01-01)' > docs/found-issues.md
+  HOME="$FAKE_HOME" FOUND_ISSUES_BIN="$stub" CLAUDE_CODE_ENTRYPOINT=cli \
+    run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  [ "$status" -eq 0 ]
+  grep -qx sync "$TMP/calls"
+  rm -rf "$FAKE_HOME"
+}
+
 @test "session-start: says how many decisions are waiting" {
   mkdir -p docs
   printf -- '- [open] 2026-10-01 a.sh:1 — x (decide: A or B?)\n- [open] 2026-10-01 b.sh:1 — y (decide: C or D?)\n- [open] 2026-10-01 c.sh:1 — z\n' > docs/found-issues.md

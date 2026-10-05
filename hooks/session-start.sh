@@ -446,7 +446,9 @@ __fi_ledger_text="$(<"$issues_file")"
 __fi_re_open=$'(^|\n)- \\[open\\]'
 # A deferred entry with an (until: ...) trigger also needs the sync: it may
 # be due to wake (v3, spec §6 step 3).
-__fi_re_until=$'(^|\n)- \\[deferred\\][^\n]*\\(until: '
+# Only the mechanically checkable kinds count: sync can never wake a
+# free-text trigger, so those must not cost a sync process every session.
+__fi_re_until=$'(^|\n)- \\[deferred\\][^\n]*\\(until: (pr|date):'
 if [[ ! "$__fi_ledger_text" =~ $__fi_re_open && ! "$__fi_ledger_text" =~ $__fi_re_until ]]; then
   fi_flush_codex_exit
 fi
