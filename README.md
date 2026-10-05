@@ -225,7 +225,7 @@ regression report is welcome.
 
 ## Status
 
-**v3.0.4** — opt-in auto-fix and auto-sweep on top of the ledger;
+**v3.0.5** — opt-in auto-fix and auto-sweep on top of the ledger;
 actively developed and dogfooded (this repo's own ledger is maintained by
 the plugin). End-to-end runtime probes exercise the generated statusline
 shims against synthetic Claude Code stdin on every CI run, and stand-in
