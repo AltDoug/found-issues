@@ -187,6 +187,7 @@ fi_af_sweep_claim() {
   fi
   (( capped )) || fi_af_cap_take sweep "$id"
   fi_af_item_set "$r" base "$AFI_base"
+  fi_af_item_set "$r" base_why "$AFI_base_why"
   fi_af_item_set "$r" base_sha "$AFI_base_sha"
   fi_af_item_set "$r" head "$AFI_base_sha"
   fi_af_item_set "$r" cur 1

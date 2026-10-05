@@ -37,6 +37,7 @@ AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
 AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
+AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next=""
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -51,13 +52,14 @@ fi_af_item_read() {
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
   AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
+  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next=""
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -212,11 +214,55 @@ fi_af_eligible() {
   return 1
 }
 
+# 3.2.0 (spec section 1): the branch a fix starts from and lands into is the
+# one the session works on, never assumed to be the default branch. Sets
+# AFI_base and AFI_base_why; every fallback is the default branch.
+fi_af_landing_branch() {
+  local def cur up b n best="" bestn="" base
+  def="$(cd "$AFI_root" && fi_resolve_default_branch)"
+  AFI_base="$def"
+  cur="$(git -C "$AFI_root" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  if [[ -z "$cur" ]]; then AFI_base_why="detached"; return 0; fi
+  if [[ "$cur" == "$def" ]]; then AFI_base_why="default branch"; return 0; fi
+  up="$(git -C "$AFI_root" config --get "branch.$cur.merge" 2>/dev/null || true)"
+  up="${up#refs/heads/}"
+  if [[ -n "$up" ]]; then
+    # ls-remote, not origin/<up>: a branch deleted on GitHub keeps its stale
+    # remote-tracking ref until someone prunes.
+    if git -C "$AFI_root" ls-remote --exit-code --heads origin "$up" >/dev/null 2>&1; then
+      AFI_base="$up" AFI_base_why="tracks origin/$up"; return 0
+    fi
+    base="$(cd "$AFI_root" && gh pr list --repo "${AFI_slug:-$(fi_repo_id 2>/dev/null)}" --head "$up" --state merged --limit 1 \
+      --json baseRefName --jq '.[0].baseRefName // ""' 2>/dev/null || true)"
+    if [[ -n "$base" ]] && git -C "$AFI_root" ls-remote --exit-code --heads origin "$base" >/dev/null 2>&1; then
+      AFI_base="$base" AFI_base_why="$up merged into $base"; return 0
+    fi
+    AFI_base_why="$up gone, base unknown"; return 0
+  fi
+  git -C "$AFI_root" fetch -q origin 2>/dev/null || true
+  while IFS= read -r b || [[ -n "$b" ]]; do
+    b="${b#origin/}"
+    [[ -n "$b" && "$b" != HEAD && "$b" != fi/* ]] || continue
+    git -C "$AFI_root" ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1 || continue
+    git -C "$AFI_root" merge-base "origin/$b" HEAD >/dev/null 2>&1 || continue
+    n="$(git -C "$AFI_root" rev-list --count "origin/$b..HEAD" 2>/dev/null)" || continue
+    if [[ -z "$bestn" ]] || (( n < bestn )) || { (( n == bestn )) && [[ "$b" == "$def" ]]; }; then
+      best="$b" bestn="$n"
+    fi
+  done < <(git -C "$AFI_root" for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null)
+  if [[ -z "$best" ]]; then AFI_base_why="no pushed ancestor"; return 0; fi
+  # A tie keeps the default branch: only a strictly nearer branch wins.
+  if [[ "$best" != "$def" ]] && [[ "$(git -C "$AFI_root" rev-list --count "origin/$def..HEAD" 2>/dev/null)" == "$bestn" ]]; then
+    AFI_base_why="nearest pushed ancestor $def"; return 0
+  fi
+  AFI_base="$best" AFI_base_why="nearest pushed ancestor $best"
+}
+
 fi_af_worktree_add() {
   local s base
-  base="$(cd "$AFI_root" && fi_resolve_default_branch)"
+  [[ -n "$AFI_base" ]] || fi_af_landing_branch
+  base="$AFI_base"
   git -C "$AFI_root" fetch -q origin "$base" 2>/dev/null || { FI_AF_WHY="git fetch failed"; return 1; }
-  AFI_base="$base"
   if [[ "$AFI_kind" == "sweep" ]]; then
     # Phase 4 ruling 5: unique per run (the spec's per-day <n> collided).
     AFI_branch="fi/sweep/${AFI_id%%-*}-${AFI_id##*-}"
@@ -316,8 +362,9 @@ fi_af_claim() {
   fi_af_item_set "$r" wt "$AFI_wt"
   fi_af_item_set "$r" branch "$AFI_branch"
   fi_af_item_set "$r" base "$AFI_base"
+  fi_af_item_set "$r" base_why "$AFI_base_why"
   fi_af_item_set "$r" base_sha "$AFI_base_sha"
-  fi_af_log "$id" "claimed: $AFI_wt ($AFI_branch from origin/$AFI_base)"
+  fi_af_log "$id" "claimed: $AFI_wt ($AFI_branch from origin/$AFI_base: $AFI_base_why)"
 }
 
 # Give a claimed item back to the queue untouched (an engine outage): no
