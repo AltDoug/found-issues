@@ -299,7 +299,22 @@ fi
 # own commit-annotation pass.
 if [[ "$cmd" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]]; then
   exit_code="$(get_field '.tool_response.exit_code')"
-  if [[ ( -z "$exit_code" || "$exit_code" == "0" ) ]] && git rev-parse --git-dir >/dev/null 2>&1; then
+  # A missing exit_code counts as success (Claude Code's Bash tool_response
+  # carries none), so a failed or no-op `git commit` would re-annotate the
+  # previous HEAD. Remember the last HEAD this route handled (in the repo's
+  # own git dir) and skip when HEAD has not moved.
+  head_sha=""
+  seen_file=""
+  commit_seen=0
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    head_sha="$(git rev-parse HEAD 2>/dev/null)" || head_sha=""
+    seen_file="$(git rev-parse --git-dir 2>/dev/null)/found-issues-last-head"
+    if [[ -n "$head_sha" && -f "$seen_file" && "$(cat "$seen_file" 2>/dev/null)" == "$head_sha" ]]; then
+      commit_seen=1
+    fi
+  fi
+  if [[ ( -z "$exit_code" || "$exit_code" == "0" ) && "$commit_seen" -eq 0 ]] && git rev-parse --git-dir >/dev/null 2>&1; then
+    [[ -n "$head_sha" ]] && printf '%s\n' "$head_sha" >"$seen_file" 2>/dev/null || true
     if [[ "${FOUND_ISSUES_AUTO_ANNOTATE:-on}" == "off" ]]; then
       legacy_out="$(legacy_commit_prompt)"
       [[ -n "$legacy_out" ]] && ctx+="$legacy_out"$'\n\n'

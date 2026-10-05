@@ -132,6 +132,23 @@ run_hook_raw() { # $1=raw json
   grep -q '(commit-auto:' docs/found-issues.md
 }
 
+@test "git commit: a second hook run on an unmoved HEAD (failed or no-op commit) does not re-annotate" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  run run_hook 'git commit -m fix' ''
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"touches files referenced"* ]]
+  # HEAD has not moved: the next commit attempt failed or changed nothing.
+  run run_hook 'git commit -m fix' ''
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "git commit: message mentioning gh pr create still triggers commit route" {
   # Regression test for the route-shadow finding: the pr-create route used
   # to match ANY command containing the substring "gh pr create" (even one
