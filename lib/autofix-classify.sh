@@ -105,8 +105,10 @@ fi_af_classify() {
   local file="$1" id="$2" list="$FI_AF_RUNS/$2.classify.list" base="$FI_AF_RUNS/$2.classify" engine rc=0 t
   _fi_af_classify_list "$file" "$list"
   [[ -s "$list" ]] || return 0
-  engine="$(fi_af_engine "${AFI_engine:-}" 2>/dev/null)" || return 0
-  command -v "$engine" >/dev/null 2>&1 || return 0
+  engine="$(fi_af_engine "${AFI_engine:-}" 2>/dev/null)" \
+    || { fi_af_log "$id" "classify: skipped (no engine resolved)"; return 0; }
+  command -v "$engine" >/dev/null 2>&1 \
+    || { fi_af_log "$id" "classify: skipped (no engine on PATH)"; return 0; }
   if [[ "$engine" == "codex" ]]; then
     printf '%s\n' '{"type":"object","properties":{"tags":{"type":"array","items":{"type":"object","properties":{"n":{"type":"string"},"kind":{"type":"string"},"value":{"type":"string"}},"required":["n","kind","value"],"additionalProperties":false}},"wake":{"type":"array","items":{"type":"string"}}},"required":["tags","wake"],"additionalProperties":false}' >"$base.schema.json"
     FI_AF_CMD=(codex exec --sandbox read-only -C "$AFI_wt" --ephemeral --json
