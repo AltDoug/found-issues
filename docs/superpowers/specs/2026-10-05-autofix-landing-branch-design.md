@@ -77,7 +77,7 @@ In `lib/sync.sh` (`_fi_pr_info`, ~line 135, and the landed check, ~line 220):
 
 | Failure | Behaviour |
 |---|---|
-| `gh` missing or failing in the gone-upstream lookup | default branch, `base_why=X gone, gh unavailable` |
+| `gh` missing or failing in the gone-upstream lookup | default branch, `base_why=X gone, base unknown` |
 | no pushed ancestor | default branch, `base_why=no pushed ancestor` |
 | fetch of the landing branch fails | item fails `git fetch failed` (unchanged) |
 | landing branch deleted between claim and PR | `gh pr create` fails, existing failure path |
