@@ -301,7 +301,29 @@ fi
 # a chained `git commit -m x && gh pr create` runs both, and so a plain
 # commit whose message happens to mention "gh pr create" still gets its
 # own commit-annotation pass.
-if [[ "$cmd_unquoted" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]]; then
+#
+# A `cd`/`pushd` ahead of the commit may have landed it in ANOTHER repo, while
+# this route annotates the hook cwd repo's HEAD. Resolve the cd target and skip
+# only when it is not inside the cwd repo (or cannot be resolved).
+commit_in_other_repo() {
+  [[ "$cmd_unquoted" =~ (^|[[:space:];\&|\(])(cd|pushd)[[:space:]]+.*git[[:space:]]+commit ]] || return 1
+  local re='(^|[[:space:];&|(])(cd|pushd)[[:space:]]+("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:];&|)]+)'
+  [[ "$cmd" =~ $re ]] || return 0
+  local target="${BASH_REMATCH[3]}"
+  target="${target#[\"\']}"; target="${target%[\"\']}"
+  case "$target" in
+    "~") target="$HOME" ;;
+    "~/"*) target="$HOME/${target#\~/}" ;;
+  esac
+  [[ -z "$target" || "$target" == *'$'* || "$target" == *'`'* ]] && return 0
+  [[ -d "$target" ]] || return 0
+  local here there
+  here="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  there="$(git -C "$target" rev-parse --show-toplevel 2>/dev/null)" || return 0
+  [[ "$(cd "$here" && pwd -P)" != "$(cd "$there" && pwd -P)" ]]
+}
+if [[ "$cmd_unquoted" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]] \
+   && ! commit_in_other_repo; then
   exit_code="$(get_field '.tool_response.exit_code')"
   # A missing exit_code counts as success (Claude Code's Bash tool_response
   # carries none), so a failed or no-op `git commit` would re-annotate the

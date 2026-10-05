@@ -286,6 +286,52 @@ run_hook_raw() { # $1=raw json
   [ -z "$output" ]
 }
 
+@test "git commit: a commit after cd into another directory is not annotated against this repo" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  run run_hook 'cd /elsewhere && git commit -m fix' ''
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "git commit: a commit after cd into a different real repo is not annotated against this repo" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  other="$(mktemp -d "$TMP/other.XXXXXX")"
+  git -C "$other" init -q
+  run run_hook "cd $other && git commit -m fix" ''
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "git commit: cd into this same repo (absolute path or subdir) still runs the commit route" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  run run_hook "cd $PWD && git commit -m fix" ''
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"touches files referenced"* ]]
+  # Fresh HEAD marker so the second case is not suppressed by the first.
+  rm -f "$(git rev-parse --git-dir)/found-issues-last-head"
+  run run_hook "cd src && git commit -m fix" ''
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"touches files referenced"* ]]
+}
+
 @test "codex harness: candidate surface is additionalContext JSON" {
   unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
   export PLUGIN_DATA="$TMP/plugdata"
