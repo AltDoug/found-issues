@@ -125,8 +125,11 @@ legacy_pr_prompt() {
   [[ -f "$lib_dir/annotate.sh" ]] || return 0
   # shellcheck source=../lib/annotate.sh
   source "$lib_dir/annotate.sh"
-  local touched_files
-  touched_files="$(fi_pr_touched_files "$pr_num" 2>/dev/null)"
+  local touched_files note_f pr_note=""
+  note_f="$(mktemp "${TMPDIR:-/tmp}/fi-pr-note.XXXXXX" 2>/dev/null)" || note_f=/dev/null
+  touched_files="$(fi_pr_touched_files "$pr_num" 2>"$note_f")"
+  pr_note="$(grep -F 'were not checked' "$note_f" 2>/dev/null || true)"
+  [[ "$note_f" != /dev/null ]] && rm -f "$note_f"
   [[ -z "$touched_files" ]] && return 0
 
   local repo_id
@@ -153,9 +156,11 @@ legacy_pr_prompt() {
     done <<< "$touched_files"
   done < <(fi_entries "$issues_file" open 2>/dev/null)
 
-  if [[ -z "$matching" ]]; then
+  if [[ -z "$matching" && -z "$pr_note" ]]; then
     return 0
   fi
+  [[ -z "$matching" ]] && matching="(none in the files checked)"$'\n'
+  [[ -n "$pr_note" ]] && matching+="$pr_note"$'\n'
 
   printf '%s' "## found-issues — PR #$pr_num touches files referenced by [open] entries
 
@@ -251,7 +256,13 @@ if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+create([[:space:]]
       legacy_out="$(legacy_pr_prompt "$pr_num")"
       [[ -n "$legacy_out" ]] && ctx+="$legacy_out"$'\n\n'
     else
-      out="$("$FI_BIN" annotate-pr "$pr_num" --hook-auto 2>/dev/null)" && rc=0 || rc=$?
+      # stderr carries one note worth keeping: the PR's file list came back
+      # incomplete (lib/annotate.sh fi_pr_touched_files). Everything else
+      # stays discarded, as before.
+      note_f="$(mktemp "${TMPDIR:-/tmp}/fi-pr-note.XXXXXX" 2>/dev/null)" || note_f=/dev/null
+      out="$("$FI_BIN" annotate-pr "$pr_num" --hook-auto 2>"$note_f")" && rc=0 || rc=$?
+      pr_note="$(grep -F 'were not checked' "$note_f" 2>/dev/null || true)"
+      [[ "$note_f" != /dev/null ]] && rm -f "$note_f"
       if [[ "$rc" -eq 0 && "$out" == *"Suggested"* ]]; then
         ctx+="## found-issues — PR #$pr_num produced annotation SUGGESTIONS
 
@@ -269,6 +280,13 @@ Compare each candidate's symptom against what the PR actually changes, then run:
   found-issues annotate-pr $pr_num --pick <path:line>[,...]
 (or --all only if the PR genuinely addresses every candidate). Entries the PR does not fix must NOT be annotated — they would false-flip to [fixed] on merge."
         ctx+=$'\n\n'
+      fi
+      if [[ -n "$pr_note" ]]; then
+        ctx+="## found-issues — PR #$pr_num file list is incomplete
+
+$pr_note
+Entries citing files past that list were not matched. If the PR fixes any, run:
+  found-issues annotate-pr $pr_num --pick <path:line>[,...]"$'\n\n'
       fi
     fi
   fi

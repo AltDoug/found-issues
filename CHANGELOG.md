@@ -8,7 +8,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- `annotate-pr` now sees every file a large PR touches. It read the file list from `gh pr view --json files`, which stops at 100 files, so on a 584-file phase-ship PR (`ByteTechSoftwares/sayciao#155`) whose first 100 files were all `.planning/` artifacts it reported "no [open] entries match" while entries citing touched source files were genuinely fixed. It now pages the REST files endpoint (`gh api --paginate repos/{owner}/{repo}/pulls/<N>/files`), up to GitHub's 3000-file ceiling, and warns when the list reaches that ceiling. If the paginated call fails it falls back to `gh pr view` and warns when that list is full at 100. The `gh pr create` hook's legacy prompt (`FOUND_ISSUES_AUTO_ANNOTATE=off`) uses the same list.
+- `annotate-pr` now sees every file a large PR touches. It read the file list from `gh pr view --json files`, which stops at 100 files, so on a 584-file phase-ship PR (`ByteTechSoftwares/sayciao#155`) whose first 100 files were all `.planning/` artifacts it reported "no [open] entries match" while entries citing touched source files were genuinely fixed. It now pages the REST files endpoint (`gh api --paginate repos/{owner}/{repo}/pulls/<N>/files`), up to GitHub's 3000-file ceiling, and warns when the list reaches that ceiling. If the paginated call fails it falls back to `gh pr view` and warns when that list is full at 100. The `gh pr create` hook's legacy prompt (`FOUND_ISSUES_AUTO_ANNOTATE=off`) uses the same list, and both of that hook's paths now pass an incomplete-list warning on to the agent with the `--pick` command (the hook used to discard stderr).
 
 ## [3.1.0] - 2026-10-05
 
