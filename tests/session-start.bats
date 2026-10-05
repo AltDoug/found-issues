@@ -301,6 +301,30 @@ run_session_start_hook() {
   rm -rf "$FAKE_HOME"
 }
 
+@test "session-start: unannotated entries take the cap slots before PR-annotated in-flight ones" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  fi_init_git
+  mkdir -p src
+  export FOUND_ISSUES_SESSION_INJECT_MAX=2
+  for i in 1 2 3 4; do
+    printf '1\n2\n3\n4\n' > "src/f$i.py"
+    fi_run log "src/f$i.py:$i — bug $i"
+  done
+  # The two NEWEST entries are already in flight in a PR.
+  sed -i.bak -E 's#^(- \[open\] .* src/f[34]\.py:[34] .*)$#\1 (PR: org/repo\#9)#' docs/found-issues.md
+  rm -f docs/found-issues.md.bak
+  grep -c '(PR: org/repo#9)' docs/found-issues.md | grep -qx 2
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"src/f1.py:1"* ]]
+  [[ "$output" == *"src/f2.py:2"* ]]
+  [[ "$output" != *"src/f3.py:3"* ]]
+  [[ "$output" != *"src/f4.py:4"* ]]
+  [[ "$output" == *"and 2 more [open] entries"* ]]
+  rm -rf "$FAKE_HOME"
+}
+
 @test "session-start: criticals always injected even over the cap" {
   FAKE_HOME="$(mktemp -d)"
   mkdir -p "$FAKE_HOME/.claude"

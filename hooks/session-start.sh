@@ -508,7 +508,24 @@ slots=$(( max_inject - crit_count ))
 (( slots < 0 )) && slots=0
 shown_noncrit=""
 if (( noncrit_count > 0 && slots > 0 )); then
-  shown_noncrit="$(printf '%s\n' "$noncrit_entries" | tail -n "$slots")"
+  # Entries already annotated (PR:) / (commit:) are in flight: the agent can do
+  # nothing about them, so unannotated entries fill the slots first and the
+  # annotated ones take only what is left, shown last.
+  fi_inflight_re='\((PR|commit): '
+  unannotated_entries="$(printf '%s\n' "$noncrit_entries" | grep -Ev "$fi_inflight_re" || true)"
+  annotated_entries="$(printf '%s\n' "$noncrit_entries" | grep -E "$fi_inflight_re" || true)"
+  unannotated_count=0
+  [[ -n "$unannotated_entries" ]] && unannotated_count="$(printf '%s\n' "$unannotated_entries" | grep -c '^-' || true)"
+  unannotated_count="${unannotated_count:-0}"
+  if (( unannotated_count >= slots )); then
+    shown_noncrit="$(printf '%s\n' "$unannotated_entries" | tail -n "$slots")"
+  else
+    shown_noncrit="$unannotated_entries"
+    if [[ -n "$annotated_entries" ]]; then
+      [[ -n "$shown_noncrit" ]] && shown_noncrit+=$'\n'
+      shown_noncrit+="$(printf '%s\n' "$annotated_entries" | tail -n "$(( slots - unannotated_count ))")"
+    fi
+  fi
 fi
 omitted=$(( noncrit_count - slots ))
 (( omitted < 0 )) && omitted=0
