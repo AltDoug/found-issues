@@ -66,6 +66,10 @@ tool_name="$(get_field '.tool_name')"
 [[ "$tool_name" != "Bash" ]] && exit 0
 cmd="$(get_field '.tool_input.command')"
 [[ -z "$cmd" ]] && exit 0
+# The commit and merge routes match against the command with quoted spans
+# removed, so a command that merely MENTIONS `git commit` / `gh pr merge`
+# inside a string (echo, grep, a commit message) does not trigger them.
+cmd_unquoted="$(printf '%s' "$cmd" | sed -E -e 's/"[^"]*"//g' -e "s/'[^']*'//g")"
 
 # --- shared resolution (same chain as the retired hooks) ---
 __fi_hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
@@ -297,7 +301,7 @@ fi
 # a chained `git commit -m x && gh pr create` runs both, and so a plain
 # commit whose message happens to mention "gh pr create" still gets its
 # own commit-annotation pass.
-if [[ "$cmd" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]]; then
+if [[ "$cmd_unquoted" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]]; then
   exit_code="$(get_field '.tool_response.exit_code')"
   # A missing exit_code counts as success (Claude Code's Bash tool_response
   # carries none), so a failed or no-op `git commit` would re-annotate the
@@ -391,7 +395,7 @@ fi
 # `gh pr create ... && gh pr merge N --auto` never reached the annotation
 # routes at all, since they sat below this one's exit. Moving this route
 # last and dropping its exit fixes that.
-if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+(merge|close|reopen)([[:space:]]|$) ]]; then
+if [[ "$cmd_unquoted" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+(merge|close|reopen)([[:space:]]|$) ]]; then
   if [[ "${FOUND_ISSUES_POST_PR_STATE:-on}" != "off" ]]; then
     if [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
       ( bash -c "$FOUND_ISSUES_AUTOSYNC_CMD" >/dev/null 2>&1 & ) >/dev/null 2>&1

@@ -264,6 +264,28 @@ run_hook_raw() { # $1=raw json
   [ -f "$marker" ]
 }
 
+@test "pr merge: a quoted mention of gh pr merge does not dispatch a sync" {
+  marker="$TMP/sync-ran"
+  export FOUND_ISSUES_AUTOSYNC_CMD="touch '$marker'"
+  run run_hook 'echo "next: gh pr merge 7 --squash"' ''
+  [ "$status" -eq 0 ]
+  sleep 2
+  [ ! -f "$marker" ]
+}
+
+@test "git commit: a quoted mention of git commit does not run the commit route" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  run run_hook "echo 'remember to git commit -m fix'" ''
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "codex harness: candidate surface is additionalContext JSON" {
   unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
   export PLUGIN_DATA="$TMP/plugdata"
