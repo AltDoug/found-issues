@@ -258,6 +258,7 @@ cmd_autofix() {
         4) fi_err "autofix: another auto-fix run holds this repo; $1 stays queued" ;;
         5) fi_err "autofix: $1 retired — $FI_AF_WHY" ;;
         6) fi_err "autofix: $1 failed — $FI_AF_WHY" ;;
+        8) fi_err "autofix: $1 waits — $FI_AF_WHY (rechecked on the next stop)" ;;
       esac
       return $rc ;;
     release)

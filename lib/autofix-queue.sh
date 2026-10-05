@@ -336,6 +336,42 @@ fi_af_reap() {
   done
 }
 
+# The file an entry cites, relative to the root; rc 1 when the entry cites no
+# file that exists in the root checkout (an abstract topic, with or without a
+# slash, or a path that exists nowhere), so there is nothing to wait on.
+_fi_af_entry_file() {
+  fi_parse_entry_vars "$AFI_entry" 2>/dev/null || return 1
+  [[ -n "$FE_path" ]] || return 1
+  [[ -e "$AFI_root/$FE_path" ]] || return 1
+  printf '%s' "$FE_path"
+}
+
+# Spec section 2: rc 0 = go; rc 8 = wait (item stays queued); rc 5 = waited
+# too long. The file must be on the landing branch's remote and untouched
+# locally, or a fix cut from origin/<base> would not match what the session sees.
+_fi_af_wait_check() {
+  local q="$1" p why now since
+  p="$(_fi_af_entry_file)" || return 0
+  git -C "$AFI_root" fetch -q origin "$AFI_base" 2>/dev/null || return 0
+  if ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
+    why="$p not on origin/$AFI_base"
+  elif [[ -n "$(git -C "$AFI_root" diff --name-only "origin/$AFI_base" -- "$p" 2>/dev/null)" ]]; then
+    why="$p busy in $AFI_root"
+  else
+    return 0
+  fi
+  now="$(date +%s)"
+  since="$AFI_wait_since"; [[ "$since" =~ ^[0-9]+$ ]] || since="$now"
+  if (( now - since > ${FOUND_ISSUES_AUTOFIX_WAIT_MAX:-259200} )); then
+    FI_AF_WHY="$why"; return 5
+  fi
+  fi_af_item_set "$q" waiting "$why"
+  fi_af_item_set "$q" wait_since "$since"
+  fi_af_item_set "$q" wait_next "$(( now + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
+  FI_AF_WHY="$why"
+  return 8
+}
+
 # Spec §5.1. Lock first, so of two claimers exactly one sees the queue file.
 fi_af_claim() {
   local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1"
@@ -349,6 +385,16 @@ fi_af_claim() {
   # finds nothing and the lock is still ours to drop.
   if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY" || fi_af_unlock "$id"; return 5; fi
   if ! fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"; then fi_af_unlock "$id"; return 3; fi
+  # Resolve the landing branch now so the wait check and the worktree cut
+  # (fi_af_worktree_add reuses AFI_base) look at the same branch.
+  fi_af_landing_branch
+  local wrc=0
+  _fi_af_wait_check "$q" || wrc=$?
+  case $wrc in
+    5) fi_af_retire "$id" stale "$FI_AF_WHY" || fi_af_unlock "$id"; return 5 ;;
+    8) fi_af_unlock "$id"; fi_af_log "$id" "waiting: $FI_AF_WHY"; return 8 ;;
+  esac
+  fi_af_item_set "$q" waiting ""
   # Launcher A's run passes its own long-lived pid. A standalone claim is an
   # in-session fixer (launcher B): its claim process exits at once, so there
   # is no pid to record. The repo lock, refreshed by every B-side call, is
