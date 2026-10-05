@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.2] - 2026-10-05
+
+### Fixed
+
+- A sweep left waiting in the queue from an earlier day no longer blocks every later sweep. Only one sweep may be queued or running at a time, and a queued sweep is launched only by a session that stops inside the checkout it was queued from, so a sweep queued from a checkout nobody returns to (here, a crash-requeued sweep rooted at a merged branch's worktree) stranded the repo's sweeps indefinitely. The next `log`/`sync` check now retires such a sweep as stale and queues a fresh one rooted at the current checkout. Fix written by the 3.1.1 auto-fixer (PR #203).
+
 ## [3.1.1] - 2026-10-05
 
 ### Fixed

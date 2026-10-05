@@ -122,6 +122,23 @@ LEDGER
   [[ "$output" != *"AUTOFIX-SWEEP-DUE"* ]]
 }
 
+@test "sweep: a sweep left queued from an earlier day is retired and a fresh one queued" {
+  fi_af_sweep_fixture 5
+  run "$FI_BIN" log --fix medium 'src/calc.sh:1 — add subtracts'
+  old="$(printf '%s\n' "$output" | sed -n 's/^AUTOFIX-SWEEP-DUE //p')"
+  [ -n "$old" ]
+  st="$FOUND_ISSUES_STATE_DIR/autofix/foo__bar"
+  sed -i.bak 's/^queued=.*/queued=2020-01-01T00:00:00/' "$st/queue/$old"
+  rm -f "$st/queue/$old.bak" "$st"/day/*.sweep
+  run "$FI_BIN" log --fix medium 'src/calc.sh:2 — add is slow'
+  [[ "$output" == *"AUTOFIX-SWEEP-DUE "* ]]
+  new="$(printf '%s\n' "$output" | sed -n 's/^AUTOFIX-SWEEP-DUE //p')"
+  [ "$new" != "$old" ]
+  [ ! -f "$st/queue/$old" ]
+  [ -f "$st/done/$old" ]
+  [ -f "$st/queue/$new" ]
+}
+
 @test "sweep: auto-fix off queues nothing" {
   fi_af_sweep_fixture 5
   git config found-issues.autofix false

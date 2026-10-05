@@ -88,6 +88,22 @@ fi_af_sweep_pending() {
   return 1
 }
 
+# A sweep still waiting in queue/ from an earlier day never got launched (its
+# root's session never stopped, or the root is gone) and would block every
+# later sweep: retire it as stale so the next check queues a fresh one.
+_fi_af_sweep_retire_stale() {
+  local f q id today
+  today="$(fi_today)"
+  for f in "$FI_AF_ST"/queue/*; do
+    [[ -f "$f" ]] || continue
+    [[ "$(_fi_af_field "$f" kind)" == "sweep" ]] || continue
+    q="$(_fi_af_field "$f" queued)" || continue
+    [[ "${q:0:10}" < "$today" ]] || continue
+    id="${f##*/}"
+    fi_af_retire "$id" stale "queued ${q:0:10} and never launched" || true
+  done
+}
+
 # Spec §4.1: after log, tag, decide or sync wrote the ledger. One sweep at
 # a time and dailySweeps a day; due at sweepThreshold candidates or on one
 # critical (fix: medium). Never fails its caller. Never inside a fixer
@@ -121,6 +137,7 @@ fi_af_sweep_check() {
   file="$(fi_find_issues_file "$root" 2>/dev/null)" || return 0
   [[ -f "$file" ]] || return 0
   fi_af_dirs "$slug"
+  _fi_af_sweep_retire_stale
   fi_af_sweep_pending && return 0
   fi_af_cap_ok sweep "$(fi_af_int dailySweeps 1)" || return 0
   while IFS= read -r entry || [[ -n "$entry" ]]; do
