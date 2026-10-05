@@ -115,7 +115,10 @@ ONBOARD_DIR="$HOME/.claude/found-issues"
 if [[ "$harness" == "claude" && "$fi_ss_interactive" == 1 ]]; then
 ONBOARD_MARKER="$ONBOARD_DIR/.onboarded"
 if [[ ! -f "$ONBOARD_MARKER" ]]; then
-  mkdir -p "$ONBOARD_DIR"
+  # Exit code 0 always: an unwritable HOME (read-only, sandboxed, full disk)
+  # must not abort the hook under errexit. The hint prints only when the
+  # marker could be written, so it cannot repeat every session.
+  if mkdir -p "$ONBOARD_DIR" 2>/dev/null && touch "$ONBOARD_MARKER" 2>/dev/null; then
   cat <<'EOF'
 [found-issues setup hint — fires only on first session ever, never again]
 
@@ -126,7 +129,7 @@ Prepend this single italicized line to the very top of your next reply, then con
 Do not paraphrase or expand. One line, then the user's actual task.
 
 EOF
-  touch "$ONBOARD_MARKER"
+  fi
 fi
 fi
 

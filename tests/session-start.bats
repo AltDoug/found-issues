@@ -539,6 +539,16 @@ run_session_start_hook() {
   [ -e "$FAKE_HOME/.claude/found-issues/.onboarded" ]
 }
 
+@test "session-start: an unwritable HOME does not abort the hook (exit 0, no repeated hint)" {
+  FAKE_HOME="$TMP/home-unwritable"; mkdir -p "$FAKE_HOME"
+  # ~/.claude is a plain file, so mkdir -p ~/.claude/found-issues must fail.
+  : > "$FAKE_HOME/.claude"
+  export CLAUDE_CODE_ENTRYPOINT=cli
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"found-issues setup hint"* ]]
+}
+
 @test "session-start: a headless session gets no codex-unwired nudge" {
   FAKE_HOME="$TMP/home-headless3"; mkdir -p "$FAKE_HOME/.claude/found-issues" "$FAKE_HOME/.codex/plugins/cache/x/found-issues"
   : > "$FAKE_HOME/.claude/found-issues/.onboarded"
