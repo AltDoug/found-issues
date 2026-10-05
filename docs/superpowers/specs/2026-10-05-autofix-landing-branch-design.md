@@ -35,12 +35,12 @@ New function `fi_af_landing_branch` in `lib/autofix-queue.sh`. It is called by `
 | Root checkout is on | Landing branch | `base_why` |
 |---|---|---|
 | the default branch, or detached HEAD | default | `default branch` / `detached` |
-| branch X, `origin/X` exists | X | `tracks origin/X` |
-| branch X, upstream configured but `origin/X` gone | base of the newest merged PR with head X (`gh pr list --head X --state merged --json baseRefName`), if that base exists on origin; else default | `X merged into <base>` / `X gone, gh unavailable` |
+| branch X, X exists on origin (`git ls-remote --heads origin X`; a stale unpruned `origin/X` ref does not count) | X | `tracks origin/X` |
+| branch X, upstream configured but `origin/X` gone | base of the newest merged PR with head X (`gh pr list --head X --state merged --json baseRefName`), if that base exists on origin; else default | `X merged into <base>` / `X gone, base unknown` (no merged PR, or `gh` unavailable) |
 | branch X, no upstream | the `origin/*` branch B, excluding `fi/*`, with the smallest `git rev-list --count origin/B..HEAD`; ties go to the default branch; no candidate means default | `nearest pushed ancestor <B>` / `no pushed ancestor` |
 
 Rules:
-- The scan only considers branches whose merge-base with HEAD is not empty. It runs after one `git fetch -q origin` (all branches, prune off).
+- The scan only considers branches that still exist on origin and whose merge-base with HEAD is not empty. It runs after one `git fetch -q origin` (all branches; no prune, existence is checked with `ls-remote`).
 - The worktree is created from `origin/<landing>`, never from local HEAD (decision 2).
 - `AFI_base` already feeds the PR `--base`, the diff/reset base (`autofix.sh:63,76,97,295`, `autofix-b.sh:124`) and the fixer/verifier briefs (`autofix-b.sh:59,191`). Those need no other change.
 - The item gains `base_why=`. The claim log line and `autofix status` (running and recent rows) show `base` and `base_why`.
@@ -71,7 +71,7 @@ In `lib/sync.sh` (`_fi_pr_info`, ~line 135, and the landed check, ~line 220):
 - A MERGED PR whose head starts with `fi/autofix/` or `fi/sweep/` counts as landed whatever its base.
 - Every other PR keeps today's rule (base is default, or base later merged into default).
 
-**Base deleted before the fix PR merges.** With `delete_branch_on_merge` on, GitHub is expected to retarget the fix PR to the merged branch's own base. This is verified live (section 6). If the base branch is gone and the PR was closed instead, `fi_af_merge_when_green` reports `autofix: PR #N base branch gone` and returns 1. The item stays visible in `autofix status`; there is no silent loss.
+**Base deleted before the fix PR merges.** With `delete_branch_on_merge` on, GitHub is expected to retarget the fix PR to the merged branch's own base. This is verified live (section 6). If GitHub closes the PR instead, the existing `fi_af_merge_when_green` output (`PR #N is already CLOSED`) and sync's existing `(PR-closed: …)` demotion leave the entry open and visible; the live check records which happens, and a closed case is logged as a found-issues `--decide` entry.
 
 ## 5. Errors
 
