@@ -122,8 +122,11 @@ legacy_pr_prompt() {
     return 0
   fi
 
+  [[ -f "$lib_dir/annotate.sh" ]] || return 0
+  # shellcheck source=../lib/annotate.sh
+  source "$lib_dir/annotate.sh"
   local touched_files
-  touched_files="$(gh pr view "$pr_num" --json files --jq '.files[].path' 2>/dev/null || true)"
+  touched_files="$(fi_pr_touched_files "$pr_num" 2>/dev/null)"
   [[ -z "$touched_files" ]] && return 0
 
   local repo_id

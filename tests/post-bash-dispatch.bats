@@ -89,6 +89,17 @@ run_hook_raw() { # $1=raw json
   [ "$status" -ne 0 ]
 }
 
+@test "pr create: legacy prompt sees a touched file past the first 100 of a large PR" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  fi_run log "src/target.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\t'"$(fi_pr_file_list 100 0)"
+  export GH_MOCK_PR_FILES=$'7\t'"$(fi_pr_file_list 150 130)"
+  run run_hook 'gh pr create' 'https://github.com/org/repo/pull/7'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"src/target.py:42"* ]]
+  [[ "$output" == *"/found-issues:annotate-pr 7"* ]]
+}
+
 @test "git commit: line-matched entry is SUGGESTED, not annotated" {
   mkdir -p src
   printf 'l1\nl2\nl3\n' > src/foo.py

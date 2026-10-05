@@ -3,6 +3,11 @@
 #
 # Reads mock responses from env vars:
 #   GH_MOCK_PR_VIEW       tab-separated: <pr_num>\t<json>   (newline-separated rows)
+#   GH_MOCK_PR_FILES      tab-separated: <pr_num>\t<paths>  for the paginated REST
+#                         `gh api ... repos/{owner}/{repo}/pulls/<N>/files` call;
+#                         paths are pre-filtered (literal \n between them). No
+#                         matching row = the call fails (exit 1), which is how a
+#                         test drives the `gh pr view` fallback.
 #   GH_MOCK_PR_DIFF       mocked unified diff for `gh pr diff <N>`. Literal \n
 #                         sequences are expanded (same convention as GH_MOCK_PR_VIEW rows).
 #   GH_MOCK_REPO_VIEW     full JSON response for `gh repo view --json ...`
@@ -52,6 +57,23 @@ cmd="${filtered_args[0]:-}"
 sub="${filtered_args[1]:-}"
 
 case "$cmd $sub" in
+  "api "*)
+    endpoint=""
+    for ((i = 1; i < ${#filtered_args[@]}; i++)); do
+      case "${filtered_args[$i]}" in --*) ;; *) endpoint="${filtered_args[$i]}" ;; esac
+    done
+    if [[ "$endpoint" =~ /pulls/([0-9]+)/files ]] && [[ -n "${GH_MOCK_PR_FILES:-}" ]]; then
+      api_pr="${BASH_REMATCH[1]}"
+      while IFS=$'\t' read -r mock_num mock_files; do
+        if [[ "$mock_num" == "$api_pr" ]]; then
+          printf '%s\n' "${mock_files//\\n/$'\n'}"
+          exit 0
+        fi
+      done <<<"$GH_MOCK_PR_FILES"
+    fi
+    printf 'gh: Not Found (HTTP 404)\n' >&2
+    exit 1
+    ;;
   "pr view")
     pr_num="${filtered_args[2]:-}"
     if [[ -n "${GH_MOCK_PR_VIEW:-}" ]]; then

@@ -139,7 +139,7 @@ cmd_annotate_pr() {
 
   # Get list of files touched by the PR
   local touched_files
-  touched_files="$(gh pr view "$pr_num" --json files --jq '.files[].path' 2>/dev/null || true)"
+  touched_files="$(fi_pr_touched_files "$pr_num")"
 
   if [[ -z "$touched_files" ]]; then
     printf 'annotate-pr: PR #%s touches no files (or fetch failed). Nothing to do.\n' "$pr_num"
