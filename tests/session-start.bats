@@ -301,6 +301,30 @@ run_session_start_hook() {
   rm -rf "$FAKE_HOME"
 }
 
+@test "session-start: unannotated entries take the cap slots before PR-annotated in-flight ones" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  fi_init_git
+  mkdir -p src
+  export FOUND_ISSUES_SESSION_INJECT_MAX=2
+  for i in 1 2 3 4; do
+    printf '1\n2\n3\n4\n' > "src/f$i.py"
+    fi_run log "src/f$i.py:$i — bug $i"
+  done
+  # The two NEWEST entries are already in flight in a PR.
+  sed -i.bak -E 's#^(- \[open\] .* src/f[34]\.py:[34] .*)$#\1 (PR: org/repo\#9)#' docs/found-issues.md
+  rm -f docs/found-issues.md.bak
+  grep -c '(PR: org/repo#9)' docs/found-issues.md | grep -qx 2
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"src/f1.py:1"* ]]
+  [[ "$output" == *"src/f2.py:2"* ]]
+  [[ "$output" != *"src/f3.py:3"* ]]
+  [[ "$output" != *"src/f4.py:4"* ]]
+  [[ "$output" == *"and 2 more [open] entries"* ]]
+  rm -rf "$FAKE_HOME"
+}
+
 @test "session-start: criticals always injected even over the cap" {
   FAKE_HOME="$(mktemp -d)"
   mkdir -p "$FAKE_HOME/.claude"
@@ -491,6 +515,27 @@ run_session_start_hook() {
   fi_assert_synced_not_archived
 }
 
+@test "session-start: only (until: pr:|date:) deferred entries trigger a sync; free text does not" {
+  fi_init_git
+  mkdir -p docs
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude"
+  stub="$TMP/fi-stub"
+  printf '#!/usr/bin/env bash\necho "$1" >> "%s/calls"\nexec "%s" "$@"\n' "$TMP" "$FI_BIN" > "$stub"
+  chmod +x "$stub"
+  printf '%s\n' '- [deferred] 2026-10-03 src/a.py:1 — x (until: the vendor ships a fix)' > docs/found-issues.md
+  HOME="$FAKE_HOME" FOUND_ISSUES_BIN="$stub" CLAUDE_CODE_ENTRYPOINT=cli \
+    run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  [ "$status" -eq 0 ]
+  ! grep -qx sync "$TMP/calls" 2>/dev/null || false
+  printf '%s\n' '- [deferred] 2026-10-03 src/a.py:1 — x (until: date:2099-01-01)' > docs/found-issues.md
+  HOME="$FAKE_HOME" FOUND_ISSUES_BIN="$stub" CLAUDE_CODE_ENTRYPOINT=cli \
+    run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  [ "$status" -eq 0 ]
+  grep -qx sync "$TMP/calls"
+  rm -rf "$FAKE_HOME"
+}
+
 @test "session-start: says how many decisions are waiting" {
   mkdir -p docs
   printf -- '- [open] 2026-10-01 a.sh:1 — x (decide: A or B?)\n- [open] 2026-10-01 b.sh:1 — y (decide: C or D?)\n- [open] 2026-10-01 c.sh:1 — z\n' > docs/found-issues.md
@@ -537,6 +582,16 @@ run_session_start_hook() {
   run_session_start_hook
   [[ "$output" == *"found-issues setup hint"* ]]
   [ -e "$FAKE_HOME/.claude/found-issues/.onboarded" ]
+}
+
+@test "session-start: an unwritable HOME does not abort the hook (exit 0, no repeated hint)" {
+  FAKE_HOME="$TMP/home-unwritable"; mkdir -p "$FAKE_HOME"
+  # ~/.claude is a plain file, so mkdir -p ~/.claude/found-issues must fail.
+  : > "$FAKE_HOME/.claude"
+  export CLAUDE_CODE_ENTRYPOINT=cli
+  run_session_start_hook
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"found-issues setup hint"* ]]
 }
 
 @test "session-start: a headless session gets no codex-unwired nudge" {

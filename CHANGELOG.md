@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.3] - 2026-10-05
+
+### Fixed
+
+Seven hook fixes from the first live 3.1.x auto-fix sweep (PR #205), each approved by the sweep's verifier:
+
+- All five `hooks/hooks.json` commands quote `${CLAUDE_PLUGIN_ROOT}`, so a plugin path containing a space no longer splits.
+- The PostToolUse commit route skips a repeat run while HEAD has not moved since it last annotated, so a failed or no-op `git commit` no longer re-annotates the previous HEAD.
+- The commit and merge routes ignore `git commit` / `gh pr merge` that appear only inside quoted text.
+- A `cd` / `pushd` before `git commit` is resolved: the commit route runs against the repo the commit happened in and skips only when that is another repo or cannot be resolved.
+- SessionStart no longer aborts when the home directory is unwritable; the first-run hint prints only once its marker was written.
+- The SessionStart injection fills its 15-entry cap with unannotated entries first; entries already carrying `(PR: …)` / `(commit: …)` take leftover slots.
+- The SessionStart sync gate fires only for `(until: pr:` and `(until: date:` triggers, not free-text ones.
+
 ## [3.1.2] - 2026-10-05
 
 ### Fixed

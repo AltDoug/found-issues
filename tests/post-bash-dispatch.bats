@@ -132,6 +132,23 @@ run_hook_raw() { # $1=raw json
   grep -q '(commit-auto:' docs/found-issues.md
 }
 
+@test "git commit: a second hook run on an unmoved HEAD (failed or no-op commit) does not re-annotate" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  run run_hook 'git commit -m fix' ''
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"touches files referenced"* ]]
+  # HEAD has not moved: the next commit attempt failed or changed nothing.
+  run run_hook 'git commit -m fix' ''
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "git commit: message mentioning gh pr create still triggers commit route" {
   # Regression test for the route-shadow finding: the pr-create route used
   # to match ANY command containing the substring "gh pr create" (even one
@@ -245,6 +262,74 @@ run_hook_raw() { # $1=raw json
   [ "$status" -eq 0 ]
   for i in 1 2 3 4 5; do [ -f "$marker" ] && break; sleep 1; done
   [ -f "$marker" ]
+}
+
+@test "pr merge: a quoted mention of gh pr merge does not dispatch a sync" {
+  marker="$TMP/sync-ran"
+  export FOUND_ISSUES_AUTOSYNC_CMD="touch '$marker'"
+  run run_hook 'echo "next: gh pr merge 7 --squash"' ''
+  [ "$status" -eq 0 ]
+  sleep 2
+  [ ! -f "$marker" ]
+}
+
+@test "git commit: a quoted mention of git commit does not run the commit route" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  run run_hook "echo 'remember to git commit -m fix'" ''
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "git commit: a commit after cd into another directory is not annotated against this repo" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  run run_hook 'cd /elsewhere && git commit -m fix' ''
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "git commit: a commit after cd into a different real repo is not annotated against this repo" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  other="$(mktemp -d "$TMP/other.XXXXXX")"
+  git -C "$other" init -q
+  run run_hook "cd $other && git commit -m fix" ''
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "git commit: cd into this same repo (absolute path or subdir) still runs the commit route" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  run run_hook "cd $PWD && git commit -m fix" ''
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"touches files referenced"* ]]
+  # Fresh HEAD marker so the second case is not suppressed by the first.
+  rm -f "$(git rev-parse --git-dir)/found-issues-last-head"
+  run run_hook "cd src && git commit -m fix" ''
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"touches files referenced"* ]]
 }
 
 @test "codex harness: candidate surface is additionalContext JSON" {

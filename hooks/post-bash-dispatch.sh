@@ -66,6 +66,10 @@ tool_name="$(get_field '.tool_name')"
 [[ "$tool_name" != "Bash" ]] && exit 0
 cmd="$(get_field '.tool_input.command')"
 [[ -z "$cmd" ]] && exit 0
+# The commit and merge routes match against the command with quoted spans
+# removed, so a command that merely MENTIONS `git commit` / `gh pr merge`
+# inside a string (echo, grep, a commit message) does not trigger them.
+cmd_unquoted="$(printf '%s' "$cmd" | sed -E -e 's/"[^"]*"//g' -e "s/'[^']*'//g")"
 
 # --- shared resolution (same chain as the retired hooks) ---
 __fi_hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
@@ -297,9 +301,46 @@ fi
 # a chained `git commit -m x && gh pr create` runs both, and so a plain
 # commit whose message happens to mention "gh pr create" still gets its
 # own commit-annotation pass.
-if [[ "$cmd" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]]; then
+#
+# A `cd`/`pushd` ahead of the commit may have landed it in ANOTHER repo, while
+# this route annotates the hook cwd repo's HEAD. Resolve the cd target and skip
+# only when it is not inside the cwd repo (or cannot be resolved).
+commit_in_other_repo() {
+  [[ "$cmd_unquoted" =~ (^|[[:space:];\&|\(])(cd|pushd)[[:space:]]+.*git[[:space:]]+commit ]] || return 1
+  local re='(^|[[:space:];&|(])(cd|pushd)[[:space:]]+("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:];&|)]+)'
+  [[ "$cmd" =~ $re ]] || return 0
+  local target="${BASH_REMATCH[3]}"
+  target="${target#[\"\']}"; target="${target%[\"\']}"
+  case "$target" in
+    "~") target="$HOME" ;;
+    "~/"*) target="$HOME/${target#\~/}" ;;
+  esac
+  [[ -z "$target" || "$target" == *'$'* || "$target" == *'`'* ]] && return 0
+  [[ -d "$target" ]] || return 0
+  local here there
+  here="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  there="$(git -C "$target" rev-parse --show-toplevel 2>/dev/null)" || return 0
+  [[ "$(cd "$here" && pwd -P)" != "$(cd "$there" && pwd -P)" ]]
+}
+if [[ "$cmd_unquoted" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]] \
+   && ! commit_in_other_repo; then
   exit_code="$(get_field '.tool_response.exit_code')"
-  if [[ ( -z "$exit_code" || "$exit_code" == "0" ) ]] && git rev-parse --git-dir >/dev/null 2>&1; then
+  # A missing exit_code counts as success (Claude Code's Bash tool_response
+  # carries none), so a failed or no-op `git commit` would re-annotate the
+  # previous HEAD. Remember the last HEAD this route handled (in the repo's
+  # own git dir) and skip when HEAD has not moved.
+  head_sha=""
+  seen_file=""
+  commit_seen=0
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    head_sha="$(git rev-parse HEAD 2>/dev/null)" || head_sha=""
+    seen_file="$(git rev-parse --git-dir 2>/dev/null)/found-issues-last-head"
+    if [[ -n "$head_sha" && -f "$seen_file" && "$(cat "$seen_file" 2>/dev/null)" == "$head_sha" ]]; then
+      commit_seen=1
+    fi
+  fi
+  if [[ ( -z "$exit_code" || "$exit_code" == "0" ) && "$commit_seen" -eq 0 ]] && git rev-parse --git-dir >/dev/null 2>&1; then
+    [[ -n "$head_sha" ]] && printf '%s\n' "$head_sha" >"$seen_file" 2>/dev/null || true
     if [[ "${FOUND_ISSUES_AUTO_ANNOTATE:-on}" == "off" ]]; then
       legacy_out="$(legacy_commit_prompt)"
       [[ -n "$legacy_out" ]] && ctx+="$legacy_out"$'\n\n'
@@ -376,7 +417,7 @@ fi
 # `gh pr create ... && gh pr merge N --auto` never reached the annotation
 # routes at all, since they sat below this one's exit. Moving this route
 # last and dropping its exit fixes that.
-if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+(merge|close|reopen)([[:space:]]|$) ]]; then
+if [[ "$cmd_unquoted" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+(merge|close|reopen)([[:space:]]|$) ]]; then
   if [[ "${FOUND_ISSUES_POST_PR_STATE:-on}" != "off" ]]; then
     if [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
       ( bash -c "$FOUND_ISSUES_AUTOSYNC_CMD" >/dev/null 2>&1 & ) >/dev/null 2>&1
