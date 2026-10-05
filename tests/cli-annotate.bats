@@ -602,3 +602,49 @@ _setup_pr_repo() {
   [ "$status" -eq 0 ]
   grep -q "monorepo/src/foo.py:1.*(commit-auto: $short_sha)" docs/found-issues.md
 }
+
+# === annotate-pr: PR file lists past GitHub's 100-file cap ===
+#
+# `gh pr view --json files` stops at 100 files. On a 584-file phase-ship PR
+# (2026-08-23) the first 100 were all .planning/ artifacts, so annotate-pr
+# said "no [open] entries match" while entries citing touched source files
+# were genuinely fixed. The file list now comes from the paginated REST files
+# endpoint; GH_MOCK_PR_VIEW below holds only the capped first 100.
+
+@test "annotate-pr: matches a touched file past the first 100 of a large PR" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\t'"$(fi_pr_file_list 100 0)"
+  export GH_MOCK_PR_FILES=$'9\t'"$(fi_pr_file_list 150 130)"
+  mkdir -p src && echo x > src/target.py
+  fi_run log "src/target.py:1 — bug"
+  fi_run annotate-pr 9
+  [ "$status" -eq 0 ]
+  grep -q 'src/target.py:1 — bug (PR-auto: org/repo#9)' docs/found-issues.md
+  [[ "$output" != *"not checked"* ]]
+}
+
+@test "annotate-pr: falls back to gh pr view and warns when its list is full" {
+  _setup_pr_repo
+  # No GH_MOCK_PR_FILES row: the paginated call fails.
+  export GH_MOCK_PR_VIEW=$'9\t'"$(fi_pr_file_list 100 40)"
+  mkdir -p src && echo x > src/target.py
+  fi_run log "src/target.py:1 — bug"
+  fi_run annotate-pr 9
+  [ "$status" -eq 0 ]
+  grep -q 'src/target.py:1 — bug (PR-auto: org/repo#9)' docs/found-issues.md
+  [[ "$output" == *"100 files"* ]]
+  [[ "$output" == *"not checked"* ]]
+}
+
+@test "annotate-pr: warns when the paginated list reaches GitHub's 3000-file ceiling" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\t{"number":9}'
+  export GH_MOCK_PR_FILES=$'9\t'"$(fi_pr_file_list 3000 2999)"
+  mkdir -p src && echo x > src/target.py
+  fi_run log "src/target.py:1 — bug"
+  fi_run annotate-pr 9
+  [ "$status" -eq 0 ]
+  grep -q 'src/target.py:1 — bug (PR-auto: org/repo#9)' docs/found-issues.md
+  [[ "$output" == *"3000 files"* ]]
+  [[ "$output" == *"not checked"* ]]
+}

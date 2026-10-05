@@ -17,6 +17,7 @@
 #   fi_auto_form <annotation>
 #   fi_scope_limited <entry-line>
 #   fi_annotate_auto [...]
+#   fi_pr_touched_files <pr_num>
 
 # === Shared annotate engine (annotate-pr / annotate-commit) ===
 #
@@ -606,3 +607,30 @@ fi_annotate_auto() {
   return 0
 }
 
+# fi_pr_touched_files <pr_num> — every file the PR touches, one per line, for
+# the repo gh resolves from the current checkout. Notes go to stderr.
+#
+# `gh pr view --json files` stops at 100 files. On a 584-file phase-ship PR
+# (2026-08-23) the first 100 were all .planning/ artifacts, so annotate-pr
+# reported "no [open] entries match" while entries citing touched source
+# files were genuinely fixed. The REST files endpoint pages up to GitHub's
+# own 3000-file ceiling. If that call fails, fall back to the capped one and
+# say when its list is full: a silent short list is the bug being fixed.
+fi_pr_touched_files() {
+  local pr_num="$1" files n
+  if files="$(gh api --paginate "repos/{owner}/{repo}/pulls/$pr_num/files?per_page=100" \
+                --jq '.[].filename' 2>/dev/null)"; then
+    n="$(printf '%s\n' "$files" | grep -c .)" || true
+    if (( n >= 3000 )); then
+      printf 'found-issues: PR #%s lists 3000 files, the most GitHub returns; files past those were not checked (use --pick for entries they fix).\n' "$pr_num" >&2
+    fi
+  else
+    files="$(gh pr view "$pr_num" --json files --jq '.files[].path' 2>/dev/null)" || true
+    n="$(printf '%s\n' "$files" | grep -c .)" || true
+    if (( n >= 100 )); then
+      printf 'found-issues: PR #%s file list came from gh pr view, which stops at 100 files; files past those were not checked (use --pick for entries they fix).\n' "$pr_num" >&2
+    fi
+  fi
+  [[ -n "$files" ]] && printf '%s\n' "$files"
+  return 0
+}
