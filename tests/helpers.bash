@@ -222,3 +222,16 @@ fi_autosync_ts() {
   local ledger="${2:-$(cd "$TMP" && pwd)/docs/found-issues.md}"
   printf '%s/segment-autosync/%s' "$1" "${ledger//[^A-Za-z0-9._-]/_}"
 }
+
+# A synthetic PR file list for the GH_MOCK_PR_VIEW / GH_MOCK_PR_FILES row
+# convention (literal \n between paths). Args: $1 = file count, $2 = the
+# 1-based position that is src/target.py (0 = none); every other slot is a
+# generated gen/fN.txt.
+fi_pr_file_list() {
+  local count="$1" target="$2" i out=""
+  for ((i = 1; i <= count; i++)); do
+    if (( i == target )); then out+="src/target.py"; else out+="gen/f$i.txt"; fi
+    (( i < count )) && out+='\n'
+  done
+  printf '%s' "$out"
+}
