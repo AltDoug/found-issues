@@ -215,3 +215,14 @@ SAMPLE
   [ "$output" = "$TMP/procsub.sh:5
 $TMP/procsub.sh:8" ]
 }
+
+@test "source-guards: every hooks.json command quotes the plugin root path" {
+  # An unquoted ${CLAUDE_PLUGIN_ROOT} word-splits when the plugin cache path
+  # contains a space (Windows "C:\Users\John Doe"), so every hook fails to launch.
+  run jq -r '.hooks[][].hooks[].command' "$REPO_ROOT/hooks/hooks.json"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  while IFS= read -r cmd || [[ -n "$cmd" ]]; do
+    [[ "$cmd" == '"${CLAUDE_PLUGIN_ROOT}/'*'"' ]] || { echo "unquoted: $cmd"; false; }
+  done <<<"$output"
+}
