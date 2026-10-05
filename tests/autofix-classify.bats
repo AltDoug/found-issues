@@ -66,6 +66,12 @@ teardown() { fi_teardown_tmp; }
   [ ! -s "$FI_STANDIN_TRACE" ]
 }
 
+@test "classify: an engine missing from PATH leaves a skipped line in the run log" {
+  AFI_wt="$REPO" AFI_id=c1 AFI_engine=claude
+  PATH="/usr/bin:/bin" fi_af_classify docs/found-issues.md c1
+  grep -q 'classify: skipped (no engine on PATH)' "$FI_AF_RUNS/c1.log"
+}
+
 @test "classify: a sweep claim classifies before it picks entries" {
   printf '# found-issues\n\n' > docs/found-issues.md
   # 3 tagged + 1 untagged = 4: below the threshold (untagged entries count).
