@@ -97,6 +97,12 @@ ws() { out="$("$FI_BIN" fix workspace)"; WT="$(printf '%s\n' "$out" | sed -n 's/
   grep -q 'line_end' "$f"
 }
 
+@test "fix.md: already-fixed annotate-commit uses --force after git show evidence" {
+  f="$TEST_REPO_ROOT/commands/fix.md"
+  grep -q 'annotate-commit <sha> --force --pick' "$f"
+  grep -q 'git show <sha> -- <path>' "$f"
+}
+
 linked_session() { # the session runs in a linked worktree of the repo
   git worktree add -q -b side "$TMP/linked" origin/main
   cd "$TMP/linked"

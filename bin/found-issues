@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="3.0.4"
+readonly FI_VERSION="3.0.5"
 
 # Statusline fast path (lib/segment-cache.sh): `status --format=segment` runs
 # every few seconds per session, so it is answered from a content-checked
@@ -307,8 +307,11 @@ fi_repo_id() {
   while [[ "$remote_url" == */ ]]; do remote_url="${remote_url%/}"; done
   remote_url="${remote_url%.git}"
   local re_gh='github\.com[:/]([^/]+/[^/]+)'
-  [[ "$remote_url" =~ $re_gh ]] && remote_url="${BASH_REMATCH[1]}"
-  printf '%s' "$remote_url"
+  [[ "$remote_url" =~ $re_gh ]] || return 1
+  local id="${BASH_REMATCH[1]}"
+  local re_id='^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
+  [[ "$id" =~ $re_id ]] || return 1
+  printf '%s' "$id"
 }
 
 # Resolve the default branch with a layered fallback chain:

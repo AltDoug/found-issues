@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.5] - 2026-10-04
+
+### Fixed
+
+- Entries whose location carries a comma-separated line list (`file.bats:157,341` or `a.bats:10-12,30`) now parse: the path is kept and the first number becomes the line. They used to fall through to an unparsed location, so line-based matching and staleness skipped them.
+- `fi_repo_id` no longer prints the raw origin URL when a github.com remote does not end in `org/repo` (for example `https://github.com/onlyorg`). It now fails, which every caller already treats as "not a GitHub repo", so annotate-pr can no longer write a malformed `(PR: <url>#N)` reference.
+- `/found-issues:fix` (and the Codex `fi-fix` skill) closes an already-fixed entry with `annotate-commit <sha> --force --pick` only after `git show <sha> -- <path>` shows the symptom removed. The previous instruction omitted `--force`, which the v2.4.0 guard requires for a SHA already on the default branch, so the step always exited 2.
+
+These three fixes were produced by the 2026-10-04 auto-fix sweep and approved by its verifier; the sweep's session exited before it pushed them, so they were recovered and shipped by hand.
+
 ## [3.0.4] - 2026-10-04
 
 ### Fixed

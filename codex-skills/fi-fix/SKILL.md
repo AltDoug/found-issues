@@ -40,9 +40,12 @@ Bucket every verified entry:
 
 1. **already-fixed** — symptom gone. Do NOT re-fix, and do NOT edit the
    ledger by hand (hard rule: only the CLI writes it). If the fixing
-   commit is identifiable, run
-   `found-issues annotate-commit <sha> --pick <location>` and sync flips
-   it. Otherwise close it with
+   commit is identifiable, first run `git show <sha> -- <path>` and confirm
+   it removed the symptom; then run
+   `found-issues annotate-commit <sha> --force --pick <location>` (the
+   guard rejects a SHA already on the default branch unless `--force`) and
+   sync flips it. Cite the `git show` evidence in the PR body. Otherwise
+   close it with
    `found-issues resolve "<unique symptom fragment>" --verified ai`.
    Never run sync from this command (it archives, leaving a ledger and
    archive diff behind). Evidence belongs in the PR body and final
