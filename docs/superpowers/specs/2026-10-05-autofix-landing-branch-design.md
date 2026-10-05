@@ -18,6 +18,7 @@ Measured cost: on kh2-midgar, 5 spot fixes (2026-10-04/05) and 1 sweep fixed not
 2. When the branch has unpushed commits, start from its pushed tip and PR back into it. Never publish unpushed work. An entry whose file exists only in unpushed commits waits until it is pushed.
 3. Landing-branch rule: approach A (tracked branch with fallbacks), below.
 4. An auto-fix PR closes its entry as soon as it merges into its landing branch.
+5. A cited file with uncommitted or unpushed changes in the session's checkout is busy: the item waits instead of fixing it (section 2).
 
 ## Goal and success criteria
 
@@ -50,6 +51,7 @@ At claim time, before the spot cap is taken (`fi_af_claim`, `lib/autofix-queue.s
 
 - **File present:** take the cap, create the worktree, and run as today.
 - **File absent:** leave the item in `queue/` with `waiting=<path> not on origin/<base>`, `wait_since=<epoch>` (kept from the first wait) and `wait_next=<now+900>`, and release the lock. No cap is taken, no worktree is created, and no engine is launched.
+- **File busy** (operator decision 5, 2026-10-05): the cited file differs between the session's checkout and the landing branch. That covers uncommitted edits (staged or not) and unpushed commits: `git -C "$AFI_root" diff --name-only "origin/$AFI_base" -- <path>` is non-empty. The item waits the same way, with `waiting=<path> busy in <root>`. This keeps a fix from auto-merging into a branch the session is mid-edit on and forcing a conflict on its next pull. Only the item's own root checkout is checked; another worktree on the same branch is not seen (accepted limit).
 - `fi_afh_stop` (and the launcher B hook path) skip a queued item whose `wait_next` is in the future, so a waiting item costs at most one fetch plus `cat-file` per 15 minutes, and only while a session stops inside its root.
 - When `now - wait_since > 3 days`, the next claim retires it as `stale: <path> never reached origin/<base>`.
 - Abstract-topic locations (no file) skip the check.
@@ -60,7 +62,7 @@ This answers ledger entry `lib/autofix-queue.sh:102`, recorded with `found-issue
 ## 3. Sweeps
 
 - `fi_af_sweep_claim` uses the same resolver from the checkout the sweep was queued in. 3.1.4's test-command check runs on that worktree, so it sees the landing branch.
-- In `fi_af_sweep_candidates` (claim time), an entry whose cited file is absent on `origin/<landing>` is skipped for this sweep, with the log line `sweep: skip <loc> (not on origin/<base>)`. It is not tagged, not failed, and stays eligible for later sweeps.
+- In `fi_af_sweep_candidates` (claim time), an entry whose cited file is absent on `origin/<landing>` or busy in the sweep's root checkout (section 2) is skipped for this sweep, with the log line `sweep: skip <loc> (not on origin/<base>)` or `sweep: skip <loc> (busy)`. It is not tagged, not failed, and stays eligible for later sweeps.
 
 ## 4. Closing auto-fix PRs on merge
 
@@ -87,6 +89,7 @@ Auto-fix never pushes to the landing branch. It only pushes its own `fi/*` branc
 Bats, using local bare-repo remotes and the existing stand-in `gh`, like the current autofix tests. Every new test is shown failing on the 3.1.4 code first.
 
 - Resolver: one test per table row, plus the tie-to-default and no-candidate cases, and `fi/*` exclusion.
+- Busy: an uncommitted edit, and separately an unpushed commit, to the cited file in the root checkout makes the item wait. It runs once the change is pushed (the diff is empty). A busy file in a sweep is skipped.
 - Waiting: an absent file waits without taking a spot slot or launching the engine. It runs after the file is pushed to the landing branch. It retires stale when `wait_since` is more than 3 days old (set directly in the item). `wait_next` throttles the Stop launcher.
 - Sweep: a candidate absent on the landing branch is skipped and logged. The others proceed.
 - Sync: a merged `fi/autofix/*` PR into a non-default base closes the entry. A merged `feat/*` PR into `release/x` still waits for promotion.
