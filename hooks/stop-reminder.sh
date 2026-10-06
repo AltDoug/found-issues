@@ -250,6 +250,7 @@ turn_edits_code() { # $1 = the turn's transcript lines
   [[ -n "$paths" ]] || return 0
   while IFS= read -r p; do
     case "$p" in
+      */CMakeLists.txt|CMakeLists.txt|*requirements*.txt|*constraints*.txt) return 0 ;;
       *.[mM][dD]|*.[mM][dD][xX]|*.[mM][aA][rR][kK][dD][oO][wW][nN]|*.[tT][xX][tT]|*.[rR][sS][tT]|*.[aA][dD][oO][cC]) ;;
       *) return 0 ;;
     esac

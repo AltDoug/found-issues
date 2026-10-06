@@ -37,6 +37,10 @@ fi_af_cancel() {
     fi_af_item_set "$d" finished "$(date +%s)" || true
     fi_af_log "$id" "cancelled: $how"
     printf 'Cancelled %s (it was queued).\n' "$id"
+    # A ship retry's verified commits live only on its kept branch (3.2.1).
+    if [[ "$(_fi_af_field "$d" ship_tries)" =~ ^[1-9] ]]; then
+      printf 'Its fixes stay on branch %s (delete it with git branch -D when no longer wanted).\n' "$(_fi_af_field "$d" branch)"
+    fi
     return 0
   fi
   [[ -f "$r" ]] || { fi_err "autofix: no queued or running item $id"; return 1; }

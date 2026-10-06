@@ -552,3 +552,32 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   grep -q '^base=main$' "$ST/queue/$SID"
   [ -n "$(git branch --list "$(sweep_branch)")" ]
 }
+
+@test "sweep: a non-numeric ship wait still requeues and the retry ships" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  export FOUND_ISSUES_AUTOFIX_SHIP_WAIT=15m
+  git config remote.origin.pushurl "$TMP/nowhere.git"
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^ship_tries=1$' "$ST/queue/$SID"
+  [ "$(sed -n 's/^wait_next=//p' "$ST/queue/$SID")" -gt "$(date +%s)" ]
+  git config --unset remote.origin.pushurl
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/queue/$SID" wait_next ""
+  run "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #9' "$ST/done/$SID"
+}
+
+@test "sweep: cancelling a queued ship retry names the kept branch; an old one retires" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  git config remote.origin.pushurl "$TMP/nowhere.git"
+  "$FI_BIN" autofix run "$SID" --engine claude
+  cp "$ST/queue/$SID" "$TMP/item"
+  run "$FI_BIN" autofix cancel "$SID"
+  [[ "$output" == *"stay on branch $(sweep_branch)"* ]]
+  source "$FI_BIN"; fi_af_context
+  QID=20991231-000000-00003
+  sed "s/^id=.*/id=$QID/" "$TMP/item" > "$FI_AF_ST/queue/$QID"
+  touch -t 202001010000 "$FI_AF_ST/queue/$QID"
+  _fi_af_sweep_retire_stale
+  grep -q "^result=stale: ship retry never launched; branch $(sweep_branch) kept" "$FI_AF_ST/done/$QID"
+}

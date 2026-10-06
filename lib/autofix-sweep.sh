@@ -97,11 +97,18 @@ _fi_af_sweep_retire_stale() {
   for f in "$FI_AF_ST"/queue/*; do
     [[ -f "$f" ]] || continue
     [[ "$(_fi_af_field "$f" kind)" == "sweep" ]] || continue
-    # A ship retry was launched and holds verified commits: never stale.
-    [[ "$(_fi_af_field "$f" ship_tries)" =~ ^[1-9] ]] && continue
+    id="${f##*/}"
+    # A ship retry holds verified commits: it gets 3 days to be launched,
+    # then retires (its branch kept and named) so it cannot block sweeps.
+    if [[ "$(_fi_af_field "$f" ship_tries)" =~ ^[1-9] ]]; then
+      q="$(fi_file_mtime "$f" 2>/dev/null)" || q=""
+      [[ "$q" =~ ^[0-9]+$ ]] || continue
+      (( $(date +%s) - q > ${FOUND_ISSUES_AUTOFIX_WAIT_MAX:-259200} )) || continue
+      fi_af_retire "$id" stale "ship retry never launched; branch $(_fi_af_field "$f" branch) kept" || true
+      continue
+    fi
     q="$(_fi_af_field "$f" queued)" || continue
     [[ "${q:0:10}" < "$today" ]] || continue
-    id="${f##*/}"
     fi_af_retire "$id" stale "queued ${q:0:10} and never launched" || true
   done
 }
@@ -357,7 +364,10 @@ _fi_af_run_sweep() {
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
     fi_af_finish "$id" stale "no test command"; return 0
   fi
-  if ! engine="$(fi_af_engine "${engine_opt:-$AFI_engine}")" || ! command -v "$engine" >/dev/null 2>&1; then
+  # A ship retry calls no engine: it must not fail for want of one.
+  if [[ "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then
+    engine="${AFI_engine:-${engine_opt:-claude}}"
+  elif ! engine="$(fi_af_engine "${engine_opt:-$AFI_engine}")" || ! command -v "$engine" >/dev/null 2>&1; then
     fi_af_finish "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
   fi
   AFI_engine="$engine"
@@ -432,10 +442,12 @@ fi_af_sweep_finish() {
 # FOUND_ISSUES_AUTOFIX_SHIP_TRIES-th failure (default 3) ends it failed,
 # still keeping the branch, which the result names.
 _fi_af_sweep_ship_failed() {
-  local id="$1" r="$FI_AF_ST/running/$1" tries max n
+  local id="$1" r="$FI_AF_ST/running/$1" tries max n wait
   tries=$(( ${AFI_ship_tries:-0} + 1 ))
   max="${FOUND_ISSUES_AUTOFIX_SHIP_TRIES:-3}"
   [[ "$max" =~ ^[1-9][0-9]*$ ]] || max=3
+  wait="${FOUND_ISSUES_AUTOFIX_SHIP_WAIT:-900}"
+  [[ "$wait" =~ ^[0-9]+$ ]] || wait=900
   AFI_ship_tries="$tries"
   fi_af_item_set "$r" ship_tries "$tries"
   if (( tries >= max )); then
@@ -444,7 +456,7 @@ _fi_af_sweep_ship_failed() {
   fi
   n="$(_fi_af_count_lines "$FI_AF_ST/sweeps/$id.entries")"
   fi_af_item_set "$r" cur "$(( n + 1 ))"
-  fi_af_item_set "$r" wait_next "$(( $(date +%s) + ${FOUND_ISSUES_AUTOFIX_SHIP_WAIT:-900} ))"
+  fi_af_item_set "$r" wait_next "$(( $(date +%s) + 10#$wait ))"
   fi_af_requeue "$id" "ship failed ($FI_AF_WHY); branch $AFI_branch kept, the next run retries ship"
 }
 

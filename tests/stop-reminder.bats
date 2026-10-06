@@ -619,3 +619,13 @@ TRANSCRIPT
   [ "$status" -eq 2 ]
   [[ "$output" == *"<!-- found-issues-checked: none-noticed -->"* ]]
 }
+
+@test "stop-reminder: build and dependency .txt files count as code" {
+  TR="$(mktemp)"
+  for f in /x/CMakeLists.txt /x/requirements-dev.txt; do
+    write_tr "$TR" "$f"
+    run_stop_on "$TR"
+    [ "$status" -eq 2 ] || { echo "expected a block for $f"; false; }
+  done
+  rm -f "$TR"
+}
