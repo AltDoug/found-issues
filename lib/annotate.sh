@@ -170,7 +170,10 @@ fi_annotate_apply_picks() {
         matched=$((matched + 1))
         promoted=$((promoted + 1))
       else
-        printf '%s %s\n' "$line" "$annotation" >>"$tmp"
+        # CRLF ledger: the annotation goes before the CR, never after it.
+        local cr=""
+        [[ "$line" == *$'\r' ]] && { cr=$'\r'; line="${line%$'\r'}"; }
+        printf '%s %s%s\n' "$line" "$annotation" "$cr" >>"$tmp"
         matched=$((matched + 1))
       fi
     else
@@ -569,7 +572,9 @@ fi_annotate_auto() {
         # appending would leave a stale (PR-auto: ...) beside the new tag.
         printf '%s\n' "${line%"$auto_tok"*}${annotation}${line##*"$auto_tok"}" >>"$tmp"
       else
-        printf '%s %s\n' "$line" "$write_annotation" >>"$tmp"
+        local cr=""
+        [[ "$line" == *$'\r' ]] && { cr=$'\r'; line="${line%$'\r'}"; }
+        printf '%s %s%s\n' "$line" "$write_annotation" "$cr" >>"$tmp"
       fi
       matched=$((matched + 1))
     else

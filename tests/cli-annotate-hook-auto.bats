@@ -117,6 +117,23 @@ mk_pr_mocks() {
   grep -q 'does not (PR-auto: org/repo#7)$' docs/found-issues.md
 }
 
+@test "annotate-pr --pick: a CRLF ledger keeps the CR at the end of the line" {
+  mkdir -p docs
+  printf -- '- [open] 2026-10-01 src/foo.py:42 — null check missing\r\n' > docs/found-issues.md
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  fi_run annotate-pr 7 --pick src/foo.py:42
+  [ "$status" -eq 0 ]
+  [ "$(cat docs/found-issues.md)" = "$(printf -- '- [open] 2026-10-01 src/foo.py:42 — null check missing (PR: org/repo#7)\r')" ]
+}
+
+@test "annotate-pr: a CRLF ledger keeps the CR at the end of the line on a bare run" {
+  mkdir -p docs
+  printf -- '- [open] 2026-10-01 src/foo.py:42 — null check missing\r\n' > docs/found-issues.md
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  fi_run annotate-pr 7
+  [ "$(cat docs/found-issues.md)" = "$(printf -- '- [open] 2026-10-01 src/foo.py:42 — null check missing (PR-auto: org/repo#7)\r')" ]
+}
+
 @test "hook-auto: no matches at all stays silent-clean, exit 0" {
   fi_run log "src/other.py:5 — unrelated"
   mk_pr_mocks
