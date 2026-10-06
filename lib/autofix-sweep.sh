@@ -160,6 +160,28 @@ fi_af_sweep_check() {
   printf 'AUTOFIX-SWEEP-DUE %s\n' "$FI_AF_ID"
 }
 
+# Spec section 3: a sweep leaves out entries whose file is not on the landing
+# branch yet or is busy in the sweep's root checkout; they stay eligible.
+# Filters candidate lines on stdin; AFI_base is set by the worktree step.
+_fi_af_sweep_ready() {
+  local id="$1" entry p keep="${AFI_entry:-}"
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    [[ -n "$entry" ]] || continue
+    AFI_entry="$entry"
+    if p="$(_fi_af_entry_file)"; then
+      fi_entry_loc_v "$entry" || true
+      if ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
+        fi_af_log "$id" "sweep: skip $FE_loc (not on origin/$AFI_base)"; continue
+      fi
+      if _fi_af_file_busy "$p"; then
+        fi_af_log "$id" "sweep: skip $FE_loc (busy)"; continue
+      fi
+    fi
+    printf '%s\n' "$entry"
+  done
+  AFI_entry="$keep"
+}
+
 # Spec §6 steps 1-3 at claim time (lock held, queue item read): cap, the
 # fresh worktree, the classify/wake pass, then the ordered entry list.
 # A sweep requeued today (crash, switch-off, outage) already holds today's
@@ -174,7 +196,6 @@ fi_af_sweep_claim() {
   fi
   fi_af_item_set "$q" pid "${FI_AF_PID:-}"
   if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
-  (( capped )) || fi_af_item_set "$q" cap_day "$(fi_today)"
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
   fi_af_seg_write "$AFI_root"
   if ! fi_af_worktree_add; then fi_af_finish "$id" failed "$FI_AF_WHY"; return 6; fi
@@ -185,8 +206,8 @@ fi_af_sweep_claim() {
   if ! fi_af_test_command "$AFI_wt" >/dev/null 2>&1; then
     fi_af_finish "$id" stale "no test command"; return 5
   fi
-  (( capped )) || fi_af_cap_take sweep "$id"
   fi_af_item_set "$r" base "$AFI_base"
+  fi_af_item_set "$r" base_why "$AFI_base_why"
   fi_af_item_set "$r" base_sha "$AFI_base_sha"
   fi_af_item_set "$r" head "$AFI_base_sha"
   fi_af_item_set "$r" cur 1
@@ -196,14 +217,21 @@ fi_af_sweep_claim() {
   file="$(fi_find_issues_file "$AFI_root" 2>/dev/null)" || file=""
   if [[ -n "$file" && -f "$file" ]]; then
     if declare -F fi_af_classify >/dev/null; then fi_af_classify "$file" "$id" || true; fi
-    fi_af_sweep_candidates "$file" "$AFI_root" "$(fi_af_int sweepMax 8)" >"$FI_AF_ST/sweeps/$id.entries"
+    fi_af_sweep_candidates "$file" "$AFI_root" 1000 | _fi_af_sweep_ready "$id" \
+      | head -n "$(fi_af_int sweepMax 8)" >"$FI_AF_ST/sweeps/$id.entries" || true  # head closing early SIGPIPEs the filter
   else
     : >"$FI_AF_ST/sweeps/$id.entries"
   fi
   : >"$FI_AF_ST/sweeps/$id.outcomes"
   while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/sweeps/$id.entries"
   if (( n == 0 )); then fi_af_finish "$id" stale "nothing fixable now"; return 5; fi
-  fi_af_log "$id" "claimed sweep: $n entries in $AFI_wt ($AFI_branch from origin/$AFI_base)"
+  # Spend the day's slot only now that the sweep has something to fix, like
+  # the no-test-command retire above.
+  if (( ! capped )); then
+    fi_af_item_set "$r" cap_day "$(fi_today)"
+    fi_af_cap_take sweep "$id"
+  fi
+  fi_af_log "$id" "claimed sweep: $n entries in $AFI_wt ($AFI_branch from origin/$AFI_base: $AFI_base_why)"
 }
 
 # Entry number AFI_cur of the sweep, with its base pinned to the last good

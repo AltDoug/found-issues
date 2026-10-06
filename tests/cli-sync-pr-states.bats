@@ -155,3 +155,25 @@ release_pr() { # mergedAt of PR 42 into release/v3
   [ "$(grep -c '^- \[fixed\]' docs/found-issues.md)" = 2 ]
   [ "$(grep -c '^pr list' "$TMP/gh.trace")" = 1 ]
 }
+
+@test "sync: a merged auto-fix PR into a working branch flips to fixed" {
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_PR_VIEW=$'42\t{"state":"MERGED","baseRefName":"gsd/phase-01","mergedAt":"2026-10-05T06:00:00Z","headRefName":"fi/autofix/src-foo-py-1-20261005-000000-00001","isDraft":false}'
+  export GH_MOCK_PR_LIST='[]'
+  mkdir -p src && printf 'x\n' > src/foo.py
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[fixed\].*(PR: foo/bar#42)' docs/found-issues.md
+}
+
+@test "sync: a merged non-auto-fix PR into a working branch still waits for main" {
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_PR_VIEW=$'42\t{"state":"MERGED","baseRefName":"gsd/phase-01","mergedAt":"2026-10-05T06:00:00Z","headRefName":"feat/x","isDraft":false}'
+  export GH_MOCK_PR_LIST='[]'
+  mkdir -p src && printf 'x\n' > src/foo.py
+  fi_seed_entry "src/foo.py:1 — bug (PR: foo/bar#42)"
+  fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*(PR: foo/bar#42)' docs/found-issues.md
+}

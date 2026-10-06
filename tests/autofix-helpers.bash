@@ -60,3 +60,14 @@ fi_af_sweep_fixture() {
   printf 'true\n' >> test.sh
   git add -A && git commit -q -m "sweep fixture" && git push -q origin main
 }
+
+# Push a branch <name> to the fixture's remote with one commit adding <file>,
+# leaving the checkout on <name> tracking origin/<name>. cwd = the repo.
+fi_af_remote_branch() {
+  local name="$1" file="${2:-src/$1.sh}"
+  git switch -q -c "$name"
+  mkdir -p "$(dirname "$file")"
+  printf 'echo %s\n' "$name" > "$file"
+  git add -A && git commit -q -m "$name"
+  git push -q -u origin "$name"
+}

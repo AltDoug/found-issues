@@ -59,3 +59,25 @@ teardown() { fi_teardown_tmp; }
   run "$FI_BIN" autofix status
   [[ "$output" == *'Spent today: $0.00 '* ]]
 }
+
+@test "autofix status: a waiting queued item shows why it waits" {
+  fi_af_item_set "$QITEM" waiting "src/calc.sh busy in $PWD"
+  run "$FI_BIN" autofix status
+  [[ "$output" == *"waiting: src/calc.sh busy in $PWD"* ]]
+}
+
+@test "autofix status: a running item shows its landing branch and why" {
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  fi_af_item_set "$ST/running/$ID" base "release/3.2"
+  fi_af_item_set "$ST/running/$ID" base_why "the branch with the cited file"
+  run "$FI_BIN" autofix status
+  [[ "$output" == *"into release/3.2 (the branch with the cited file)"* ]]
+}
+
+@test "autofix status: a recent row shows the landing branch and why" {
+  printf 'id=r1\nkind=spot\nloc=src/a.sh:1\nresult=fixed: t\nfinished=1000\nbase=release/3.2\nbase_why=the branch with the cited file\n' > "$ST/done/r1"
+  printf 'id=r2\nkind=spot\nloc=src/b.sh:2\nresult=stale: t\nfinished=900\n' > "$ST/done/r2"
+  run "$FI_BIN" autofix status
+  [[ "$output" == *"into release/3.2 (the branch with the cited file)"* ]]
+  [ "$(printf '%s\n' "$output" | grep -c 'into release/3.2')" = 1 ]
+}

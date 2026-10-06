@@ -113,3 +113,16 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
   wait_spawn
   grep -q "autofix run $SWID --engine claude$" "$TMP/spawned"
 }
+
+@test "stop: a waiting item is not launched before wait_next" {
+  printf 'wait_next=%s\n' "$(( $(date +%s) + 600 ))" >> "$QITEM"
+  run stop "$REPO"
+  [ "$status" -eq 0 ]
+  no_spawn
+}
+
+@test "stop: a waiting item whose wait_next passed is launched" {
+  printf 'wait_next=%s\n' "$(( $(date +%s) - 1 ))" >> "$QITEM"
+  run stop "$REPO"
+  wait_spawn
+}

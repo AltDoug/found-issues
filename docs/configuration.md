@@ -210,6 +210,8 @@ found-issues config autofix.sweepMax --unset
 | `FOUND_ISSUES_AUTOFIX_LOCK_STALE` | `3600` | Seconds after which a repo's run lock counts as abandoned |
 | `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS` | `runTimeoutMin` × 60 | Per engine-call timeout override |
 | `FOUND_ISSUES_AUTOFIX_MERGE_POLLS` / `_MERGE_SLEEP` | `60` / `60` | How long `autofix merge-when-green` waits for checks |
+| `FOUND_ISSUES_AUTOFIX_WAIT_RECHECK` | `900` | Seconds before a waiting item (its cited file is not on the landing branch yet, or has uncommitted or unpushed changes) is looked at again |
+| `FOUND_ISSUES_AUTOFIX_WAIT_MAX` | `259200` | Seconds (3 days) a spot item may wait before it retires stale |
 | `FOUND_ISSUES_STATE_DIR` | `~/.claude/found-issues` | Where the queue, locks, caps and the statusline's run counts live |
 
 Set by the plugin, not by you: `FOUND_ISSUES_AUTOFIX_CHILD=1` marks a

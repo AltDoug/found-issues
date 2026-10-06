@@ -183,10 +183,15 @@ _fi_af_run_one() {
   return 0
 }
 
+# First queued id that is not waiting (wait_next empty or past), skipping $1.
 _fi_af_next_queued() {
-  local f
+  local f n now; now="$(date +%s)"
   for f in "$FI_AF_ST"/queue/*; do
-    [[ -f "$f" ]] && { printf '%s' "${f##*/}"; return 0; }
+    [[ -f "$f" ]] || continue
+    [[ "${f##*/}" == "${1:-}" ]] && continue
+    n="$(_fi_af_field "$f" wait_next 2>/dev/null || true)"
+    [[ "$n" =~ ^[0-9]+$ ]] && (( n > now )) && continue
+    printf '%s' "${f##*/}"; return 0
   done
   return 1
 }
@@ -200,7 +205,7 @@ _fi_af_on_signal() {
 
 # Launcher A: run <id>, then drain the queue while claims succeed.
 _fi_af_run() {
-  local id="$1" engine_opt="$2" rc next
+  local id="$1" engine_opt="$2" rc next tried=" "
   export FI_AF_PID=$$
   trap _fi_af_on_signal INT TERM HUP
   # A mistyped id must not silently drain everything else (operator
@@ -221,12 +226,16 @@ _fi_af_run() {
          printf 'Auto-fix: daily cap reached; %s waits for tomorrow.\n' "$id"; return 3 ;;
       4) printf 'Auto-fix: another run holds this repo; %s stays queued.\n' "$id"; return 4 ;;
       7) printf 'Auto-fix: engine error (%s); %s stays queued.\n' "$FI_AF_WHY" "$id"; return 7 ;;
+      # A waiting item stays queued; the loop moves on to the next one.
+      8) printf 'Auto-fix: %s waits (%s).\n' "$id" "$FI_AF_WHY" ;;
     esac
     [[ -f "$FI_AF_ST/done/$id" ]] && { fi_af_item_read "$FI_AF_ST/done/$id"; printf '%s: %s\n' "$id" "$AFI_result"; }
-    next="$(_fi_af_next_queued || true)"
+    next="$(_fi_af_next_queued "$id" || true)"
     # An item the claim could not move (rc 1 with its file still queued)
-    # would come straight back: stop rather than spin.
-    [[ "$next" == "$id" ]] && break
+    # must not come back round: stop rather than spin. The queue helper skips
+    # only the current id, so remember every id this drain has attempted.
+    tried="$tried$id "
+    [[ "$tried" == *" $next "* ]] && break
     id="$next"
   done
 }
@@ -258,6 +267,7 @@ cmd_autofix() {
         4) fi_err "autofix: another auto-fix run holds this repo; $1 stays queued" ;;
         5) fi_err "autofix: $1 retired — $FI_AF_WHY" ;;
         6) fi_err "autofix: $1 failed — $FI_AF_WHY" ;;
+        8) fi_err "autofix: $1 waits — $FI_AF_WHY (rechecked on the next stop)" ;;
       esac
       return $rc ;;
     release)

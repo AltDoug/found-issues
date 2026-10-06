@@ -37,6 +37,7 @@ AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
 AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
+AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next=""
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -51,13 +52,14 @@ fi_af_item_read() {
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
   AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
+  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next=""
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -212,11 +214,55 @@ fi_af_eligible() {
   return 1
 }
 
+# 3.2.0 (spec section 1): the branch a fix starts from and lands into is the
+# one the session works on, never assumed to be the default branch. Sets
+# AFI_base and AFI_base_why; every fallback is the default branch.
+fi_af_landing_branch() {
+  local def cur up b n best="" bestn="" base
+  def="$(cd "$AFI_root" && fi_resolve_default_branch)"
+  AFI_base="$def"
+  cur="$(git -C "$AFI_root" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  if [[ -z "$cur" ]]; then AFI_base_why="detached"; return 0; fi
+  if [[ "$cur" == "$def" ]]; then AFI_base_why="default branch"; return 0; fi
+  up="$(git -C "$AFI_root" config --get "branch.$cur.merge" 2>/dev/null || true)"
+  up="${up#refs/heads/}"
+  if [[ -n "$up" ]]; then
+    # ls-remote, not origin/<up>: a branch deleted on GitHub keeps its stale
+    # remote-tracking ref until someone prunes.
+    if git -C "$AFI_root" ls-remote --exit-code --heads origin "$up" >/dev/null 2>&1; then
+      AFI_base="$up" AFI_base_why="tracks origin/$up"; return 0
+    fi
+    base="$(cd "$AFI_root" && gh pr list --repo "${AFI_slug:-$(fi_repo_id 2>/dev/null)}" --head "$up" --state merged --limit 1 \
+      --json baseRefName --jq '.[0].baseRefName // ""' 2>/dev/null || true)"
+    if [[ -n "$base" ]] && git -C "$AFI_root" ls-remote --exit-code --heads origin "$base" >/dev/null 2>&1; then
+      AFI_base="$base" AFI_base_why="$up merged into $base"; return 0
+    fi
+    AFI_base_why="$up gone, base unknown"; return 0
+  fi
+  git -C "$AFI_root" fetch -q origin 2>/dev/null || true
+  while IFS= read -r b || [[ -n "$b" ]]; do
+    b="${b#origin/}"
+    [[ -n "$b" && "$b" != HEAD && "$b" != fi/* ]] || continue
+    git -C "$AFI_root" ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1 || continue
+    git -C "$AFI_root" merge-base "origin/$b" HEAD >/dev/null 2>&1 || continue
+    n="$(git -C "$AFI_root" rev-list --count "origin/$b..HEAD" 2>/dev/null)" || continue
+    if [[ -z "$bestn" ]] || (( n < bestn )) || { (( n == bestn )) && [[ "$b" == "$def" ]]; }; then
+      best="$b" bestn="$n"
+    fi
+  done < <(git -C "$AFI_root" for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null)
+  if [[ -z "$best" ]]; then AFI_base_why="no pushed ancestor"; return 0; fi
+  # A tie keeps the default branch: only a strictly nearer branch wins.
+  if [[ "$best" != "$def" ]] && [[ "$(git -C "$AFI_root" rev-list --count "origin/$def..HEAD" 2>/dev/null)" == "$bestn" ]]; then
+    AFI_base_why="nearest pushed ancestor $def"; return 0
+  fi
+  AFI_base="$best" AFI_base_why="nearest pushed ancestor $best"
+}
+
 fi_af_worktree_add() {
   local s base
-  base="$(cd "$AFI_root" && fi_resolve_default_branch)"
+  [[ -n "$AFI_base" ]] || fi_af_landing_branch
+  base="$AFI_base"
   git -C "$AFI_root" fetch -q origin "$base" 2>/dev/null || { FI_AF_WHY="git fetch failed"; return 1; }
-  AFI_base="$base"
   if [[ "$AFI_kind" == "sweep" ]]; then
     # Phase 4 ruling 5: unique per run (the spec's per-day <n> collided).
     AFI_branch="fi/sweep/${AFI_id%%-*}-${AFI_id##*-}"
@@ -277,6 +323,9 @@ fi_af_reap() {
       fi_af_item_set "$f" pid ""
       # The dead run's PR number would make cancel refuse the re-run.
       fi_af_item_set "$f" pr ""
+      # Back in the queue: the landing branch resolves fresh at re-claim.
+      fi_af_item_set "$f" base ""
+      fi_af_item_set "$f" base_why ""
       fi_af_unlock "$AFI_id"
       mv "$f" "$FI_AF_ST/queue/$AFI_id"
       fi_af_seg_write "$AFI_root"
@@ -285,6 +334,63 @@ fi_af_reap() {
       fi_af_finish "$AFI_id" failed "crashed"
     fi
   done
+}
+
+# The file an entry cites, relative to the root; rc 1 when the entry cites no
+# file that exists in the root checkout (an abstract topic, with or without a
+# slash, or a path that exists nowhere), so there is nothing to wait on.
+_fi_af_entry_file() {
+  fi_parse_entry_vars "$AFI_entry" 2>/dev/null || return 1
+  [[ -n "$FE_path" ]] || return 1
+  [[ -e "$AFI_root/$FE_path" ]] || return 1
+  printf '%s' "$FE_path"
+}
+
+# Spec decision 5: a cited file is busy in the session's root checkout when it
+# has uncommitted changes (staged or not) or commits not yet pushed. "Pushed"
+# is the branch's own upstream ref when it exists (live or stale: a
+# squash-merged branch's own commits are not unpushed), else origin/<base>.
+# Never a diff against origin/<base> itself: a checkout merely behind origin
+# differs from it without holding any work of its own. rc 0 = busy.
+_fi_af_file_busy() {
+  local p="$1" cur up pushed
+  [[ -n "$(git -C "$AFI_root" diff --name-only HEAD -- "$p" 2>/dev/null)" ]] && return 0
+  pushed="origin/$AFI_base"
+  cur="$(git -C "$AFI_root" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  if [[ -n "$cur" ]]; then
+    up="$(git -C "$AFI_root" config --get "branch.$cur.merge" 2>/dev/null || true)"
+    up="${up#refs/heads/}"
+    if [[ -n "$up" ]] && git -C "$AFI_root" show-ref --verify --quiet "refs/remotes/origin/$up"; then
+      pushed="origin/$up"
+    fi
+  fi
+  [[ -n "$(git -C "$AFI_root" rev-list -1 "$pushed..HEAD" -- "$p" 2>/dev/null)" ]]
+}
+
+# Spec section 2: rc 0 = go; rc 8 = wait (item stays queued); rc 5 = waited
+# too long. The file must be on the landing branch's remote and untouched
+# locally, or a fix cut from origin/<base> would not match what the session sees.
+_fi_af_wait_check() {
+  local q="$1" p why now since
+  p="$(_fi_af_entry_file)" || return 0
+  git -C "$AFI_root" fetch -q origin "$AFI_base" 2>/dev/null || return 0
+  if ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
+    why="$p not on origin/$AFI_base"
+  elif _fi_af_file_busy "$p"; then
+    why="$p busy in $AFI_root"
+  else
+    return 0
+  fi
+  now="$(date +%s)"
+  since="$AFI_wait_since"; [[ "$since" =~ ^[0-9]+$ ]] || since="$now"
+  if (( now - since > ${FOUND_ISSUES_AUTOFIX_WAIT_MAX:-259200} )); then
+    FI_AF_WHY="$why"; return 5
+  fi
+  fi_af_item_set "$q" waiting "$why"
+  fi_af_item_set "$q" wait_since "$since"
+  fi_af_item_set "$q" wait_next "$(( now + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
+  FI_AF_WHY="$why"
+  return 8
 }
 
 # Spec §5.1. Lock first, so of two claimers exactly one sees the queue file.
@@ -300,6 +406,20 @@ fi_af_claim() {
   # finds nothing and the lock is still ours to drop.
   if ! fi_af_eligible; then fi_af_retire "$id" stale "$FI_AF_WHY" || fi_af_unlock "$id"; return 5; fi
   if ! fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"; then fi_af_unlock "$id"; return 3; fi
+  # Resolve the landing branch now so the wait check and the worktree cut
+  # (fi_af_worktree_add reuses AFI_base) look at the same branch.
+  fi_af_landing_branch
+  local wrc=0
+  _fi_af_wait_check "$q" || wrc=$?
+  case $wrc in
+    5) fi_af_retire "$id" stale "$FI_AF_WHY" || fi_af_unlock "$id"; return 5 ;;
+    8) fi_af_unlock "$id"; fi_af_log "$id" "waiting: $FI_AF_WHY"; return 8 ;;
+  esac
+  # The wait is over: clear its clock too, or the next wait of a requeued
+  # item would start from this one's wait_since and retire stale at once.
+  fi_af_item_set "$q" waiting ""
+  fi_af_item_set "$q" wait_since ""
+  fi_af_item_set "$q" wait_next ""
   # Launcher A's run passes its own long-lived pid. A standalone claim is an
   # in-session fixer (launcher B): its claim process exits at once, so there
   # is no pid to record. The repo lock, refreshed by every B-side call, is
@@ -316,8 +436,9 @@ fi_af_claim() {
   fi_af_item_set "$r" wt "$AFI_wt"
   fi_af_item_set "$r" branch "$AFI_branch"
   fi_af_item_set "$r" base "$AFI_base"
+  fi_af_item_set "$r" base_why "$AFI_base_why"
   fi_af_item_set "$r" base_sha "$AFI_base_sha"
-  fi_af_log "$id" "claimed: $AFI_wt ($AFI_branch from origin/$AFI_base)"
+  fi_af_log "$id" "claimed: $AFI_wt ($AFI_branch from origin/$AFI_base: $AFI_base_why)"
 }
 
 # Give a claimed item back to the queue untouched (an engine outage): no
@@ -328,6 +449,9 @@ fi_af_requeue() {
   fi_af_worktree_remove
   fi_af_item_set "$r" pid ""
   fi_af_item_set "$r" pr ""
+  # A queued item resolves its landing branch fresh at its next claim.
+  fi_af_item_set "$r" base ""
+  fi_af_item_set "$r" base_why ""
   mv "$r" "$FI_AF_ST/queue/$id"
   fi_af_seg_write "$AFI_root"
   fi_af_unlock "$id"
