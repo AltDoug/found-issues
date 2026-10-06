@@ -16,6 +16,8 @@ teardown() { fi_teardown_tmp; }
   done
   [[ "$output" == *"found-issues.autofix.dailyFixes"*"5"*"(default)"* ]]
   [[ "$output" == *"found-issues.autofix.testCommand"*"sh test.sh"*"(local)"* ]]
+  [[ "$output" == *"found-issues.autofix.runBudget"*"(default)"* ]]
+  [[ "$output" == *"found-issues.autofix.sweepBudget"*"(default)"* ]]
 }
 
 @test "config: set writes this repo, get reads it back" {

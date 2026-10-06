@@ -249,7 +249,7 @@ fi_af_summary() {
 
 # Phase 5 ruling 9: auto-fix readiness at a glance, on or off (spec §8).
 fi_af_doctor() {
-  local p="$1" w="$2" x="$3" gh_user="$4" e v
+  local p="$1" w="$2" x="$3" gh_user="$4" e v rb sb
   git rev-parse --show-toplevel >/dev/null 2>&1 || return 0
   printf '== Auto-fix ==\n'
   if fi_af_enabled; then
@@ -277,8 +277,11 @@ fi_af_doctor() {
   done
   e="$(fi_af_engine 2>/dev/null || true)"
   printf '   Engine: %s -> %s\n' "$(fi_af_cfg engine auto)" "${e:-none available}"
-  printf '   Caps: %s spot fixes/day, %s sweep(s)/day (at %s fixable, up to %s entries), $%s per run, $%s per sweep, %s min per run\n' \
+  rb="$(fi_af_cfg runBudget "")" sb="$(fi_af_cfg sweepBudget "")"
+  [[ -n "$rb" ]] && rb="\$$rb per run" || rb="no dollar cap per run"
+  [[ -n "$sb" ]] && sb="\$$sb per sweep" || sb="no dollar cap per sweep"
+  printf '   Caps: %s spot fixes/day, %s sweep(s)/day (at %s fixable, up to %s entries), %s, %s, %s min per run\n' \
     "$(fi_af_int dailyFixes 5)" "$(fi_af_int dailySweeps 1)" "$(fi_af_int sweepThreshold 5)" \
-    "$(fi_af_int sweepMax 8)" "$(fi_af_cfg runBudget 3)" "$(fi_af_cfg sweepBudget 10)" "$(fi_af_int runTimeoutMin 20)"
+    "$(fi_af_int sweepMax 8)" "$rb" "$sb" "$(fi_af_int runTimeoutMin 20)"
   printf '   Fix PRs merge themselves once checks pass. Stop: found-issues autofix off\n\n'
 }

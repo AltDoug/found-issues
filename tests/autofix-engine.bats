@@ -24,12 +24,35 @@ teardown() { fi_teardown_tmp; }
   grep -qx -- '--permission-prompts' "$TMP/argv"
   grep -qx 'none' "$TMP/argv"
   grep -qx 'sonnet' "$TMP/argv"
-  grep -qx -- '--max-budget-usd' "$TMP/argv"
+  ! grep -qx -- '--max-budget-usd' "$TMP/argv" || false
   grep -qx -- '--max-turns' "$TMP/argv"
   grep -qx 'Bash(sh test.sh)' "$TMP/argv"
   grep -qx 'Bash(sh test.sh \*)' "$TMP/argv"
   ! grep -q 'Bash(git' "$TMP/argv" || false
   ! grep -qx 'bypassPermissions' "$TMP/argv" || false
+}
+
+@test "autofix engine: a set runBudget puts --max-budget-usd on every claude child" {
+  git config found-issues.autofix.runBudget 2
+  fi_af_allowlist 'sh test.sh'
+  fi_af_fixer_cmd claude "P" "$TMP/last"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  grep -qx -- '--max-budget-usd' "$TMP/argv"
+  grep -qx '2.00' "$TMP/argv"
+  fi_af_verifier_cmd claude "P" "$TMP/last" "$TMP/schema"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  grep -qx -- '--max-budget-usd' "$TMP/argv"
+}
+
+@test "autofix engine: no budget set means no dollar cap" {
+  FI_AF_COST=500
+  [ -z "$(fi_af_budget)" ]
+  fi_af_budget_left
+  [ -z "$(fi_af_budget_left)" ]
+  fi_af_run_budget_left claude
+  fi_af_verifier_cmd claude "P" "$TMP/last" "$TMP/schema"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  ! grep -qx -- '--max-budget-usd' "$TMP/argv" || false
 }
 
 @test "autofix engine: bats and pytest runners may be called with a single file" {

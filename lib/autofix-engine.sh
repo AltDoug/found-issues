@@ -26,6 +26,7 @@
 #   fi_af_parse_result <text>
 #   fi_af_parse_verdict <text>
 #   fi_af_budget_left
+#   fi_af_budget_args
 #   fi_af_token_cap
 #   fi_af_tokens_left
 #   fi_af_run_budget_left <engine>
@@ -33,7 +34,7 @@
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
-FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
+FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_BARGS=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
 FI_AF_RESULT="" FI_AF_RESULT_TEXT="" FI_AF_APPROVE="false" FI_AF_REASON=""
 FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0
 
@@ -180,7 +181,8 @@ fi_af_fixer_cmd() {
     FI_AF_CMD=(codex exec --sandbox workspace-write -C "$AFI_wt" --ephemeral --json
       ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"} -o "$last" "$prompt")
   else
-    FI_AF_CMD=(claude -p --model sonnet --max-budget-usd "$(fi_af_budget_left || printf '0.10')"
+    fi_af_budget_args
+    FI_AF_CMD=(claude -p --model sonnet ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 40 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools "${FI_AF_TOOLS[@]}"
@@ -196,7 +198,8 @@ fi_af_verifier_cmd() {
     FI_AF_CMD=(codex exec --sandbox read-only -C "$AFI_wt" --ephemeral --json
       ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"} --output-schema "$schema" -o "$last" "$prompt")
   else
-    FI_AF_CMD=(claude -p --model opus --effort high --max-budget-usd "$(fi_af_budget_left || printf '0.10')"
+    fi_af_budget_args
+    FI_AF_CMD=(claude -p --model opus --effort high ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 15 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools Read Grep Glob "Bash(found-issues autofix search ${AFI_id:-} *)"
@@ -258,9 +261,22 @@ fi_af_parse_verdict() {
   FI_AF_REASON="${FI_AF_REASON//$'\n'/ }"
 }
 
-# Spec §7: runBudget caps the whole run (every fixer and verifier child).
+# Spec §7/§8: runBudget caps the whole run (every child) when set; unset is
+# no cap (3.3.0, Decision 6).
 fi_af_budget_left() {
-  awk -v b="$(fi_af_budget)" -v s="$FI_AF_COST" 'BEGIN { l = b - s; if (l < 0.10) exit 1; printf "%.2f", l }'
+  local b
+  b="$(fi_af_budget)"
+  [[ -n "$b" ]] || return 0
+  awk -v b="$b" -v s="$FI_AF_COST" 'BEGIN { l = b - s; if (l < 0.10) exit 1; printf "%.2f", l }'
+}
+
+# The claude child's --max-budget-usd, only when a budget is set.
+fi_af_budget_args() {
+  local b
+  FI_AF_BARGS=()
+  [[ -n "$(fi_af_budget)" ]] || return 0
+  b="$(fi_af_budget_left || printf '0.10')"
+  FI_AF_BARGS=(--max-budget-usd "$b")
 }
 
 # 3.3.0 spec §2: Codex reports tokens, not dollars, so its runs stop on a

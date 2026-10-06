@@ -53,15 +53,16 @@ fi_af_cap_int() {
   printf '%s' "$((10#$v))"
 }
 
-# A sweep fixes up to sweepMax entries, so it has its own budget (phase 4
-# ruling 4: about $1 per entry was measured in phase 3).
+# Dollar cap for this run, or nothing: opt-in since 3.3.0 (spec §8). A
+# sweep has its own key, which covers every batch of the sweep.
 fi_af_budget() {
-  local v key=runBudget def=3
-  [[ "${AFI_kind:-}" == "sweep" ]] && key=sweepBudget def=10
-  v="$(fi_af_cfg "$key" "$def")"
+  local v key=runBudget
+  [[ "${AFI_kind:-}" == "sweep" ]] && key=sweepBudget
+  v="$(fi_af_cfg "$key" "")"
+  [[ -n "$v" ]] || return 0
   if [[ ! "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-    fi_err "found-issues: found-issues.autofix.$key=$v is not a USD amount — using $def"
-    v="$def"
+    fi_err "found-issues: found-issues.autofix.$key=$v is not a USD amount — no dollar cap"
+    return 0
   fi
   printf '%s' "$v"
 }
@@ -205,8 +206,8 @@ autofix.dailyFixes|int|5
 autofix.dailySweeps|int|1
 autofix.sweepThreshold|int|5
 autofix.sweepMax|int|8
-autofix.runBudget|usd|3
-autofix.sweepBudget|usd|10
+autofix.runBudget|usd|
+autofix.sweepBudget|usd|
 autofix.codexRunTokens|int|
 autofix.codexSweepTokens|int|
 autofix.runTimeoutMin|int|20'

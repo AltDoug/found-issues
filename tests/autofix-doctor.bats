@@ -18,6 +18,15 @@ teardown() { fi_teardown_tmp; }
   [[ "$output" == *"claude:"* ]]
 }
 
+@test "doctor auto-fix: unset caps read as no cap" {
+  run "$FI_BIN" doctor
+  [[ "$output" == *"no dollar cap per run"* ]]
+  [[ "$output" == *"no dollar cap per sweep"* ]]
+  git config found-issues.autofix.runBudget 3
+  run "$FI_BIN" doctor
+  [[ "$output" == *'$3 per run'* ]]
+}
+
 @test "doctor auto-fix: off says how to turn it on" {
   git config found-issues.autofix false
   run "$FI_BIN" doctor

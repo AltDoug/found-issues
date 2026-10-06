@@ -119,7 +119,8 @@ fi_af_classify() {
       ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"}
       --output-schema "$base.schema.json" -o "$base.last" "$(_fi_af_classify_prompt "$list")")
   else
-    FI_AF_CMD=(claude -p --model sonnet --max-budget-usd "$(fi_af_budget_left || printf '0.10')"
+    fi_af_budget_args
+    FI_AF_CMD=(claude -p --model sonnet ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 20 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools Read Grep Glob

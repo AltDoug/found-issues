@@ -18,12 +18,13 @@ S="$TEST_REPO_ROOT/commands/setup.md"
 @test "setup disclosure: the caps it states are the code defaults" {
   grep -q '5 spot fixes and 1 sweep a day' "$S"
   grep -q 'up to 8 entries' "$S"
-  grep -q '\$3 per fix run, \$10 per sweep, 20 minutes per run' "$S"
+  grep -q 'no dollar cap unless you set one' "$S"
+  grep -q '20 minutes per run' "$S"
   grep -rqF 'fi_af_int dailyFixes 5' "$TEST_REPO_ROOT/lib"
   grep -rqF 'fi_af_int dailySweeps 1' "$TEST_REPO_ROOT/lib"
   grep -rqF 'fi_af_int sweepMax 8' "$TEST_REPO_ROOT/lib"
-  grep -rqF 'key=runBudget def=3' "$TEST_REPO_ROOT/lib"
-  grep -rqF 'key=sweepBudget def=10' "$TEST_REPO_ROOT/lib"
+  grep -qx 'autofix.runBudget|usd|' "$TEST_REPO_ROOT/lib/autofix-config.sh"
+  grep -qx 'autofix.sweepBudget|usd|' "$TEST_REPO_ROOT/lib/autofix-config.sh"
   grep -rqF 'runTimeoutMin 20' "$TEST_REPO_ROOT/lib"
 }
 

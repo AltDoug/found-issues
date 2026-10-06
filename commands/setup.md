@@ -337,7 +337,7 @@ anything:
 >
 > - Entries tagged `(fix: small)` are fixed in the background, each in its own worktree, branch and PR. When 5 entries are fixable, one sweep fixes up to 8 entries in a single PR.
 > - **Fix PRs merge themselves.** Each fix must pass the repo's tests and a read-only reviewer model, then its PR is set to auto-merge. No human approves it.
-> - **Runs bill your Claude or Codex account, including in the background** where you don't see them. Default caps per repo: 5 spot fixes and 1 sweep a day, up to 8 entries per sweep, $3 per fix run, $10 per sweep, 20 minutes per run (`found-issues config` changes them).
+> - **Runs bill your Claude or Codex account, including in the background** where you don't see them. Default caps per repo: 5 spot fixes and 1 sweep a day, up to 8 entries per sweep, 20 minutes per run. Runs have no dollar cap unless you set one (`found-issues config autofix.runBudget <usd>`, `autofix.sweepBudget <usd>`); `found-issues config` changes the rest.
 > - Issues that need a decision are never auto-fixed; they wait in `/found-issues:decide`.
 > - Turn it off any time: `found-issues autofix off` stops it in every repo at once; `found-issues config autofix false` turns this repo off; `FOUND_ISSUES_AUTOFIX=off` stops it for one shell.
 

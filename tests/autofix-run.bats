@@ -107,6 +107,14 @@ teardown() { fi_teardown_tmp; }
   [ "$(grep -c '^claude' "$FI_STANDIN_TRACE")" = 1 ]
 }
 
+@test "autofix run: with no budget set a claude run never stops on cost" {
+  export FI_STANDIN_COST=50
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped' "$ST/done/$ID"
+  ! grep -q -- '--max-budget-usd' "$FI_STANDIN_TRACE" || false
+}
+
 @test "autofix run: drains the rest of the queue oldest first" {
   printf -- '- [open] 2026-10-02 test.sh:2 — second thing (fix: small)\n' >> "$REPO/docs/found-issues.md"
   git -C "$REPO" commit -qam "second entry" && git -C "$REPO" push -q
