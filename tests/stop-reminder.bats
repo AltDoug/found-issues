@@ -196,6 +196,24 @@ TRANSCRIPT
   rm -f "$TR"
 }
 
+@test "stop-reminder: a huge tool_result line does not push the mutating tool_use out of the smart-fire window" {
+  # Claude Code writes tool results as single very large JSONL lines; a 100KB
+  # result used to shove the Edit tool_use past the 16KB tail window, so the
+  # hook concluded "no substantive tool use" and skipped the marker.
+  TR="$(mktemp)"
+  big="$(head -c 100000 /dev/zero | tr '\0' 'x')"
+  {
+    printf '%s\n' '{"parentUuid":"u-1","type":"user","message":{"role":"user","content":[{"type":"text","text":"edit it"}]},"uuid":"user-1","sessionId":"s-1"}'
+    printf '%s\n' '{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Edit","input":{"file_path":"/x/a.txt","old_string":"a","new_string":"b"}}]},"uuid":"asst-1","sessionId":"s-1"}'
+    printf '{"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01","type":"tool_result","content":"%s","is_error":false}]},"uuid":"toolres-1","sessionId":"s-1"}\n' "$big"
+    printf '%s\n' '{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Edited."}]},"uuid":"asst-2","sessionId":"s-1"}'
+  } > "$TR"
+  input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
+  run bash -c "echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
+  [ "$status" -eq 2 ]
+  rm -f "$TR"
+}
+
 # --- smart-fire: Bash counts only when it mutates (2.7.0, 2026-08-28 audit F5) ---
 
 # realistic_bash_transcript <file> <command-json-escaped> — one user prompt,
