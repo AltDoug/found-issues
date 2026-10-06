@@ -193,3 +193,47 @@ teardown() { fi_teardown_tmp; }
   fi_af_collect claude "$TMP/c.json" ""
   [ "$FI_AF_ENGINE_ERR" = "You've hit your usage limit" ]
 }
+
+@test "autofix engine: codex roles get pinned models and efforts by default" {
+  fi_af_fixer_cmd codex "P" "$TMP/last"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/fix"
+  grep -qx 'gpt-6.1-sol' "$TMP/fix"
+  grep -qx 'model_reasoning_effort=medium' "$TMP/fix"
+  [ "${FI_AF_CMD[${#FI_AF_CMD[@]}-1]}" = "P" ]
+  fi_af_verifier_cmd codex "V" "$TMP/last" "$TMP/schema"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/ver"
+  grep -qx 'gpt-6-astra' "$TMP/ver"
+  grep -qx 'model_reasoning_effort=high' "$TMP/ver"
+  fi_af_codex_margs classifier
+  [ "${FI_AF_MARGS[*]}" = "-m gpt-6.1-sol -c model_reasoning_effort=low" ]
+  [ "$FI_AF_MDESC" = "gpt-6.1-sol (low)" ]
+}
+
+@test "autofix engine: inherit is per role and drops both -m and effort" {
+  git config found-issues.autofix.codexVerifierModel inherit
+  fi_af_verifier_cmd codex "V" "$TMP/last" "$TMP/schema"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/ver"
+  ! grep -qx -- '-m' "$TMP/ver" || false
+  ! grep -q 'model_reasoning_effort' "$TMP/ver" || false
+  grep -qx 'read-only' "$TMP/ver"
+  fi_af_fixer_cmd codex "P" "$TMP/last"
+  printf '%s\n' "${FI_AF_CMD[@]}" | grep -qx 'gpt-6.1-sol'
+  fi_af_codex_margs verifier
+  [ "${#FI_AF_MARGS[@]}" -eq 0 ]
+  [ "$FI_AF_MDESC" = "inherit" ]
+}
+
+@test "autofix engine: a custom codex model passes through as one argv element" {
+  git config found-issues.autofix.codexModel 'org/model:tag-1.2'
+  fi_af_fixer_cmd codex "P" "$TMP/last"
+  printf '%s\n' "${FI_AF_CMD[@]}" | grep -qx 'org/model:tag-1.2'
+}
+
+@test "autofix engine: the codex classifier argv carries the classifier model" {
+  printf -- '- [open] 2026-10-01 src/calc.sh:1 — untagged thing\n' >> docs/found-issues.md
+  export FI_STANDIN_TRACE="$TMP/trace"
+  FI_AF_RUNS="$TMP"; AFI_engine=codex
+  fi_af_classify docs/found-issues.md t1 || true
+  grep -q 'model_reasoning_effort=low' "$TMP/trace"
+  grep -q 'gpt-6.1-sol' "$TMP/trace"
+}

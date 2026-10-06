@@ -9,6 +9,7 @@
 #   fi_af_cfg <key> <default>
 #   fi_af_int <key> <default>
 #   fi_af_budget
+#   fi_af_codex_margs <fixer|verifier|classifier>
 #   fi_af_root
 #   fi_af_enabled
 #   fi_af_dirs <owner/repo>
@@ -49,6 +50,23 @@ fi_af_budget() {
     v="$def"
   fi
   printf '%s' "$v"
+}
+
+# 3.3.0 spec section 1: the -m/effort pair for one Codex role. Effort is fixed
+# per role in code, as the claude engine's is. inherit leaves both out, so the
+# user's ~/.codex/config.toml decides. Sets FI_AF_MARGS and FI_AF_MDESC.
+FI_AF_MARGS=() FI_AF_MDESC=""
+fi_af_codex_margs() {
+  local key=codexModel def=gpt-6.1-sol effort=medium m
+  case "$1" in
+    classifier) effort=low ;;
+    verifier) key=codexVerifierModel def=gpt-6-astra effort=high ;;
+  esac
+  m="$(fi_af_cfg "$key" "$def")"
+  FI_AF_MARGS=()
+  if [[ "$m" == inherit ]]; then FI_AF_MDESC=inherit; return 0; fi
+  FI_AF_MARGS=(-m "$m" -c "model_reasoning_effort=$effort")
+  FI_AF_MDESC="$m ($effort)"
 }
 
 fi_af_root() {
@@ -166,6 +184,8 @@ fi_af_no_prompts() {
 # Spec §8 settings: key|kind|default ("" = detected or none).
 _FI_CFG_KEYS='autofix|bool|false
 autofix.engine|engine|auto
+autofix.codexModel|model|gpt-6.1-sol
+autofix.codexVerifierModel|model|gpt-6-astra
 autofix.testCommand|text|
 autofix.dailyFixes|int|5
 autofix.dailySweeps|int|1
@@ -212,6 +232,9 @@ _fi_cfg_valid() {
       if [[ ! "$FI_CFG_VAL" =~ ^[0-9]+(\.[0-9]+)?$ || "$FI_CFG_VAL" =~ ^0+(\.0+)?$ ]]; then
         fi_err "config: found-issues.$FI_CFG_KEY takes a USD amount above 0, e.g. 3 or 2.5"; return 1
       fi ;;
+    model)
+      [[ "$FI_CFG_VAL" =~ ^[A-Za-z0-9._:/-]+$ ]] \
+        || { fi_err "config: found-issues.$FI_CFG_KEY takes a Codex model name (e.g. gpt-6.1-sol) or inherit"; return 1; } ;;
     text)
       [[ -n "$FI_CFG_VAL" ]] || { fi_err "config: found-issues.$FI_CFG_KEY needs a value"; return 1; } ;;
   esac

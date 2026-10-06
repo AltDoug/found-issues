@@ -152,3 +152,15 @@ src() {
   CODEX_THREAD_ID=x PATH="/usr/bin:/bin" run fi_af_engine
   [ "$output" = codex ]
 }
+
+@test "config validates model names" {
+  run "$FI_BIN" config autofix.codexModel 'gpt 6'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"takes a Codex model name"* ]]
+  run "$FI_BIN" config autofix.codexModel inherit
+  [ "$status" -eq 0 ]
+  run "$FI_BIN" config autofix.codexVerifierModel gpt-6-astra
+  [ "$status" -eq 0 ]
+  run "$FI_BIN" config
+  [[ "$output" == *"found-issues.autofix.codexModel"*"inherit"*"(local)"* ]]
+}

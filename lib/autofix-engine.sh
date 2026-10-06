@@ -172,7 +172,9 @@ EOF
 fi_af_fixer_cmd() {
   local engine="$1" prompt="$2" last="$3"
   if [[ "$engine" == "codex" ]]; then
-    FI_AF_CMD=(codex exec --sandbox workspace-write -C "$AFI_wt" --ephemeral --json -o "$last" "$prompt")
+    fi_af_codex_margs fixer
+    FI_AF_CMD=(codex exec --sandbox workspace-write -C "$AFI_wt" --ephemeral --json
+      ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"} -o "$last" "$prompt")
   else
     FI_AF_CMD=(claude -p --model sonnet --max-budget-usd "$(fi_af_budget_left || printf '0.10')"
       --max-turns 40 --no-session-persistence
@@ -186,8 +188,9 @@ fi_af_verifier_cmd() {
   local engine="$1" prompt="$2" last="$3" schema="$4"
   if [[ "$engine" == "codex" ]]; then
     printf '%s\n' '{"type":"object","properties":{"approve":{"type":"boolean"},"reason":{"type":"string"}},"required":["approve","reason"],"additionalProperties":false}' >"$schema"
+    fi_af_codex_margs verifier
     FI_AF_CMD=(codex exec --sandbox read-only -C "$AFI_wt" --ephemeral --json
-      -c model_reasoning_effort=high --output-schema "$schema" -o "$last" "$prompt")
+      ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"} --output-schema "$schema" -o "$last" "$prompt")
   else
     FI_AF_CMD=(claude -p --model opus --effort high --max-budget-usd "$(fi_af_budget_left || printf '0.10')"
       --max-turns 15 --no-session-persistence

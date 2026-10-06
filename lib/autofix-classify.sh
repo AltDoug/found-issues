@@ -111,7 +111,9 @@ fi_af_classify() {
     || { fi_af_log "$id" "classify: skipped (no engine on PATH)"; return 0; }
   if [[ "$engine" == "codex" ]]; then
     printf '%s\n' '{"type":"object","properties":{"tags":{"type":"array","items":{"type":"object","properties":{"n":{"type":"string"},"kind":{"type":"string"},"value":{"type":"string"}},"required":["n","kind","value"],"additionalProperties":false}},"wake":{"type":"array","items":{"type":"string"}}},"required":["tags","wake"],"additionalProperties":false}' >"$base.schema.json"
+    fi_af_codex_margs classifier
     FI_AF_CMD=(codex exec --sandbox read-only -C "$AFI_wt" --ephemeral --json
+      ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"}
       --output-schema "$base.schema.json" -o "$base.last" "$(_fi_af_classify_prompt "$list")")
   else
     FI_AF_CMD=(claude -p --model sonnet --max-budget-usd "$(fi_af_budget_left || printf '0.10')"
