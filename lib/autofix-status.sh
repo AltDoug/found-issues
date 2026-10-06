@@ -145,6 +145,7 @@ fi_af_status() {
     while IFS= read -r f || [[ -n "$f" ]]; do
       fi_af_item_read "${f#* }" || true
       printf '  %s  %s — %s\n' "$AFI_id" "${AFI_loc:-sweep}" "$AFI_result"
+      if [[ -n "$AFI_base" ]]; then printf '      into %s (%s)\n' "$AFI_base" "${AFI_base_why:-?}"; fi
       _fi_af_pr_num
       if [[ -n "$FI_AF_PRNUM" ]]; then
         printf '      https://github.com/%s/pull/%s' "${AFI_slug:-$FI_AF_SLUG}" "$FI_AF_PRNUM"
