@@ -14,9 +14,6 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - The stop reminder blocks once per session only in a session that edited code: an Edit, Write, MultiEdit or NotebookEdit on a path that is not `.md`, `.mdx`, `.markdown`, `.txt`, `.rst` or `.adoc`. Other substantive turns without the marker, such as doc-only edits or a mutating Bash command, get one non-blocking reminder per session. A new `UserPromptSubmit` hook, `prompt-nudge.sh`, hands that reminder to the model with the next prompt. A scan of 101 transcripts found that most blocks bought a whole billed turn just to append the marker. `FOUND_ISSUES_STOP_REMINDER_EVERY_TURN=on` keeps the old block on every substantive turn. Codex is unchanged.
-
-### Added
-
 - `/found-issues:setup` asks when a sweep starts after you turn auto-fix on: 5 (the default), 10, 20, or any whole number. It writes `autofix.sweepThreshold` at the scope auto-fix was turned on in.
 
 ## [3.2.0] - 2026-10-05
