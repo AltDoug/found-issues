@@ -350,6 +350,21 @@ multi-select above):
 2. `Turn on in this repo` — run `found-issues config autofix true`.
 3. `Turn on in every repo` — run `found-issues config autofix true --global`.
 
+If the user turned it on, ask one more single-select `AskUserQuestion`:
+"Start a sweep when how many entries are fixable?" (a sweep fixes up to 8
+entries in one PR, whatever the number chosen here):
+
+1. `5 (Recommended)` — description: "The default: sweeps start early and
+   stay small."
+2. `10` — description: "Fewer sweep runs; a sweep still fixes up to 8."
+3. `20` — description: "Sweeps only on a large backlog; a sweep still
+   fixes up to 8."
+
+The automatic Other slot takes any whole number of 1 or more; ask again if
+the answer is not one. Write the choice at the scope auto-fix was turned on
+in: `found-issues config autofix.sweepThreshold <n>` for this repo, or
+`found-issues config autofix.sweepThreshold <n> --global` for every repo.
+
 After turning it on, run `found-issues doctor` and show its
 `== Auto-fix ==` section, so the user sees anything still missing (a test
 command, the `gh` sign-in, `claude` or `codex` on PATH).

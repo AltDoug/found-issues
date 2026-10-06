@@ -6,6 +6,9 @@
 # bare repo through url.insteadOf (fi_repo_id still reads foo/bar). It has
 # one bug (add subtracts), a test command that sees it, a committed ledger
 # entry tagged (fix: small), and auto-fix enabled locally. cwd = the repo.
+# Like a real repo the suite passes at base (3.2.1 runs it there first): the
+# bug's test stands in for the one a fixer adds, so it runs only once src/
+# holds a change: uncommitted, or in a commit no remote branch has yet.
 fi_af_fixture() {
   export FOUND_ISSUES_STATE_DIR="$TMP/state"
   export HOME="$TMP/home"; mkdir -p "$HOME"
@@ -18,7 +21,7 @@ fi_af_fixture() {
   git config url."$TMP/remote.git".insteadOf https://github.com/foo/bar.git
   mkdir -p src docs
   printf 'add() { echo $(( $1 - $2 )); }\n' > src/calc.sh
-  printf '. ./src/calc.sh\n[ "$(add 2 3)" = 5 ]\n' > test.sh
+  printf '. ./src/calc.sh\n[ -z "$(git status --porcelain -- src)$(git rev-list HEAD --not --remotes -- src)" ] && exit 0\n[ "$(add 2 3)" = 5 ]\n' > test.sh
   printf '# found-issues\n\n- [open] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small)\n' > docs/found-issues.md
   git add -A && git commit -q -m init
   git push -q -u origin main

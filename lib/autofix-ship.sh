@@ -155,10 +155,15 @@ fi_af_ship() {
 # ledger (where sync closes it on merge), then arm auto-merge.
 _fi_af_publish() {
   local title="$1" bodyf="$2" rows="$3" wt="$AFI_wt" br="$AFI_branch" base="$AFI_base"
-  local runlog="$FI_AF_RUNS/$AFI_id.log" url p wl="" ann key loc n=0 msg
+  local runlog="$FI_AF_RUNS/$AFI_id.log" url="" p wl="" ann key loc n=0 msg
   local keep_key="$AFI_key" keep_loc="$AFI_loc"
   git -C "$wt" push -q -u origin "$br" >>"$runlog" 2>&1 || { FI_AF_WHY="git push failed"; return 1; }
-  url="$(cd "$wt" && gh pr create --repo "$AFI_slug" --base "$base" --head "$br" --title "$title" --body-file "$bodyf" 2>>"$runlog")" \
+  # A ship retry (3.2.1) may follow a try whose PR was opened after all.
+  if [[ "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then
+    p="$(cd "$wt" && gh pr list --repo "$AFI_slug" --head "$br" --state open --json number --jq '.[0].number // ""' 2>>"$runlog" || true)"
+    [[ "$p" =~ ^[0-9]+$ ]] && url="https://github.com/$AFI_slug/pull/$p"
+  fi
+  [[ -n "$url" ]] || url="$(cd "$wt" && gh pr create --repo "$AFI_slug" --base "$base" --head "$br" --title "$title" --body-file "$bodyf" 2>>"$runlog")" \
     || { FI_AF_WHY="gh pr create failed"; return 1; }
   FI_AF_PR="${url##*/}"
   [[ "$FI_AF_PR" =~ ^[0-9]+$ ]] || { FI_AF_WHY="no PR number in: $url"; return 1; }

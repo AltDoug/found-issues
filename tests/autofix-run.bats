@@ -61,8 +61,17 @@ teardown() { fi_teardown_tmp; }
   grep -q '(autofix-failed: tests fail after 2 attempts)$' "$REPO/docs/found-issues.md"
 }
 
+@test "autofix run: tests that fail at base end stale without starting an engine" {
+  git config found-issues.autofix.testCommand 'exit 1'
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=stale: tests fail at base$' "$ST/done/$ID"
+  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q '^claude' "$FI_STANDIN_TRACE" || false
+  ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
+}
+
 @test "autofix run: retry feedback names the failing tests, not just the tail" {
-  git config found-issues.autofix.testCommand "printf 'not ok 1 early %s\n' failure; i=2; while [ \$i -le 40 ]; do echo \"ok \$i fine\"; i=\$((i+1)); done; exit 1"
+  git config found-issues.autofix.testCommand "[ -z \"\$(git status --porcelain -- src)\" ] && exit 0; printf 'not ok 1 early %s\n' failure; i=2; while [ \$i -le 40 ]; do echo \"ok \$i fine\"; i=\$((i+1)); done; exit 1"
   run "$FI_BIN" autofix run "$ID" --engine claude
   grep -q 'not ok 1 early failure' "$FI_STANDIN_TRACE"
 }

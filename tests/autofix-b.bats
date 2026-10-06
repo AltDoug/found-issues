@@ -60,7 +60,7 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   [[ "$output" == *"src/calc.sh:1:add()"* ]]
   run "$FI_BIN" autofix search "$ID" 'add' test.sh
   [ "$status" -eq 0 ]
-  [[ "$output" == *"test.sh:2:"* ]]
+  [[ "$output" == *"test.sh:3:"* ]]
   [[ "$output" != *"src/calc.sh"* ]]
   run "$FI_BIN" autofix search "$ID" --files 'src/*'
   [ "$status" -eq 0 ]
@@ -119,6 +119,7 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
 
 @test "b: test runs the repo test command in the worktree and reports fail then pass" {
   claim
+  printf '# touched\n' >>"$WT/src/calc.sh"   # the bug's test runs once src/ changes
   run "$FI_BIN" autofix test "$ID"
   [ "$status" -ne 0 ]
   [[ "$output" == *"tests: fail"* ]]
@@ -128,9 +129,10 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   [[ "$output" == *"tests: pass"* ]]
 }
 
-# A TAP run whose only failure is far above the last 30 lines.
+# A TAP run whose only failure is far above the last 30 lines; it passes at
+# base (claim runs it there first) and fails once fail.flag exists.
 tap_fail_cmd() {
-  printf '%s' "printf 'not ok 1 early %s\n# (in test file t.bats, line 3)\n' failure; i=2; while [ \$i -le 40 ]; do echo \"ok \$i fine\"; i=\$((i+1)); done; exit 1"
+  printf '%s' "[ -f fail.flag ] || exit 0; printf 'not ok 1 early %s\n# (in test file t.bats, line 3)\n' failure; i=2; while [ \$i -le 40 ]; do echo \"ok \$i fine\"; i=\$((i+1)); done; exit 1"
 }
 
 @test "b: the repo test command runs without FOUND_ISSUES_AUTOFIX_CHILD" {
@@ -144,6 +146,7 @@ tap_fail_cmd() {
 @test "b: test lists every failing TAP test with its diagnostics, not just the tail" {
   git -C "$REPO" config found-issues.autofix.testCommand "$(tap_fail_cmd)"
   claim
+  touch "$WT/fail.flag"
   run "$FI_BIN" autofix test "$ID"
   [ "$status" -ne 0 ]
   [[ "$output" == *"not ok 1 early failure"* ]]

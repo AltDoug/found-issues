@@ -133,3 +133,27 @@ teardown() { fi_teardown_tmp; }
   [ -f "$REPO/precious.txt" ]
   [ -f "$REPO/src/calc.sh" ]
 }
+
+# 3.2.1 (ledger lib/autofix.sh:127): a suite that already fails at base fails
+# every attempt whatever the fix does, so claim runs it once first.
+@test "autofix claim: tests that fail at base retire the item stale before any fixer" {
+  git config found-issues.autofix.testCommand 'echo "not ok 1 needs donor files"; exit 1'
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"retired"*"tests fail at base"* ]]
+  grep -q '^result=stale: tests fail at base$' "$ST/done/$ID"
+  [ ! -d "$REPO/.claude/worktrees/fi-autofix-$ID" ]
+  [ -z "$(git branch --list 'fi/autofix/*')" ]
+  [ ! -d "$ST/lock" ]
+  # Stale, not failed: the entry stays fixable for a later run.
+  ! grep -q 'autofix-failed' docs/found-issues.md || false
+  grep -q 'not ok 1 needs donor files' "$FI_AF_RUNS/$ID.log"
+}
+
+@test "autofix claim: tests that pass at base run once and the claim proceeds" {
+  git config found-issues.autofix.testCommand "echo base >> '$TMP/base-runs'"
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 1 ]
+  [ -f "$ST/running/$ID" ]
+}

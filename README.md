@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**5 lifecycle hooks · 14 slash commands · 1290 tests on Linux/macOS · zero manual bookkeeping**
+**6 lifecycle hooks · 14 slash commands · 1310 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -162,8 +162,11 @@ src/foo.py:42 — bug` works as a shortcut for the full namespaced form.
 Off by default. With `found-issues config autofix true` in a GitHub repo
 (`gh` signed in, a test command), entries tagged `(fix: small)` are fixed
 in the background, each in its own worktree, branch and PR; when 5 are
-fixable, one sweep fixes up to 8 in a single PR. Each fix must pass the
-repo's tests and a read-only reviewer model. The fix starts from, and its
+fixable (setup lets you pick 5, 10, 20 or any number), one sweep fixes up
+to 8 in a single PR. Each fix must pass the repo's tests and a read-only
+reviewer model. A run whose tests already fail before any change ends at
+once, before it spends anything, and a sweep whose PR could not be pushed
+keeps its branch and retries. The fix starts from, and its
 PR opens into, the branch your session is working on (its landing branch),
 not always the default branch; a file with uncommitted or unpushed changes
 in your checkout waits until you push it.
@@ -228,7 +231,7 @@ regression report is welcome.
 
 ## Status
 
-**v3.2.0** — opt-in auto-fix and auto-sweep on top of the ledger;
+**v3.2.1** — opt-in auto-fix and auto-sweep on top of the ledger;
 actively developed and dogfooded (this repo's own ledger is maintained by
 the plugin). End-to-end runtime probes exercise the generated statusline
 shims against synthetic Claude Code stdin on every CI run, and stand-in

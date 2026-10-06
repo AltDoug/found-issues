@@ -20,7 +20,8 @@
 #   fi_af_cap_ok <kind> <limit> / fi_af_cap_take <kind> <id>
 #   fi_af_find_entry [<ledger>]
 #   fi_af_eligible
-#   fi_af_worktree_add / fi_af_worktree_remove
+#   fi_af_worktree_add / fi_af_worktree_remove [drop]
+#   fi_af_base_tests <id>
 #   fi_af_retire <id> <outcome> <text>
 #   fi_af_reap
 #   fi_af_claim <id>
@@ -37,7 +38,7 @@ AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
 AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next=""
+AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0"
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -52,14 +53,14 @@ fi_af_item_read() {
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
   AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next=""
+  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0"
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -281,13 +282,34 @@ fi_af_worktree_add() {
   AFI_base_sha="$(git -C "$AFI_wt" rev-parse HEAD 2>/dev/null || true)"
 }
 
+# 3.2.1 (ledger lib/autofix-sweep.sh:387): once a sweep's ship has failed,
+# its branch alone holds the verified commits, so only a shipped sweep
+# (<drop>) deletes it; a requeue, crash, cancel or final failure keeps it.
 fi_af_worktree_remove() {
   [[ -n "$AFI_wt" && -n "$AFI_root" ]] || return 0
   git -C "$AFI_root" worktree remove --force "$AFI_wt" >/dev/null 2>&1 || rm -rf "$AFI_wt"
   git -C "$AFI_root" worktree prune >/dev/null 2>&1 || true
+  [[ "${AFI_ship_tries:-0}" =~ ^[1-9] && "${1:-}" != drop ]] && return 0
   if [[ -n "$AFI_branch" ]]; then
     git -C "$AFI_root" branch -D "$AFI_branch" >/dev/null 2>&1 || true
   fi
+}
+
+# 3.2.1 (ledger lib/autofix.sh:127): run the repo's tests once in the fresh
+# worktree. A suite already red at base fails every attempt whatever the fix
+# changes, so the run ends stale before any engine starts. rc 1 = red at
+# base; rc 0 = green, or no test command (the run reports that itself). The
+# worktree is reset after, so nothing the tests left reaches a fixer's diff.
+fi_af_base_tests() {
+  local id="$1" t rc=0 log="$FI_AF_RUNS/$1.base-tests.log"
+  t="$(fi_af_test_command "$AFI_wt" 2>/dev/null)" || return 0
+  fi_af_run_tests "$AFI_wt" "$t" "$log" || rc=$?
+  git -C "$AFI_wt" reset -q --hard "${AFI_base_sha:-HEAD}" >/dev/null 2>&1 || true
+  git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
+  (( rc == 0 )) && return 0
+  fi_af_log "$id" "tests fail at base (exit $rc, $t):"
+  fi_af_test_report "$log" 20 >>"$FI_AF_RUNS/$id.log" 2>/dev/null || true
+  return 1
 }
 
 # Move an item (queued or running) to done/ with a result, no ledger write.
@@ -323,9 +345,12 @@ fi_af_reap() {
       fi_af_item_set "$f" pid ""
       # The dead run's PR number would make cancel refuse the re-run.
       fi_af_item_set "$f" pr ""
-      # Back in the queue: the landing branch resolves fresh at re-claim.
-      fi_af_item_set "$f" base ""
-      fi_af_item_set "$f" base_why ""
+      # Back in the queue: the landing branch resolves fresh at re-claim,
+      # except for a ship retry, whose kept branch was cut from this base.
+      if [[ ! "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then
+        fi_af_item_set "$f" base ""
+        fi_af_item_set "$f" base_why ""
+      fi
       fi_af_unlock "$AFI_id"
       mv "$f" "$FI_AF_ST/queue/$AFI_id"
       fi_af_seg_write "$AFI_root"
@@ -439,6 +464,11 @@ fi_af_claim() {
   fi_af_item_set "$r" base_why "$AFI_base_why"
   fi_af_item_set "$r" base_sha "$AFI_base_sha"
   fi_af_log "$id" "claimed: $AFI_wt ($AFI_branch from origin/$AFI_base: $AFI_base_why)"
+  if ! fi_af_base_tests "$id"; then
+    FI_AF_WHY="tests fail at base"
+    fi_af_finish "$id" stale "$FI_AF_WHY"
+    return 5
+  fi
 }
 
 # Give a claimed item back to the queue untouched (an engine outage): no
@@ -449,9 +479,12 @@ fi_af_requeue() {
   fi_af_worktree_remove
   fi_af_item_set "$r" pid ""
   fi_af_item_set "$r" pr ""
-  # A queued item resolves its landing branch fresh at its next claim.
-  fi_af_item_set "$r" base ""
-  fi_af_item_set "$r" base_why ""
+  # A queued item resolves its landing branch fresh at its next claim; a
+  # ship retry keeps the base its kept branch was cut from.
+  if [[ ! "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then
+    fi_af_item_set "$r" base ""
+    fi_af_item_set "$r" base_why ""
+  fi
   mv "$r" "$FI_AF_ST/queue/$id"
   fi_af_seg_write "$AFI_root"
   fi_af_unlock "$id"
@@ -519,6 +552,6 @@ fi_af_finish() {
     _fi_af_ledger_outcome "$outcome" "$text" || rc=$?
   fi
   (( rc == 0 )) || fi_af_log "$id" "ledger not updated for $outcome (rc $rc)"
-  fi_af_worktree_remove
+  if [[ "$outcome" == shipped ]]; then fi_af_worktree_remove drop; else fi_af_worktree_remove; fi
   fi_af_retire "$id" "$outcome" "$text"
 }

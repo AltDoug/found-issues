@@ -37,6 +37,9 @@ ws() { out="$("$FI_BIN" fix workspace)"; WT="$(printf '%s\n' "$out" | sed -n 's/
 @test "fix test: runs the detected command in the worktree" {
   ws
   run "$FI_BIN" fix test "$WT"
+  [ "$status" -eq 0 ]
+  printf '# note\n' >> "$WT/src/calc.sh"
+  run "$FI_BIN" fix test "$WT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"tests: fail"* ]]
   sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"

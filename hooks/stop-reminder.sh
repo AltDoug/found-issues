@@ -151,7 +151,8 @@ fi
 # one empty file per session under ~/.claude/found-issues/reminded/, written
 # at block time, reaped after 7 days. FOUND_ISSUES_STOP_REMINDER_EVERY_TURN=on
 # restores the pre-2.8.0 per-turn block. No session_id in the payload = no
-# state, so a bare local invocation still blocks every time.
+# state, so a bare local invocation still blocks every time. Since 3.2.1 the
+# block is for sessions that edited code only; see turn_edits_code below.
 # Only a plain file-name charset is ever used (it names a state file), so a
 # value with anything else — escapes included — reads as "no session_id".
 session_id=""
@@ -230,6 +231,32 @@ bash_turn_mutates() { # $1 = the turn's transcript lines
     | sed -E 's/"([^"\\]|\\.)*"//g; s/[0-9]*>&[0-9]//g; s/[0-9&]*>>?[[:space:]]*\/dev\/null//g' \
     | grep -qE "$MUTATING_RE"
 }
+
+# 3.2.1 hybrid (ledger hooks/stop-reminder.sh:87): a scan of 101 transcripts
+# found most once-per-session blocks bought a marker-only turn. Only a code
+# edit still blocks; any other substantive turn gets one non-blocking
+# reminder (hooks/prompt-nudge.sh hands it to the model with the next
+# prompt). "Code" = an Edit/Write/MultiEdit/NotebookEdit whose path is not a
+# doc file; a path this hook cannot read (no jq, no file_path) counts as
+# code, so the block fails closed.
+turn_edits_code() { # $1 = the turn's transcript lines
+  local paths p
+  grep -qE '"name":"(Edit|Write|MultiEdit|NotebookEdit)"' <<< "$1" || return 1
+  command -v jq >/dev/null 2>&1 || return 0
+  paths="$(printf '%s' "$1" | jq -R -r 'fromjson? | select(.type=="assistant")
+      | ((.message | objects | .content[]?), (.tool_uses[]?)) | objects
+      | select(.name == "Edit" or .name == "Write" or .name == "MultiEdit" or .name == "NotebookEdit")
+      | ((.input | objects | (.file_path // .notebook_path)) // "") | if . == "" then "?" else . end' 2>/dev/null || true)"
+  [[ -n "$paths" ]] || return 0
+  while IFS= read -r p; do
+    case "$p" in
+      */CMakeLists.txt|CMakeLists.txt|*requirements*.txt|*constraints*.txt) return 0 ;;
+      *.[mM][dD]|*.[mM][dD][xX]|*.[mM][aA][rR][kK][dD][oO][wW][nN]|*.[tT][xX][tT]|*.[rR][sS][tT]|*.[aA][dD][oO][cC]) ;;
+      *) return 0 ;;
+    esac
+  done <<< "$paths"
+  return 1
+}
 #
 # Logic: walk back through the last ~4MB of transcript, find the most
 # recent user message boundary, then check if any tool_use of a
@@ -245,6 +272,7 @@ bash_turn_mutates() { # $1 = the turn's transcript lines
 # The window is 4MB, not 16KB: one tool_result line (Bash stdout is written
 # twice, in the message and in toolUseResult) can alone exceed 16KB and would
 # push the turn's tool_use out of view, silently turning the marker off.
+code_edit=1
 recent_tail="$(tail -c 4194304 "$transcript_path" 2>/dev/null || true)"
 if [[ -n "$recent_tail" ]]; then
   # Take everything after the last real user message marker (excluding
@@ -268,6 +296,15 @@ if [[ -n "$recent_tail" ]]; then
      && ! bash_turn_mutates "$last_turn"; then
     exit 0
   fi
+  if turn_edits_code "$last_turn"; then
+    # Remembered even when this turn carries the marker: a later doc-only
+    # turn of a session that edited code still blocks.
+    if [[ -n "$session_id" ]] && mkdir -p "$REMINDED_DIR" 2>/dev/null; then
+      : > "$REMINDED_DIR/$session_id.code" 2>/dev/null || true
+    fi
+  else
+    code_edit=0
+  fi
 fi
 
 # Check the last ~8KB of the transcript for the marker. 8KB is enough to
@@ -285,6 +322,23 @@ for attempt in 1 2; do
   fi
   [[ $attempt -eq 1 ]] && sleep 0.3
 done
+
+# No code edited this session: one non-blocking reminder, no billed turn.
+# FOUND_ISSUES_STOP_REMINDER_EVERY_TURN=on keeps the old block on every
+# substantive turn. No session_id = nowhere to keep the reminder: allow.
+if (( ! code_edit )) && [[ -n "$session_id" && -f "$REMINDED_DIR/$session_id.code" ]]; then
+  code_edit=1
+fi
+[[ "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" == "on" ]] && code_edit=1
+if (( ! code_edit )); then
+  [[ -n "$session_id" ]] || exit 0
+  [[ -e "$REMINDED_DIR/$session_id.nudge" || -e "$REMINDED_DIR/$session_id.nudged" ]] && exit 0
+  if mkdir -p "$REMINDED_DIR" 2>/dev/null; then
+    : > "$REMINDED_DIR/$session_id.nudge" 2>/dev/null || true
+    find "$REMINDED_DIR" -type f -mtime +7 -delete 2>/dev/null || true
+  fi
+  exit 0
+fi
 
 # Remember that this session has been asked once (see the once-per-session
 # note above), and reap week-old state so the dir never grows unbounded.

@@ -12,6 +12,19 @@ setup() {
 # A failing cancel must not leave the stand-in sleeping for an hour.
 teardown() { pkill -f 'sleep 471[34]' 2>/dev/null || true; fi_teardown_tmp; }
 
+# The engine child's group, once it runs: claim's base test run (3.2.1) has
+# its own, already finished, child group first.
+wait_engine() {
+  cpgid=""
+  for _ in $(seq 1 60); do
+    if grep -q '^claude' "$FI_STANDIN_TRACE" 2>/dev/null; then
+      cpgid="$(sed -n 's/^cpgid=//p' "$ST/running/$ID" 2>/dev/null)"
+      [ -n "$cpgid" ] && kill -0 -- "-$cpgid" 2>/dev/null && return 0
+    fi
+    sleep 0.25
+  done
+}
+
 @test "autofix cancel: a queued item is retired and the ledger is untouched" {
   before="$(cat docs/found-issues.md)"
   run "$FI_BIN" autofix cancel "$ID"
@@ -35,8 +48,7 @@ teardown() { pkill -f 'sleep 471[34]' 2>/dev/null || true; fi_teardown_tmp; }
   export FI_STANDIN_SLEEP=4713
   "$FI_BIN" autofix run "$ID" --engine claude >/dev/null 2>&1 &
   rpid=$!
-  for _ in $(seq 1 40); do grep -q '^cpgid=' "$ST/running/$ID" 2>/dev/null && break; sleep 0.25; done
-  cpgid="$(sed -n 's/^cpgid=//p' "$ST/running/$ID")"
+  wait_engine
   [ -n "$cpgid" ]
   run "$FI_BIN" autofix cancel "$ID"
   [ "$status" -eq 0 ]
@@ -70,8 +82,7 @@ teardown() { pkill -f 'sleep 471[34]' 2>/dev/null || true; fi_teardown_tmp; }
   export FI_STANDIN_SLEEP=4713
   "$FI_BIN" autofix run "$ID" --engine claude >/dev/null 2>&1 &
   rpid=$!
-  for _ in $(seq 1 40); do grep -q '^cpgid=' "$ST/running/$ID" 2>/dev/null && break; sleep 0.25; done
-  cpgid="$(sed -n 's/^cpgid=//p' "$ST/running/$ID")"
+  wait_engine
   [ -n "$cpgid" ]
   # An item the drain already left: same run pid and engine group, no lock.
   sed -e 's/^id=.*/id=stale1/' -e '/^wt=/d' -e '/^branch=/d' "$ST/running/$ID" > "$ST/running/stale1"
