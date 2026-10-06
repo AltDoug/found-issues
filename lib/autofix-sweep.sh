@@ -160,6 +160,28 @@ fi_af_sweep_check() {
   printf 'AUTOFIX-SWEEP-DUE %s\n' "$FI_AF_ID"
 }
 
+# Spec section 3: a sweep leaves out entries whose file is not on the landing
+# branch yet or is busy in the sweep's root checkout; they stay eligible.
+# Filters candidate lines on stdin; AFI_base is set by the worktree step.
+_fi_af_sweep_ready() {
+  local id="$1" entry p keep="${AFI_entry:-}"
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    [[ -n "$entry" ]] || continue
+    AFI_entry="$entry"
+    if p="$(_fi_af_entry_file)"; then
+      fi_entry_loc_v "$entry" || true
+      if ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
+        fi_af_log "$id" "sweep: skip $FE_loc (not on origin/$AFI_base)"; continue
+      fi
+      if [[ -n "$(git -C "$AFI_root" diff --name-only "origin/$AFI_base" -- "$p" 2>/dev/null)" ]]; then
+        fi_af_log "$id" "sweep: skip $FE_loc (busy)"; continue
+      fi
+    fi
+    printf '%s\n' "$entry"
+  done
+  AFI_entry="$keep"
+}
+
 # Spec §6 steps 1-3 at claim time (lock held, queue item read): cap, the
 # fresh worktree, the classify/wake pass, then the ordered entry list.
 # A sweep requeued today (crash, switch-off, outage) already holds today's
@@ -197,7 +219,8 @@ fi_af_sweep_claim() {
   file="$(fi_find_issues_file "$AFI_root" 2>/dev/null)" || file=""
   if [[ -n "$file" && -f "$file" ]]; then
     if declare -F fi_af_classify >/dev/null; then fi_af_classify "$file" "$id" || true; fi
-    fi_af_sweep_candidates "$file" "$AFI_root" "$(fi_af_int sweepMax 8)" >"$FI_AF_ST/sweeps/$id.entries"
+    fi_af_sweep_candidates "$file" "$AFI_root" 1000 | _fi_af_sweep_ready "$id" \
+      | head -n "$(fi_af_int sweepMax 8)" >"$FI_AF_ST/sweeps/$id.entries" || true  # head closing early SIGPIPEs the filter
   else
     : >"$FI_AF_ST/sweeps/$id.entries"
   fi

@@ -212,3 +212,24 @@ queue_entry() { # $1 = ledger line to append and queue; sets id
   [ -f "$FI_AF_ST/queue/$first" ]
   [ ! -f "$FI_AF_ST/queue/$id" ]
 }
+
+@test "sweep: candidates missing on the landing branch or busy are skipped and logged" {
+  cd "$TMP"; rm -rf "$TMP/repo" "$TMP/remote.git" "$TMP/state"    # setup's single-entry fixture
+  fi_af_sweep_fixture 5
+  REPO="$(pwd -P)"
+  printf '# busy\n' >> src/f1.sh                               # busy: edited, not committed
+  printf 'g\n' > src/ghost.sh                                  # exists locally only, never on origin
+  printf -- '- [open] 2026-10-05 src/ghost.sh:1 — not pushed (fix: medium)\n' >> docs/found-issues.md
+  git config found-issues.autofix.testCommand 'sh test.sh'
+  fi_use_standins
+  fi_af_context; AFI_root="$REPO"                             # setup sourced the CLI already
+  fi_af_sweep_check >/dev/null
+  id="$(ls "$FI_AF_ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 0 ]
+  ! grep -q 'src/f1.sh' "$FI_AF_ST/sweeps/$id.entries" || false
+  ! grep -q 'src/ghost.sh' "$FI_AF_ST/sweeps/$id.entries" || false
+  grep -q 'src/f2.sh' "$FI_AF_ST/sweeps/$id.entries"
+  grep -q 'sweep: skip src/f1.sh:1 (busy)' "$FI_AF_RUNS/$id.log"
+  grep -q 'sweep: skip src/ghost.sh:1 (not on origin/main)' "$FI_AF_RUNS/$id.log"
+}
