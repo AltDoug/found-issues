@@ -94,6 +94,15 @@ _fi_af_count_lines() {
   printf '%s' "$n"
 }
 
+# 3.3.0: the location column; a continuation batch of a sweep says which.
+_fi_af_loc_label() {
+  if [[ "${AFI_kind:-}" == "sweep" && "${AFI_cont:-}" =~ ^[0-9]+$ ]] && (( 10#$AFI_cont >= 2 )); then
+    printf 'sweep (batch %s)' "$((10#$AFI_cont))"
+  else
+    printf '%s' "${AFI_loc:-sweep}"
+  fi
+}
+
 # Spec §8: queue, running, today's counts against caps, decisions waiting,
 # recent results with PR links and cost.
 fi_af_status() {
@@ -117,10 +126,10 @@ fi_af_status() {
       [[ -f "$f" ]] || continue
       fi_af_item_read "$f" || true
       if [[ "$dir" == running ]]; then
-        printf '  %s  %s  %s (launcher %s)\n' "$AFI_id" "${AFI_kind:-spot}" "${AFI_loc:-sweep}" "${AFI_launcher:-?}"
+        printf '  %s  %s  %s (launcher %s)\n' "$AFI_id" "${AFI_kind:-spot}" "$(_fi_af_loc_label)" "${AFI_launcher:-?}"
         if [[ -n "$AFI_base" ]]; then printf '      into %s (%s)\n' "$AFI_base" "${AFI_base_why:-?}"; fi
       else
-        printf '  %s  %s  %s\n' "$AFI_id" "${AFI_kind:-spot}" "${AFI_loc:-sweep}"
+        printf '  %s  %s  %s\n' "$AFI_id" "${AFI_kind:-spot}" "$(_fi_af_loc_label)"
         if [[ -n "$AFI_waiting" ]]; then printf '      waiting: %s\n' "$AFI_waiting"; fi
       fi
     done
@@ -148,7 +157,7 @@ fi_af_status() {
     # Newest first by finished stamp (items from before phase 5 sort as 0).
     while IFS= read -r f || [[ -n "$f" ]]; do
       fi_af_item_read "${f#* }" || true
-      printf '  %s  %s — %s\n' "$AFI_id" "${AFI_loc:-sweep}" "$AFI_result"
+      printf '  %s  %s — %s\n' "$AFI_id" "$(_fi_af_loc_label)" "$AFI_result"
       if [[ -n "$AFI_base" ]]; then printf '      into %s (%s)\n' "$AFI_base" "${AFI_base_why:-?}"; fi
       _fi_af_pr_num
       if [[ -n "$FI_AF_PRNUM" ]]; then
@@ -280,8 +289,8 @@ fi_af_doctor() {
   rb="$(fi_af_cfg runBudget "")" sb="$(fi_af_cfg sweepBudget "")"
   [[ -n "$rb" ]] && rb="\$$rb per run" || rb="no dollar cap per run"
   [[ -n "$sb" ]] && sb="\$$sb per sweep" || sb="no dollar cap per sweep"
-  printf '   Caps: %s spot fixes/day, %s sweep(s)/day (at %s fixable, up to %s entries), %s, %s, %s min per run\n' \
+  printf '   Caps: %s spot fixes/day, %s sweep(s)/day (at %s fixable, %s fixes per PR), %s, %s, %s min per run\n' \
     "$(fi_af_int dailyFixes 5)" "$(fi_af_int dailySweeps 1)" "$(fi_af_int sweepThreshold 5)" \
-    "$(fi_af_int sweepMax 8)" "$rb" "$sb" "$(fi_af_int runTimeoutMin 20)"
+    "$(fi_af_sweep_batch)" "$rb" "$sb" "$(fi_af_int runTimeoutMin 20)"
   printf '   Fix PRs merge themselves once checks pass. Stop: found-issues autofix off\n\n'
 }

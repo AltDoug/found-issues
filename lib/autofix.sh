@@ -38,7 +38,7 @@ Usage: found-issues autofix <command>
                               Wait for PR <N>'s checks, then squash-merge it
 Settings: git config found-issues.autofix true|false (local overrides --global),
 found-issues.autofix.{engine,testCommand,dailyFixes,runBudget,runTimeoutMin,
-dailySweeps,sweepThreshold,sweepMax,sweepBudget,codexModel,codexVerifierModel,
+dailySweeps,sweepThreshold,sweepBatch,sweepBudget,codexModel,codexVerifierModel,
 codexRunTokens,codexSweepTokens}.
 EOF
 }

@@ -19,6 +19,10 @@
 #   fi_af_sweep_commit <id> / fi_af_sweep_settle <id> <outcome> <text>
 #   _fi_af_run_sweep <id> <engine>
 #   fi_af_sweep_finish <id> / fi_af_sweep_ship
+#
+# 3.3.0 (spec section 9): a sweep takes every fixable entry and ships one PR
+# per sweepBatch fixes. A full batch closes at a file boundary and queues a
+# continuation item (cont, skip_files, cap_day, carried cost/tokens) for the rest.
 
 # shellcheck disable=SC2034,SC2154  # AFI_*/FE_* are shared with autofix-queue.sh / parse-entries.sh
 
@@ -173,12 +177,15 @@ fi_af_sweep_check() {
 # branch yet or is busy in the sweep's root checkout; they stay eligible.
 # Filters candidate lines on stdin; AFI_base is set by the worktree step.
 _fi_af_sweep_ready() {
-  local id="$1" entry p keep="${AFI_entry:-}"
+  local id="$1" entry p keep="${AFI_entry:-}" skip=":${AFI_skip_files:-}:"
   while IFS= read -r entry || [[ -n "$entry" ]]; do
     [[ -n "$entry" ]] || continue
     AFI_entry="$entry"
     if p="$(_fi_af_entry_file)"; then
       fi_entry_loc_v "$entry" || true
+      if [[ "$skip" == *":$p:"* ]]; then
+        fi_af_log "$id" "sweep: skip $FE_loc (file in an earlier batch's PR)"; continue
+      fi
       if ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
         fi_af_log "$id" "sweep: skip $FE_loc (not on origin/$AFI_base)"; continue
       fi
@@ -224,7 +231,8 @@ _fi_af_sweep_claim_ship() {
 # cap. A sweep over the cap retires stale rather than returning rc 3: rc 3
 # writes the day's capped marker, which would stop spot fixes too.
 fi_af_sweep_claim() {
-  local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1" file n=0 line capped=0
+  local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1" file n=0 line capped=0 cont=0
+  [[ "${AFI_cont:-}" =~ ^[0-9]+$ ]] && (( 10#$AFI_cont >= 2 )) && cont=1
   if [[ "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then _fi_af_sweep_claim_ship "$id"; return; fi
   [[ "$(_fi_af_field "$q" cap_day)" == "$(fi_today)" ]] && capped=1
   if (( ! capped )) && ! fi_af_cap_ok sweep "$(fi_af_int dailySweeps 1)"; then
@@ -256,13 +264,15 @@ fi_af_sweep_claim() {
   fi_af_item_set "$r" head "$AFI_base_sha"
   fi_af_item_set "$r" cur 1
   fi_af_item_set "$r" fixed 0
-  AFI_head="$AFI_base_sha" AFI_cur=1 AFI_fixed=0
+  fi_af_item_set "$r" more ""
+  AFI_head="$AFI_base_sha" AFI_cur=1 AFI_fixed=0 AFI_more=""
   mkdir -p "$FI_AF_ST/sweeps"
   file="$(fi_find_issues_file "$AFI_root" 2>/dev/null)" || file=""
   if [[ -n "$file" && -f "$file" ]]; then
-    if declare -F fi_af_classify >/dev/null; then fi_af_classify "$file" "$id" || true; fi
+    # A continuation was classified with its first batch.
+    if (( ! cont )) && declare -F fi_af_classify >/dev/null; then fi_af_classify "$file" "$id" || true; fi
     fi_af_sweep_candidates "$file" "$AFI_root" 1000 | _fi_af_sweep_ready "$id" \
-      | head -n "$(fi_af_int sweepMax 8)" >"$FI_AF_ST/sweeps/$id.entries" || true  # head closing early SIGPIPEs the filter
+      >"$FI_AF_ST/sweeps/$id.entries" || true
   else
     : >"$FI_AF_ST/sweeps/$id.entries"
   fi
@@ -354,6 +364,31 @@ fi_af_sweep_settle() {
   _fi_af_sweep_advance
 }
 
+# Right after a commit (AFI_cur already points at the next entry): the batch
+# is full and the next entry cites another file, so the batch closes here. A
+# file never straddles two PRs. rc 1 = keep going.
+_fi_af_sweep_batch_closes() {
+  local id="$1" f="$FI_AF_ST/sweeps/$1.entries" i=0 line next="" prev
+  (( ${AFI_fixed:-0} >= $(fi_af_sweep_batch) )) || return 1
+  fi_parse_entry_vars "$AFI_entry" 2>/dev/null || true
+  prev="$FE_path"
+  [[ "$AFI_cur" =~ ^[0-9]+$ && -f "$f" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    i=$((i + 1))
+    (( i == AFI_cur )) && { next="$line"; break; }
+  done <"$f"
+  [[ -n "$next" ]] || return 1
+  fi_parse_entry_vars "$next" 2>/dev/null || true
+  [[ -n "$prev" && "$FE_path" == "$prev" ]] && return 1
+  fi_af_log "$id" "sweep: batch $(_fi_af_sweep_batch_no) closes at $AFI_fixed fixes"
+  return 0
+}
+
+# This batch's number: 1 for the first, cont for a continuation.
+_fi_af_sweep_batch_no() {
+  if [[ "${AFI_cont:-}" =~ ^[0-9]+$ ]] && (( 10#$AFI_cont >= 2 )); then printf '%s' "$((10#$AFI_cont))"; else printf '1'; fi
+}
+
 # Launcher A for a claimed sweep: each entry through the shared fix loop,
 # then one PR (spec §6 steps 4-5). A budget stop or an engine outage leaves
 # the current entry untouched and ships what is committed (ruling 7).
@@ -381,7 +416,16 @@ _fi_af_run_sweep() {
         fi_af_log "$id" "sweep: engine error: $FI_AF_OUTCOME_TEXT"
         _fi_af_reset_wt; break ;;
       approved)
-        fi_af_sweep_commit "$id" || fi_af_sweep_settle "$id" failed "commit: $FI_AF_WHY" ;;
+        if fi_af_sweep_commit "$id"; then
+          if _fi_af_sweep_batch_closes "$id"; then
+            # The chain keeps the engine this batch resolved (spec section 9).
+            fi_af_item_set "$r" engine "$engine"
+            fi_af_item_set "$r" more 1
+            break
+          fi
+        else
+          fi_af_sweep_settle "$id" failed "commit: $FI_AF_WHY"
+        fi ;;
       failed)
         if [[ "$FI_AF_OUTCOME_TEXT" == "run budget spent"* ]]; then
           fi_af_log "$id" "sweep: $FI_AF_OUTCOME_TEXT"
@@ -428,11 +472,35 @@ fi_af_sweep_finish() {
   [[ -n "$FI_AF_TESTCMD" ]] || FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt" 2>/dev/null || true)"
   if fi_af_sweep_ship; then
     fi_af_item_set "$r" pr "$FI_AF_PR"
+    # Queue the rest BEFORE this item moves to done/, so fi_af_sweep_pending
+    # never sees a gap in which a Stop hook could queue an unrelated sweep.
+    if [[ "${AFI_more:-}" == 1 ]] && fi_af_enabled; then _fi_af_sweep_queue_next "$id"; fi
     fi_af_finish "$id" shipped "PR #$FI_AF_PR, $AFI_fixed fixed, merge $FI_AF_MERGE, \$${FI_AF_COST:-0}"
     return 0
   fi
   _fi_af_sweep_ship_failed "$id"
   return 1
+}
+
+# The continuation item: what fi_af_sweep_check writes, plus the chain state.
+# skip_files holds every file an earlier batch of the chain fixed: their PRs
+# may not be merged yet, so a later batch cut from origin/<base> must not
+# touch them. The item keeps this batch's base and resolved engine.
+_fi_af_sweep_queue_next() {
+  local id="$1" nxt skip="${AFI_skip_files:-}" loc out key text p
+  nxt=$(( $(_fi_af_sweep_batch_no) + 1 ))
+  while IFS=$'\t' read -r loc out key text || [[ -n "$loc" ]]; do
+    [[ "$out" == "fixed" ]] || continue
+    p="${loc%%:*}"
+    [[ -n "$p" && ":$skip:" != *":$p:"* ]] && skip+="${skip:+:}$p"
+  done <"$FI_AF_ST/sweeps/$id.outcomes"
+  fi_af_new_id
+  fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID" "id=$FI_AF_ID" "kind=sweep" \
+    "root=$AFI_root" "slug=$AFI_slug" "loc=sweep" "engine=$AFI_engine" \
+    "queued=$(date +%Y-%m-%dT%H:%M:%S)" "crashes=0" \
+    "cont=$nxt" "cap_day=$(fi_today)" "cost=${FI_AF_COST:-0}" "tokens=${FI_AF_TOKENS:-0}" \
+    "base=$AFI_base" "skip_files=$skip"
+  fi_af_log "$id" "sweep: queued batch $nxt as $FI_AF_ID"
 }
 
 # 3.2.1 (ledger lib/autofix-sweep.sh:387): one transient push failure used to
@@ -497,5 +565,10 @@ fi_af_sweep_ship() {
     [[ "$out" == "fixed" && -n "$key" ]] && printf '%s\t%s\n' "$key" "$loc" >>"$rows"
   done <"$FI_AF_ST/sweeps/$AFI_id.outcomes"
   _fi_af_sweep_pr_body "$tlog" >"$bodyf"
-  _fi_af_publish "fix: found-issues sweep ($AFI_fixed entries)" "$bodyf" "$rows"
+  local title="fix: found-issues sweep ($AFI_fixed entries)" bn
+  bn="$(_fi_af_sweep_batch_no)"
+  if [[ "${AFI_more:-}" == 1 ]] || (( bn >= 2 )); then
+    title="fix: found-issues sweep ($AFI_fixed entries, batch $bn)"
+  fi
+  _fi_af_publish "$title" "$bodyf" "$rows"
 }

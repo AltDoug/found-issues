@@ -83,8 +83,8 @@ COMMANDS
                                         background run; the ledger is untouched.
   autofix run <id> [--engine E]         Fix a queued (fix: small) entry headlessly:
                                         worktree, fixer, tests, verifier, self-merging PR.
-  autofix run <sweep-id>                A sweep: up to sweepMax fixable entries, one
-                                        commit each, one self-merging PR.
+  autofix run <sweep-id>                A sweep: every fixable entry, one commit each,
+                                        one self-merging PR per sweepBatch fixes.
   autofix claim|brief|next|search|test|verify|diff|ship|release <id>
                                         The steps of a fix or sweep, for in-session fixers.
   fix workspace | fix test <wt> | fix ship <wt> [--source R] --title T --body-file F --pick L

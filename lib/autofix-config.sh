@@ -40,6 +40,14 @@ fi_af_int() {
   printf '%s' "$((10#$v))"
 }
 
+# 3.3.0 spec section 9: fixes per sweep PR. sweepMax (<= 3.2.x: entries per
+# sweep) still sets it when sweepBatch is unset.
+fi_af_sweep_batch() {
+  if [[ -n "$(fi_af_cfg sweepBatch "")" ]]; then fi_af_int sweepBatch 8
+  elif [[ -n "$(fi_af_cfg sweepMax "")" ]]; then fi_af_int sweepMax 8
+  else printf '8'; fi
+}
+
 # 3.3.0: an opt-in cap. Unset prints nothing (no cap); a value that is not a
 # positive integer warns and also means no cap.
 fi_af_cap_int() {
@@ -205,7 +213,7 @@ autofix.testCommand|text|
 autofix.dailyFixes|int|5
 autofix.dailySweeps|int|1
 autofix.sweepThreshold|int|5
-autofix.sweepMax|int|8
+autofix.sweepBatch|int|8
 autofix.runBudget|usd|
 autofix.sweepBudget|usd|
 autofix.codexRunTokens|int|

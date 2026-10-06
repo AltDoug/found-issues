@@ -210,11 +210,12 @@ sweep_queue() { # queue a sweep for the fixture; sets SID and ST
   [ -s "$ST/day/$(date +%Y-%m-%d).sweep" ]
 }
 
-@test "sweep claim: honours sweepMax" {
+@test "sweep claim: takes every fixable entry, no count limit" {
   fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
-  git config found-issues.autofix.sweepMax 2
+  git config found-issues.autofix.sweepBatch 2
   "$FI_BIN" autofix claim "$SID" >/dev/null
-  [ "$(wc -l < "$ST/sweeps/$SID.entries" | tr -d ' ')" = 2 ]
+  # The 4 fixture entries plus the one sweep_queue logged.
+  [ "$(wc -l < "$ST/sweeps/$SID.entries" | tr -d ' ')" = 5 ]
 }
 
 @test "sweep claim: nothing fixable any more finishes the sweep stale" {
@@ -508,6 +509,90 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"git push failed"*"requeued with its branch kept"* ]]
   grep -q '^ship_tries=2$' "$ST/queue/$SID"
+}
+
+# 3.3.0 (spec section 9): a sweep fixes every fixable entry and ships one PR
+# per sweepBatch fixes; the rest waits in a continuation item.
+@test "sweep run: ships a PR per batch and queues the next batch" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  sweep_queue
+  source "$FI_BIN"; fi_af_context
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 2 fixed' "$ST/done/$SID"
+  grep -q 'sweep: batch 1 closes at 2 fixes' "$FI_AF_RUNS/$SID.log"
+  grep -q 'sweep: queued batch 2 as ' "$FI_AF_RUNS/$SID.log"
+  grep -q 'found-issues sweep (2 entries, batch 1)' "$GH_MOCK_TRACE"
+  # Launcher A drains the continuation in the same run.
+  n="$(grep -l '^cont=2' "$ST"/done/* | wc -l | tr -d ' ')"
+  [ "$n" = 1 ]
+  c="$(grep -l '^cont=2' "$ST"/done/*)"
+  grep -q '^engine=claude$' "$c"
+  grep -q '^base=main$' "$c"
+  grep -q 'found-issues sweep (2 entries, batch 2)' "$GH_MOCK_TRACE"
+  ! grep -q 'autofix-failed' docs/found-issues.md || false
+}
+
+@test "sweep run: a continuation takes no second daily slot and carries cost" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  git config found-issues.autofix.dailySweeps 1
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  c="$(grep -l '^cont=2' "$ST"/done/*)"
+  grep -q '^result=shipped' "$c"
+  [ "$(grep -c . "$ST/day/$(date +%Y-%m-%d).sweep")" = 1 ]
+  awk -F= '$1=="cost" && $2+0 > 0.5 { ok=1 } END { exit !ok }' "$c"
+}
+
+@test "sweep run: a batch closes only at a file boundary" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 1
+  # A second entry on src/f1.sh: it sorts next to the first f1 entry.
+  run "$FI_BIN" log --fix medium 'src/f1.sh:1 — f1 ignores its argument'
+  SID="$(printf '%s\n' "$output" | sed -n 's/^AUTOFIX-SWEEP-DUE //p')"
+  ST="$FOUND_ISSUES_STATE_DIR/autofix/foo__bar"
+  [ -n "$SID" ]
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 2 fixed' "$ST/done/$SID"
+}
+
+@test "sweep claim: a continuation skips files in skip_files" {
+  fi_af_sweep_fixture 4; fi_use_standins
+  source "$FI_BIN"; fi_af_context
+  QID=20991231-000000-00003
+  fi_af_item_write "$FI_AF_ST/queue/$QID" "id=$QID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=claude "queued=$(date +%Y-%m-%dT%H:%M:%S)" crashes=0 cont=2 "cap_day=$(date +%Y-%m-%d)" \
+    skip_files=src/f1.sh base=main
+  run "$FI_BIN" autofix claim "$QID"
+  [ "$status" -eq 0 ]
+  grep -q "sweep: skip src/f1.sh:1 (file in an earlier batch's PR)" "$FI_AF_RUNS/$QID.log"
+  [ "$(wc -l < "$FI_AF_ST/sweeps/$QID.entries" | tr -d ' ')" = 3 ]
+  ! grep -q 'src/f1.sh' "$FI_AF_ST/sweeps/$QID.entries" || false
+  # No classify pass and no second day slot for a continuation.
+  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q . "$FI_STANDIN_TRACE"
+  [ ! -s "$FI_AF_ST/day/$(date +%Y-%m-%d).sweep" ]
+}
+
+@test "sweep run: a failed batch ship queues no continuation" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  git config remote.origin.pushurl "$TMP/nowhere.git"
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude || true
+  grep -q '^ship_tries=1$' "$ST/queue/$SID"
+  [ "$(find "$ST/queue" "$ST/done" -type f | wc -l | tr -d ' ')" = 1 ]
+  ! grep -q '^cont=' "$ST"/queue/* "$ST"/done/* 2>/dev/null || false
+}
+
+@test "config: sweepMax still sets the batch size when sweepBatch is unset" {
+  fi_af_fixture
+  source "$FI_BIN"; fi_af_context
+  [ "$(fi_af_sweep_batch)" = 8 ]
+  git config found-issues.autofix.sweepMax 3
+  [ "$(fi_af_sweep_batch)" = 3 ]
+  git config found-issues.autofix.sweepBatch 5
+  [ "$(fi_af_sweep_batch)" = 5 ]
 }
 
 @test "sweep: a ship-retry sweep queued on an earlier day is not retired as never launched" {
