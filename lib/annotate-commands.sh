@@ -274,7 +274,8 @@ cmd_annotate_commit() {
 
   # Files touched by the commit
   local touched_files
-  touched_files="$(git show --name-only --format= "$full_sha" 2>/dev/null | grep -v '^$' || true)"
+  # core.quotepath=off: a non-ASCII path must come back raw, not as "caf\303\251.md".
+  touched_files="$(git -c core.quotepath=off show --no-color --no-ext-diff --no-textconv --name-only --format= "$full_sha" 2>/dev/null | grep -v '^$' || true)"
 
   if [[ -z "$touched_files" ]]; then
     printf 'annotate-commit: commit %s touches no files. Nothing to do.\n' "$short_sha"
@@ -283,7 +284,7 @@ cmd_annotate_commit() {
 
   local old_ranges=""
   if [[ "$hook_auto" == "yes" ]]; then
-    old_ranges="$(git show --format= "$full_sha" | fi_diff_old_ranges || true)"
+    old_ranges="$(git -c core.quotepath=off show --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --format= "$full_sha" | fi_diff_old_ranges || true)"
   fi
 
   fi_annotate_auto "$file" "$annotation" "$touched_files" "$annotate_all" \
