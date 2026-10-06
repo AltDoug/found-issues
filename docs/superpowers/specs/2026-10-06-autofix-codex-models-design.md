@@ -1,7 +1,7 @@
 # Auto-fix on Codex: pinned models and a token cap — design
 
 **Date:** 2026-10-06 · **Target release:** 3.3.0 (minor: Codex runs change model by default)
-**Status:** DRAFT for operator review. Scope fixed by the operator on 2026-10-05; the defaults below marked *proposed* and the open questions at the end need a yes before a plan is written.
+**Status:** approved for planning. Scope fixed by the operator on 2026-10-05; the three open questions were answered on 2026-10-06 (see Decisions at the end). Token-cap defaults still come from the Task 0 measurement.
 
 ## Why
 
@@ -74,8 +74,8 @@ On a throwaway private repo (recreate `AltDoug/fi-v3-e2e`, delete after): 3 spot
 
 3.3.0 (minor: default Codex model changes). CHANGELOG `Changed` names the new defaults and the `inherit` escape hatch. README auto-fix section and `docs/configuration.md` list the four keys.
 
-## Open questions for the operator
+## Decisions (operator, 2026-10-06)
 
-1. Defaults: pinned models on by default (proposed, protects plan usage), or `inherit` by default with pinning opt-in?
-2. Are `gpt-6.1-sol` (fixer, classifier) and `gpt-6-astra` (verifier) still the right pair on the day the plan is written? Re-check the Codex model list then.
-3. Mid-child enforcement: is overshoot by one child acceptable for 3.3.0, or should the watchdog kill a child whose streamed usage passes the cap (only possible if Codex streams usage, see §6)?
+1. Pinned models by default; `inherit` is the opt-out.
+2. Fixer and classifier `gpt-6.1-sol` (medium / low effort), verifier `gpt-6-astra` (high). Re-check the Codex model list when the plan is written.
+3. Overshoot by one child is acceptable: the cap is checked before each fix, verify and classify child, like the claude dollar budget. No streamed mid-child kill in 3.3.0.
