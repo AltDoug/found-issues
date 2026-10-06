@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Codex auto-fix children run on fixed per-role models (unless the user picks `inherit`), and a Codex run stops starting new children once its token count reaches a cap, parking the item as `run budget spent (<N> tokens)`.
+**Goal:** Codex auto-fix children run on fixed per-role models (unless the user picks `inherit`). A Codex run with a token cap set stops starting new children once its token count reaches it, parking the item as `run budget spent (<N> tokens)`. Every cap is opt-in: no token cap, no dollar cap, and no per-sweep entry limit by default. A sweep fixes everything fixable and ships one PR per batch of `autofix.sweepBatch` fixes (default 8).
+
+> **Amended 2026-10-06** (spec Decisions 4-6, relayed by peer session "Autofix Codex"): token caps unset by default (Task 4), Task 3 informs docs only, new Task 5 (dollar caps opt-in) and Task 6 (sweep batches). Visibility is now Task 7 and the release Task 8. Run order: 1, 2, 3, 4, 5, 6, 7, 8. Task 3 needs live Codex runs and an operator checkpoint, so the controller runs it, not a subagent.
 
 **Architecture:** Two new model keys and two new token-cap keys join the existing `_FI_CFG_KEYS` table. One helper builds each Codex role's `-m`/effort argv. One engine-neutral gate, `fi_af_run_budget_left <engine>`, replaces the three `engine == claude` budget guards and adds a gate before classify: dollars for claude (unchanged), tokens for codex. Codex `turn.failed` events become `FI_AF_ENGINE_ERR`, so a rejected model is an outage, not an attempt. Status, the run log, doctor and the PR body show models and tokens against the cap.
 
@@ -16,12 +18,14 @@
 - Defaults (operator decision 2026-10-06, models re-checked 2026-10-06 with `codex debug models` on codex-cli 0.160.1: both are listed and both support low/medium/high): `autofix.codexModel` = `gpt-6.1-sol` (fixer `medium`, classifier `low`), `autofix.codexVerifierModel` = `gpt-6-astra` (verifier `high`).
 - `inherit` drops BOTH `-m` and the `-c model_reasoning_effort=…` override for that role; `~/.codex/config.toml` decides everything.
 - Model values pass through unchanged. found-issues keeps no model list.
-- Token-cap defaults: `autofix.codexRunTokens` and `autofix.codexSweepTokens` = about 3× the median measured in Task 3 (spec proposal before measurement: 600000 / 1500000).
-- The cap is checked before each fix, verify and classify child. One child may overshoot it; there is no streamed mid-child kill in 3.3.0 (operator decision 3).
-- The claude engine's dollar budget behaviour and outcome text (`run budget spent ($X)`) are unchanged; every existing budget test stays green.
+- Token caps: `autofix.codexRunTokens` and `autofix.codexSweepTokens` have NO default (unset = no cap; spec Decision 5). Task 3's numbers only produce a suggested value for the docs.
+- Dollar caps: `autofix.runBudget` and `autofix.sweepBudget` have NO default (unset = no cap, no `--max-budget-usd`; spec Decision 6, Task 5).
+- A set cap is checked before each fix, verify and classify child. One child may overshoot it; there is no streamed mid-child kill in 3.3.0 (operator decision 3).
+- With a dollar budget SET, the claude engine's behaviour and outcome text (`run budget spent ($X)`) are unchanged; existing budget tests stay green once they set the budget explicitly.
+- Sweeps: `autofix.sweepMax` becomes `autofix.sweepBatch` (fixes per PR, default 8); a set `sweepMax` is read as the batch size when `sweepBatch` is unset (spec §9, Task 6).
 - bash 3.2 under `set -euo pipefail` (`bin/found-issues:29`): expand a possibly-empty array as `${A[@]+"${A[@]}"}`, never `"${A[@]}"`.
 - bats: test names ASCII only (the PR guard fails on em-dashes); a mid-test negation is `! cmd || false`, never a bare `! cmd`.
-- Each task that adds `@test`s bumps the README test count (`README.md:11`, currently `1279 tests`) in the same commit.
+- Each task that adds `@test`s bumps the README test count (`README.md:11`; read the current number, it was `1310 tests` at 3.2.1) in the same commit.
 - Never `git add -A`; never hand-edit `docs/found-issues.md` (use `./bin/found-issues`).
 
 ## Review Focus
@@ -29,8 +33,10 @@
 1. **`inherit` on one role, a pinned model on the other** (e.g. `codexVerifierModel=inherit`, `codexModel` default): the fixer still gets `-m gpt-6.1-sol -c model_reasoning_effort=medium` and the verifier gets neither. Pinned in Task 1 (`inherit is per role`).
 2. **A rejected model on the VERIFIER** (not the fixer): today `_fi_af_fix_loop` treats a verifier with no verdict as a reject, which burns an attempt and tags the entry autofix-failed. Expected: an outage that requeues. Pinned in Task 2 (`a verifier engine error requeues`).
 3. **A sweep whose classifier already used tokens**: the cap counts classifier tokens too, and the sweep still ships what it committed before the cap. Pinned in Task 4 (sweep cap test, cap chosen to give "1 fixed" with or without a classify child).
-4. **A non-numeric or zero token cap** (`codexRunTokens=lots`, `0`): falls back to the default with the `fi_af_int` warning; `config` refuses to set it. Pinned in Task 4 (`token cap keys`).
+4. **A non-numeric or zero token cap** (`codexRunTokens=lots`, `0`): treated as no cap, with a warning on stderr; `config` refuses to set it. Pinned in Task 4 (`token cap keys`).
 5. **A model name with characters a shell or TOML would mangle** (`gpt-6.1-sol`, `org/model:tag`): passed as one argv element, unchanged; `config` refuses whitespace and empty values. Pinned in Task 1 (`config validates model names`).
+6. **No cap anywhere** (the new default): a claude child's argv has no `--max-budget-usd`, the gate never stops a run, and nothing prints an empty `$` or `/` (status, doctor, run log, PR body). Pinned in Tasks 4, 5 and 7.
+7. **A sweep with more than one batch**: batch 2 never touches a file batch 1 changed, does not take a second daily slot, carries the chain's cost forward, and a failed batch ship queues no continuation. Pinned in Task 6.
 
 ---
 
@@ -225,7 +231,7 @@ and the last stderr line is `Reading additional input from stdin...`. So today t
 
 **Interfaces:**
 - Consumes: nothing new.
-- Produces: `fi_af_collect codex …` sets `FI_AF_ENGINE_ERR` to the inner `error.message` of the last `turn.failed` event (empty when none), and `FI_AF_CHILD_TOKENS` to this child's tokens (Task 5 logs it).
+- Produces: `fi_af_collect codex …` sets `FI_AF_ENGINE_ERR` to the inner `error.message` of the last `turn.failed` event (empty when none), and `FI_AF_CHILD_TOKENS` to this child's tokens (Task 7 logs it).
 
 - [ ] **Step 1: Teach the stand-in to fail like Codex.** In `tests/standins/codex`, just before the final two `printf` lines:
 
@@ -331,13 +337,13 @@ git commit -m "fix(autofix): a failed Codex turn is an outage, also on the verif
 
 ### Task 3: Live measurement (spec §6, "Task 0")
 
-No code. It sets the token-cap defaults for Task 4 and answers whether `codex exec --json` streams usage before `turn.completed`.
+No code. Amended (spec Decision 5): it no longer sets defaults. It produces a SUGGESTED token cap for the docs (Task 8) and answers whether `codex exec --json` streams usage before `turn.completed`. The controller runs it (live Codex usage, an operator checkpoint), not a subagent. Run it after Tasks 1-2 (it needs the pinned models).
 
 **Files:**
 - Create: `docs/e2e/v3.3-codex-tokens-2026-10-XX.md` (XX = the day it runs)
 
 **Interfaces:**
-- Produces: `RUN_CAP` and `SWEEP_CAP`, two integers that Task 4 writes into `_FI_CFG_KEYS`.
+- Produces: `RUN_CAP` and `SWEEP_CAP`, two integers that Task 8 quotes in `docs/configuration.md` as suggested values ("e.g."). Nothing in code uses them.
 
 - [ ] **Step 1: Recreate the throwaway repo** the way the 3.0.0/3.2.0 e2e did (read `docs/e2e/v3-live-e2e-2026-10-04.md` for the fixture shape: a small `src/` with one-line bugs, `test.sh`, a ledger with `(fix: small)` entries). `gh repo create AltDoug/fi-v3-e2e --private`, push the fixture, set `found-issues.autofix true` and `autofix.testCommand "sh test.sh"` locally. Seed 6 fixable entries: 3 for spot runs, plus 3 for one sweep (`autofix.sweepThreshold 3`).
 
@@ -347,7 +353,7 @@ No code. It sets the token-cap defaults for Task 4 and answers whether `codex ex
 
 - [ ] **Step 4: Streaming usage check.** `jq -c 'select(.usage) | .type' <id>.fix1.out | sort | uniq -c`. If any type other than `turn.completed` carries usage, write that down for a future release; 3.3.0 does NOT change (operator decision 3).
 
-- [ ] **Step 5: Write the e2e doc and compute the caps.** A table per run (role, model, effort, tokens, seconds); `RUN_CAP` = 3 × the median pinned-model spot `tokens=`, rounded up to the next 100000; `SWEEP_CAP` = 3 × the pinned-model sweep `tokens=`, rounded up to the next 100000. If the pinned numbers are within 20% of 600000/3 and 1500000/3, keep 600000 / 1500000 and say so.
+- [ ] **Step 5: Write the e2e doc and compute the suggested caps.** A table per run (role, model, effort, tokens, seconds); `RUN_CAP` = 3 × the median pinned-model spot `tokens=`, rounded up to the next 100000; `SWEEP_CAP` = 3 × the pinned-model sweep `tokens=`, rounded up to the next 100000. If the pinned numbers are within 20% of 600000/3 and 1500000/3, keep 600000 / 1500000 and say so. These are suggestions for the docs; the keys stay unset by default. Note that a 3.3.0 sweep has no entry limit, so the sweep number is per sweep of the measured size.
 
 - [ ] **Step 6: Operator checkpoint, then delete the repo.** Ask via AskUserQuestion: "Delete AltDoug/fi-v3-e2e now?" (recommended: yes, the doc holds the numbers). Only on yes: `GH_REPO_DELETE_GUARD=off gh repo delete AltDoug/fi-v3-e2e --yes`. Close any PRs the runs opened first if the operator says keep.
 
@@ -363,7 +369,7 @@ git commit -m "docs(e2e): measure Codex tokens per role for the 3.3.0 cap defaul
 ### Task 4: Token cap
 
 **Files:**
-- Modify: `lib/autofix-config.sh` (`_FI_CFG_KEYS`)
+- Modify: `lib/autofix-config.sh` (`_FI_CFG_KEYS`, new `fi_af_cap_int` after `fi_af_int`)
 - Modify: `lib/autofix-engine.sh` (after `fi_af_budget_left` at `:249-251`, header list)
 - Modify: `lib/autofix.sh:101-103` and `:131-133` (`_fi_af_fix_loop` guards)
 - Modify: `lib/autofix-b.sh:135-141` (`autofix verify` guard)
@@ -372,8 +378,8 @@ git commit -m "docs(e2e): measure Codex tokens per role for the 3.3.0 cap defaul
 - Test: `tests/autofix-engine.bats`, `tests/autofix-config.bats`, `tests/autofix-run.bats`, `tests/autofix-sweep.bats`, `tests/autofix-b.bats`
 
 **Interfaces:**
-- Consumes: `RUN_CAP`, `SWEEP_CAP` from Task 3; `FI_AF_TOKENS` (existing).
-- Produces: `fi_af_token_cap` (prints the cap for `AFI_kind`), `fi_af_tokens_left` (rc 1 at or past the cap, else prints what is left), `fi_af_run_budget_left <engine>` (rc 0 = may start another child), `fi_af_spent_text <engine>` (`run budget spent ($X)` | `run budget spent (<N> tokens)`). Task 5 uses `fi_af_token_cap`.
+- Consumes: `FI_AF_TOKENS` (existing). Nothing from Task 3 (amended: caps are opt-in).
+- Produces: `fi_af_cap_int <key>` (prints a set positive integer; prints nothing when unset; warns and prints nothing when invalid), `fi_af_token_cap` (prints the cap for `AFI_kind`, or nothing when no cap is set), `fi_af_tokens_left` (rc 1 at or past a set cap, else prints what is left; rc 0 and prints nothing when no cap), `fi_af_run_budget_left <engine>` (rc 0 = may start another child), `fi_af_spent_text <engine>` (`run budget spent ($X)` | `run budget spent (<N> tokens)`). Task 5 reuses `fi_af_run_budget_left`; Task 7 uses `fi_af_token_cap`.
 
 - [ ] **Step 1: Stand-in token knob.** In `tests/standins/codex` replace the final `turn.completed` line with:
 
@@ -405,25 +411,36 @@ printf '{"type":"turn.completed","usage":{"input_tokens":%s,"cached_input_tokens
   git config found-issues.autofix.codexSweepTokens 5000
   [ "$(fi_af_token_cap)" = 5000 ]
 }
+
+@test "autofix engine: no token cap set means the codex gate never stops" {
+  FI_AF_TOKENS=999999999
+  [ -z "$(fi_af_token_cap)" ]
+  fi_af_tokens_left
+  [ -z "$(fi_af_tokens_left)" ]
+  fi_af_run_budget_left codex
+}
 ```
 
 `tests/autofix-config.bats`:
 
 ```bash
-@test "config: token cap keys default, validate and fall back" {
-  [ "$(fi_af_int codexRunTokens RUN_CAP)" = RUN_CAP ]
+@test "config: token cap keys are unset by default, validate and fall back to no cap" {
+  [ -z "$(fi_af_token_cap)" ]
   run "$FI_BIN" config autofix.codexRunTokens 0
   [ "$status" -eq 2 ]
   git config found-issues.autofix.codexSweepTokens lots
-  run fi_af_int codexSweepTokens 1500000
-  [ "${lines[${#lines[@]}-1]}" = 1500000 ]
+  run fi_af_cap_int codexSweepTokens
+  [[ "$output" == *"not a positive integer"* ]]
+  [ "${lines[${#lines[@]}-1]}" != lots ]
+  AFI_kind=sweep
+  [ -z "$(fi_af_token_cap 2>/dev/null)" ]
   run "$FI_BIN" config
   [[ "$output" == *"found-issues.autofix.codexRunTokens"* ]]
   [[ "$output" == *"found-issues.autofix.codexSweepTokens"* ]]
 }
 ```
 
-(Replace the literal `RUN_CAP` in the first line with Task 3's number, e.g. `[ "$(fi_af_token_cap)" = 600000 ]` run with no `AFI_kind` set. Check the default through `fi_af_token_cap`, not through `fi_af_int`'s second argument.)
+(The warning goes to stderr, which bats `run` merges into `output`; the cap itself prints nothing. Check how `fi_cfg_show_line` renders an empty default (`testCommand` already has one) and assert that word, e.g. `none`, for both keys.)
 
 `tests/autofix-run.bats`:
 
@@ -484,29 +501,45 @@ Expected: the new tests FAIL (`fi_af_tokens_left: command not found`; the codex 
 
 - [ ] **Step 4: Implement**
 
-`_FI_CFG_KEYS`, after `autofix.sweepBudget`:
+`_FI_CFG_KEYS`, after `autofix.sweepBudget` (empty default = no cap, spec Decision 5):
 
 ```
-autofix.codexRunTokens|int|<RUN_CAP>
-autofix.codexSweepTokens|int|<SWEEP_CAP>
+autofix.codexRunTokens|int|
+autofix.codexSweepTokens|int|
 ```
 
-(The literal numbers from Task 3, e.g. `600000` / `1500000`.)
+`lib/autofix-config.sh`, after `fi_af_int` (and in the header list):
+
+```bash
+# 3.3.0: an opt-in cap. Unset prints nothing (no cap); a value that is not a
+# positive integer warns and also means no cap.
+fi_af_cap_int() {
+  local v
+  v="$(fi_af_cfg "$1" "")"
+  [[ -n "$v" ]] || return 0
+  if [[ ! "$v" =~ ^[0-9]+$ ]] || (( 10#$v < 1 )); then
+    fi_err "found-issues: found-issues.autofix.$1=$v is not a positive integer — no cap"
+    return 0
+  fi
+  printf '%s' "$((10#$v))"
+}
+```
 
 `lib/autofix-engine.sh`, after `fi_af_budget_left` (and the four names in the header list):
 
 ```bash
 # 3.3.0 spec §2: Codex reports tokens, not dollars, so its runs stop on a
-# token cap instead (a sweep has its own). Checked before each child; one
-# child may overshoot (operator decision 3, 2026-10-06).
+# token cap instead (a sweep has its own). Opt-in: unset = no cap (Decision
+# 5). Checked before each child; one child may overshoot (Decision 3).
 fi_af_token_cap() {
-  if [[ "${AFI_kind:-}" == "sweep" ]]; then fi_af_int codexSweepTokens <SWEEP_CAP>
-  else fi_af_int codexRunTokens <RUN_CAP>; fi
+  if [[ "${AFI_kind:-}" == "sweep" ]]; then fi_af_cap_int codexSweepTokens
+  else fi_af_cap_int codexRunTokens; fi
 }
 
 fi_af_tokens_left() {
   local cap
   cap="$(fi_af_token_cap)"
+  [[ -n "$cap" ]] || return 0
   (( FI_AF_TOKENS < cap )) || return 1
   printf '%s' $(( cap - FI_AF_TOKENS ))
 }
@@ -558,7 +591,7 @@ fi_af_spent_text() {
 Run: `bats tests/autofix-engine.bats tests/autofix-config.bats tests/autofix-run.bats tests/autofix-sweep.bats tests/autofix-b.bats tests/autofix-classify.bats`
 Expected: all pass, including `a spent budget stops before the next child` and `the run budget stops the sweep without failing the current entry` (claude, unchanged).
 
-- [ ] **Step 6: Bump the README count (+6) and commit**
+- [ ] **Step 6: Bump the README count (+7) and commit**
 
 ```bash
 git add lib/autofix-config.sh lib/autofix-engine.sh lib/autofix.sh lib/autofix-b.sh lib/autofix-classify.sh \
@@ -569,7 +602,288 @@ git commit -m "feat(autofix): stop Codex runs at a per-run token cap"
 
 ---
 
-### Task 5: Visibility (run log, status, doctor, PR body)
+### Task 5: Dollar caps become opt-in (spec §8, Decision 6)
+
+**Files:**
+- Modify: `lib/autofix-config.sh` (`_FI_CFG_KEYS` `runBudget`/`sweepBudget` defaults, `fi_af_budget` `:41-52` and its header comment)
+- Modify: `lib/autofix-engine.sh` (`fi_af_budget_left` `:248-251`, `fi_af_fixer_cmd`, `fi_af_verifier_cmd`, new `fi_af_budget_args`)
+- Modify: `lib/autofix-classify.sh:117` (classifier argv)
+- Modify: `lib/autofix-status.sh:280-282` (doctor `Caps:` line)
+- Modify: `commands/setup.md:338-340` (disclosure), then regenerate `codex-skills/fi-setup` the way `tests/codex-skills-drift.bats` expects (read that test for the generator command)
+- Test: `tests/autofix-engine.bats`, `tests/autofix-run.bats`, `tests/autofix-config.bats`, `tests/autofix-doctor.bats`, `tests/setup-autofix-disclosure.bats`, `tests/cli-config.bats`
+
+**Interfaces:**
+- Consumes: `fi_af_run_budget_left <engine>` (Task 4).
+- Produces: `fi_af_budget` prints the dollar cap for `AFI_kind`, or nothing when unset. `fi_af_budget_left` returns rc 0 and prints nothing when no budget is set. `fi_af_budget_args` sets the array `FI_AF_BARGS` to `(--max-budget-usd <left>)` when a budget is set, else to an empty array. Task 6 relies on unset meaning unlimited for a whole sweep chain.
+
+- [ ] **Step 1: Write the failing tests**
+
+`tests/autofix-engine.bats`: in the existing first test (the claude fixer argv test, `:15-35`), change `grep -qx -- '--max-budget-usd' "$TMP/argv"` to `! grep -qx -- '--max-budget-usd' "$TMP/argv" || false`, then add:
+
+```bash
+@test "autofix engine: a set runBudget puts --max-budget-usd on every claude child" {
+  git config found-issues.autofix.runBudget 2
+  fi_af_allowlist 'sh test.sh'
+  fi_af_fixer_cmd claude "P" "$TMP/last"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  grep -qx -- '--max-budget-usd' "$TMP/argv"
+  grep -qx '2.00' "$TMP/argv"
+  fi_af_verifier_cmd claude "P" "$TMP/last" "$TMP/schema"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  grep -qx -- '--max-budget-usd' "$TMP/argv"
+}
+
+@test "autofix engine: no budget set means no dollar cap" {
+  FI_AF_COST=500
+  [ -z "$(fi_af_budget)" ]
+  fi_af_budget_left
+  [ -z "$(fi_af_budget_left)" ]
+  fi_af_run_budget_left claude
+  fi_af_verifier_cmd claude "P" "$TMP/last" "$TMP/schema"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  ! grep -qx -- '--max-budget-usd' "$TMP/argv" || false
+}
+```
+
+(Match the setup lines the neighbouring tests use; if `fi_af_verifier_cmd` needs `AFI_wt`/`AFI_id`, copy them from the existing verifier argv test.)
+
+`tests/autofix-run.bats`, after `a spent budget stops before the next child`:
+
+```bash
+@test "autofix run: with no budget set a claude run never stops on cost" {
+  export FI_STANDIN_COST=50
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped' "$ST/done/$ID"
+  ! grep -q -- '--max-budget-usd' "$FI_STANDIN_TRACE" || false
+}
+```
+
+(Check that the stand-in trace records argv; if it records only the program name, drop the last line: the engine test above pins argv.)
+
+`tests/autofix-doctor.bats`:
+
+```bash
+@test "doctor auto-fix: unset caps read as no cap" {
+  run "$FI_BIN" doctor
+  [[ "$output" == *"no dollar cap per run"* ]]
+  [[ "$output" == *"no dollar cap per sweep"* ]]
+  git config found-issues.autofix.runBudget 3
+  run "$FI_BIN" doctor
+  [[ "$output" == *'$3 per run'* ]]
+}
+```
+
+`tests/setup-autofix-disclosure.bats`, the `the caps it states are the code defaults` test: replace the `\$3 per fix run, \$10 per sweep, 20 minutes per run` line and the two `key=runBudget def=3` / `key=sweepBudget def=10` lines with:
+
+```bash
+  grep -q 'no dollar cap unless you set one' "$S"
+  grep -q '20 minutes per run' "$S"
+  grep -qF 'autofix.runBudget|usd|' "$TEST_REPO_ROOT/lib/autofix-config.sh"
+  grep -qF 'autofix.sweepBudget|usd|' "$TEST_REPO_ROOT/lib/autofix-config.sh"
+```
+
+(`autofix.runBudget|usd|` followed by end of line: use `grep -qx 'autofix.runBudget|usd|'` if the key table lines have no leading spaces; check.)
+
+`tests/autofix-config.bats` / `tests/cli-config.bats`: wherever a test relies on the $3 / $10 defaults (`rg -n 'runBudget|sweepBudget|budget' tests/`), set the budget explicitly in that test. Add one assertion that `"$FI_BIN" config autofix.runBudget` with nothing set reports the key as unset (the same word `testCommand` shows when unset).
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `bats tests/autofix-engine.bats tests/autofix-run.bats tests/autofix-doctor.bats tests/setup-autofix-disclosure.bats tests/autofix-config.bats tests/cli-config.bats`
+Expected: the new and changed tests FAIL (the default argv still has `--max-budget-usd`; the $50 stand-in run stops on budget; doctor prints `$3 per run`).
+
+- [ ] **Step 3: Implement**
+
+`_FI_CFG_KEYS`:
+
+```
+autofix.runBudget|usd|
+autofix.sweepBudget|usd|
+```
+
+`fi_af_budget` (`lib/autofix-config.sh`), comment and body:
+
+```bash
+# Dollar cap for this run, or nothing: opt-in since 3.3.0 (spec §8). A
+# sweep has its own key, which covers every batch of the sweep.
+fi_af_budget() {
+  local v key=runBudget
+  [[ "${AFI_kind:-}" == "sweep" ]] && key=sweepBudget
+  v="$(fi_af_cfg "$key" "")"
+  [[ -n "$v" ]] || return 0
+  if [[ ! "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    fi_err "found-issues: found-issues.autofix.$key=$v is not a USD amount — no dollar cap"
+    return 0
+  fi
+  printf '%s' "$v"
+}
+```
+
+`lib/autofix-engine.sh`:
+
+```bash
+# Spec §7/§8: runBudget caps the whole run (every child) when set; unset is
+# no cap (3.3.0, Decision 6).
+fi_af_budget_left() {
+  local b
+  b="$(fi_af_budget)"
+  [[ -n "$b" ]] || return 0
+  awk -v b="$b" -v s="$FI_AF_COST" 'BEGIN { l = b - s; if (l < 0.10) exit 1; printf "%.2f", l }'
+}
+
+# The claude child's --max-budget-usd, only when a budget is set.
+fi_af_budget_args() {
+  local b
+  FI_AF_BARGS=()
+  [[ -n "$(fi_af_budget)" ]] || return 0
+  b="$(fi_af_budget_left || printf '0.10')"
+  FI_AF_BARGS=(--max-budget-usd "$b")
+}
+```
+
+In `fi_af_fixer_cmd`, `fi_af_verifier_cmd` (`lib/autofix-engine.sh`) and the classifier (`lib/autofix-classify.sh:117`), call `fi_af_budget_args` before building the claude argv, and replace `--max-budget-usd "$(fi_af_budget_left || printf '0.10')"` with `${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}` (bash 3.2: an empty array must use this form). Declare `FI_AF_BARGS=()` at the top of `lib/autofix-engine.sh` with the other globals.
+
+Doctor `Caps:` line (`lib/autofix-status.sh:280-282`): keep the other fields; print each dollar cap as `$<n> per run` / `$<n> per sweep` when set, else `no dollar cap per run` / `no dollar cap per sweep`. Task 6 changes the `up to %s entries` part, so leave that field as is here.
+
+`commands/setup.md:340`: replace `$3 per fix run, $10 per sweep, 20 minutes per run` with `20 minutes per run. Runs have no dollar cap unless you set one (found-issues config autofix.runBudget <usd>, autofix.sweepBudget <usd>)`, keeping the rest of the sentence. Make sure the line contains `no dollar cap unless you set one` and `20 minutes per run`. Regenerate the Codex skill copy.
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `bats tests/autofix-engine.bats tests/autofix-run.bats tests/autofix-doctor.bats tests/setup-autofix-disclosure.bats tests/autofix-config.bats tests/cli-config.bats tests/codex-skills-drift.bats tests/autofix-sweep.bats tests/autofix-classify.bats tests/autofix-b.bats`
+Expected: all pass. That includes `a spent budget stops before the next child` and `the run budget stops the sweep without failing the current entry`, which already set a budget.
+
+- [ ] **Step 5: Bump the README count (+4) and commit**
+
+```bash
+git add lib/autofix-config.sh lib/autofix-engine.sh lib/autofix-classify.sh lib/autofix-status.sh \
+  commands/setup.md codex-skills/fi-setup tests/autofix-engine.bats tests/autofix-run.bats \
+  tests/autofix-doctor.bats tests/setup-autofix-disclosure.bats tests/autofix-config.bats tests/cli-config.bats README.md
+git commit -m "feat(autofix): dollar caps are opt-in; no --max-budget-usd when unset"
+```
+
+---
+
+### Task 6: Sweep batches (spec §9, Decision 4)
+
+**Files:**
+- Modify: `lib/autofix-config.sh` (`_FI_CFG_KEYS`: `autofix.sweepMax|int|8` → `autofix.sweepBatch|int|8`; new `fi_af_sweep_batch`)
+- Modify: `lib/autofix-sweep.sh` (`fi_af_sweep_claim` `:226-279`, `_fi_af_sweep_ready` `:175-192`, `_fi_af_run_sweep` `:360-403`, `fi_af_sweep_finish` `:421-436`, `fi_af_sweep_ship` title `:500`, header list)
+- Modify: `lib/autofix-status.sh` (sweep rows: `sweep (batch <n>)`; doctor `Caps:` field `up to %s entries` → `%s fixes per PR`)
+- Modify: `lib/help.sh:86` (`autofix run <sweep-id>` description), `commands/setup.md:338,355-362` (the "up to 8" wording), Codex skill copy
+- Test: `tests/autofix-sweep.bats`, `tests/cli-config.bats`, `tests/setup-autofix-disclosure.bats`, `tests/autofix-status.bats`
+
+**Interfaces:**
+- Consumes: `fi_af_budget` / `fi_af_token_cap` (Tasks 4-5): unset means the chain runs until no entry is left.
+- Produces: `fi_af_sweep_batch` (prints `sweepBatch`, else a set `sweepMax`, else 8). Sweep item fields `cont` (batch number, empty or 1 for the first), `skip_files` (`:`-separated repo paths), `cap_day`, and carried `cost`/`tokens`. Log lines `sweep: batch <n> closes at <k> fixes` and `sweep: skip <loc> (file in an earlier batch's PR)`.
+
+Design (spec §9), restated for the implementer:
+1. Claim takes every ready candidate (drop the `head -n sweepMax`). A continuation (`cont` ≥ 2) skips classify and the cap (it carries `cap_day` = today), and `_fi_af_sweep_ready` drops entries whose `_fi_af_entry_file` is in `skip_files`.
+2. `_fi_af_run_sweep`: after each `fi_af_sweep_commit`, if `AFI_fixed >= fi_af_sweep_batch` AND the next entry (line `AFI_cur` of `sweeps/<id>.entries`, if any) is in a different file than the entry just committed, log `sweep: batch <n> closes at <k> fixes` and stop the loop. Record that entries remain (a local flag), but only if a next entry exists.
+3. `fi_af_sweep_finish`: on a successful ship with the flag set and `fi_af_enabled`, queue the continuation: `fi_af_new_id`, `fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID"` with the same fields `fi_af_sweep_check` writes plus `cont=<n+1>`, `cap_day=<today>`, `cost=$FI_AF_COST`, `tokens=$FI_AF_TOKENS`, `base=$AFI_base` and `skip_files=<old skip_files plus the files of this batch's fixed entries>`. Log `sweep: queued batch <n+1> as <new id>`. Write the queue item BEFORE `fi_af_finish` moves this one to `done/`, so `fi_af_sweep_pending` never sees a gap in which a Stop hook could queue a second, unrelated sweep.
+4. Ship failure (`_fi_af_sweep_ship_failed`), a budget stop, an engine outage, or `autofix off`: no continuation.
+5. `_fi_af_run_sweep` seeds `FI_AF_COST`/`FI_AF_TOKENS` from the item (it already does), so a carried `cost`/`tokens` counts against `sweepBudget`/`codexSweepTokens` across the chain.
+6. PR title: `fix: found-issues sweep ($AFI_fixed entries)` for a single batch; `fix: found-issues sweep ($AFI_fixed entries, batch <n>)` when the chain has more than one batch, i.e. when `cont` ≥ 2 or a continuation was queued.
+
+- [ ] **Step 1: Write the failing tests** in `tests/autofix-sweep.bats` (reuse `fi_af_sweep_fixture`, `fi_use_standins`, `sweep_edit`, `gh_mock`, `sweep_queue` exactly as the neighbouring tests do; read `:200-360` first). Rename `sweep claim: honours sweepMax` to `sweep claim: takes every fixable entry, no count limit` and change it to set `sweepBatch 2` with 4 fixable entries and assert all 4 are in `sweeps/<id>.entries`. Add:
+
+```bash
+@test "sweep run: ships a PR per batch and queues the next batch" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 2 fixed' "$ST/done/$SID"
+  grep -q 'sweep: batch 1 closes at 2 fixes' "$FI_AF_RUNS/$SID.log"
+  # Launcher A drains the continuation in the same run.
+  n="$(grep -l '^cont=2' "$ST"/done/* | wc -l | tr -d ' ')"
+  [ "$n" = 1 ]
+  ! grep -q 'autofix-failed' docs/found-issues.md || false
+}
+
+@test "sweep run: a continuation takes no second daily slot and carries cost" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  git config found-issues.autofix.dailySweeps 1
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  c="$(grep -l '^cont=2' "$ST"/done/*)"
+  grep -q '^result=shipped' "$c"
+  [ "$(grep -c . "$ST/day/$(date +%Y-%m-%d).sweep")" = 1 ]
+  awk -F= '$1=="cost" && $2+0 > 0.5 { ok=1 } END { exit !ok }' "$c"
+}
+
+@test "sweep run: a batch closes only at a file boundary" {
+  # <fixture where entries 1 and 2 cite the same file and sort next to each other>
+  git config found-issues.autofix.sweepBatch 1
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 2 fixed' "$ST/done/$SID"
+}
+
+@test "sweep claim: a continuation skips files in skip_files" {
+  # <queue a sweep item by hand with cont=2, cap_day=today and
+  #  skip_files=<the file entry 1 cites>, then claim it>
+  grep -q "file in an earlier batch's PR" "$FI_AF_RUNS/$SID.log"
+  # <assert entry 1 is not in sweeps/$SID.entries and no classify child ran>
+}
+
+@test "sweep run: a failed batch ship queues no continuation" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  export GH_MOCK_PUSH_FAIL=1   # use whatever the 3.2.1 ship-retry tests use to fail the push
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude || true
+  ! grep -l '^cont=2' "$ST"/queue/* "$ST"/done/* 2>/dev/null || false
+}
+
+@test "config: sweepMax still sets the batch size when sweepBatch is unset" {
+  git config found-issues.autofix.sweepMax 3
+  [ "$(fi_af_sweep_batch)" = 3 ]
+  git config found-issues.autofix.sweepBatch 5
+  [ "$(fi_af_sweep_batch)" = 5 ]
+}
+```
+
+(The `<…>` parts depend on `fi_af_sweep_fixture`, which decides which files hold which entries: read it, and extend it or write the ledger by hand. For the push failure, copy the mechanism from the 3.2.1 tests: `rg -n 'ship_tries' tests/autofix-sweep.bats`. The README bump below counts 6 new tests.)
+
+`tests/cli-config.bats:14,30-35`: replace `autofix.sweepMax` with `autofix.sweepBatch` in the key list and the set/get test. `tests/setup-autofix-disclosure.bats`: `up to 8 entries` → `8 fixes per PR`; `fi_af_int sweepMax 8` → `autofix.sweepBatch|int|8`.
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `bats tests/autofix-sweep.bats tests/cli-config.bats tests/setup-autofix-disclosure.bats`
+Expected: the new tests FAIL (only 2 entries in the entries file; no continuation; `fi_af_sweep_batch: command not found`).
+
+- [ ] **Step 3: Implement** per the design above. `fi_af_sweep_batch` in `lib/autofix-config.sh`:
+
+```bash
+# 3.3.0 spec §9: fixes per sweep PR. sweepMax (<= 3.2.x: entries per sweep)
+# still sets it when sweepBatch is unset.
+fi_af_sweep_batch() {
+  if [[ -n "$(fi_af_cfg sweepBatch "")" ]]; then fi_af_int sweepBatch 8
+  elif [[ -n "$(fi_af_cfg sweepMax "")" ]]; then fi_af_int sweepMax 8
+  else printf '8'; fi
+}
+```
+
+Doctor `Caps:` field: `(at %s fixable, %s fixes per PR)` fed by `fi_af_sweep_batch`. `autofix status`: where a sweep row prints its kind or loc, print `sweep (batch <cont>)` when `AFI_cont` ≥ 2 (add `cont` and `skip_files` to the `AFI_*` fields `fi_af_item_read` loads, `lib/autofix-queue.sh:37` and `:52`). `lib/help.sh:86`: `A sweep: every fixable entry, one PR per sweepBatch fixes`. `commands/setup.md`: line 338 `one sweep fixes them all, one PR per 8 fixes`; the picker text at `:355-362` drops "a sweep fixes up to 8" (say "a sweep fixes every fixable entry"). Keep the strings the disclosure test greps. Regenerate the Codex skill copy.
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `bats tests/autofix-sweep.bats tests/cli-config.bats tests/setup-autofix-disclosure.bats tests/autofix-status.bats tests/autofix-doctor.bats tests/codex-skills-drift.bats tests/autofix-b.bats tests/autofix-cancel.bats`
+Expected: all pass.
+
+- [ ] **Step 5: Bump the README count (+6) and commit**
+
+```bash
+git add lib/autofix-config.sh lib/autofix-sweep.sh lib/autofix-status.sh lib/autofix-queue.sh lib/help.sh \
+  commands/setup.md codex-skills/fi-setup tests/autofix-sweep.bats tests/cli-config.bats \
+  tests/setup-autofix-disclosure.bats README.md
+git commit -m "feat(autofix): sweeps fix every fixable entry and ship one PR per batch"
+```
+
+---
+
+### Task 7: Visibility (run log, status, doctor, PR body)
 
 **Files:**
 - Modify: `lib/autofix-engine.sh` (new `fi_af_codex_note`; model-error marker in `fi_af_collect`)
@@ -590,8 +904,8 @@ git commit -m "feat(autofix): stop Codex runs at a per-run token cap"
 @test "autofix run: the run log names each codex child's model and tokens against the cap" {
   run "$FI_BIN" autofix run "$ID" --engine codex
   [ "$status" -eq 0 ]
-  grep -q 'codex fixer: model gpt-6.1-sol (medium), 1500 tokens, run total 1500/' "$FI_AF_RUNS/$ID.log"
-  grep -q 'codex verifier: model gpt-6-astra (high), 1500 tokens, run total 3000/' "$FI_AF_RUNS/$ID.log"
+  grep -q 'codex fixer: model gpt-6.1-sol (medium), 1500 tokens, run total 1500$' "$FI_AF_RUNS/$ID.log"
+  grep -q 'codex verifier: model gpt-6-astra (high), 1500 tokens, run total 3000$' "$FI_AF_RUNS/$ID.log"
   grep -q 'Run cost: .*codex models: fixer gpt-6.1-sol (medium), verifier gpt-6-astra (high)' "$FI_AF_RUNS/$ID.pr-body.md"
 }
 ```
@@ -607,6 +921,15 @@ git commit -m "feat(autofix): stop Codex runs at a per-run token cap"
   run "$FI_BIN" autofix status
   [[ "$output" == *"3000/600000 tokens"* ]]
 }
+
+@test "autofix status: a codex run with no token cap shows its tokens alone" {
+  export GH_MOCK_PR_VIEW=$'7\t{"number":7,"state":"OPEN","statusCheckRollup":[]}'
+  export FI_STANDIN_EDIT="sed -i.bak 's/ - / + /' src/calc.sh && rm -f src/calc.sh.bak"
+  "$FI_BIN" autofix run "$ID" --engine codex >/dev/null
+  run "$FI_BIN" autofix status
+  [[ "$output" == *" 3000 tokens"* ]]
+  [[ "$output" != *"3000/"* ]]
+}
 ```
 
 `tests/autofix-doctor.bats`:
@@ -617,7 +940,10 @@ git commit -m "feat(autofix): stop Codex runs at a per-run token cap"
   mkdir -p "$TMP/codexhome"; printf 'model = "gpt-6-astra"\n' > "$TMP/codexhome/config.toml"
   CODEX_HOME="$TMP/codexhome" run "$FI_BIN" doctor
   [[ "$output" == *"Codex models: fixer gpt-6.1-sol (medium), verifier inherit (~/.codex/config.toml: gpt-6-astra), classifier gpt-6.1-sol (low)"* ]]
-  [[ "$output" == *"Codex tokens per run"* ]]
+  [[ "$output" == *"no token cap per run"* ]]
+  git config found-issues.autofix.codexRunTokens 600000
+  CODEX_HOME="$TMP/codexhome" run "$FI_BIN" doctor
+  [[ "$output" == *"600000 Codex tokens per run"* ]]
 }
 
 @test "doctor auto-fix: warns when the last codex child failed on its model" {
@@ -634,7 +960,7 @@ git commit -m "feat(autofix): stop Codex runs at a per-run token cap"
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `bats tests/autofix-run.bats tests/autofix-status.bats tests/autofix-doctor.bats`
-Expected: the five new tests FAIL (no `codex fixer:` log line, no `/600000 tokens`, no `Codex models:` line).
+Expected: the six new tests FAIL (no `codex fixer:` log line, no `/600000 tokens`, no `Codex models:` line).
 
 - [ ] **Step 3: Implement**
 
@@ -655,7 +981,9 @@ And two helpers after `fi_af_spent_text`:
 # 3.3.0 spec §3: one run-log line per Codex child.
 fi_af_codex_note() {
   fi_af_codex_margs "$2"
-  fi_af_log "$1" "codex $2: model $FI_AF_MDESC, $FI_AF_CHILD_TOKENS tokens, run total $FI_AF_TOKENS/$(fi_af_token_cap)"
+  local cap
+  cap="$(fi_af_token_cap)"
+  fi_af_log "$1" "codex $2: model $FI_AF_MDESC, $FI_AF_CHILD_TOKENS tokens, run total $FI_AF_TOKENS${cap:+/$cap}"
 }
 
 # Doctor's description of one role; inherit names config.toml's model.
@@ -699,7 +1027,7 @@ Under `set -e`, write each as `if [[ "$engine" == codex ]]; then fi_af_codex_not
   fi
 ```
 
-and extend the `Caps:` printf with `, %s Codex tokens per run, %s per sweep` fed by `"$(fi_af_int codexRunTokens <RUN_CAP>)" "$(fi_af_int codexSweepTokens <SWEEP_CAP>)"`.
+and extend the `Caps:` line (Tasks 5-6 already reworked it) with the token caps: `<n> Codex tokens per run` / `<n> per sweep` when set (`fi_af_cap_int codexRunTokens` / `codexSweepTokens`), else `no token cap per run` / `no token cap per sweep`.
 
 PR bodies (`lib/autofix-ship.sh:122` and `lib/autofix-sweep.sh:402`): keep the line and append the models for codex runs:
 
@@ -718,7 +1046,7 @@ PR bodies (`lib/autofix-ship.sh:122` and `lib/autofix-sweep.sh:402`): keep the l
 Run: `bats tests/autofix-run.bats tests/autofix-status.bats tests/autofix-doctor.bats tests/autofix-sweep.bats`
 Expected: all pass.
 
-- [ ] **Step 5: Bump the README count (+5) and commit**
+- [ ] **Step 5: Bump the README count (+6) and commit**
 
 ```bash
 git add lib/autofix-engine.sh lib/autofix.sh lib/autofix-classify.sh lib/autofix-status.sh \
@@ -729,7 +1057,7 @@ git commit -m "feat(autofix): show Codex models and tokens against the cap"
 
 ---
 
-### Task 6: Docs, full verification and release 3.3.0
+### Task 8: Docs, full verification and release 3.3.0
 
 **Files:**
 - Modify: `docs/configuration.md:192-202` (the four keys), `README.md` (auto-fix section, version line `:231`), `CHANGELOG.md`
@@ -741,8 +1069,10 @@ git commit -m "feat(autofix): show Codex models and tokens against the cap"
 ```
 | `autofix.codexModel` | `gpt-6.1-sol` | Codex fixer (effort medium) and classifier (effort low) model, or `inherit` for `~/.codex/config.toml` |
 | `autofix.codexVerifierModel` | `gpt-6-astra` | Codex verifier model (effort high), or `inherit` |
-| `autofix.codexRunTokens` | `<RUN_CAP>` | Codex tokens per spot run; checked before each child, so one child can overshoot |
-| `autofix.codexSweepTokens` | `<SWEEP_CAP>` | Codex tokens per sweep |
+| `autofix.codexRunTokens` | unset (no cap) | Codex tokens per spot run, e.g. `<RUN_CAP>` (Task 3: about 3× a measured spot run); checked before each child, so one child can overshoot |
+| `autofix.codexSweepTokens` | unset (no cap) | Codex tokens per sweep (all batches), e.g. `<SWEEP_CAP>` |
+
+Also change the `runBudget` / `sweepBudget` rows to default `unset (no cap)` (keep the USD wording; `sweepBudget` covers all batches of a sweep), replace the `sweepMax` row with `| \`autofix.sweepBatch\` | \`8\` | Fixes per sweep PR; a sweep fixes every fixable entry, one PR per batch (\`sweepMax\` is read when this is unset) |`, and fix the `config autofix.sweepMax --unset` example at `:191`.
 ```
 
 README auto-fix section: one sentence that Codex runs use pinned models (`inherit` to keep your own) and stop at a token cap. Version line → v3.3.0.
@@ -754,9 +1084,11 @@ README auto-fix section: one sentence that Codex runs use pinned models (`inheri
 
 ### Changed
 - Codex auto-fix runs no longer inherit your interactive Codex model. The fixer and classifier run on `gpt-6.1-sol` (effort medium / low), the verifier on `gpt-6-astra` (effort high). Set `found-issues config autofix.codexModel inherit` (and/or `autofix.codexVerifierModel inherit`) to keep using `~/.codex/config.toml`.
+- No dollar cap by default: `autofix.runBudget` and `autofix.sweepBudget` are now unset unless you set them (they were $3 / $10), and claude children get no `--max-budget-usd` without one. Daily caps and the per-child timeout still apply.
+- A sweep no longer stops at 8 entries: it fixes every fixable entry and opens one PR per `autofix.sweepBatch` fixes (default 8). `autofix.sweepMax` is replaced by `autofix.sweepBatch` and still read when `sweepBatch` is unset.
 
 ### Added
-- Codex token cap: `autofix.codexRunTokens` (<RUN_CAP>) and `autofix.codexSweepTokens` (<SWEEP_CAP>). A run stops starting children at the cap and parks as `run budget spent (<N> tokens)`.
+- Opt-in Codex token caps: `autofix.codexRunTokens` and `autofix.codexSweepTokens` (unset = no cap). A run stops starting children at the cap and parks as `run budget spent (<N> tokens)`.
 - Run log, `autofix status`, `doctor` and the PR body show the Codex model per role and tokens against the cap; `doctor` warns when the last Codex run failed on its model.
 
 ### Fixed
@@ -765,7 +1097,7 @@ README auto-fix section: one sentence that Codex runs use pinned models (`inheri
 
 - [ ] **Step 2: Version bump.** `FI_VERSION="3.3.0"` in `bin/found-issues`; `"version": "3.3.0"` in both plugin manifests. Run `bats tests/check-version.bats tests/docs-consistency.bats` and expect pass.
 
-- [ ] **Step 3: Full suite.** `bats tests/ tests/hooks/` and expect `0 not ok`. Quote the `1..N` line and the count of `not ok` in the PR body. Check that the README count equals `N`.
+- [ ] **Step 3: Full suite.** `bats tests/` (bare; there is no `tests/hooks/`) and expect `0 not ok`. Quote the `1..N` line and the count of `not ok` in the PR body. Check that the README count equals `N`.
 
 - [ ] **Step 4: End-to-end verification (verify skill).** On a real repo with Codex installed, drive one spot run with the branch CLI: `"$BR/bin/found-issues" autofix run <id> --engine codex`. Then read the run log for the two `codex fixer:`/`codex verifier:` lines, `autofix status` for `<T>/<cap> tokens`, and `doctor` for the `Codex models:` line. Capture them verbatim for the PR. Task 3's repo (if the operator kept it) serves; otherwise reuse the Task 3 recreate steps and ask before deleting again.
 
@@ -777,6 +1109,7 @@ README auto-fix section: one sentence that Codex runs use pinned models (`inheri
 
 ## Self-review (done while writing, 2026-10-06)
 
-- Spec coverage: §1 → Task 1; §2 → Task 4 (check points: fix attempt and verify via `_fi_af_fix_loop`, launcher B verify, classify); §3 → Task 5 (all four surfaces); §4 → Task 2 (unknown model = outage, fixer and verifier) + Task 5 (doctor warning) + Task 4 (non-numeric cap via `fi_af_int`); §5 → tests in Tasks 1, 2 and 4; §6 → Task 3; §7 → Task 6.
+- Spec coverage: §1 → Task 1; §2 → Task 4 (check points: fix attempt and verify via `_fi_af_fix_loop`, launcher B verify, classify); §3 → Task 7 (all four surfaces); §4 → Task 2 (unknown model = outage, fixer and verifier) + Task 7 (doctor warning) + Task 4 (non-numeric cap via `fi_af_cap_int`); §5 → tests in Tasks 1, 2 and 4; §6 → Task 3; §7 → Task 8.
 - Spec drift found and handled: §4 says a rejected model "surfaces as an engine error … which the run already handles". Measured 2026-10-06, it does not: `fi_af_collect` never reads `turn.failed`, and the verifier path has no engine-error check. Task 2 adds both.
-- `RUN_CAP`/`SWEEP_CAP` are the only values left open on purpose: Task 3 produces them by a stated formula, with 600000/1500000 as the fallback.
+- `RUN_CAP`/`SWEEP_CAP` are the only values left open on purpose: Task 3 produces them by a stated formula, with 600000/1500000 as the fallback. Amended: they are doc suggestions only; the keys default to unset.
+- Amendment 2026-10-06 (spec Decisions 4-6): §2 opt-in → Task 4; §8 dollar caps opt-in → Task 5; §9 sweep batches → Task 6; visibility of unset caps → Task 7; docs and disclosure → Tasks 5, 6 and 8.
