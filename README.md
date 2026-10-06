@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**5 lifecycle hooks · 14 slash commands · 1272 tests on Linux/macOS · zero manual bookkeeping**
+**5 lifecycle hooks · 14 slash commands · 1279 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -163,7 +163,10 @@ Off by default. With `found-issues config autofix true` in a GitHub repo
 (`gh` signed in, a test command), entries tagged `(fix: small)` are fixed
 in the background, each in its own worktree, branch and PR; when 5 are
 fixable, one sweep fixes up to 8 in a single PR. Each fix must pass the
-repo's tests and a read-only reviewer model.
+repo's tests and a read-only reviewer model. The fix starts from, and its
+PR opens into, the branch your session is working on (its landing branch),
+not always the default branch; a file with uncommitted or unpushed changes
+in your checkout waits until you push it.
 
 - **Fix PRs merge themselves** — no human approves them.
 - **Runs bill your Claude or Codex account, including in the background.**

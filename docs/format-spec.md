@@ -223,7 +223,7 @@ A single entry may be addressed by multiple PRs over time (e.g., partial fix →
 - [open] 2026-05-06 src/auth.ts:88 — race on session refresh (PR: AltDoug/found-issues#5) (PR: AltDoug/found-issues#7)
 ```
 
-Sync checks each PR independently. Closure happens when any one merges to default branch, or merges into another branch (a release branch, a stacked PR) that a later merged PR brings into the default branch.
+Sync checks each PR independently. Closure happens when any one merges to default branch, or merges into another branch (a release branch, a stacked PR) that a later merged PR brings into the default branch. The exception is a PR whose head branch is `fi/autofix/*` or `fi/sweep/*` (an auto-fix PR): it closes its entry as soon as it merges, whatever branch it merged into, because auto-fix opens its PR into the session's own branch.
 
 ## Annotation lifecycle
 

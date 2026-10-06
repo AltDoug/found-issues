@@ -9,11 +9,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Auto-fix starts from, and opens its PR into, the branch the session works on instead of the default branch: the tracked branch; for a merged branch, the base of its merged PR; for a never-pushed branch, its nearest pushed ancestor; the default branch when on it or detached. The item, run log and `autofix status` record the branch and why.
+- `autofix status` lists waiting items and shows the landing branch of each run.
 - Sync closes an entry whose `fi/autofix/*` or `fi/sweep/*` PR merged, whatever branch it merged into. Other stacked PRs still wait until their branch reaches the default branch.
 
 ### Added
 
 - A spot item whose cited file is not on the landing branch yet, or has uncommitted or unpushed changes in the session's checkout, waits in the queue (`waiting=`) instead of spending a daily slot. It is rechecked at most every 15 minutes, on a stop inside its checkout, and retired stale after 3 days. Sweeps skip such entries.
+
+### Fixed
+
+- "Busy" means uncommitted or unpushed changes to the cited file, as intended. A checkout that was merely behind origin used to read as busy, so its items waited three days and its sweeps skipped nearly everything.
+- A wait that ended in a claim no longer leaves `wait_since` and `wait_next` behind, so a requeued item's next wait starts a fresh clock instead of retiring stale at once.
+- The sweep run log names why the landing branch was chosen, like a spot claim does.
+- A sweep whose candidates are all skipped no longer spends the day's sweep slot.
 
 ## [3.1.4] - 2026-10-05
 
