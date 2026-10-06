@@ -201,3 +201,14 @@ queue_entry() { # $1 = ledger line to append and queue; sets id
   run "$FI_BIN" autofix claim "$id"
   [ "$status" -eq 0 ]
 }
+
+@test "drain: a waiting item does not stop the next queued item" {
+  printf '# local edit\n' >> src/calc.sh                          # makes calc busy
+  first="$(fi_af_queue_spot "$(grep -m1 '^- \[open\]' docs/found-issues.md)" >/dev/null; ls "$FI_AF_ST/queue" | head -1)"
+  sleep 1
+  queue_entry "- [open] 2026-10-05 environment (agent PATH) — topic bug (fix: small)"
+  fi_use_standins
+  run "$FI_BIN" autofix run "$first" --engine claude
+  [ -f "$FI_AF_ST/queue/$first" ]
+  [ ! -f "$FI_AF_ST/queue/$id" ]
+}

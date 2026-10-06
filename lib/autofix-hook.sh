@@ -156,6 +156,7 @@ fi_afh_stop() {
     [[ -e "$st/day/$FI_AFH_DAY.capped" ]] && continue
     [[ -d "$st/lock" ]] && fi_afh_lock_fresh "$st/lock" && continue
     fi_af_item_read "$f" || continue
+    [[ "$AFI_wait_next" =~ ^[0-9]+$ ]] && (( AFI_wait_next > FI_AFH_NOW )) && continue
     [[ -n "$AFI_root" && ( "$cwd" == "$AFI_root" || "$cwd" == "$AFI_root"/* ) ]] || continue
     if [[ "$AFI_launched" =~ ^[0-9]+$ ]] \
        && (( FI_AFH_NOW - AFI_launched < ${FOUND_ISSUES_AUTOFIX_STOP_GRACE:-60} )); then

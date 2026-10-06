@@ -14,7 +14,8 @@ found-issues auto-fix on; nobody will answer questions, so never ask any.
 1. Take the item id from your prompt (it looks like `20261003-142501-01234`).
    Run `found-issues autofix claim <id>` as one Bash call. If it exits
    non-zero, reply with its message and stop: another run has the item, the
-   daily cap is reached, or the item is no longer fixable.
+   daily cap is reached, the item waits for its file to be pushed or freed
+   (exit 8), or the item is no longer fixable.
 2. Run `found-issues autofix brief <id>` and follow it exactly. It names the
    issue, the worktree you may edit, and the only commands you may run.
 
