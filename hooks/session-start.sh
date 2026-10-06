@@ -590,16 +590,19 @@ EOF
     printf "…and %s more [open] entries — run \`found-issues list\` for the full ledger.\n" "$omitted"
   fi
   # v3 decision queue (spec §3.4). Fixed text + a number only, so it stays
-  # outside the untrusted-data fence safely. Builtin count over the ledger
-  # text read for the hook-11 gate.
-  local fi_decide_ref='/found-issues:decide' __fi_dec=0 __fi_rest="$__fi_ledger_text" __fi_s="s"
+  # outside the untrusted-data fence safely. Counted over the post-sync
+  # open entries with the same tail-only parse as `decide --count`, so an
+  # entry sync just woke counts and a mid-line tag does not.
+  local fi_decide_ref='/found-issues:decide' __fi_dec=0 __fi_s="s" __fi_line
   # shellcheck disable=SC2016  # $fi- is Codex's literal mention sigil
   [[ "$harness" == "codex" ]] && fi_decide_ref='$fi-decide'
-  local __fi_re_dec=$'(^|\n)- \\[open\\][^\n]*\\(decide: '
-  while [[ "$__fi_rest" =~ $__fi_re_dec ]]; do
-    __fi_dec=$((__fi_dec + 1))
-    __fi_rest="${__fi_rest#*"${BASH_REMATCH[0]}"}"
-  done
+  if declare -F fi_parse_entry_vars >/dev/null 2>&1; then
+    while IFS= read -r __fi_line; do
+      [[ -z "$__fi_line" ]] && continue
+      fi_parse_entry_vars "$__fi_line" || continue
+      [[ -n "${FE_decide:-}" ]] && __fi_dec=$((__fi_dec + 1))
+    done <<< "$open_entries"
+  fi
   (( __fi_dec == 1 )) && __fi_s=""
   if (( __fi_dec > 0 )); then
     printf '\n%s decision%s waiting — answer with `%s`.\n' "$__fi_dec" "$__fi_s" "$fi_decide_ref"

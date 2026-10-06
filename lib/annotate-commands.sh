@@ -148,7 +148,14 @@ cmd_annotate_pr() {
 
   local old_ranges=""
   if [[ "$hook_auto" == "yes" ]]; then
-    old_ranges="$(gh pr diff "$pr_num" 2>/dev/null | fi_diff_old_ranges || true)"
+    # A failed or empty diff must not read as "cited line not touched": say
+    # the diff was unavailable and attempt no line-matched suggestions.
+    local diff_out=""
+    if ! diff_out="$(gh pr diff "$pr_num" 2>/dev/null)" || [[ -z "$diff_out" ]]; then
+      printf 'annotate-pr: PR diff unavailable — no line-matched suggestions attempted\n'
+      return 0
+    fi
+    old_ranges="$(fi_diff_old_ranges <<<"$diff_out" || true)"
   fi
 
   fi_annotate_auto "$file" "$annotation" "$touched_files" "$annotate_all" \
@@ -267,7 +274,11 @@ cmd_annotate_commit() {
 
   # Files touched by the commit
   local touched_files
-  touched_files="$(git show --name-only --format= "$full_sha" 2>/dev/null | grep -v '^$' || true)"
+  # core.quotepath=off: a non-ASCII path must come back raw, not as "caf\303\251.md".
+  # --name-status -M lists BOTH names of a rename (R<score>\told\tnew): entries
+  # cite the pre-fix (old) path, so a rename-plus-edit commit must offer it.
+  touched_files="$(git -c core.quotepath=off show --no-color --no-ext-diff --no-textconv -M --name-status --format= "$full_sha" 2>/dev/null \
+    | awk -F'\t' 'NF >= 2 { for (i = 2; i <= NF; i++) if ($i != "") print $i }' || true)"
 
   if [[ -z "$touched_files" ]]; then
     printf 'annotate-commit: commit %s touches no files. Nothing to do.\n' "$short_sha"
@@ -276,7 +287,7 @@ cmd_annotate_commit() {
 
   local old_ranges=""
   if [[ "$hook_auto" == "yes" ]]; then
-    old_ranges="$(git show --format= "$full_sha" | fi_diff_old_ranges || true)"
+    old_ranges="$(git -c core.quotepath=off show --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --format= "$full_sha" | fi_diff_old_ranges || true)"
   fi
 
   fi_annotate_auto "$file" "$annotation" "$touched_files" "$annotate_all" \

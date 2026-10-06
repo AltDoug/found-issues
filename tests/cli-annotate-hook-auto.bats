@@ -34,6 +34,18 @@ mk_pr_mocks() {
   grep -q 'src/foo.py:42.*(PR-auto: org/repo#7)' docs/found-issues.md
 }
 
+@test "hook-auto: an unavailable PR diff says so instead of listing candidates" {
+  fi_run log "src/foo.py:42 — null check missing"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  unset GH_MOCK_PR_DIFF
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR diff unavailable"* ]]
+  [[ "$output" != *"not touched"* ]]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
 @test "hook-auto: file-touched but line outside hunks becomes candidate, exit 3" {
   fi_run log "src/foo.py:99 — wrong cast"
   mk_pr_mocks
@@ -68,6 +80,60 @@ mk_pr_mocks() {
   [ "$status" -ne 0 ]
 }
 
+@test "hook-auto: the candidate list is capped at 5 lines plus a +N more line" {
+  export FOUND_ISSUES_AUTO_ANNOTATE_MAX=2
+  files="" diff=""
+  for n in 1 2 3 4 5 6 7; do
+    fi_run log "src/f$n.py:1 — bug $n"
+    files+="src/f$n.py\\n"
+    diff+="diff --git a/src/f$n.py b/src/f$n.py\\n--- a/src/f$n.py\\n+++ b/src/f$n.py\\n@@ -1,2 +1,2 @@\\n-old1\\n+new1\\n ctx2\\n"
+  done
+  export GH_MOCK_PR_VIEW=$'7\t'"${files%\\n}"
+  export GH_MOCK_PR_DIFF="${diff%\\n}"
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"7 [open] entries not annotated"* ]]
+  [[ "$output" == *"+2 more [run without --hook-auto to see all]"* ]]
+  [[ "$output" == *"src/f5.py:1"* ]]
+  [[ "$output" != *"src/f6.py:1"* ]]
+}
+
+@test "annotate-pr --all: confirms an existing PR-auto suggestion in place instead of appending a duplicate" {
+  mkdir -p docs
+  printf -- '- [open] 2026-10-01 src/foo.py:42 — null check missing (PR-auto: org/repo#7)\n' > docs/found-issues.md
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  fi_run annotate-pr 7 --all
+  [ "$status" -eq 0 ]
+  grep -q 'src/foo.py:42 — null check missing (PR: org/repo#7)$' docs/found-issues.md
+  run grep -c 'PR-auto' docs/found-issues.md
+  [ "$output" = "0" ]
+}
+
+@test "annotate-pr: a symptom that merely quotes a (PR: ...) token is not treated as already annotated" {
+  mkdir -p docs
+  printf -- '- [open] 2026-10-01 src/foo.py:42 — docs say (PR: org/repo#7) closes this but it does not\n' > docs/found-issues.md
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  fi_run annotate-pr 7
+  grep -q 'does not (PR-auto: org/repo#7)$' docs/found-issues.md
+}
+
+@test "annotate-pr --pick: a CRLF ledger keeps the CR at the end of the line" {
+  mkdir -p docs
+  printf -- '- [open] 2026-10-01 src/foo.py:42 — null check missing\r\n' > docs/found-issues.md
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  fi_run annotate-pr 7 --pick src/foo.py:42
+  [ "$status" -eq 0 ]
+  [ "$(cat docs/found-issues.md)" = "$(printf -- '- [open] 2026-10-01 src/foo.py:42 — null check missing (PR: org/repo#7)\r')" ]
+}
+
+@test "annotate-pr: a CRLF ledger keeps the CR at the end of the line on a bare run" {
+  mkdir -p docs
+  printf -- '- [open] 2026-10-01 src/foo.py:42 — null check missing\r\n' > docs/found-issues.md
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  fi_run annotate-pr 7
+  [ "$(cat docs/found-issues.md)" = "$(printf -- '- [open] 2026-10-01 src/foo.py:42 — null check missing (PR-auto: org/repo#7)\r')" ]
+}
+
 @test "hook-auto: no matches at all stays silent-clean, exit 0" {
   fi_run log "src/other.py:5 — unrelated"
   mk_pr_mocks
@@ -96,6 +162,33 @@ mk_pr_mocks() {
   fi_run annotate-commit HEAD --hook-auto
   [ "$status" -eq 0 ]
   grep -q "src/foo.py:3.*(commit-auto: $short_sha)" docs/found-issues.md
+}
+
+@test "annotate-commit --hook-auto: a non-ASCII path still line-matches" {
+  mkdir -p src
+  printf 'l1\nl2\nl3\nl4\nl5\n' > "src/café.py"
+  git add -A && git commit -q -m "seed"
+  fi_run log "src/café.py:3 — bug at line 3"
+  printf 'l1\nl2\nFIXED\nl4\nl5\n' > "src/café.py"
+  git add -A && git commit -q -m "fix"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+  fi_run annotate-commit HEAD --hook-auto
+  [ "$status" -eq 0 ]
+  grep -q "src/café.py:3.*(commit-auto: $short_sha)" docs/found-issues.md
+}
+
+@test "annotate-commit --hook-auto: a rename-plus-edit commit still matches the entry citing the old path" {
+  mkdir -p src
+  printf 'l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n' > src/old.py
+  git add -A && git commit -q -m "seed"
+  fi_run log "src/old.py:3 — bug at line 3"
+  git mv src/old.py src/new.py
+  printf 'l1\nl2\nFIXED\nl4\nl5\nl6\nl7\nl8\n' > src/new.py
+  git add -A && git commit -q -m "rename and fix"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+  fi_run annotate-commit HEAD --hook-auto
+  [ "$status" -eq 0 ]
+  grep -q "src/old.py:3.*(commit-auto: $short_sha)" docs/found-issues.md
 }
 
 @test "hook-auto: a pure-addition commit adjacent to the cited line does NOT auto-annotate" {

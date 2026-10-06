@@ -160,16 +160,20 @@ fi_annotate_apply_picks() {
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ -n "$auto_set" ]] && fi_nl_has "$auto_set" "$line"; then
-      if [[ "$line" == *"$annotation"* ]]; then
+      fi_annotation_tail_v "$line"
+      if [[ "$FI_ANN_TAIL" == *"$annotation"* ]]; then
         already=$((already + 1))
         printf '%s\n' "$line" >>"$tmp"
-      elif [[ "$auto_annotation" != "$annotation" && "$line" == *"$auto_annotation"* ]]; then
+      elif [[ "$auto_annotation" != "$annotation" && "$FI_ANN_TAIL" == *"$auto_annotation"* ]]; then
         # Confirm a pending suggestion in place: substitute, never append.
-        printf '%s\n' "${line//"$auto_annotation"/"$annotation"}" >>"$tmp"
+        printf '%s\n' "${line%"$auto_annotation"*}${annotation}${line##*"$auto_annotation"}" >>"$tmp"
         matched=$((matched + 1))
         promoted=$((promoted + 1))
       else
-        printf '%s %s\n' "$line" "$annotation" >>"$tmp"
+        # CRLF ledger: the annotation goes before the CR, never after it.
+        local cr=""
+        [[ "$line" == *$'\r' ]] && { cr=$'\r'; line="${line%$'\r'}"; }
+        printf '%s %s%s\n' "$line" "$annotation" "$cr" >>"$tmp"
         matched=$((matched + 1))
       fi
     else
@@ -456,7 +460,10 @@ fi_annotate_auto() {
     # Both forms count as "already annotated": a canonical token means this
     # ref is confirmed, a suggestion token means it is already pending review.
     # Testing only one form made every later commit re-append a duplicate.
-    if [[ "$line" == *"$annotation"* || "$line" == *"$write_annotation"* ]]; then
+    # Tail-only test: a symptom that merely quotes a "(PR: ...)" token is not
+    # an annotation.
+    fi_annotation_tail_v "$line"
+    if [[ "$FI_ANN_TAIL" == *"$annotation"* || "$FI_ANN_TAIL" == *"$write_annotation"* ]]; then
       ann_tfs+="$matched_tfs"
       continue
     fi
@@ -555,7 +562,20 @@ fi_annotate_auto() {
   # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ -n "$auto_set" ]] && fi_nl_has "$auto_set" "$line"; then
-      printf '%s %s\n' "$line" "$write_annotation" >>"$tmp"
+      local auto_tok
+      auto_tok="$(fi_auto_form "$annotation")"
+      fi_annotation_tail_v "$line"
+      if [[ "$write_annotation" == "$annotation" && "$auto_tok" != "$annotation" \
+            && "$FI_ANN_TAIL" == *"$auto_tok"* ]]; then
+        # A canonical write over an existing suggestion of the same ref
+        # confirms it in place (last occurrence, which sits in the tail) —
+        # appending would leave a stale (PR-auto: ...) beside the new tag.
+        printf '%s\n' "${line%"$auto_tok"*}${annotation}${line##*"$auto_tok"}" >>"$tmp"
+      else
+        local cr=""
+        [[ "$line" == *$'\r' ]] && { cr=$'\r'; line="${line%$'\r'}"; }
+        printf '%s %s%s\n' "$line" "$write_annotation" "$cr" >>"$tmp"
+      fi
       matched=$((matched + 1))
     else
       printf '%s\n' "$line" >>"$tmp"
@@ -585,7 +605,14 @@ fi_annotate_auto() {
     printf '%s: %d [open] entr%s not annotated — each needs judgment:\n' \
       "$cmd_label" "${#ambig_indices[@]}" "$([[ ${#ambig_indices[@]} -eq 1 ]] && echo y || echo ies)"
     local k
+    # Hook mode feeds this list into the session as context: cap it so a big
+    # change cannot flood the prompt. Manual runs list everything.
+    local list_max=5
     for (( k = 0; k < ${#ambig_indices[@]}; k++ )); do
+      if [[ "$hook_auto" == "yes" ]] && (( k >= list_max )); then
+        printf '  +%d more [run without --hook-auto to see all]\n' "$(( ${#ambig_indices[@]} - list_max ))"
+        break
+      fi
       i="${ambig_indices[$k]}"
       local sym="${cand_syms[$i]}"
       (( ${#sym} > 70 )) && sym="${sym:0:70}..."
@@ -619,7 +646,7 @@ fi_annotate_auto() {
 fi_pr_touched_files() {
   local pr_num="$1" files n
   if files="$(gh api --paginate "repos/{owner}/{repo}/pulls/$pr_num/files?per_page=100" \
-                --jq '.[].filename' 2>/dev/null)"; then
+                --jq '.[] | .filename, (.previous_filename // empty)' 2>/dev/null)"; then
     n="$(printf '%s\n' "$files" | grep -c .)" || true
     if (( n >= 3000 )); then
       printf 'found-issues: PR #%s lists 3000 files, the most GitHub returns; files past those were not checked (use --pick for entries they fix).\n' "$pr_num" >&2

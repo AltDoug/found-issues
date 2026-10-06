@@ -218,7 +218,7 @@ MUTATING_RE="$MUTATING_RE"'|>'
 
 bash_turn_mutates() { # $1 = the turn's transcript lines
   local cmds
-  command -v jq >/dev/null 2>&1 || { printf '%s' "$1" | grep -q '"name":"Bash"'; return; }
+  command -v jq >/dev/null 2>&1 || { grep -q '"name":"Bash"' <<< "$1"; return; }
   # Real transcripts: assistant message.content[] tool_use blocks. Also the
   # flat {"tool_uses":[…]} shape the fixtures use.
   cmds="$(printf '%s' "$1" | jq -R -r 'fromjson? | select(.type=="assistant")
@@ -231,7 +231,7 @@ bash_turn_mutates() { # $1 = the turn's transcript lines
     | grep -qE "$MUTATING_RE"
 }
 #
-# Logic: walk back through the last ~16KB of transcript, find the most
+# Logic: walk back through the last ~4MB of transcript, find the most
 # recent user message boundary, then check if any tool_use of a
 # substantive type appears between that boundary and end-of-transcript.
 #
@@ -242,7 +242,10 @@ bash_turn_mutates() { # $1 = the turn's transcript lines
 # the same line and skip them when finding the turn boundary; otherwise
 # every tool-call turn looks like "nothing happened after the user spoke"
 # and smart-fire silently exits 0.
-recent_tail="$(tail -c 16384 "$transcript_path" 2>/dev/null || true)"
+# The window is 4MB, not 16KB: one tool_result line (Bash stdout is written
+# twice, in the message and in toolUseResult) can alone exceed 16KB and would
+# push the turn's tool_use out of view, silently turning the marker off.
+recent_tail="$(tail -c 4194304 "$transcript_path" 2>/dev/null || true)"
 if [[ -n "$recent_tail" ]]; then
   # Take everything after the last real user message marker (excluding
   # tool_result envelopes, which also carry "type":"user").
@@ -258,8 +261,10 @@ if [[ -n "$recent_tail" ]]; then
     END { print buf }
   ')"
   # If no substantive tool use in the most recent assistant turn, allow stop
-  if ! printf '%s' "$last_turn" \
-     | grep -qE '"name":"(Edit|Write|MultiEdit|NotebookEdit)"' \
+  # Here-string, not a pipe: under pipefail, grep -q quitting early on a
+  # match makes a large printf die of SIGPIPE, and the `!` read that as
+  # "no match" (a >64KB turn skipped the marker).
+  if ! grep -qE '"name":"(Edit|Write|MultiEdit|NotebookEdit)"' <<< "$last_turn" \
      && ! bash_turn_mutates "$last_turn"; then
     exit 0
   fi
