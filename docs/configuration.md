@@ -11,10 +11,11 @@ overrides.
 
 ## Hook opt-outs
 
-The plugin registers 5 hooks in `hooks/hooks.json` (see
+The plugin registers 6 hooks in `hooks/hooks.json` (see
 [architecture](architecture.md) for the full table): `format-enforcer`,
-`pre-branch-delete`, `post-bash-dispatch`, `session-start`, and
-`stop-reminder`. `post-bash-dispatch` is a router — it fires on every
+`pre-branch-delete`, `post-bash-dispatch`, `session-start`,
+`stop-reminder`, and `prompt-nudge` (it delivers the stop-reminder's
+non-blocking reminder and is off whenever that is). `post-bash-dispatch` is a router — it fires on every
 PostToolUse `Bash` call and dispatches up to three independent routes
 (auto-annotate after `gh pr create`, auto-annotate after `git commit`,
 background sync after `gh pr merge`/`close`/`reopen`), so it has two
@@ -29,7 +30,8 @@ individual opt-outs.
 
 | Variable | Default | What it controls |
 |---|---|---|
-| `FOUND_ISSUES_STOP_REMINDER` | `on` | The Stop hook that requires `<!-- found-issues-checked: ... -->` in any assistant turn that did substantive tool use (Edit / Write / MultiEdit / Bash). Set to `off` if the marker friction outweighs the discipline-enforcement value. |
+| `FOUND_ISSUES_STOP_REMINDER` | `on` | The Stop hook that asks for `<!-- found-issues-checked: ... -->` after a substantive turn (Edit / Write / MultiEdit / a mutating Bash). Since 3.2.1 it blocks the Stop once per session, and only in a session that edited code (an Edit / Write / MultiEdit / NotebookEdit on a path that is not `.md` / `.mdx` / `.markdown` / `.txt` / `.rst` / `.adoc`). Any other substantive turn without the marker gets one non-blocking reminder per session, which the `UserPromptSubmit` hook (`prompt-nudge.sh`) hands to the model with your next prompt. Set to `off` if the marker friction outweighs the discipline-enforcement value. |
+| `FOUND_ISSUES_STOP_REMINDER_EVERY_TURN` | `off` | `on` brings back the pre-2.8.0 behavior: a block on every substantive turn without the marker, code edit or not. |
 | `FOUND_ISSUES_REMINDER_VERBOSITY` | `auto` | Stop-hook message verbosity. `full` (8-line educational form), `terse` (1-line form), or `auto` (terse iff `~/.claude/found-issues/.onboarded` exists). |
 | `FOUND_ISSUES_PROMOTE_GUARD` | `on` | The `pre-branch-delete` hook that hard-blocks `git branch -d` / `--delete` / `gh api ... DELETE` when the branch has `[open]` entries whose dedup key isn't on `main`. Set to `off` for a one-shot bypass (`FOUND_ISSUES_PROMOTE_GUARD=off git branch -D ...`). The inline prefix form is parsed from the command string itself, so it works inside Claude Code's Bash tool (where the hook subprocess otherwise would not inherit per-command env). The guard also auto-skips when the default branch does not track the issues file — repos using per-developer-local (gitignored) `docs/found-issues.md` get an exit-0 with a one-line note rather than a block. |
 | `FOUND_ISSUES_FORMAT_ENFORCER` | `on` | The `PreToolUse` format-enforcer that validates entries written via `Write` / `Edit` / `MultiEdit`. In `local` mode it's already off; in `git` mode it warns-only; in `github-*` modes it hard-blocks. Set to `off` to disable globally. |
@@ -196,7 +198,7 @@ found-issues config autofix.sweepMax --unset
 | `autofix.testCommand` | detected | The command that proves a fix (bats, npm test, pytest, go, cargo, make) |
 | `autofix.dailyFixes` | `5` | Spot fixes per repo per day |
 | `autofix.dailySweeps` | `1` | Sweeps per repo per day |
-| `autofix.sweepThreshold` | `5` | Fixable entries that trigger a sweep |
+| `autofix.sweepThreshold` | `5` | Fixable entries that trigger a sweep (`/found-issues:setup` offers 5, 10, 20 or any whole number) |
 | `autofix.sweepMax` | `8` | Entries one sweep fixes |
 | `autofix.runBudget` | `3` | USD estimate per spot run (Claude Code's `total_cost_usd`) |
 | `autofix.sweepBudget` | `10` | USD estimate per sweep |
@@ -208,6 +210,8 @@ found-issues config autofix.sweepMax --unset
 | `FOUND_ISSUES_AUTOFIX_LAUNCHER` | (auto) | `headless` forces launcher A (a detached `autofix run`) even in auto/bypass sessions |
 | `FOUND_ISSUES_AUTOFIX_STOP_GRACE` | `60` | Seconds an in-session item has to be claimed before the Stop hook launches it headlessly |
 | `FOUND_ISSUES_AUTOFIX_LOCK_STALE` | `3600` | Seconds after which a repo's run lock counts as abandoned |
+| `FOUND_ISSUES_AUTOFIX_SHIP_TRIES` | `3` | Ship attempts a sweep gets. A failed ship keeps the sweep's branch and requeues it so the next run only ships; the last failure ends the sweep failed, its branch still kept |
+| `FOUND_ISSUES_AUTOFIX_SHIP_WAIT` | `900` | Seconds before a requeued sweep retries its ship |
 | `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS` | `runTimeoutMin` × 60 | Per engine-call timeout override |
 | `FOUND_ISSUES_AUTOFIX_MERGE_POLLS` / `_MERGE_SLEEP` | `60` / `60` | How long `autofix merge-when-green` waits for checks |
 | `FOUND_ISSUES_AUTOFIX_WAIT_RECHECK` | `900` | Seconds before a waiting item (its cited file is not on the landing branch yet, or has uncommitted or unpushed changes) is looked at again |

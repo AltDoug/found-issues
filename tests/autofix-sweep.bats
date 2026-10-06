@@ -340,7 +340,9 @@ gh_mock() {
   git config found-issues.autofix.sweepMax 1
   sweep_queue
   "$FI_BIN" autofix run "$SID" --engine claude
-  grep -q '^result=failed: ship: the tree differs' "$ST/done/$SID"
+  source "$FI_BIN"; fi_af_context
+  grep -q 'ship failed (the tree differs' "$FI_AF_RUNS/$SID.log"
+  grep -q '^ship_tries=1$' "$ST/queue/$SID"
   ! grep -q '^pr create' "$GH_MOCK_TRACE" 2>/dev/null || false
 }
 
@@ -420,4 +422,133 @@ gh_mock() {
   [ "$status" -eq 5 ]
   [[ "$output" == *"today's sweep cap"* ]]
   [[ "$output" != *"spot-fix"* ]]
+}
+
+# 3.2.1 (ledger lib/autofix.sh:127): the suite runs once at base, before the
+# classifier. A failing base spends the day's slot, or every Stop would queue
+# a fresh sweep and re-run the whole suite.
+@test "sweep claim: tests that fail at base retire stale before classifying, spending the day's slot" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  git config found-issues.autofix.testCommand 'exit 1'
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"tests fail at base"* ]]
+  grep -q '^result=stale: tests fail at base$' "$ST/done/$SID"
+  [ -s "$ST/day/$(date +%Y-%m-%d).sweep" ]
+  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q . "$FI_STANDIN_TRACE"
+  [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
+}
+
+# 3.2.1 (ledger lib/autofix-sweep.sh:387): a failed ship keeps the branch and
+# requeues the sweep; the next run ships the same commits without fixing again.
+sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
+
+@test "sweep run: a failed push keeps the branch and requeues the sweep; the next run only ships" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  git config remote.origin.pushurl "$TMP/nowhere.git"
+  run "$FI_BIN" autofix run "$SID" --engine claude
+  [ "$status" -eq 0 ]
+  [ -f "$ST/queue/$SID" ]
+  [ ! -f "$ST/done/$SID" ]
+  grep -q '^ship_tries=1$' "$ST/queue/$SID"
+  grep -q '^base=main$' "$ST/queue/$SID"
+  [ "$(sed -n 's/^wait_next=//p' "$ST/queue/$SID")" -gt "$(date +%s)" ]
+  [ "$(git log --format=%s "main..$(sweep_branch)" | grep -c '^fix: ')" = 5 ]
+  [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
+  ! grep -q '^pr create' "$GH_MOCK_TRACE" 2>/dev/null || false
+  ! grep -q 'autofix-failed' docs/found-issues.md || false
+  engine_calls="$(grep -c '^claude' "$FI_STANDIN_TRACE")"
+  git config --unset remote.origin.pushurl
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/queue/$SID" wait_next ""
+  run "$FI_BIN" autofix run "$SID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped: PR #9, 5 fixed' "$ST/done/$SID"
+  [ "$(grep -c '^claude' "$FI_STANDIN_TRACE")" = "$engine_calls" ]
+  [ "$(git -C "$TMP/remote.git" log --format=%s "main..$(sweep_branch)" | grep -c '^fix: ')" = 5 ]
+  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 5 ]
+  [ -z "$(git branch --list "$(sweep_branch)")" ]
+}
+
+@test "sweep run: the last allowed failed ship ends failed and still keeps the branch" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  export FOUND_ISSUES_AUTOFIX_SHIP_TRIES=2
+  git config remote.origin.pushurl "$TMP/nowhere.git"
+  "$FI_BIN" autofix run "$SID" --engine claude
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/queue/$SID" wait_next ""
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=failed: ship: git push failed' "$ST/done/$SID"
+  grep -q "$(sweep_branch) kept" "$ST/done/$SID"
+  [ -n "$(git branch --list "$(sweep_branch)")" ]
+  [ "$(git log --format=%s "main..$(sweep_branch)" | grep -c '^fix: ')" = 5 ]
+}
+
+@test "sweep run: a ship retry reuses the PR an earlier try opened" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  git config remote.origin.pushurl "$TMP/nowhere.git"
+  "$FI_BIN" autofix run "$SID" --engine claude
+  git config --unset remote.origin.pushurl
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/queue/$SID" wait_next ""
+  export GH_MOCK_PR_LIST='[{"number":11}]'
+  export GH_MOCK_PR_VIEW=$'11\t{"number":11,"state":"OPEN","statusCheckRollup":[]}'
+  run "$FI_BIN" autofix run "$SID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped: PR #11, 5 fixed' "$ST/done/$SID"
+  ! grep -q '^pr create' "$GH_MOCK_TRACE" || false
+}
+
+@test "sweep b: a failed ship says the sweep is requeued with its branch kept" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  git config remote.origin.pushurl "$TMP/nowhere.git"
+  "$FI_BIN" autofix run "$SID" --engine claude
+  "$FI_BIN" autofix claim "$SID" >/dev/null
+  run "$FI_BIN" autofix ship "$SID"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"git push failed"*"requeued with its branch kept"* ]]
+  grep -q '^ship_tries=2$' "$ST/queue/$SID"
+}
+
+@test "sweep: a ship-retry sweep queued on an earlier day is not retired as never launched" {
+  fi_af_sweep_fixture 4
+  source "$FI_BIN"; fi_af_context
+  QID=20991231-000000-00002
+  fi_af_item_write "$FI_AF_ST/queue/$QID" "id=$QID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=claude queued=2020-01-01T00:00:00 crashes=0 ship_tries=1
+  _fi_af_sweep_retire_stale
+  [ -f "$FI_AF_ST/queue/$QID" ]
+}
+
+@test "sweep: switching off a ship-retry sweep keeps its branch and base" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  git config remote.origin.pushurl "$TMP/nowhere.git"
+  "$FI_BIN" autofix run "$SID" --engine claude
+  git config --unset remote.origin.pushurl
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 0 ]
+  WT="$REPO/.claude/worktrees/fi-sweep-$SID"
+  [ "$output" = "$WT" ]
+  [ "$(git -C "$WT" rev-parse HEAD)" = "$(git rev-parse "$(sweep_branch)")" ]
+  run "$FI_BIN" autofix next "$SID"
+  [[ "$output" == "No entries left. Run: found-issues autofix ship $SID" ]]
+  "$FI_BIN" autofix off >/dev/null
+  run "$FI_BIN" autofix ship "$SID"
+  [ "$status" -eq 8 ]
+  grep -q '^base=main$' "$ST/queue/$SID"
+  [ "$(git log --format=%s "main..$(sweep_branch)" | grep -c '^fix: ')" = 5 ]
+}
+
+@test "sweep: a crashed ship-retry run is requeued with its branch kept" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  git config remote.origin.pushurl "$TMP/nowhere.git"
+  "$FI_BIN" autofix run "$SID" --engine claude
+  "$FI_BIN" autofix claim "$SID" >/dev/null
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/running/$SID" pid 999999
+  fi_af_unlock "$SID"
+  fi_af_lock reaper; fi_af_reap; fi_af_unlock reaper
+  [ -f "$ST/queue/$SID" ]
+  grep -q '^base=main$' "$ST/queue/$SID"
+  [ -n "$(git branch --list "$(sweep_branch)")" ]
 }

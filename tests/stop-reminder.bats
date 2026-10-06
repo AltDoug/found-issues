@@ -185,9 +185,9 @@ TRANSCRIPT
   TR="$(mktemp)"
   cat > "$TR" <<'TRANSCRIPT'
 {"parentUuid":"u-1","isSidechain":false,"type":"user","message":{"role":"user","content":[{"type":"text","text":"please run git status"}]},"uuid":"user-1","timestamp":"2026-05-12T00:00:00Z","sessionId":"s-1","cwd":"/x","version":"2.1.139"}
-{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"sed -i '' s/main/master/ README.md"}}]},"uuid":"asst-1","timestamp":"2026-05-12T00:00:01Z","sessionId":"s-1"}
+{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Edit","input":{"file_path":"/x/app.py","old_string":"main","new_string":"master"}}]},"uuid":"asst-1","timestamp":"2026-05-12T00:00:01Z","sessionId":"s-1"}
 {"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01","type":"tool_result","content":"","is_error":false}]},"uuid":"toolres-1","timestamp":"2026-05-12T00:00:02Z","toolUseResult":{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false},"sourceToolAssistantUUID":"asst-1","sessionId":"s-1"}
-{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Edited README in place."}]},"uuid":"asst-2","timestamp":"2026-05-12T00:00:03Z","sessionId":"s-1"}
+{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Edited app.py in place."}]},"uuid":"asst-2","timestamp":"2026-05-12T00:00:03Z","sessionId":"s-1"}
 TRANSCRIPT
   input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
   run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=full echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=full '$HOOK'"
@@ -204,7 +204,7 @@ TRANSCRIPT
   big="$(head -c 100000 /dev/zero | tr '\0' 'x')"
   {
     printf '%s\n' '{"parentUuid":"u-1","type":"user","message":{"role":"user","content":[{"type":"text","text":"edit it"}]},"uuid":"user-1","sessionId":"s-1"}'
-    printf '%s\n' '{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Edit","input":{"file_path":"/x/a.txt","old_string":"a","new_string":"b"}}]},"uuid":"asst-1","sessionId":"s-1"}'
+    printf '%s\n' '{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Edit","input":{"file_path":"/x/a.py","old_string":"a","new_string":"b"}}]},"uuid":"asst-1","sessionId":"s-1"}'
     printf '{"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01","type":"tool_result","content":"%s","is_error":false}]},"uuid":"toolres-1","sessionId":"s-1"}\n' "$big"
     printf '%s\n' '{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Edited."}]},"uuid":"asst-2","sessionId":"s-1"}'
   } > "$TR"
@@ -228,65 +228,160 @@ realistic_bash_transcript() {
 TRANSCRIPT
 }
 
-run_stop_on() { # $1 = transcript path
+run_stop_on() { # $1 = transcript path, $2 = session_id (optional)
   local input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$1\"}"
-  run bash -c "FOUND_ISSUES_REMINDER_VERBOSITY=terse echo '$input' | FOUND_ISSUES_REMINDER_VERBOSITY=terse '$HOOK'"
+  [[ -n "${2:-}" ]] && input="{\"hook_event_name\":\"Stop\",\"session_id\":\"$2\",\"transcript_path\":\"$1\"}"
+  mkdir -p "$TMP/srhome"
+  run bash -c "echo '$input' | HOME='$TMP/srhome' FOUND_ISSUES_REMINDER_VERBOSITY=terse '$HOOK'"
 }
+nudge_file() { printf '%s' "$TMP/srhome/.claude/found-issues/reminded/$1.nudge"; }
 
 @test "stop-reminder: read-only Bash turns (open a folder, git status, cat, rg) do not require the marker" {
-  TR="$(mktemp)"
+  TR="$(mktemp)"; i=0
   for cmd in 'open \"/x/READY-TO-SEND\"' 'git status --short && git branch --show-current' 'cat docs/plan.md | head -40' 'rg -n TODO src/' 'gh pr view 12 --json state 2>/dev/null' 'ls -la ~/Downloads 2>&1 | tail -5'; do
+    i=$((i + 1))
     realistic_bash_transcript "$TR" "$cmd"
-    run_stop_on "$TR"
+    run_stop_on "$TR" "ro-$i"
     [ "$status" -eq 0 ] || { echo "expected allow for: $cmd — got $status: $output"; false; }
+    [ ! -e "$(nudge_file "ro-$i")" ] || { echo "unexpected reminder for: $cmd"; false; }
   done
   rm -f "$TR"
 }
 
-@test "stop-reminder: mutating Bash turns (sed -i, redirect, rm, git commit, heredoc-fed python, pnpm add) still require the marker" {
-  TR="$(mktemp)"
+# 3.2.1 hybrid (ledger hooks/stop-reminder.sh:87): only a code edit is worth a
+# blocking Stop; a turn that changed things some other way gets one
+# non-blocking reminder, delivered with the next prompt.
+@test "stop-reminder: mutating Bash turns (sed -i, redirect, rm, git commit, heredoc-fed python, pnpm add) get the reminder, not a block" {
+  TR="$(mktemp)"; i=0
   for cmd in "sed -i '' s/a/b/ foo.py" 'echo x > out.txt' 'rm -f page-1.png' 'git commit -m \"fix: thing\"' 'git -C /x push -u origin fix/x' 'python3 - <<PY\nprint(1)\nPY' 'pnpm add -D vitest' 'mkdir -p dist && cp a dist/' 'cat report.md | tee summary.md'; do
+    i=$((i + 1))
     realistic_bash_transcript "$TR" "$cmd"
-    run_stop_on "$TR"
-    [ "$status" -eq 2 ] || { echo "expected block for: $cmd — got $status: $output"; false; }
-    [[ "$output" == *"Stop blocked"* ]]
+    run_stop_on "$TR" "mut-$i"
+    [ "$status" -eq 0 ] || { echo "expected no block for: $cmd — got $status: $output"; false; }
+    [ -z "$output" ]
+    [ -f "$(nudge_file "mut-$i")" ] || { echo "expected a reminder for: $cmd"; false; }
   done
   rm -f "$TR"
 }
 
 @test "stop-reminder: a > inside quotes, 2>&1 and >/dev/null are not mutations" {
-  TR="$(mktemp)"
+  TR="$(mktemp)"; i=0
   for cmd in 'echo \"a -> b\"' "printf '%s' 'x > y'" 'git log --oneline 2>&1 | head' 'command -v jq >/dev/null 2>&1 && echo yes' 'gh api repos/o/r 2>/dev/null'; do
+    i=$((i + 1))
     realistic_bash_transcript "$TR" "$cmd"
-    run_stop_on "$TR"
+    run_stop_on "$TR" "q-$i"
     [ "$status" -eq 0 ] || { echo "expected allow for: $cmd — got $status: $output"; false; }
+    [ ! -e "$(nudge_file "q-$i")" ] || { echo "unexpected reminder for: $cmd"; false; }
   done
   rm -f "$TR"
 }
 
-@test "stop-reminder: Write and the flat fixture shape with a mutating Bash still block" {
-  TR="$(mktemp)"
-  cat > "$TR" <<'TRANSCRIPT'
+write_tr() { # $1 = transcript path, $2 = the Write's file_path
+  cat > "$1" <<TRANSCRIPT
 {"parentUuid":"u-1","type":"user","message":{"role":"user","content":[{"type":"text","text":"write it"}]},"uuid":"user-1","sessionId":"s-1"}
-{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"Write","input":{"file_path":"/x/new.md","content":"hi"}}]},"uuid":"asst-1","sessionId":"s-1"}
+{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"Write","input":{"file_path":"$2","content":"hi"}}]},"uuid":"asst-1","sessionId":"s-1"}
 {"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_02","type":"tool_result","content":"ok","is_error":false}]},"uuid":"toolres-1","sessionId":"s-1"}
 {"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Written."}]},"uuid":"asst-2","sessionId":"s-1"}
 TRANSCRIPT
-  run_stop_on "$TR"
+}
+
+@test "stop-reminder: a Write to a code file blocks; doc files and the flat shape's mutating Bash get the reminder" {
+  TR="$(mktemp)"
+  write_tr "$TR" /x/new.py
+  run_stop_on "$TR" w-code
   [ "$status" -eq 2 ]
+  for doc in /x/new.md /x/NOTES.TXT /x/guide.rst /x/page.mdx; do
+    write_tr "$TR" "$doc"
+    run_stop_on "$TR" "w-doc-${doc##*.}"
+    [ "$status" -eq 0 ] || { echo "expected no block for $doc"; false; }
+    [ -f "$(nudge_file "w-doc-${doc##*.}")" ]
+  done
   cat > "$TR" <<'TRANSCRIPT'
 {"type":"user","message":"please fix the bug"}
 {"type":"assistant","message":"sure","tool_uses":[{"name":"Bash","input":{"command":"mv old.py new.py"}}]}
 TRANSCRIPT
-  run_stop_on "$TR"
-  [ "$status" -eq 2 ]
+  run_stop_on "$TR" flat-mv
+  [ "$status" -eq 0 ]
+  [ -f "$(nudge_file flat-mv)" ]
   cat > "$TR" <<'TRANSCRIPT'
 {"type":"user","message":"where are we"}
 {"type":"assistant","message":"checking","tool_uses":[{"name":"Bash","input":{"command":"git status"}}]}
 TRANSCRIPT
-  run_stop_on "$TR"
+  run_stop_on "$TR" flat-ro
+  [ "$status" -eq 0 ]
+  [ ! -e "$(nudge_file flat-ro)" ]
+  rm -f "$TR"
+}
+
+PROMPT_HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/hooks/prompt-nudge.sh"
+run_prompt() { # $1 = session_id
+  run bash -c "echo '{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"$1\",\"prompt\":\"next\"}' | HOME='$TMP/srhome' '$PROMPT_HOOK'"
+}
+
+@test "stop-reminder: the reminder reaches the model once, with the next prompt" {
+  TR="$(mktemp)"
+  write_tr "$TR" /x/notes.md
+  run_stop_on "$TR" sess-n1
+  [ "$status" -eq 0 ]
+  run_prompt sess-n1
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null
+  printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext' | grep -q 'found-issues-checked: none-noticed'
+  run_prompt sess-n1
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # Once per session: a second doc-only turn without the marker adds nothing.
+  run_stop_on "$TR" sess-n1
+  [ "$status" -eq 0 ]
+  [ ! -e "$(nudge_file sess-n1)" ]
+  run_prompt sess-n1
+  [ -z "$output" ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: after a reminder, a code edit later in the session still blocks once" {
+  TR="$(mktemp)"
+  write_tr "$TR" /x/notes.md
+  run_stop_on "$TR" sess-n2
+  [ "$status" -eq 0 ]
+  write_tr "$TR" /x/app.py
+  run_stop_on "$TR" sess-n2
+  [ "$status" -eq 2 ]
+  run_stop_on "$TR" sess-n2
   [ "$status" -eq 0 ]
   rm -f "$TR"
+}
+
+@test "stop-reminder: a session that edited code earlier blocks on a later doc-only turn" {
+  TR="$(mktemp)"
+  {
+    printf '%s\n' '{"type":"user","message":"fix it"}'
+    printf '%s\n' '{"type":"assistant","message":"done <!-- found-issues-checked: none-noticed -->","tool_uses":[{"name":"Edit","input":{"file_path":"/x/app.py"}}]}'
+  } > "$TR"
+  run_stop_on "$TR" sess-n3
+  [ "$status" -eq 0 ]
+  write_tr "$TR" /x/notes.md
+  run_stop_on "$TR" sess-n3
+  [ "$status" -eq 2 ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: the prompt hook is silent without a pending reminder or with a bad session_id" {
+  run_prompt sess-none
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  mkdir -p "$TMP/srhome/.claude/found-issues/reminded"
+  : > "$TMP/srhome/.claude/escape.nudge"
+  run_prompt "../escape"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -f "$TMP/srhome/.claude/escape.nudge" ]
+}
+
+@test "stop-reminder: hooks.json runs the prompt hook on UserPromptSubmit" {
+  run jq -r '.hooks.UserPromptSubmit[].hooks[].command' "$(dirname "$HOOK")/hooks.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'hooks/prompt-nudge.sh'* ]]
 }
 
 @test "stop-reminder: honors stop_hook_active=true (skip on retry-fire)" {

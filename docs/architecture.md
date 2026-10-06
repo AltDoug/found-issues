@@ -113,13 +113,14 @@ Bash scripts in `hooks/`, registered via `hooks/hooks.json` on Claude
 Code (the plugin manifest) or via `found-issues install-codex-hooks`
 into `$CODEX_HOME/hooks.json` on Codex — see Harness adapters below for
 why registration differs by harness. They turn the CLAUDE.md rules into
-mechanical behavior. Five lifecycle hooks plus one optional per-repo git
+mechanical behavior. Six lifecycle hooks plus one optional per-repo git
 hook:
 
 | Hook | Event | Job |
 |---|---|---|
 | `session-start.sh` | SessionStart | Run sync silently, inject `[open]` entries into context (fenced as untrusted data), auto-migrate broken custom statusline targets |
-| `stop-reminder.sh` | Stop | Require the `<!-- found-issues-checked: ... -->` marker on turns with substantive tool use (Edit/Write/MultiEdit/Bash); pure-conversation turns and non-interactive (`CLAUDE_CODE_ENTRYPOINT != cli`) sessions pass through |
+| `stop-reminder.sh` | Stop | Ask for the `<!-- found-issues-checked: ... -->` marker after turns with substantive tool use (Edit/Write/MultiEdit/mutating Bash): a block once per session in sessions that edited code, else one non-blocking reminder (3.2.1); pure-conversation turns and non-interactive (`CLAUDE_CODE_ENTRYPOINT != cli`) sessions pass through |
+| `prompt-nudge.sh` | UserPromptSubmit | Hand a pending stop-reminder reminder to the model with the next prompt, once (no extra turn) |
 | `format-enforcer.sh` | PreToolUse Write/Edit | Block malformed entries before they land |
 | `pre-branch-delete.sh` | PreToolUse Bash | Block branch deletion if entries unpromoted |
 | `post-bash-dispatch.sh` | PostToolUse Bash | Auto-annotate PR/commit entries matching just-changed lines (`--hook-auto`), surfacing only judgment cases; background `sync` after `gh pr merge`/`close`/`reopen` |

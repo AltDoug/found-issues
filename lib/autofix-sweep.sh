@@ -97,6 +97,8 @@ _fi_af_sweep_retire_stale() {
   for f in "$FI_AF_ST"/queue/*; do
     [[ -f "$f" ]] || continue
     [[ "$(_fi_af_field "$f" kind)" == "sweep" ]] || continue
+    # A ship retry was launched and holds verified commits: never stale.
+    [[ "$(_fi_af_field "$f" ship_tries)" =~ ^[1-9] ]] && continue
     q="$(_fi_af_field "$f" queued)" || continue
     [[ "${q:0:10}" < "$today" ]] || continue
     id="${f##*/}"
@@ -182,6 +184,33 @@ _fi_af_sweep_ready() {
   AFI_entry="$keep"
 }
 
+# 3.2.1 (ledger lib/autofix-sweep.sh:387): a sweep whose ship failed comes
+# back with its commits on the kept branch. No cap, no classify, no entries:
+# re-attach a worktree to that branch, at the commit the sweep recorded, and
+# go straight to ship (its cur is past the last entry).
+_fi_af_sweep_claim_ship() {
+  local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1" at
+  fi_af_item_set "$q" pid "${FI_AF_PID:-}"
+  if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
+  fi_af_item_set "$q" wait_next ""
+  mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
+  fi_af_seg_write "$AFI_root"
+  [[ -n "$AFI_wt" ]] || AFI_wt="$AFI_root/.claude/worktrees/fi-sweep-$id"
+  at="$(git -C "$AFI_root" rev-parse -q --verify "refs/heads/$AFI_branch" 2>/dev/null || true)"
+  if [[ -z "$AFI_branch" || -z "$AFI_head" || -z "$AFI_base" || "$at" != "$AFI_head" ]]; then
+    FI_AF_WHY="ship retry: branch ${AFI_branch:-?} is gone or moved"
+    fi_af_finish "$id" failed "$FI_AF_WHY"; return 6
+  fi
+  mkdir -p "$AFI_root/.claude/worktrees"
+  git -C "$AFI_root" worktree prune >/dev/null 2>&1 || true
+  if ! git -C "$AFI_root" worktree add -q "$AFI_wt" "$AFI_branch" >/dev/null 2>&1; then
+    FI_AF_WHY="ship retry: git worktree add failed"
+    fi_af_finish "$id" failed "$FI_AF_WHY"; return 6
+  fi
+  fi_af_item_set "$r" wt "$AFI_wt"
+  fi_af_log "$id" "claimed sweep for ship retry $AFI_ship_tries: $AFI_wt ($AFI_branch at $AFI_head)"
+}
+
 # Spec §6 steps 1-3 at claim time (lock held, queue item read): cap, the
 # fresh worktree, the classify/wake pass, then the ordered entry list.
 # A sweep requeued today (crash, switch-off, outage) already holds today's
@@ -189,6 +218,7 @@ _fi_af_sweep_ready() {
 # writes the day's capped marker, which would stop spot fixes too.
 fi_af_sweep_claim() {
   local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1" file n=0 line capped=0
+  if [[ "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then _fi_af_sweep_claim_ship "$id"; return; fi
   [[ "$(_fi_af_field "$q" cap_day)" == "$(fi_today)" ]] && capped=1
   if (( ! capped )) && ! fi_af_cap_ok sweep "$(fi_af_int dailySweeps 1)"; then
     FI_AF_WHY="today's sweep cap is reached; the next trigger queues a new sweep"
@@ -205,6 +235,13 @@ fi_af_sweep_claim() {
   # and before the classifier runs.
   if ! fi_af_test_command "$AFI_wt" >/dev/null 2>&1; then
     fi_af_finish "$id" stale "no test command"; return 5
+  fi
+  # Red at base: retire before the classifier spends anything. The day's
+  # slot is spent, or every Stop would queue a new sweep and re-run the suite.
+  if ! fi_af_base_tests "$id"; then
+    (( capped )) || fi_af_cap_take sweep "$id"
+    FI_AF_WHY="tests fail at base"
+    fi_af_finish "$id" stale "$FI_AF_WHY"; return 5
   fi
   fi_af_item_set "$r" base "$AFI_base"
   fi_af_item_set "$r" base_why "$AFI_base_why"
@@ -384,8 +421,31 @@ fi_af_sweep_finish() {
     fi_af_finish "$id" shipped "PR #$FI_AF_PR, $AFI_fixed fixed, merge $FI_AF_MERGE, \$${FI_AF_COST:-0}"
     return 0
   fi
-  fi_af_finish "$id" failed "ship: $FI_AF_WHY"
+  _fi_af_sweep_ship_failed "$id"
   return 1
+}
+
+# 3.2.1 (ledger lib/autofix-sweep.sh:387): one transient push failure used to
+# delete the branch and every verified commit on it. Keep the branch and
+# requeue the sweep with its cur past the last entry, so the next run (after
+# FOUND_ISSUES_AUTOFIX_SHIP_WAIT seconds) only ships. The
+# FOUND_ISSUES_AUTOFIX_SHIP_TRIES-th failure (default 3) ends it failed,
+# still keeping the branch, which the result names.
+_fi_af_sweep_ship_failed() {
+  local id="$1" r="$FI_AF_ST/running/$1" tries max n
+  tries=$(( ${AFI_ship_tries:-0} + 1 ))
+  max="${FOUND_ISSUES_AUTOFIX_SHIP_TRIES:-3}"
+  [[ "$max" =~ ^[1-9][0-9]*$ ]] || max=3
+  AFI_ship_tries="$tries"
+  fi_af_item_set "$r" ship_tries "$tries"
+  if (( tries >= max )); then
+    fi_af_finish "$id" failed "ship: $FI_AF_WHY ($tries tries; branch $AFI_branch kept)"
+    return 0
+  fi
+  n="$(_fi_af_count_lines "$FI_AF_ST/sweeps/$id.entries")"
+  fi_af_item_set "$r" cur "$(( n + 1 ))"
+  fi_af_item_set "$r" wait_next "$(( $(date +%s) + ${FOUND_ISSUES_AUTOFIX_SHIP_WAIT:-900} ))"
+  fi_af_requeue "$id" "ship failed ($FI_AF_WHY); branch $AFI_branch kept, the next run retries ship"
 }
 
 _fi_af_sweep_pr_body() {
@@ -406,7 +466,7 @@ _fi_af_sweep_pr_body() {
 # The commits exist; ship re-runs the tests at head and refuses any tree
 # other than head's (plan Review Focus 3), then publishes one PR. An entry
 # left half-done (verify exit 3, 6 or 7) is dropped first: only committed,
-# approved entries ship, and a failed ship would delete their branch.
+# approved entries ship; a failed ship keeps the branch and requeues (3.2.1).
 fi_af_sweep_ship() {
   local wt="$AFI_wt" tlog="$FI_AF_RUNS/$AFI_id.ship-tests.log" bodyf="$FI_AF_RUNS/$AFI_id.pr-body.md"
   local rows="$FI_AF_RUNS/$AFI_id.publish" loc out key text

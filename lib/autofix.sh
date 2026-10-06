@@ -315,7 +315,13 @@ cmd_autofix() {
           esac
           return 0
         fi
-        fi_err "autofix: sweep ship refused — $FI_AF_WHY"
+        if [[ -f "$FI_AF_ST/queue/$1" ]]; then
+          fi_err "autofix: sweep ship failed — $FI_AF_WHY; the sweep is requeued with its branch kept and the next run retries ship; stop"
+        elif [[ -f "$FI_AF_ST/done/$1" ]]; then
+          fi_err "autofix: sweep ship failed — $FI_AF_WHY; the sweep is finished, its branch kept; stop"
+        else
+          fi_err "autofix: sweep ship refused — $FI_AF_WHY"
+        fi
         return 1
       fi
       if [[ "$AFI_verdict" != "approve" ]]; then

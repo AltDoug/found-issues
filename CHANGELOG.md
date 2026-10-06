@@ -4,6 +4,21 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.1] - 2026-10-06
+
+### Fixed
+
+- Auto-fix runs the repo's test command once in the fresh worktree before any fixer starts. A suite that already fails there ends the run as `stale: tests fail at base`, with the failing tests in the run log, instead of spending two engine attempts per entry on a red suite (a kh2-midgar sweep spent $4.88 on four entries this way). A sweep retires before its classifier runs; it spends the day's sweep slot, so a red base does not re-run the suite at every stop. The entry is not tagged and stays fixable.
+- A sweep whose ship fails (a push that cannot reach GitHub, `gh pr create` failing, red tests or a changed tree at ship) keeps its branch and goes back to the queue. The next run, after 15 minutes, re-attaches a worktree to that branch and only ships: no fixer, no classifier, no cap. Before, `git branch -D` deleted every verified commit (one DNS failure lost a 2.5-hour, 8-fix sweep). The third failed ship (`FOUND_ISSUES_AUTOFIX_SHIP_TRIES`) ends the sweep failed and still keeps the branch, named in the result. A retry reuses a PR an earlier try opened. Crash reaping, `autofix off`, cancel and the never-launched sweep cleanup also keep such a branch.
+
+### Changed
+
+- The stop reminder blocks once per session only in a session that edited code: an Edit, Write, MultiEdit or NotebookEdit on a path that is not `.md`, `.mdx`, `.markdown`, `.txt`, `.rst` or `.adoc`. Other substantive turns without the marker, such as doc-only edits or a mutating Bash command, get one non-blocking reminder per session. A new `UserPromptSubmit` hook, `prompt-nudge.sh`, hands that reminder to the model with the next prompt. A scan of 101 transcripts found that most blocks bought a whole billed turn just to append the marker. `FOUND_ISSUES_STOP_REMINDER_EVERY_TURN=on` keeps the old block on every substantive turn. Codex is unchanged.
+
+### Added
+
+- `/found-issues:setup` asks when a sweep starts after you turn auto-fix on: 5 (the default), 10, 20, or any whole number. It writes `autofix.sweepThreshold` at the scope auto-fix was turned on in.
+
 ## [3.2.0] - 2026-10-05
 
 ### Changed

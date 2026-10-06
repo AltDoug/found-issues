@@ -26,3 +26,17 @@ S="$TEST_REPO_ROOT/commands/setup.md"
   grep -rqF 'key=sweepBudget def=10' "$TEST_REPO_ROOT/lib"
   grep -rqF 'runTimeoutMin 20' "$TEST_REPO_ROOT/lib"
 }
+
+# 3.2.1: after turning auto-fix on, setup asks when a sweep starts and writes
+# autofix.sweepThreshold at the scope auto-fix was turned on in.
+@test "setup sweep trigger: offers 5 (the code default), 10, 20 and a custom number" {
+  grep -qF '`5 (Recommended)`' "$S"
+  grep -qF '`10`' "$S"
+  grep -qF '`20`' "$S"
+  grep -qF 'found-issues config autofix.sweepThreshold <n>' "$S"
+  grep -qF 'found-issues config autofix.sweepThreshold <n> --global' "$S"
+  grep -rqF 'fi_af_int sweepThreshold 5' "$TEST_REPO_ROOT/lib"
+  c="$TEST_REPO_ROOT/codex-skills/fi-setup/SKILL.md"
+  grep -qF '`5 (Recommended)`' "$c"
+  grep -qF 'found-issues config autofix.sweepThreshold <n>' "$c"
+}
