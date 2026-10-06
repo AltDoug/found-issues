@@ -119,8 +119,8 @@ cmd_sync() {
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
   # One gh call per distinct PR per run, answered as "state<TAB>base<TAB>
-  # mergedAt" by gh's built-in --jq — no jq binary needed, so a machine with
-  # gh but no jq closes merged PRs too (audit ledger-7, ledger-8b). Fields are
+  # mergedAt<TAB>head" by gh's built-in --jq — no jq binary needed, so a
+  # machine with gh but no jq closes merged PRs too (audit ledger-7, ledger-8b). Fields are
   # \x1f-separated (tab is IFS whitespace: an empty field would collapse).
   # Memo lines: "\n<repo#N>\x1e<answer>"; an empty answer means gh failed.
   local _fi_pr_memo=$'\n'
@@ -132,8 +132,8 @@ cmd_sync() {
       return 0
     fi
     _fi_pr_ans="$(gh pr view "${ref##*#}" --repo "${ref%#*}" \
-      --json state,baseRefName,mergedAt \
-      --jq '[.state, .baseRefName, (.mergedAt // "")] | join("\u001f")' 2>/dev/null || true)"
+      --json state,baseRefName,mergedAt,headRefName \
+      --jq '[.state, .baseRefName, (.mergedAt // ""), (.headRefName // "")] | join("\u001f")' 2>/dev/null || true)"
     _fi_pr_memo+="$ref"$'\x1e'"$_fi_pr_ans"$'\n'
   }
 
@@ -214,11 +214,15 @@ cmd_sync() {
             gh_empty_warnings+=("$pr_ref")
             continue
           fi
-          local pr_state pr_branch pr_merged_at
-          IFS=$'\x1f' read -r pr_state pr_branch pr_merged_at <<<"$_fi_pr_ans"
+          local pr_state pr_branch pr_merged_at pr_head
+          IFS=$'\x1f' read -r pr_state pr_branch pr_merged_at pr_head <<<"$_fi_pr_ans"
           local pr_landed=0
           if [[ "$pr_state" == "MERGED" ]]; then
             if [[ -z "$default_branch" || "$pr_branch" == "$default_branch" ]]; then
+              pr_landed=1
+            elif [[ "$pr_head" == fi/autofix/* || "$pr_head" == fi/sweep/* ]]; then
+              # 3.2.0 (spec section 4): an auto-fix lands in the session's
+              # branch; the operator decided that closes the entry.
               pr_landed=1
             elif [[ -n "$pr_branch" && -n "$pr_merged_at" ]]; then
               # Landed once <base> merged into the default branch after it.
