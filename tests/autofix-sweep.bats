@@ -212,9 +212,10 @@ sweep_queue() { # queue a sweep for the fixture; sets SID and ST
 
 @test "sweep claim: takes every fixable entry, no count limit" {
   fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
-  git config found-issues.autofix.sweepBatch 2
+  git config found-issues.autofix.sweepMax 2
   "$FI_BIN" autofix claim "$SID" >/dev/null
-  # The 4 fixture entries plus the one sweep_queue logged.
+  # The 4 fixture entries plus the one sweep_queue logged; the old
+  # sweepMax-sized claim would have kept 2.
   [ "$(wc -l < "$ST/sweeps/$SID.entries" | tr -d ' ')" = 5 ]
 }
 
@@ -533,7 +534,7 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   ! grep -q 'autofix-failed' docs/found-issues.md || false
 }
 
-@test "sweep run: a continuation takes no second daily slot and carries cost" {
+@test "sweep run: a continuation takes no second daily slot and carries the chain's spend" {
   fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
   git config found-issues.autofix.sweepBatch 2
   git config found-issues.autofix.dailySweeps 1
@@ -542,7 +543,11 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   c="$(grep -l '^cont=2' "$ST"/done/*)"
   grep -q '^result=shipped' "$c"
   [ "$(grep -c . "$ST/day/$(date +%Y-%m-%d).sweep")" = 1 ]
-  awk -F= '$1=="cost" && $2+0 > 0.5 { ok=1 } END { exit !ok }' "$c"
+  # The chain's running total rides in chain_cost; the item's own cost is its batch only.
+  awk -F= '$1=="chain_cost" && $2+0 > 0.5 { ok=1 } END { exit !ok }' "$c"
+  # So summing the done items counts the chain's spend once: 5 entries at 0.50 each.
+  total="$(awk -F= '$1=="cost" { s += $2 } END { printf "%.2f", s }' "$ST"/done/*)"
+  [ "$total" = "2.50" ]
 }
 
 @test "sweep run: a batch closes only at a file boundary" {
@@ -570,7 +575,7 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   [ "$(wc -l < "$FI_AF_ST/sweeps/$QID.entries" | tr -d ' ')" = 3 ]
   ! grep -q 'src/f1.sh' "$FI_AF_ST/sweeps/$QID.entries" || false
   # No classify pass and no second day slot for a continuation.
-  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q . "$FI_STANDIN_TRACE"
+  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q . "$FI_STANDIN_TRACE" || false
   [ ! -s "$FI_AF_ST/day/$(date +%Y-%m-%d).sweep" ]
 }
 
@@ -581,6 +586,14 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   sweep_queue
   "$FI_BIN" autofix run "$SID" --engine claude || true
   grep -q '^ship_tries=1$' "$ST/queue/$SID"
+  [ "$(find "$ST/queue" "$ST/done" -type f | wc -l | tr -d ' ')" = 1 ]
+  ! grep -q '^cont=' "$ST"/queue/* "$ST"/done/* 2>/dev/null || false
+  # The retry ships the same commits; the rest waits for the next sweep.
+  git config --unset remote.origin.pushurl
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/queue/$SID" wait_next ""
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 2 fixed' "$ST/done/$SID"
   [ "$(find "$ST/queue" "$ST/done" -type f | wc -l | tr -d ' ')" = 1 ]
   ! grep -q '^cont=' "$ST"/queue/* "$ST"/done/* 2>/dev/null || false
 }

@@ -9,11 +9,13 @@ teardown() { fi_teardown_tmp; }
 
 @test "doctor auto-fix: on, with test command source, caps and the auto-merge sentence" {
   git config found-issues.autofix.dailyFixes 2
+  git config found-issues.autofix.sweepMax 3
   run "$FI_BIN" doctor
   [[ "$output" == *"== Auto-fix =="* ]]
   [[ "$output" == *"Auto-fix: on"* ]]
   [[ "$output" == *"Test command: sh test.sh (local)"* ]]
   [[ "$output" == *"2 spot fixes/day"* ]]
+  [[ "$output" == *"3 fixes per PR"* ]]
   [[ "$output" == *"Fix PRs merge themselves"* ]]
   [[ "$output" == *"claude:"* ]]
 }

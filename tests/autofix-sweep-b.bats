@@ -116,6 +116,27 @@ fix_current() { # fix the entry `next` names (an fN entry), with a test
   [ "$(grep -c '^pr create' "$GH_MOCK_TRACE")" = 1 ]
 }
 
+@test "sweep b: a full batch tells the agent to ship, and ship queues the next batch" {
+  git config found-issues.autofix.sweepBatch 1
+  fix_current
+  run "$FI_BIN" autofix verify "$SID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"batch 1 closes at 1 fixes"* ]]
+  [[ "$output" == *"autofix ship $SID"* ]]
+  grep -q '^more=1$' "$ST/running/$SID"
+  run "$FI_BIN" autofix next "$SID"
+  [[ "$output" == "No entries left. Run: found-issues autofix ship $SID" ]]
+  run "$FI_BIN" autofix ship "$SID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR #9"* ]]
+  [ "$(grep -l '^cont=2' "$ST"/queue/* | wc -l | tr -d ' ')" = 1 ]
+  c="$(grep -l '^cont=2' "$ST"/queue/*)"
+  grep -q '^skip_files=src/f[0-9]*\.sh$' "$c"
+  grep -q '^base=main$' "$c"
+  grep -q '^chain_cost=' "$c"
+  grep -q 'found-issues sweep (1 entries, batch 1)' "$GH_MOCK_TRACE"
+}
+
 @test "sweep b: brief says a failing-tests verify means fix and verify again" {
   run "$FI_BIN" autofix brief "$SID"
   [ "$status" -eq 0 ]

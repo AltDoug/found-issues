@@ -384,6 +384,47 @@ _fi_af_sweep_batch_closes() {
   return 0
 }
 
+# A full batch stops handing out entries: record that entries remain and keep
+# the engine this batch resolved, so the chain never switches (spec section 9).
+# Shared by launchers A and B. rc 0 = the batch closed.
+_fi_af_sweep_close_if_full() {
+  local id="$1" engine="$2" r="$FI_AF_ST/running/$1"
+  _fi_af_sweep_batch_closes "$id" || return 1
+  fi_af_item_set "$r" engine "$engine"
+  fi_af_item_set "$r" more 1
+  AFI_more=1
+  return 0
+}
+
+# A chain's spend (spec section 9; ruling R10). A continuation carries the
+# chain's running totals in chain_cost/chain_tokens, which seed the run so
+# sweepBudget / codexSweepTokens cover the whole chain; the item's own cost
+# and tokens record only this batch, so the status and summary sums stay true.
+_fi_af_chain_seed() {
+  if [[ -z "$AFI_chain_cost" ]]; then
+    FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}"
+    return 0
+  fi
+  FI_AF_COST="$(awk -v a="$AFI_chain_cost" -v b="${AFI_cost:-0}" 'BEGIN { printf "%.4f", a + b }')"
+  FI_AF_TOKENS=$(( ${AFI_chain_tokens:-0} + ${AFI_tokens:-0} ))
+}
+
+_fi_af_own_cost() {
+  if [[ -z "$AFI_chain_cost" ]]; then printf '%s' "${FI_AF_COST:-0}"; return 0; fi
+  awk -v a="${FI_AF_COST:-0}" -v b="$AFI_chain_cost" 'BEGIN { d = a - b; if (d < 0) d = 0; printf "%.4f", d }'
+}
+
+_fi_af_own_tokens() {
+  local d=$(( ${FI_AF_TOKENS:-0} - ${AFI_chain_tokens:-0} ))
+  (( d < 0 )) && d=0
+  printf '%s' "$d"
+}
+
+_fi_af_chain_save() {
+  fi_af_item_set "$1" cost "$(_fi_af_own_cost)"
+  fi_af_item_set "$1" tokens "$(_fi_af_own_tokens)"
+}
+
 # This batch's number: 1 for the first, cont for a continuation.
 _fi_af_sweep_batch_no() {
   if [[ "${AFI_cont:-}" =~ ^[0-9]+$ ]] && (( 10#$AFI_cont >= 2 )); then printf '%s' "$((10#$AFI_cont))"; else printf '1'; fi
@@ -395,7 +436,7 @@ _fi_af_sweep_batch_no() {
 _fi_af_run_sweep() {
   local id="$1" engine_opt="$2" r="$FI_AF_ST/running/$1" engine
   fi_af_item_read "$r" || return 0
-  FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}"
+  _fi_af_chain_seed
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
     fi_af_finish "$id" stale "no test command"; return 0
   fi
@@ -409,20 +450,14 @@ _fi_af_run_sweep() {
   while fi_af_sweep_load "$id"; do
     fi_af_enabled || break
     _fi_af_fix_loop "$id" "$engine"
-    fi_af_item_set "$r" cost "$FI_AF_COST"
-    fi_af_item_set "$r" tokens "$FI_AF_TOKENS"
+    _fi_af_chain_save "$r"
     case "$FI_AF_OUTCOME" in
       outage)
         fi_af_log "$id" "sweep: engine error: $FI_AF_OUTCOME_TEXT"
         _fi_af_reset_wt; break ;;
       approved)
         if fi_af_sweep_commit "$id"; then
-          if _fi_af_sweep_batch_closes "$id"; then
-            # The chain keeps the engine this batch resolved (spec section 9).
-            fi_af_item_set "$r" engine "$engine"
-            fi_af_item_set "$r" more 1
-            break
-          fi
+          _fi_af_sweep_close_if_full "$id" "$engine" && break
         else
           fi_af_sweep_settle "$id" failed "commit: $FI_AF_WHY"
         fi ;;
@@ -475,7 +510,7 @@ fi_af_sweep_finish() {
     # Queue the rest BEFORE this item moves to done/, so fi_af_sweep_pending
     # never sees a gap in which a Stop hook could queue an unrelated sweep.
     if [[ "${AFI_more:-}" == 1 ]] && fi_af_enabled; then _fi_af_sweep_queue_next "$id"; fi
-    fi_af_finish "$id" shipped "PR #$FI_AF_PR, $AFI_fixed fixed, merge $FI_AF_MERGE, \$${FI_AF_COST:-0}"
+    fi_af_finish "$id" shipped "PR #$FI_AF_PR, $AFI_fixed fixed, merge $FI_AF_MERGE, \$$(_fi_af_own_cost)"
     return 0
   fi
   _fi_af_sweep_ship_failed "$id"
@@ -498,7 +533,7 @@ _fi_af_sweep_queue_next() {
   fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID" "id=$FI_AF_ID" "kind=sweep" \
     "root=$AFI_root" "slug=$AFI_slug" "loc=sweep" "engine=$AFI_engine" \
     "queued=$(date +%Y-%m-%dT%H:%M:%S)" "crashes=0" \
-    "cont=$nxt" "cap_day=$(fi_today)" "cost=${FI_AF_COST:-0}" "tokens=${FI_AF_TOKENS:-0}" \
+    "cont=$nxt" "cap_day=$(fi_today)" "chain_cost=${FI_AF_COST:-0}" "chain_tokens=${FI_AF_TOKENS:-0}" \
     "base=$AFI_base" "skip_files=$skip"
   fi_af_log "$id" "sweep: queued batch $nxt as $FI_AF_ID"
 }
@@ -518,6 +553,10 @@ _fi_af_sweep_ship_failed() {
   [[ "$wait" =~ ^[0-9]+$ ]] || wait=900
   AFI_ship_tries="$tries"
   fi_af_item_set "$r" ship_tries "$tries"
+  # Spec section 9: a batch whose ship fails queues no continuation, even if
+  # a retry ships it; the rest waits for the next sweep.
+  fi_af_item_set "$r" more ""
+  AFI_more=""
   if (( tries >= max )); then
     fi_af_finish "$id" failed "ship: $FI_AF_WHY ($tries tries; branch $AFI_branch kept)"
     return 0
@@ -539,7 +578,7 @@ _fi_af_sweep_pr_body() {
   printf '\nOne commit per fixed entry; the verifier approved each one.\n\n'
   printf 'Tests: `%s` passed. Last lines:\n\n' "$FI_AF_TESTCMD"
   tail -n 15 "$tlog" 2>/dev/null | sed 's/^/    /'
-  printf '\nRun cost: $%s (claude), %s tokens (codex)\n\n' "${FI_AF_COST:-0}" "${FI_AF_TOKENS:-0}"
+  printf '\nRun cost: $%s (claude), %s tokens (codex)\n\n' "$(_fi_af_own_cost)" "$(_fi_af_own_tokens)"
   printf 'This PR merges itself when its checks pass (found-issues auto-fix policy).\n'
 }
 

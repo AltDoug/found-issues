@@ -311,7 +311,8 @@ cmd_autofix() {
       fi_af_b_enabled "$1" || return
       if [[ "$sub" == "ship" && "$AFI_kind" == "sweep" ]]; then
         fi_af_no_prompts
-        FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}" FI_AF_TESTCMD=""
+        _fi_af_chain_seed
+        FI_AF_TESTCMD=""
         if fi_af_sweep_finish "$1"; then
           fi_af_item_read "$FI_AF_ST/done/$1"
           case "$AFI_result" in

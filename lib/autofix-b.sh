@@ -31,7 +31,10 @@ fi_af_touch_lock() {
 fi_af_b_running() {
   fi_af_item_read "$FI_AF_ST/running/$1" || { fi_err "autofix: $1 is not claimed (run: found-issues autofix claim $1)"; return 1; }
   fi_af_touch_lock "$1"
-  if [[ "$AFI_kind" == "sweep" ]]; then fi_af_sweep_load "$1" || AFI_entry=""; fi
+  if [[ "$AFI_kind" == "sweep" ]]; then
+    # A full batch hands out no more entries: next and verify say ship.
+    if [[ "$AFI_more" == 1 ]]; then AFI_entry=""; else fi_af_sweep_load "$1" || AFI_entry=""; fi
+  fi
   return 0
 }
 
@@ -131,7 +134,7 @@ fi_af_b_verify() {
     printf 'tests fail: fix them (found-issues autofix test %s) before verify\n' "$id"; return 3
   fi
   engine="$(fi_af_engine "${AFI_engine:-claude}")" || engine=claude
-  FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}"
+  _fi_af_chain_seed
   if ! fi_af_run_budget_left "$engine"; then
     if (( sweep )); then
       printf '%s: run found-issues autofix ship %s\n' "$(fi_af_spent_text "$engine")" "$id"; return 6
@@ -141,8 +144,7 @@ fi_af_b_verify() {
   fi
   n=$(( ${AFI_attempts:-0} + 1 ))
   _fi_af_verify "$engine" "$n"
-  fi_af_item_set "$r" cost "$FI_AF_COST"
-  fi_af_item_set "$r" tokens "$FI_AF_TOKENS"
+  _fi_af_chain_save "$r"
   if [[ -n "$FI_AF_ENGINE_ERR" ]]; then
     if (( sweep )); then
       printf 'verifier unavailable (%s): run found-issues autofix ship %s\n' "$FI_AF_ENGINE_ERR" "$id"; return 7
@@ -158,6 +160,10 @@ fi_af_b_verify() {
     if ! fi_af_sweep_commit "$id"; then
       fi_af_sweep_settle "$id" failed "commit: $FI_AF_WHY"
       printf 'not committed (%s): entry marked failed.\nNext: found-issues autofix next %s\n' "$FI_AF_WHY" "$id"; return 5
+    fi
+    if _fi_af_sweep_close_if_full "$id" "$engine"; then
+      printf 'approved and committed: %s\nsweep: batch %s closes at %s fixes.\nNext: found-issues autofix ship %s\n' \
+        "$FI_AF_REASON" "$(_fi_af_sweep_batch_no)" "$AFI_fixed" "$id"; return 0
     fi
     printf 'approved and committed: %s\nNext: found-issues autofix next %s\n' "$FI_AF_REASON" "$id"; return 0
   fi

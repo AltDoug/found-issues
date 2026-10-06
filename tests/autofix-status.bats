@@ -22,6 +22,18 @@ teardown() { fi_teardown_tmp; }
   [[ "$output" == *"Spent today: \$"* ]]
 }
 
+@test "autofix status: a sweep continuation shows its batch number" {
+  QID=20991231-000000-00009
+  fi_af_item_write "$ST/queue/$QID" "id=$QID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=claude "queued=$(date +%Y-%m-%dT%H:%M:%S)" crashes=0 cont=3
+  DID=20991231-000000-00008
+  fi_af_item_write "$ST/done/$DID" "id=$DID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    cont=2 finished=1 "result=stale: sweep fixed nothing"
+  run "$FI_BIN" autofix status
+  [[ "$output" == *"$QID  sweep  sweep (batch 3)"* ]]
+  [[ "$output" == *"$DID  sweep (batch 2) — stale"* ]]
+}
+
 @test "autofix status: finished items carry a finished stamp" {
   "$FI_BIN" autofix cancel "$ID" >/dev/null
   grep -qE '^finished=[0-9]+$' "$ST/done/$ID"
