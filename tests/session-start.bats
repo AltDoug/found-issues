@@ -543,6 +543,20 @@ run_session_start_hook() {
   [[ "$output" == *"2 decisions waiting"*"/found-issues:decide"* ]]
 }
 
+@test "session-start: a decide tag written mid-line is not counted as a waiting decision" {
+  mkdir -p docs
+  printf -- '- [open] 2026-10-01 a.sh:1 — mentions (decide: A or B?) mid-line but has no tail tag\n' > docs/found-issues.md
+  run env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" FOUND_ISSUES_BIN="$TEST_REPO_ROOT/bin/found-issues" PATH="$TEST_REPO_ROOT/bin:$PATH" HOME="$TMP" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
+  [[ "$output" != *"waiting — answer with"* ]]
+}
+
+@test "session-start: a decision on an entry sync just woke is counted" {
+  mkdir -p docs
+  printf -- '- [deferred] 2026-09-01 b.sh:1 — woke (decide: C or D?) (until: date:2026-01-01)\n' > docs/found-issues.md
+  run env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" FOUND_ISSUES_BIN="$TEST_REPO_ROOT/bin/found-issues" PATH="$TEST_REPO_ROOT/bin:$PATH" HOME="$TMP" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
+  [[ "$output" == *"1 decision waiting"* ]]
+}
+
 @test "session-start: a deferred-only ledger with a due until-trigger still syncs" {
   mkdir -p docs
   printf -- '- [deferred] 2026-09-01 a.sh:1 — past (until: date:2026-01-01)\n' > docs/found-issues.md
