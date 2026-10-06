@@ -114,8 +114,10 @@ fi_af_status() {
       fi_af_item_read "$f" || true
       if [[ "$dir" == running ]]; then
         printf '  %s  %s  %s (launcher %s)\n' "$AFI_id" "${AFI_kind:-spot}" "${AFI_loc:-sweep}" "${AFI_launcher:-?}"
+        if [[ -n "$AFI_base" ]]; then printf '      into %s (%s)\n' "$AFI_base" "${AFI_base_why:-?}"; fi
       else
         printf '  %s  %s  %s\n' "$AFI_id" "${AFI_kind:-spot}" "${AFI_loc:-sweep}"
+        if [[ -n "$AFI_waiting" ]]; then printf '      waiting: %s\n' "$AFI_waiting"; fi
       fi
     done
   done
