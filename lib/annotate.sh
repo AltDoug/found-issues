@@ -619,7 +619,7 @@ fi_annotate_auto() {
 fi_pr_touched_files() {
   local pr_num="$1" files n
   if files="$(gh api --paginate "repos/{owner}/{repo}/pulls/$pr_num/files?per_page=100" \
-                --jq '.[].filename' 2>/dev/null)"; then
+                --jq '.[] | .filename, (.previous_filename // empty)' 2>/dev/null)"; then
     n="$(printf '%s\n' "$files" | grep -c .)" || true
     if (( n >= 3000 )); then
       printf 'found-issues: PR #%s lists 3000 files, the most GitHub returns; files past those were not checked (use --pick for entries they fix).\n' "$pr_num" >&2

@@ -275,7 +275,10 @@ cmd_annotate_commit() {
   # Files touched by the commit
   local touched_files
   # core.quotepath=off: a non-ASCII path must come back raw, not as "caf\303\251.md".
-  touched_files="$(git -c core.quotepath=off show --no-color --no-ext-diff --no-textconv --name-only --format= "$full_sha" 2>/dev/null | grep -v '^$' || true)"
+  # --name-status -M lists BOTH names of a rename (R<score>\told\tnew): entries
+  # cite the pre-fix (old) path, so a rename-plus-edit commit must offer it.
+  touched_files="$(git -c core.quotepath=off show --no-color --no-ext-diff --no-textconv -M --name-status --format= "$full_sha" 2>/dev/null \
+    | awk -F'\t' 'NF >= 2 { for (i = 2; i <= NF; i++) if ($i != "") print $i }' || true)"
 
   if [[ -z "$touched_files" ]]; then
     printf 'annotate-commit: commit %s touches no files. Nothing to do.\n' "$short_sha"

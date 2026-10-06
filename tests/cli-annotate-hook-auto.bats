@@ -123,6 +123,20 @@ mk_pr_mocks() {
   grep -q "src/café.py:3.*(commit-auto: $short_sha)" docs/found-issues.md
 }
 
+@test "annotate-commit --hook-auto: a rename-plus-edit commit still matches the entry citing the old path" {
+  mkdir -p src
+  printf 'l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n' > src/old.py
+  git add -A && git commit -q -m "seed"
+  fi_run log "src/old.py:3 — bug at line 3"
+  git mv src/old.py src/new.py
+  printf 'l1\nl2\nFIXED\nl4\nl5\nl6\nl7\nl8\n' > src/new.py
+  git add -A && git commit -q -m "rename and fix"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+  fi_run annotate-commit HEAD --hook-auto
+  [ "$status" -eq 0 ]
+  grep -q "src/old.py:3.*(commit-auto: $short_sha)" docs/found-issues.md
+}
+
 @test "hook-auto: a pure-addition commit adjacent to the cited line does NOT auto-annotate" {
   # Regression: an insertion next to the cited line touches the file but
   # removes nothing on the old side — fi_diff_old_ranges emits no range, so
