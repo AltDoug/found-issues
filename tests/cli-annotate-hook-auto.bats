@@ -98,6 +98,25 @@ mk_pr_mocks() {
   [[ "$output" != *"src/f6.py:1"* ]]
 }
 
+@test "annotate-pr --all: confirms an existing PR-auto suggestion in place instead of appending a duplicate" {
+  mkdir -p docs
+  printf -- '- [open] 2026-10-01 src/foo.py:42 — null check missing (PR-auto: org/repo#7)\n' > docs/found-issues.md
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  fi_run annotate-pr 7 --all
+  [ "$status" -eq 0 ]
+  grep -q 'src/foo.py:42 — null check missing (PR: org/repo#7)$' docs/found-issues.md
+  run grep -c 'PR-auto' docs/found-issues.md
+  [ "$output" = "0" ]
+}
+
+@test "annotate-pr: a symptom that merely quotes a (PR: ...) token is not treated as already annotated" {
+  mkdir -p docs
+  printf -- '- [open] 2026-10-01 src/foo.py:42 — docs say (PR: org/repo#7) closes this but it does not\n' > docs/found-issues.md
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  fi_run annotate-pr 7
+  grep -q 'does not (PR-auto: org/repo#7)$' docs/found-issues.md
+}
+
 @test "hook-auto: no matches at all stays silent-clean, exit 0" {
   fi_run log "src/other.py:5 — unrelated"
   mk_pr_mocks
