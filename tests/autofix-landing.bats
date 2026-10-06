@@ -107,6 +107,7 @@ teardown() { fi_teardown_tmp; }
   [ -f "$FI_AF_ST/queue/$id" ]
   grep -q '^base=$' "$FI_AF_ST/queue/$id"
   grep -q '^base_why=$' "$FI_AF_ST/queue/$id"
+  ! grep -q '^wait_since=[0-9]' "$FI_AF_ST/queue/$id" || false
   fi_af_remote_branch gsd/phase-02
   run "$FI_BIN" autofix claim "$id"
   [ "$status" -eq 0 ]
@@ -178,6 +179,59 @@ queue_entry() { # $1 = ledger line to append and queue; sets id
   [ "$status" -eq 0 ]
   [ -f "$FI_AF_ST/running/$id" ]
   grep -q '^waiting=$' "$FI_AF_ST/running/$id"
+  # A successful claim ends the wait: the next wait must start its own clock.
+  grep -q '^wait_since=$' "$FI_AF_ST/running/$id"
+  grep -q '^wait_next=$' "$FI_AF_ST/running/$id"
+}
+
+# Another clone pushes a change to <file> on main; the session's checkout stays behind.
+push_from_other_clone() {
+  git clone -q "$TMP/remote.git" "$TMP/other"
+  ( cd "$TMP/other" && printf '# upstream change\n' >> "$1" \
+    && git -c user.email=a@b -c user.name=x -c commit.gpgsign=false commit -qam up && git push -q origin main )
+}
+
+@test "wait: a checkout merely behind origin is not busy" {
+  push_from_other_clone src/calc.sh
+  [ -z "$(git -C "$REPO" status --porcelain -- src/calc.sh)" ]
+  id="$(fi_af_queue_spot "$(grep -m1 '^- \[open\]' docs/found-issues.md)" >/dev/null; ls "$FI_AF_ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 0 ]
+  [ -f "$FI_AF_ST/running/$id" ]
+}
+
+@test "wait: a staged but uncommitted edit makes it busy" {
+  printf '# staged\n' >> src/calc.sh && git add src/calc.sh
+  id="$(fi_af_queue_spot "$(grep -m1 '^- \[open\]' docs/found-issues.md)" >/dev/null; ls "$FI_AF_ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 8 ]
+}
+
+@test "wait: a commit already on the branch's own stale upstream ref is not busy" {
+  fi_af_remote_branch feat/squashed src/sq.sh
+  printf '# on the branch\n' >> src/calc.sh && git commit -qam onbranch && git push -q origin feat/squashed
+  git -C "$TMP/remote.git" branch -D feat/squashed >/dev/null     # merged elsewhere; origin/feat/squashed stays stale
+  fi_use_gh_shim
+  export GH_MOCK_PR_LIST='[]'
+  id="$(fi_af_queue_spot "$(grep -m1 '^- \[open\]' docs/found-issues.md)" >/dev/null; ls "$FI_AF_ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 0 ]
+}
+
+@test "wait: a wait that ended in a claim does not carry its clock into the next wait" {
+  printf '# local commit\n' >> src/calc.sh && git commit -qam local
+  id="$(fi_af_queue_spot "$(grep -m1 '^- \[open\]' docs/found-issues.md)" >/dev/null; ls "$FI_AF_ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id"; [ "$status" -eq 8 ]
+  fi_af_item_set "$FI_AF_ST/queue/$id" wait_since 1000     # the first wait was long ago
+  git push -q origin main
+  run "$FI_BIN" autofix claim "$id"; [ "$status" -eq 0 ]
+  grep -q '^wait_since=$' "$FI_AF_ST/running/$id"
+  grep -q '^wait_next=$' "$FI_AF_ST/running/$id"
+  fi_af_requeue "$id" "engine outage"
+  printf '# edit again\n' >> src/calc.sh
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 8 ]
+  grep -q "^waiting=src/calc.sh busy in $REPO\$" "$FI_AF_ST/queue/$id"
 }
 
 @test "wait: a wait older than the maximum retires the item stale" {
@@ -232,4 +286,47 @@ queue_entry() { # $1 = ledger line to append and queue; sets id
   grep -q 'src/f2.sh' "$FI_AF_ST/sweeps/$id.entries"
   grep -q 'sweep: skip src/f1.sh:1 (busy)' "$FI_AF_RUNS/$id.log"
   grep -q 'sweep: skip src/ghost.sh:1 (not on origin/main)' "$FI_AF_RUNS/$id.log"
+}
+
+@test "sweep: a checkout merely behind origin keeps its entries as candidates" {
+  cd "$TMP"; rm -rf "$TMP/repo" "$TMP/remote.git" "$TMP/state"
+  fi_af_sweep_fixture 5
+  REPO="$(pwd -P)"
+  push_from_other_clone src/f1.sh
+  fi_use_standins
+  fi_af_context; AFI_root="$REPO"
+  fi_af_sweep_check >/dev/null
+  id="$(ls "$FI_AF_ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 0 ]
+  grep -q 'src/f1.sh' "$FI_AF_ST/sweeps/$id.entries"
+  ! grep -q 'skip src/f1.sh' "$FI_AF_RUNS/$id.log" || false
+}
+
+@test "sweep: the claim log line says why the landing branch was chosen" {
+  cd "$TMP"; rm -rf "$TMP/repo" "$TMP/remote.git" "$TMP/state"
+  fi_af_sweep_fixture 5
+  REPO="$(pwd -P)"
+  fi_use_standins
+  fi_af_context; AFI_root="$REPO"
+  fi_af_sweep_check >/dev/null
+  id="$(ls "$FI_AF_ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 0 ]
+  grep -q 'claimed sweep: 5 entries in .* from origin/main: default branch)$' "$FI_AF_RUNS/$id.log"
+}
+
+@test "sweep: every candidate skipped does not spend the day's sweep slot" {
+  cd "$TMP"; rm -rf "$TMP/repo" "$TMP/remote.git" "$TMP/state"
+  fi_af_sweep_fixture 5
+  REPO="$(pwd -P)"
+  printf '# busy\n' | tee -a src/f1.sh -a src/f2.sh -a src/f3.sh -a src/f4.sh -a src/f5.sh >/dev/null   # all busy: edited, not committed
+  fi_use_standins
+  fi_af_context; AFI_root="$REPO"
+  fi_af_sweep_check >/dev/null
+  id="$(ls "$FI_AF_ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 5 ]
+  grep -q '^result=stale: nothing fixable now$' "$FI_AF_ST/done/$id"
+  [ ! -e "$FI_AF_ST/day/$(date +%Y-%m-%d).sweep" ]
 }

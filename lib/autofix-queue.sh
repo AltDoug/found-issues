@@ -346,6 +346,27 @@ _fi_af_entry_file() {
   printf '%s' "$FE_path"
 }
 
+# Spec decision 5: a cited file is busy in the session's root checkout when it
+# has uncommitted changes (staged or not) or commits not yet pushed. "Pushed"
+# is the branch's own upstream ref when it exists (live or stale: a
+# squash-merged branch's own commits are not unpushed), else origin/<base>.
+# Never a diff against origin/<base> itself: a checkout merely behind origin
+# differs from it without holding any work of its own. rc 0 = busy.
+_fi_af_file_busy() {
+  local p="$1" cur up pushed
+  [[ -n "$(git -C "$AFI_root" diff --name-only HEAD -- "$p" 2>/dev/null)" ]] && return 0
+  pushed="origin/$AFI_base"
+  cur="$(git -C "$AFI_root" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  if [[ -n "$cur" ]]; then
+    up="$(git -C "$AFI_root" config --get "branch.$cur.merge" 2>/dev/null || true)"
+    up="${up#refs/heads/}"
+    if [[ -n "$up" ]] && git -C "$AFI_root" show-ref --verify --quiet "refs/remotes/origin/$up"; then
+      pushed="origin/$up"
+    fi
+  fi
+  [[ -n "$(git -C "$AFI_root" rev-list -1 "$pushed..HEAD" -- "$p" 2>/dev/null)" ]]
+}
+
 # Spec section 2: rc 0 = go; rc 8 = wait (item stays queued); rc 5 = waited
 # too long. The file must be on the landing branch's remote and untouched
 # locally, or a fix cut from origin/<base> would not match what the session sees.
@@ -355,7 +376,7 @@ _fi_af_wait_check() {
   git -C "$AFI_root" fetch -q origin "$AFI_base" 2>/dev/null || return 0
   if ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
     why="$p not on origin/$AFI_base"
-  elif [[ -n "$(git -C "$AFI_root" diff --name-only "origin/$AFI_base" -- "$p" 2>/dev/null)" ]]; then
+  elif _fi_af_file_busy "$p"; then
     why="$p busy in $AFI_root"
   else
     return 0
@@ -394,7 +415,11 @@ fi_af_claim() {
     5) fi_af_retire "$id" stale "$FI_AF_WHY" || fi_af_unlock "$id"; return 5 ;;
     8) fi_af_unlock "$id"; fi_af_log "$id" "waiting: $FI_AF_WHY"; return 8 ;;
   esac
+  # The wait is over: clear its clock too, or the next wait of a requeued
+  # item would start from this one's wait_since and retire stale at once.
   fi_af_item_set "$q" waiting ""
+  fi_af_item_set "$q" wait_since ""
+  fi_af_item_set "$q" wait_next ""
   # Launcher A's run passes its own long-lived pid. A standalone claim is an
   # in-session fixer (launcher B): its claim process exits at once, so there
   # is no pid to record. The repo lock, refreshed by every B-side call, is

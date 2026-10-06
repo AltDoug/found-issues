@@ -173,7 +173,7 @@ _fi_af_sweep_ready() {
       if ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
         fi_af_log "$id" "sweep: skip $FE_loc (not on origin/$AFI_base)"; continue
       fi
-      if [[ -n "$(git -C "$AFI_root" diff --name-only "origin/$AFI_base" -- "$p" 2>/dev/null)" ]]; then
+      if _fi_af_file_busy "$p"; then
         fi_af_log "$id" "sweep: skip $FE_loc (busy)"; continue
       fi
     fi
@@ -196,7 +196,6 @@ fi_af_sweep_claim() {
   fi
   fi_af_item_set "$q" pid "${FI_AF_PID:-}"
   if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
-  (( capped )) || fi_af_item_set "$q" cap_day "$(fi_today)"
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
   fi_af_seg_write "$AFI_root"
   if ! fi_af_worktree_add; then fi_af_finish "$id" failed "$FI_AF_WHY"; return 6; fi
@@ -207,7 +206,6 @@ fi_af_sweep_claim() {
   if ! fi_af_test_command "$AFI_wt" >/dev/null 2>&1; then
     fi_af_finish "$id" stale "no test command"; return 5
   fi
-  (( capped )) || fi_af_cap_take sweep "$id"
   fi_af_item_set "$r" base "$AFI_base"
   fi_af_item_set "$r" base_why "$AFI_base_why"
   fi_af_item_set "$r" base_sha "$AFI_base_sha"
@@ -227,7 +225,13 @@ fi_af_sweep_claim() {
   : >"$FI_AF_ST/sweeps/$id.outcomes"
   while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/sweeps/$id.entries"
   if (( n == 0 )); then fi_af_finish "$id" stale "nothing fixable now"; return 5; fi
-  fi_af_log "$id" "claimed sweep: $n entries in $AFI_wt ($AFI_branch from origin/$AFI_base)"
+  # Spend the day's slot only now that the sweep has something to fix, like
+  # the no-test-command retire above.
+  if (( ! capped )); then
+    fi_af_item_set "$r" cap_day "$(fi_today)"
+    fi_af_cap_take sweep "$id"
+  fi
+  fi_af_log "$id" "claimed sweep: $n entries in $AFI_wt ($AFI_branch from origin/$AFI_base: $AFI_base_why)"
 }
 
 # Entry number AFI_cur of the sweep, with its base pinned to the last good
