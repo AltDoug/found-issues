@@ -80,6 +80,24 @@ mk_pr_mocks() {
   [ "$status" -ne 0 ]
 }
 
+@test "hook-auto: the candidate list is capped at 5 lines plus a +N more line" {
+  export FOUND_ISSUES_AUTO_ANNOTATE_MAX=2
+  files="" diff=""
+  for n in 1 2 3 4 5 6 7; do
+    fi_run log "src/f$n.py:1 — bug $n"
+    files+="src/f$n.py\\n"
+    diff+="diff --git a/src/f$n.py b/src/f$n.py\\n--- a/src/f$n.py\\n+++ b/src/f$n.py\\n@@ -1,2 +1,2 @@\\n-old1\\n+new1\\n ctx2\\n"
+  done
+  export GH_MOCK_PR_VIEW=$'7\t'"${files%\\n}"
+  export GH_MOCK_PR_DIFF="${diff%\\n}"
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"7 [open] entries not annotated"* ]]
+  [[ "$output" == *"+2 more [run without --hook-auto to see all]"* ]]
+  [[ "$output" == *"src/f5.py:1"* ]]
+  [[ "$output" != *"src/f6.py:1"* ]]
+}
+
 @test "hook-auto: no matches at all stays silent-clean, exit 0" {
   fi_run log "src/other.py:5 — unrelated"
   mk_pr_mocks

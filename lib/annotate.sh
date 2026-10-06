@@ -585,7 +585,14 @@ fi_annotate_auto() {
     printf '%s: %d [open] entr%s not annotated — each needs judgment:\n' \
       "$cmd_label" "${#ambig_indices[@]}" "$([[ ${#ambig_indices[@]} -eq 1 ]] && echo y || echo ies)"
     local k
+    # Hook mode feeds this list into the session as context: cap it so a big
+    # change cannot flood the prompt. Manual runs list everything.
+    local list_max=5
     for (( k = 0; k < ${#ambig_indices[@]}; k++ )); do
+      if [[ "$hook_auto" == "yes" ]] && (( k >= list_max )); then
+        printf '  +%d more [run without --hook-auto to see all]\n' "$(( ${#ambig_indices[@]} - list_max ))"
+        break
+      fi
       i="${ambig_indices[$k]}"
       local sym="${cand_syms[$i]}"
       (( ${#sym} > 70 )) && sym="${sym:0:70}..."
