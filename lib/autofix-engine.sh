@@ -26,6 +26,10 @@
 #   fi_af_parse_result <text>
 #   fi_af_parse_verdict <text>
 #   fi_af_budget_left
+#   fi_af_token_cap
+#   fi_af_tokens_left
+#   fi_af_run_budget_left <engine>
+#   fi_af_spent_text <engine>
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
@@ -257,4 +261,31 @@ fi_af_parse_verdict() {
 # Spec §7: runBudget caps the whole run (every fixer and verifier child).
 fi_af_budget_left() {
   awk -v b="$(fi_af_budget)" -v s="$FI_AF_COST" 'BEGIN { l = b - s; if (l < 0.10) exit 1; printf "%.2f", l }'
+}
+
+# 3.3.0 spec §2: Codex reports tokens, not dollars, so its runs stop on a
+# token cap instead (a sweep has its own). Opt-in: unset = no cap (Decision
+# 5). Checked before each child; one child may overshoot (Decision 3).
+fi_af_token_cap() {
+  if [[ "${AFI_kind:-}" == "sweep" ]]; then fi_af_cap_int codexSweepTokens
+  else fi_af_cap_int codexRunTokens; fi
+}
+
+fi_af_tokens_left() {
+  local cap
+  cap="$(fi_af_token_cap)"
+  [[ -n "$cap" ]] || return 0
+  (( FI_AF_TOKENS < cap )) || return 1
+  printf '%s' $(( cap - FI_AF_TOKENS ))
+}
+
+# Engine-neutral gate: dollars for claude, tokens for codex.
+fi_af_run_budget_left() {
+  if [[ "$1" == codex ]]; then fi_af_tokens_left >/dev/null
+  else fi_af_budget_left >/dev/null; fi
+}
+
+fi_af_spent_text() {
+  if [[ "$1" == codex ]]; then printf 'run budget spent (%s tokens)' "$FI_AF_TOKENS"
+  else printf 'run budget spent ($%s)' "$FI_AF_COST"; fi
 }

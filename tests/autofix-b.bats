@@ -277,3 +277,14 @@ tap_fail_cmd() {
   [[ "$output" == *"autofix verify"* ]]
   ! grep -q '^pr create' "$GH_MOCK_TRACE" 2>/dev/null || false
 }
+
+@test "autofix verify (launcher B): a codex item past its token cap fails without a verifier" {
+  claim; fix_it
+  fi_af_item_set "$ST/running/$ID" engine codex
+  fi_af_item_set "$ST/running/$ID" tokens 700000
+  git config found-issues.autofix.codexRunTokens 600000
+  run "$FI_BIN" autofix verify "$ID"
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"failed: run budget spent; stop"* ]]
+  ! grep -q 'read-only' "$FI_STANDIN_TRACE" 2>/dev/null || false
+}

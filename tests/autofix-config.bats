@@ -164,3 +164,20 @@ src() {
   run "$FI_BIN" config
   [[ "$output" == *"found-issues.autofix.codexModel"*"inherit"*"(local)"* ]]
 }
+
+@test "config: token cap keys are unset by default, validate and fall back to no cap" {
+  src
+  [ -z "$(fi_af_token_cap)" ]
+  run "$FI_BIN" config autofix.codexRunTokens 0
+  [ "$status" -eq 2 ]
+  git config found-issues.autofix.codexSweepTokens lots
+  run fi_af_cap_int codexSweepTokens
+  [[ "$output" == *"not a positive integer"* ]]
+  [ "${lines[${#lines[@]}-1]}" != lots ]
+  AFI_kind=sweep
+  [ -z "$(fi_af_token_cap 2>/dev/null)" ]
+  git config --unset found-issues.autofix.codexSweepTokens
+  run "$FI_BIN" config
+  [[ "$output" == *"found-issues.autofix.codexRunTokens"*"(default)"* ]]
+  [[ "$output" == *"found-issues.autofix.codexSweepTokens"*"(default)"* ]]
+}

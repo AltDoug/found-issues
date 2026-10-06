@@ -240,3 +240,20 @@ teardown() { fi_teardown_tmp; }
   [ ! -d "$REPO/.claude/worktrees/fi-autofix-$ID" ]
   ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
 }
+
+@test "autofix run: codex stops at the token cap before the verifier" {
+  git config found-issues.autofix.codexRunTokens 1000
+  run "$FI_BIN" autofix run "$ID" --engine codex
+  [ "$status" -eq 0 ]
+  grep -q '^result=failed: run budget spent (1500 tokens)' "$ST/done/$ID"
+  grep -q '(autofix-failed: run budget spent \[1500 tokens\])' "$REPO/docs/found-issues.md"
+  # the fixer prompt says read-only, so match the verifier's sandbox flag
+  [ "$(grep -c 'sandbox.read-only' "$FI_STANDIN_TRACE")" = 0 ]
+}
+
+@test "autofix run: the claude budget ignores the codex token cap" {
+  git config found-issues.autofix.codexRunTokens 1
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped' "$ST/done/$ID"
+}

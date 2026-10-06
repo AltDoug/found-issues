@@ -132,11 +132,11 @@ fi_af_b_verify() {
   fi
   engine="$(fi_af_engine "${AFI_engine:-claude}")" || engine=claude
   FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}"
-  if [[ "$engine" == claude ]] && ! fi_af_budget_left >/dev/null; then
+  if ! fi_af_run_budget_left "$engine"; then
     if (( sweep )); then
-      printf 'run budget spent ($%s): run found-issues autofix ship %s\n' "$FI_AF_COST" "$id"; return 6
+      printf '%s: run found-issues autofix ship %s\n' "$(fi_af_spent_text "$engine")" "$id"; return 6
     fi
-    fi_af_finish "$id" failed "run budget spent (\$$FI_AF_COST)"
+    fi_af_finish "$id" failed "$(fi_af_spent_text "$engine")"
     printf 'failed: run budget spent; stop\n'; return 6
   fi
   n=$(( ${AFI_attempts:-0} + 1 ))

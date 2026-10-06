@@ -8,6 +8,7 @@
 # Functions:
 #   fi_af_cfg <key> <default>
 #   fi_af_int <key> <default>
+#   fi_af_cap_int <key>
 #   fi_af_budget
 #   fi_af_codex_margs <fixer|verifier|classifier>
 #   fi_af_root
@@ -35,6 +36,19 @@ fi_af_int() {
   if [[ ! "$v" =~ ^[0-9]+$ ]] || (( 10#$v < 1 )); then
     fi_err "found-issues: found-issues.autofix.$1=$v is not a positive integer — using $2"
     v="$2"
+  fi
+  printf '%s' "$((10#$v))"
+}
+
+# 3.3.0: an opt-in cap. Unset prints nothing (no cap); a value that is not a
+# positive integer warns and also means no cap.
+fi_af_cap_int() {
+  local v
+  v="$(fi_af_cfg "$1" "")"
+  [[ -n "$v" ]] || return 0
+  if [[ ! "$v" =~ ^[0-9]+$ ]] || (( 10#$v < 1 )); then
+    fi_err "found-issues: found-issues.autofix.$1=$v is not a positive integer — no cap"
+    return 0
   fi
   printf '%s' "$((10#$v))"
 }
@@ -193,6 +207,8 @@ autofix.sweepThreshold|int|5
 autofix.sweepMax|int|8
 autofix.runBudget|usd|3
 autofix.sweepBudget|usd|10
+autofix.codexRunTokens|int|
+autofix.codexSweepTokens|int|
 autofix.runTimeoutMin|int|20'
 
 FI_CFG_KEY="" FI_CFG_KIND="" FI_CFG_DEF="" FI_CFG_VAL="" FI_CFG_SRC=""

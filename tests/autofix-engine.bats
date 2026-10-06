@@ -249,3 +249,29 @@ teardown() { fi_teardown_tmp; }
   [ -z "$FI_AF_ENGINE_ERR" ]
   [ "$FI_AF_CHILD_TOKENS" = 1500 ]
 }
+
+@test "autofix engine: tokens left shrink with use and run out at the cap" {
+  git config found-issues.autofix.codexRunTokens 1000
+  FI_AF_TOKENS=400
+  [ "$(fi_af_tokens_left)" = 600 ]
+  fi_af_run_budget_left codex
+  FI_AF_TOKENS=1000
+  run fi_af_tokens_left
+  [ "$status" -eq 1 ]
+  ! fi_af_run_budget_left codex || false
+  [ "$(fi_af_spent_text codex)" = "run budget spent (1000 tokens)" ]
+  FI_AF_COST=0.50
+  [ "$(fi_af_spent_text claude)" = 'run budget spent ($0.50)' ]
+  fi_af_run_budget_left claude
+  AFI_kind=sweep
+  git config found-issues.autofix.codexSweepTokens 5000
+  [ "$(fi_af_token_cap)" = 5000 ]
+}
+
+@test "autofix engine: no token cap set means the codex gate never stops" {
+  FI_AF_TOKENS=999999999
+  [ -z "$(fi_af_token_cap)" ]
+  fi_af_tokens_left
+  [ -z "$(fi_af_tokens_left)" ]
+  fi_af_run_budget_left codex
+}

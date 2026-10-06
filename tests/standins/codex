@@ -41,4 +41,4 @@ else
 fi
 [[ -n "$last" ]] && printf '%s\n' "$text" >"$last"
 printf '{"type":"thread.started"}\n'
-printf '{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":0,"output_tokens":300}}\n'
+printf '{"type":"turn.completed","usage":{"input_tokens":%s,"cached_input_tokens":0,"output_tokens":300}}\n' "${FI_STANDIN_TOKENS:-1200}"

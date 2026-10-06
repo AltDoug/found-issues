@@ -109,6 +109,9 @@ fi_af_classify() {
     || { fi_af_log "$id" "classify: skipped (no engine resolved)"; return 0; }
   command -v "$engine" >/dev/null 2>&1 \
     || { fi_af_log "$id" "classify: skipped (no engine on PATH)"; return 0; }
+  if ! fi_af_run_budget_left "$engine"; then
+    fi_af_log "$id" "classify: skipped ($(fi_af_spent_text "$engine"))"; return 0
+  fi
   if [[ "$engine" == "codex" ]]; then
     printf '%s\n' '{"type":"object","properties":{"tags":{"type":"array","items":{"type":"object","properties":{"n":{"type":"string"},"kind":{"type":"string"},"value":{"type":"string"}},"required":["n","kind","value"],"additionalProperties":false}},"wake":{"type":"array","items":{"type":"string"}}},"required":["tags","wake"],"additionalProperties":false}' >"$base.schema.json"
     fi_af_codex_margs classifier

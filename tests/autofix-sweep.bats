@@ -581,3 +581,14 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   _fi_af_sweep_retire_stale
   grep -q "^result=stale: ship retry never launched; branch $(sweep_branch) kept" "$FI_AF_ST/done/$QID"
 }
+
+@test "sweep run: the codex token cap stops the sweep and ships what it committed" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  # 1500 tokens per child: with or without a classify child, entry 1 is
+  # fixed and verified and the cap stops entry 2 before its verifier.
+  git config found-issues.autofix.codexSweepTokens 3500
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine codex
+  grep -q '^result=shipped: PR #9, 1 fixed' "$ST/done/$SID"
+  ! grep -q 'autofix-failed' docs/found-issues.md || false
+}

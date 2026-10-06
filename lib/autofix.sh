@@ -38,7 +38,8 @@ Usage: found-issues autofix <command>
                               Wait for PR <N>'s checks, then squash-merge it
 Settings: git config found-issues.autofix true|false (local overrides --global),
 found-issues.autofix.{engine,testCommand,dailyFixes,runBudget,runTimeoutMin,
-dailySweeps,sweepThreshold,sweepMax,sweepBudget,codexModel,codexVerifierModel}.
+dailySweeps,sweepThreshold,sweepMax,sweepBudget,codexModel,codexVerifierModel,
+codexRunTokens,codexSweepTokens}.
 EOF
 }
 
@@ -98,8 +99,8 @@ _fi_af_fix_loop() {
   FI_AF_OUTCOME="" FI_AF_OUTCOME_TEXT=""
   for n in 1 2; do
     touch "$FI_AF_ST/lock" 2>/dev/null || true
-    if [[ "$engine" == "claude" ]] && ! fi_af_budget_left >/dev/null; then
-      why="run budget spent (\$$FI_AF_COST)"; break
+    if ! fi_af_run_budget_left "$engine"; then
+      why="$(fi_af_spent_text "$engine")"; break
     fi
     (( n == 1 )) || _fi_af_reset_wt
     _fi_af_fix_attempt "$engine" "$n" "$feedback"
@@ -128,8 +129,8 @@ _fi_af_fix_loop() {
       why="tests fail"; feedback="The test command failed."$'\n'"$(fi_af_test_report "$tlog" 20)"
       continue
     fi
-    if [[ "$engine" == "claude" ]] && ! fi_af_budget_left >/dev/null; then
-      why="run budget spent (\$$FI_AF_COST)"; break
+    if ! fi_af_run_budget_left "$engine"; then
+      why="$(fi_af_spent_text "$engine")"; break
     fi
     _fi_af_verify "$engine" "$n"
     # A verifier that could not run (outage, rejected model) is not a reject.
