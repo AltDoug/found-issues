@@ -148,7 +148,14 @@ cmd_annotate_pr() {
 
   local old_ranges=""
   if [[ "$hook_auto" == "yes" ]]; then
-    old_ranges="$(gh pr diff "$pr_num" 2>/dev/null | fi_diff_old_ranges || true)"
+    # A failed or empty diff must not read as "cited line not touched": say
+    # the diff was unavailable and attempt no line-matched suggestions.
+    local diff_out=""
+    if ! diff_out="$(gh pr diff "$pr_num" 2>/dev/null)" || [[ -z "$diff_out" ]]; then
+      printf 'annotate-pr: PR diff unavailable — no line-matched suggestions attempted\n'
+      return 0
+    fi
+    old_ranges="$(fi_diff_old_ranges <<<"$diff_out" || true)"
   fi
 
   fi_annotate_auto "$file" "$annotation" "$touched_files" "$annotate_all" \

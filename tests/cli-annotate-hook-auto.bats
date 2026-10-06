@@ -34,6 +34,18 @@ mk_pr_mocks() {
   grep -q 'src/foo.py:42.*(PR-auto: org/repo#7)' docs/found-issues.md
 }
 
+@test "hook-auto: an unavailable PR diff says so instead of listing candidates" {
+  fi_run log "src/foo.py:42 — null check missing"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  unset GH_MOCK_PR_DIFF
+  fi_run annotate-pr 7 --hook-auto
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR diff unavailable"* ]]
+  [[ "$output" != *"not touched"* ]]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
 @test "hook-auto: file-touched but line outside hunks becomes candidate, exit 3" {
   fi_run log "src/foo.py:99 — wrong cast"
   mk_pr_mocks
