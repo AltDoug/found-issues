@@ -222,3 +222,21 @@ teardown() { fi_teardown_tmp; }
   [ "$status" -eq 3 ]
   [ -f "$ST/day/$(date +%Y-%m-%d).capped" ]
 }
+
+@test "autofix run: a codex fixer on a rejected model requeues as an outage" {
+  export FI_STANDIN_CODEX_FAIL=workspace-write
+  run "$FI_BIN" autofix run "$ID" --engine codex
+  [ "$status" -eq 7 ]
+  [ -f "$ST/queue/$ID" ]
+  grep -q "requeued: engine error: The 'bad-model' model is not supported" "$FI_AF_RUNS/$ID.log"
+  ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
+}
+
+@test "autofix run: a verifier engine error requeues instead of counting as a reject" {
+  export FI_STANDIN_CODEX_FAIL=read-only
+  run "$FI_BIN" autofix run "$ID" --engine codex
+  [ "$status" -eq 7 ]
+  [ -f "$ST/queue/$ID" ]
+  [ ! -d "$REPO/.claude/worktrees/fi-autofix-$ID" ]
+  ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
+}

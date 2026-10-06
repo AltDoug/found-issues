@@ -237,3 +237,15 @@ teardown() { fi_teardown_tmp; }
   grep -q 'model_reasoning_effort=low' "$TMP/trace"
   grep -q 'gpt-6.1-sol' "$TMP/trace"
 }
+
+@test "autofix engine: a codex turn.failed becomes the engine error text" {
+  FI_AF_TOKENS=0
+  FI_STANDIN_CODEX_FAIL=all codex exec -o "$TMP/last" "x" > "$TMP/f.jsonl" 2>/dev/null || true
+  fi_af_collect codex "$TMP/f.jsonl" "$TMP/last"
+  [ "$FI_AF_ENGINE_ERR" = "The 'bad-model' model is not supported when using Codex with a ChatGPT account." ]
+  [ "$FI_AF_TOKENS" = 0 ]
+  codex exec -o "$TMP/last" "x" > "$TMP/ok.jsonl"
+  fi_af_collect codex "$TMP/ok.jsonl" "$TMP/last"
+  [ -z "$FI_AF_ENGINE_ERR" ]
+  [ "$FI_AF_CHILD_TOKENS" = 1500 ]
+}

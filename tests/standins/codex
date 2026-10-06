@@ -19,6 +19,13 @@ done
 [[ -n "$cd_dir" ]] && cd "$cd_dir"
 export FI_STANDIN_PROMPT="${!#}"
 FI_STANDIN_NO_TAGS='{"tags":[],"wake":[]}'
+# A failed turn exits before any edit or -o write, like the real codex.
+if [[ -n "${FI_STANDIN_CODEX_FAIL:-}" && ( "$sandbox" == "$FI_STANDIN_CODEX_FAIL" || "$FI_STANDIN_CODEX_FAIL" == all ) ]]; then
+  printf '{"type":"thread.started"}\n'
+  printf '%s\n' '{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The '"'"'bad-model'"'"' model is not supported when using Codex with a ChatGPT account.\"}}"}}'
+  echo 'Reading additional input from stdin...' >&2
+  exit 1
+fi
 if [[ "$FI_STANDIN_PROMPT" == *"found-issues classifier"* ]]; then
   text="${FI_STANDIN_CLASSIFY:-$FI_STANDIN_NO_TAGS}"
 elif [[ "$sandbox" == "read-only" ]]; then

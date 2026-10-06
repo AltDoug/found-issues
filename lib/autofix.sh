@@ -132,6 +132,10 @@ _fi_af_fix_loop() {
       why="run budget spent (\$$FI_AF_COST)"; break
     fi
     _fi_af_verify "$engine" "$n"
+    # A verifier that could not run (outage, rejected model) is not a reject.
+    if [[ -n "$FI_AF_ENGINE_ERR" ]]; then
+      FI_AF_OUTCOME=outage FI_AF_OUTCOME_TEXT="$FI_AF_ENGINE_ERR"; return 0
+    fi
     if [[ "$FI_AF_APPROVE" != "true" ]]; then
       why="verifier rejected: $FI_AF_REASON"; feedback="The reviewer rejected it: $FI_AF_REASON"; continue
     fi

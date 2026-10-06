@@ -31,7 +31,7 @@
 
 FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
 FI_AF_RESULT="" FI_AF_RESULT_TEXT="" FI_AF_APPROVE="false" FI_AF_REASON=""
-FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR=""
+FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0
 
 # macOS ships no `timeout`. Poll once a second; on the limit, TERM then KILL.
 # The child gets its own process group (perl setpgrp — bash 3.2 has no
@@ -202,11 +202,17 @@ fi_af_verifier_cmd() {
 
 fi_af_collect() {
   local engine="$1" out="$2" last="$3" c t
-  FI_AF_TEXT="" FI_AF_ENGINE_ERR=""
+  FI_AF_TEXT="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0
   if [[ "$engine" == "codex" ]]; then
     [[ -n "$last" && -f "$last" ]] && FI_AF_TEXT="$(cat "$last")"
     t="$(jq -s '[.[] | select(.type=="turn.completed") | (.usage.input_tokens // 0) + (.usage.output_tokens // 0)] | add // 0' "$out" 2>/dev/null || true)"
-    [[ "$t" =~ ^[0-9]+$ ]] && FI_AF_TOKENS=$((FI_AF_TOKENS + t))
+    [[ "$t" =~ ^[0-9]+$ ]] || t=0
+    FI_AF_CHILD_TOKENS="$t"
+    FI_AF_TOKENS=$((FI_AF_TOKENS + t))
+    # 3.3.0 spec section 4: a rejected model (or any failed turn) is an outage.
+    # Measured: the message is a JSON error envelope inside a string.
+    FI_AF_ENGINE_ERR="$(jq -rs '[.[] | select(.type=="turn.failed") | (.error.message // "turn failed")] | last // empty | ((fromjson? | .error.message // .message) // .)' "$out" 2>/dev/null || true)"
+    FI_AF_ENGINE_ERR="${FI_AF_ENGINE_ERR//$'\n'/ }"
   else
     FI_AF_TEXT="$(jq -r '.result // empty' "$out" 2>/dev/null || true)"
     # An outage (usage limit, logged out, network) is is_error or an error_*
