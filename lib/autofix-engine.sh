@@ -31,6 +31,8 @@
 #   fi_af_tokens_left
 #   fi_af_run_budget_left <engine>
 #   fi_af_spent_text <engine>
+#   fi_af_codex_note <id> <role>
+#   fi_af_codex_desc <role>
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
@@ -220,6 +222,14 @@ fi_af_collect() {
     # Measured: the message is a JSON error envelope inside a string.
     FI_AF_ENGINE_ERR="$(jq -rs '[.[] | select(.type=="turn.failed") | (.error.message // "turn failed")] | last // empty | ((fromjson? | .error.message // .message) // .)' "$out" 2>/dev/null || true)"
     FI_AF_ENGINE_ERR="${FI_AF_ENGINE_ERR//$'\n'/ }"
+    # A model the account cannot use leaves a marker for doctor; a clean child
+    # that spent tokens clears it.
+    fi_af_root
+    if [[ -n "$FI_AF_ENGINE_ERR" ]] && [[ "$(printf '%s' "$FI_AF_ENGINE_ERR" | tr '[:upper:]' '[:lower:]')" == *model* ]]; then
+      printf '%s\n' "$FI_AF_ENGINE_ERR" >"$FI_AF_ROOT/codex-model-error" 2>/dev/null || true
+    elif [[ -z "$FI_AF_ENGINE_ERR" ]] && (( t > 0 )); then
+      rm -f "$FI_AF_ROOT/codex-model-error" 2>/dev/null || true
+    fi
   else
     FI_AF_TEXT="$(jq -r '.result // empty' "$out" 2>/dev/null || true)"
     # An outage (usage limit, logged out, network) is is_error or an error_*
@@ -304,4 +314,21 @@ fi_af_run_budget_left() {
 fi_af_spent_text() {
   if [[ "$1" == codex ]]; then printf 'run budget spent (%s tokens)' "$FI_AF_TOKENS"
   else printf 'run budget spent ($%s)' "$FI_AF_COST"; fi
+}
+
+# 3.3.0 spec section 3: one run-log line per Codex child.
+fi_af_codex_note() {
+  fi_af_codex_margs "$2"
+  local cap
+  cap="$(fi_af_token_cap)"
+  fi_af_log "$1" "codex $2: model $FI_AF_MDESC, $FI_AF_CHILD_TOKENS tokens, run total $FI_AF_TOKENS${cap:+/$cap}"
+}
+
+# Doctor's description of one role; inherit names config.toml's model.
+fi_af_codex_desc() {
+  local m
+  fi_af_codex_margs "$1"
+  if [[ "$FI_AF_MDESC" != inherit ]]; then printf '%s' "$FI_AF_MDESC"; return 0; fi
+  m="$(sed -n 's/^model[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null | head -n 1)"
+  printf 'inherit (~/.codex/config.toml: %s)' "${m:-its default}"
 }

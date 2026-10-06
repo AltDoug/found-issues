@@ -93,3 +93,21 @@ teardown() { fi_teardown_tmp; }
   [[ "$output" == *"into release/3.2 (the branch with the cited file)"* ]]
   [ "$(printf '%s\n' "$output" | grep -c 'into release/3.2')" = 1 ]
 }
+
+@test "autofix status: a codex run shows tokens against its cap" {
+  export GH_MOCK_PR_VIEW=$'7\t{"number":7,"state":"OPEN","statusCheckRollup":[]}'
+  export FI_STANDIN_EDIT="sed -i.bak 's/ - / + /' src/calc.sh && rm -f src/calc.sh.bak"
+  git config found-issues.autofix.codexRunTokens 600000
+  "$FI_BIN" autofix run "$ID" --engine codex >/dev/null
+  run "$FI_BIN" autofix status
+  [[ "$output" == *"3000/600000 tokens"* ]]
+}
+
+@test "autofix status: a codex run with no token cap shows its tokens alone" {
+  export GH_MOCK_PR_VIEW=$'7\t{"number":7,"state":"OPEN","statusCheckRollup":[]}'
+  export FI_STANDIN_EDIT="sed -i.bak 's/ - / + /' src/calc.sh && rm -f src/calc.sh.bak"
+  "$FI_BIN" autofix run "$ID" --engine codex >/dev/null
+  run "$FI_BIN" autofix status
+  [[ "$output" == *" 3000 tokens"* ]]
+  [[ "$output" != *"3000/"* ]]
+}

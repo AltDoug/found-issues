@@ -48,3 +48,23 @@ teardown() { fi_teardown_tmp; }
   [[ "$output" == *"claude not on PATH"* ]]
   [[ "$output" == *"codex not on PATH"* ]]
 }
+
+@test "doctor auto-fix: codex models per role and the token caps" {
+  git config found-issues.autofix.codexVerifierModel inherit
+  mkdir -p "$TMP/codexhome"; printf 'model = "gpt-6-astra"\n' > "$TMP/codexhome/config.toml"
+  CODEX_HOME="$TMP/codexhome" run "$FI_BIN" doctor
+  [[ "$output" == *"Codex models: fixer gpt-6.1-sol (medium), verifier inherit (~/.codex/config.toml: gpt-6-astra), classifier gpt-6.1-sol (low)"* ]]
+  [[ "$output" == *"no token cap per run"* ]]
+  git config found-issues.autofix.codexRunTokens 600000
+  CODEX_HOME="$TMP/codexhome" run "$FI_BIN" doctor
+  [[ "$output" == *"600000 Codex tokens per run"* ]]
+}
+
+@test "doctor auto-fix: warns when the last codex child failed on its model" {
+  fi_af_queue_fixture
+  export FI_STANDIN_CODEX_FAIL=workspace-write
+  "$FI_BIN" autofix run "$ID" --engine codex >/dev/null || true
+  run "$FI_BIN" doctor
+  [[ "$output" == *"Last Codex run failed on its model"* ]]
+  [[ "$output" == *"found-issues config autofix.codexModel"* ]]
+}

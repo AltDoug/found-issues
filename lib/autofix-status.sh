@@ -103,6 +103,14 @@ _fi_af_loc_label() {
   fi
 }
 
+# 3.3.0: a Codex item's tokens, against its cap when one is set.
+_fi_af_tokens_row() {
+  local cap
+  [[ "${AFI_engine:-}" == codex && "${AFI_tokens:-}" =~ ^[0-9]+$ ]] && (( AFI_tokens > 0 )) || return 0
+  cap="$(fi_af_token_cap)"
+  printf '      %s%s tokens\n' "$AFI_tokens" "${cap:+/$cap}"
+}
+
 # Spec §8: queue, running, today's counts against caps, decisions waiting,
 # recent results with PR links and cost.
 fi_af_status() {
@@ -128,6 +136,7 @@ fi_af_status() {
       if [[ "$dir" == running ]]; then
         printf '  %s  %s  %s (launcher %s)\n' "$AFI_id" "${AFI_kind:-spot}" "$(_fi_af_loc_label)" "${AFI_launcher:-?}"
         if [[ -n "$AFI_base" ]]; then printf '      into %s (%s)\n' "$AFI_base" "${AFI_base_why:-?}"; fi
+        _fi_af_tokens_row
       else
         printf '  %s  %s  %s\n' "$AFI_id" "${AFI_kind:-spot}" "$(_fi_af_loc_label)"
         if [[ -n "$AFI_waiting" ]]; then printf '      waiting: %s\n' "$AFI_waiting"; fi
@@ -159,6 +168,7 @@ fi_af_status() {
       fi_af_item_read "${f#* }" || true
       printf '  %s  %s — %s\n' "$AFI_id" "$(_fi_af_loc_label)" "$AFI_result"
       if [[ -n "$AFI_base" ]]; then printf '      into %s (%s)\n' "$AFI_base" "${AFI_base_why:-?}"; fi
+      _fi_af_tokens_row
       _fi_af_pr_num
       if [[ -n "$FI_AF_PRNUM" ]]; then
         printf '      https://github.com/%s/pull/%s' "${AFI_slug:-$FI_AF_SLUG}" "$FI_AF_PRNUM"
@@ -258,7 +268,7 @@ fi_af_summary() {
 
 # Phase 5 ruling 9: auto-fix readiness at a glance, on or off (spec §8).
 fi_af_doctor() {
-  local p="$1" w="$2" x="$3" gh_user="$4" e v rb sb
+  local p="$1" w="$2" x="$3" gh_user="$4" e v rb sb rt st
   git rev-parse --show-toplevel >/dev/null 2>&1 || return 0
   printf '== Auto-fix ==\n'
   if fi_af_enabled; then
@@ -286,11 +296,21 @@ fi_af_doctor() {
   done
   e="$(fi_af_engine 2>/dev/null || true)"
   printf '   Engine: %s -> %s\n' "$(fi_af_cfg engine auto)" "${e:-none available}"
+  printf '   Codex models: fixer %s, verifier %s, classifier %s\n' \
+    "$(fi_af_codex_desc fixer)" "$(fi_af_codex_desc verifier)" "$(fi_af_codex_desc classifier)"
+  fi_af_root
+  if [[ -s "$FI_AF_ROOT/codex-model-error" ]]; then
+    printf '%s Last Codex run failed on its model: %s\n' "$w" "$(head -n 1 "$FI_AF_ROOT/codex-model-error")"
+    printf '   Fix: found-issues config autofix.codexModel <model> (or inherit); same for autofix.codexVerifierModel\n'
+  fi
   rb="$(fi_af_cfg runBudget "")" sb="$(fi_af_cfg sweepBudget "")"
   [[ -n "$rb" ]] && rb="\$$rb per run" || rb="no dollar cap per run"
   [[ -n "$sb" ]] && sb="\$$sb per sweep" || sb="no dollar cap per sweep"
-  printf '   Caps: %s spot fixes/day, %s sweep(s)/day (at %s fixable, %s fixes per PR), %s, %s, %s min per run\n' \
+  rt="$(fi_af_cap_int codexRunTokens)" st="$(fi_af_cap_int codexSweepTokens)"
+  [[ -n "$rt" ]] && rt="$rt Codex tokens per run" || rt="no token cap per run"
+  [[ -n "$st" ]] && st="$st per sweep" || st="no token cap per sweep"
+  printf '   Caps: %s spot fixes/day, %s sweep(s)/day (at %s fixable, %s fixes per PR), %s, %s, %s, %s, %s min per run\n' \
     "$(fi_af_int dailyFixes 5)" "$(fi_af_int dailySweeps 1)" "$(fi_af_int sweepThreshold 5)" \
-    "$(fi_af_sweep_batch)" "$rb" "$sb" "$(fi_af_int runTimeoutMin 20)"
+    "$(fi_af_sweep_batch)" "$rb" "$sb" "$rt" "$st" "$(fi_af_int runTimeoutMin 20)"
   printf '   Fix PRs merge themselves once checks pass. Stop: found-issues autofix off\n\n'
 }

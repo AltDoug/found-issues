@@ -128,6 +128,7 @@ fi_af_classify() {
   fi
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
   fi_af_collect "$engine" "$base.out" "$base.last"
+  if [[ "$engine" == codex ]]; then fi_af_codex_note "$id" classifier; fi
   if [[ -f "$FI_AF_ST/running/$id" ]]; then
     fi_af_item_set "$FI_AF_ST/running/$id" cost "$FI_AF_COST" || true
     fi_af_item_set "$FI_AF_ST/running/$id" tokens "$FI_AF_TOKENS" || true

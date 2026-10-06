@@ -265,3 +265,11 @@ teardown() { fi_teardown_tmp; }
   [ "$status" -eq 0 ]
   grep -q '^result=shipped' "$ST/done/$ID"
 }
+
+@test "autofix run: the run log names each codex child's model and tokens against the cap" {
+  run "$FI_BIN" autofix run "$ID" --engine codex
+  [ "$status" -eq 0 ]
+  grep -q 'codex fixer: model gpt-6.1-sol (medium), 1500 tokens, run total 1500$' "$FI_AF_RUNS/$ID.log"
+  grep -q 'codex verifier: model gpt-6-astra (high), 1500 tokens, run total 3000$' "$FI_AF_RUNS/$ID.log"
+  grep -q 'Run cost: .*codex models: fixer gpt-6.1-sol (medium), verifier gpt-6-astra (high)' "$FI_AF_RUNS/$ID.pr-body.md"
+}

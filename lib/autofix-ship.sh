@@ -112,6 +112,13 @@ fi_af_spawn() {
   ( cd "$cwd" && nohup "$FI_SELF" "$@" </dev/null >>"$FI_AF_RUNS/spawn.log" 2>&1 & )
 }
 
+# 3.3.0: a Codex run's PR body names the model each role ran on.
+_fi_af_pr_models() {
+  [[ "${AFI_engine:-}" == codex ]] || return 0
+  printf ' \xe2\x80\x94 codex models: fixer %s, verifier %s' \
+    "$(fi_af_codex_margs fixer; printf '%s' "$FI_AF_MDESC")" "$(fi_af_codex_margs verifier; printf '%s' "$FI_AF_MDESC")"
+}
+
 _fi_af_pr_body() {
   local tlog="$1"
   printf 'Unattended fix by found-issues auto-fix (launcher %s, engine %s).\n\n' "${AFI_launcher:-A}" "${AFI_engine:-?}"
@@ -119,7 +126,9 @@ _fi_af_pr_body() {
   printf 'Tests: `%s` passed. Last lines:\n\n' "$FI_AF_TESTCMD"
   tail -n 15 "$tlog" 2>/dev/null | sed 's/^/    /'
   printf '\nVerifier: approved — %s\n' "${FI_AF_VERDICT_REASON:-n/a}"
-  printf 'Run cost: $%s (claude), %s tokens (codex)\n\n' "${FI_AF_COST:-0}" "${FI_AF_TOKENS:-0}"
+  printf 'Run cost: $%s (claude), %s tokens (codex)' "${FI_AF_COST:-0}" "${FI_AF_TOKENS:-0}"
+  _fi_af_pr_models
+  printf '\n\n'
   printf 'This PR merges itself when its checks pass (found-issues auto-fix policy).\n'
 }
 

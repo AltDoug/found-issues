@@ -578,7 +578,9 @@ _fi_af_sweep_pr_body() {
   printf '\nOne commit per fixed entry; the verifier approved each one.\n\n'
   printf 'Tests: `%s` passed. Last lines:\n\n' "$FI_AF_TESTCMD"
   tail -n 15 "$tlog" 2>/dev/null | sed 's/^/    /'
-  printf '\nRun cost: $%s (claude), %s tokens (codex)\n\n' "$(_fi_af_own_cost)" "$(_fi_af_own_tokens)"
+  printf '\nRun cost: $%s (claude), %s tokens (codex)' "$(_fi_af_own_cost)" "$(_fi_af_own_tokens)"
+  _fi_af_pr_models
+  printf '\n\n'
   printf 'This PR merges itself when its checks pass (found-issues auto-fix policy).\n'
 }
 
