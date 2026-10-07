@@ -176,6 +176,35 @@ src() {
   [ "$(git config found-issues.autofix.codexModel)" = inherit ]
 }
 
+@test "config: the legacy sweepMax can be unset, here and globally, but not set" {
+  git config found-issues.autofix.sweepMax 3
+  git config --global found-issues.autofix.sweepMax 4
+  run "$FI_BIN" config autofix.sweepMax 5
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"autofix.sweepBatch"* ]]
+  [ "$(git config found-issues.autofix.sweepMax)" = 3 ]
+  run "$FI_BIN" config autofix.sweepMax --unset
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Unset found-issues.autofix.sweepMax (local)"* ]]
+  [ "$(git config --local --get found-issues.autofix.sweepMax || true)" = "" ]
+  [ "$(git config --global found-issues.autofix.sweepMax)" = 4 ]
+  run "$FI_BIN" config autofix.sweepMax --unset --global
+  [ "$status" -eq 0 ]
+  [ -z "$(git config --get found-issues.autofix.sweepMax || true)" ]
+}
+
+@test "config: the listing shows the batch size a legacy sweepMax sets" {
+  run "$FI_BIN" config
+  echo "$output" | grep -Eq '^found-issues\.autofix\.sweepBatch +8 +\(default\)$'
+  git config found-issues.autofix.sweepMax 3
+  run "$FI_BIN" config
+  echo "$output" | grep -Eq '^found-issues\.autofix\.sweepBatch +3 \(from legacy sweepMax\) +\(local\)$'
+  git config found-issues.autofix.sweepBatch 5
+  run "$FI_BIN" config
+  echo "$output" | grep -Eq '^found-issues\.autofix\.sweepBatch +5 +\(local\)$'
+  ! echo "$output" | grep -q 'legacy' || false
+}
+
 @test "config: token cap keys are unset by default, validate and fall back to no cap" {
   src
   [ -z "$(fi_af_token_cap)" ]

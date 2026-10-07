@@ -203,7 +203,7 @@ found-issues config autofix.sweepBatch --unset
 | `autofix.dailyFixes` | `5` | Spot fixes per repo per day |
 | `autofix.dailySweeps` | `1` | Sweeps per repo per day |
 | `autofix.sweepThreshold` | `5` | Fixable entries that trigger a sweep (`/found-issues:setup` offers 5, 10, 20 or any whole number) |
-| `autofix.sweepBatch` | `8` | Fixes per sweep PR; a sweep fixes every fixable entry, one PR per batch (a legacy `sweepMax` is read when this is unset) |
+| `autofix.sweepBatch` | `8` | Fixes per sweep PR; a sweep fixes every fixable entry, one PR per batch (a legacy `sweepMax` is read when this is unset: the listing then shows `<n> (from legacy sweepMax)`, `found-issues config autofix.sweepMax --unset [--global]` removes it, and setting it is refused in favour of this key) |
 | `autofix.runBudget` | unset (no cap) | USD estimate per spot run (Claude Code's `total_cost_usd`) |
 | `autofix.sweepBudget` | unset (no cap) | USD estimate per sweep, shared by all of its batches |
 | `autofix.runTimeoutMin` | `20` | Minutes per engine call |

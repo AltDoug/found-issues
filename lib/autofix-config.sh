@@ -297,6 +297,34 @@ fi_cfg_show_line() {
   fi
 }
 
+# 3.3.0: only a legacy sweepMax is set, so the sweepBatch row shows the batch
+# size the sweep really uses and where it came from (git config scope).
+_fi_cfg_legacy_batch() {
+  local out
+  [[ "$FI_CFG_KEY" == autofix.sweepBatch && "$FI_CFG_SRC" == default ]] || return 0
+  out="$(git config --show-scope --get found-issues.autofix.sweepMax 2>/dev/null || true)"
+  [[ -n "$out" ]] || return 0
+  FI_CFG_SRC="${out%%$'\t'*}" FI_CFG_VAL="$(fi_af_sweep_batch 2>/dev/null || printf 8) (from legacy sweepMax)"
+}
+
+# autofix.sweepMax was replaced by autofix.sweepBatch (3.3.0). It is no longer
+# a setting (setting it is refused, naming the new key) but --unset still
+# removes a value an older version left behind, here or with --global.
+_fi_cfg_legacy_sweepmax() {
+  local scope="$1" unset_it="$2" val="$3"
+  if (( unset_it )); then
+    if [[ "$scope" == --local ]]; then
+      git rev-parse --git-dir >/dev/null 2>&1 \
+        || { fi_err "config: not in a git repo — use --global to unset it for every repo"; return 1; }
+    fi
+    git config "$scope" --unset found-issues.autofix.sweepMax 2>/dev/null || true
+    printf 'Unset found-issues.autofix.sweepMax (%s)\n' "${scope#--}"
+    return 0
+  fi
+  fi_err "config: autofix.sweepMax is replaced by autofix.sweepBatch (fixes per sweep PR): set that instead; autofix.sweepMax --unset still removes an old value"
+  return 2
+}
+
 # Phase 5 ruling 7: list, get, set (this repo, or --global), --unset.
 cmd_config() {
   local key="" val="" unset_it=0 scope=--local line
@@ -321,9 +349,13 @@ cmd_config() {
   if [[ -z "$key" ]]; then
     while IFS= read -r line; do
       fi_cfg_show_line "${line%%|*}"
+      _fi_cfg_legacy_batch
       printf 'found-issues.%-24s %s  (%s)\n' "$FI_CFG_KEY" "$FI_CFG_VAL" "$FI_CFG_SRC"
     done <<<"$_FI_CFG_KEYS"
     return 0
+  fi
+  if [[ "$(printf '%s' "${key#found-issues.}" | tr '[:upper:]' '[:lower:]')" == autofix.sweepmax ]]; then
+    _fi_cfg_legacy_sweepmax "$scope" "$unset_it" "$val"; return
   fi
   _fi_cfg_spec "$key" || { fi_err "config: unknown setting $key (run: found-issues config)"; return 2; }
   if [[ "$scope" == --local ]] && { (( unset_it )) || [[ -n "$val" ]]; }; then
