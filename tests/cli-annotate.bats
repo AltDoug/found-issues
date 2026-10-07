@@ -417,6 +417,26 @@ EOF
   unset GH_MOCK_PR_VIEW
 }
 
+@test "annotate-pr: each ambiguous pick's hints and the unmatched message start their own line (3.3.1 review)" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src docs && echo x > src/hot.py
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-09-10 src/hot.py:2 — null deref crash
+- [open] 2026-09-12 src/hot.py:2 — null deref crash on startup
+- [open] 2026-09-10 src/hot.py:5 — stale cache entry
+- [open] 2026-09-12 src/hot.py:5 — stale cache entry on reload
+EOF
+  fi_run annotate-pr 9 --pick src/hot.py:2 --pick src/hot.py:5 --pick src/hot.py:99
+  [ "$status" -ne 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c -- '^    .* --pick "src/hot.py:[25] — ')" -eq 4 ]
+  [ "$(printf '%s\n' "$output" | grep -c -- '--pick ".*--pick')" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c -- '^  for "')" -eq 4 ]
+  printf '%s\n' "$output" | grep -q '^annotate-pr: no \[open\] entry matches pick:$'
+  unset GH_MOCK_PR_VIEW
+}
+
 @test "annotate-pr: --pick applies even when the touched-files fetch is empty" {
   _setup_pr_repo
   export GH_MOCK_PR_VIEW=$'9\t'

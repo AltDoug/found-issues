@@ -284,7 +284,7 @@ fi_annotate_apply_picks() {
 
   # Partition selectors: single hit → annotate; several hits → refuse;
   # zero hits → report (a bad selection must never fail silently).
-  local auto_set="" unmatched="" ambiguous="" ambiguous_hints=""
+  local auto_set="" unmatched="" ambiguous="" ambiguous_hints="" hint
   for (( i = 0; i < ${#pick_arr[@]}; i++ )); do
     if (( ${pick_hits[$i]} == 0 )); then
       unmatched+="  ${pick_arr[$i]}"$'\n'
@@ -296,7 +296,10 @@ fi_annotate_apply_picks() {
         [[ -z "$line" ]] && continue
         ambiguous+="    $line"$'\n'
       done <<<"${pick_lines[$i]}"
-      ambiguous_hints+="$(_fi_pick_hints "${pick_group[$i]}" "${pick_lines[$i]}" "${pick_arr[$i]%% — *}" "$rerun_cmd")"
+      # $(...) drops the trailing newline: put it back so the next pick's
+      # hints and the output after them start their own line (3.3.1).
+      hint="$(_fi_pick_hints "${pick_group[$i]}" "${pick_lines[$i]}" "${pick_arr[$i]%% — *}" "$rerun_cmd")"
+      [[ -z "$hint" ]] || ambiguous_hints+="$hint"$'\n'
     fi
   done
 
