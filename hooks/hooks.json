@@ -29,6 +29,15 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-dispatch.sh\""
           }
         ]
+      },
+      {
+        "matcher": "Read|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/first-touch.sh\""
+          }
+        ]
       }
     ],
     "SessionStart": [

@@ -11,7 +11,7 @@ load 'helpers'
 setup() { fi_setup_tmp; }
 teardown() { fi_teardown_tmp; }
 
-@test "install-codex-hooks: creates hooks.json with our 5 entries across 4 events" {
+@test "install-codex-hooks: creates hooks.json with our 6 entries across 4 events" {
   CODEX_HOME="$TMP/codex-home"
   fi_run install-codex-hooks --codex-home "$CODEX_HOME"
   [ "$status" -eq 0 ]
@@ -19,12 +19,13 @@ teardown() { fi_teardown_tmp; }
 
   jq -e '.hooks.SessionStart | length == 1' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PreToolUse | length == 2' "$CODEX_HOME/hooks.json"
-  jq -e '.hooks.PostToolUse | length == 1' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PostToolUse | length == 2' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.Stop | length == 1' "$CODEX_HOME/hooks.json"
 
   jq -e '.hooks.PreToolUse[0].matcher == "Write|Edit|MultiEdit|apply_patch"' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PreToolUse[1].matcher == "Bash"' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PostToolUse[0].matcher == "Bash"' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PostToolUse[1].matcher == "apply_patch"' "$CODEX_HOME/hooks.json"
 
   jq -e '.hooks.SessionStart[0].hooks[0].command | contains("env FOUND_ISSUES_HARNESS=codex ")' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.SessionStart[0].hooks[0].command | contains("/hooks/session-start.sh")' "$CODEX_HOME/hooks.json"
@@ -78,7 +79,7 @@ teardown() { fi_teardown_tmp; }
   done
 }
 
-@test "install-codex-hooks: empty hooks.json is seeded then installed (5 entries, exit 0)" {
+@test "install-codex-hooks: empty hooks.json is seeded then installed (6 entries, exit 0)" {
   CODEX_HOME="$TMP/codex-home"
   mkdir -p "$CODEX_HOME"
   : > "$CODEX_HOME/hooks.json"
@@ -86,10 +87,10 @@ teardown() { fi_teardown_tmp; }
   [ "$status" -eq 0 ]
   jq -e '.hooks.SessionStart | length == 1' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PreToolUse | length == 2' "$CODEX_HOME/hooks.json"
-  jq -e '.hooks.PostToolUse | length == 1' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PostToolUse | length == 2' "$CODEX_HOME/hooks.json"
 }
 
-@test "install-codex-hooks: whitespace-only hooks.json is seeded then installed (5 entries, exit 0)" {
+@test "install-codex-hooks: whitespace-only hooks.json is seeded then installed (6 entries, exit 0)" {
   CODEX_HOME="$TMP/codex-home"
   mkdir -p "$CODEX_HOME"
   printf '   \n  \t \n' > "$CODEX_HOME/hooks.json"
@@ -97,7 +98,7 @@ teardown() { fi_teardown_tmp; }
   [ "$status" -eq 0 ]
   jq -e '.hooks.SessionStart | length == 1' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PreToolUse | length == 2' "$CODEX_HOME/hooks.json"
-  jq -e '.hooks.PostToolUse | length == 1' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PostToolUse | length == 2' "$CODEX_HOME/hooks.json"
 }
 
 @test "install-codex-hooks: corrupt-JSON hooks.json errors rc 5 and leaves the file byte-unchanged" {
@@ -153,7 +154,7 @@ EOF
   [ "$first" = "$second" ]
   jq -e '.hooks.SessionStart | length == 1' "$CODEX_HOME/hooks.json"
   jq -e '.hooks.PreToolUse | length == 2' "$CODEX_HOME/hooks.json"
-  jq -e '.hooks.PostToolUse | length == 1' "$CODEX_HOME/hooks.json"
+  jq -e '.hooks.PostToolUse | length == 2' "$CODEX_HOME/hooks.json"
 }
 
 @test "install-codex-hooks: replaces stale plugin-cache-path entries on re-install" {
@@ -223,4 +224,12 @@ EOF
   fi_run uninstall-codex-hooks --codex-home
   [ "$status" -eq 1 ]
   [[ "$output" == *"--codex-home requires"* ]]
+}
+
+@test "install-codex-hooks: wires the first-touch hook for apply_patch" {
+  home="$TMP/codexhome"; mkdir -p "$home"
+  fi_run install-codex-hooks --codex-home "$home"
+  [ "$status" -eq 0 ]
+  jq -e '.hooks.PostToolUse[] | select(.matcher == "apply_patch") | .hooks[0].command | test("first-touch.sh")' "$home/hooks.json"
+  [ -x "$home/found-issues/hooks/first-touch.sh" ]
 }
