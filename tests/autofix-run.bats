@@ -249,6 +249,60 @@ teardown() { fi_teardown_tmp; }
   ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
 }
 
+@test "autofix run: a verifier that dies with no verdict is an outage, not a reject" {
+  export FI_STANDIN_VERIFIER_CRASH=1
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 7 ]
+  [ -f "$ST/queue/$ID" ]
+  grep -q 'requeued: engine error: claude verifier exited 1' "$FI_AF_RUNS/$ID.log"
+  ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
+  grep -q '^outages=1$' "$ST/queue/$ID"
+}
+
+@test "autofix run: a codex verifier timeout exit with no verdict is an outage" {
+  export FI_STANDIN_VERIFIER_CRASH=124
+  run "$FI_BIN" autofix run "$ID" --engine codex
+  [ "$status" -eq 7 ]
+  [ -f "$ST/queue/$ID" ]
+  grep -q 'requeued: engine error: codex verifier exited 124' "$FI_AF_RUNS/$ID.log"
+}
+
+@test "autofix run: a verifier that exits non-zero but left a verdict keeps the verdict" {
+  export FI_STANDIN_VERIFIER_RC=1
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped' "$ST/done/$ID"
+}
+
+@test "autofix run: the third outage in a row finishes the item failed with the outage text" {
+  export FI_STANDIN_VERIFIER_CRASH=1
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 7 ]
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 7 ]
+  grep -q '^outages=2$' "$ST/queue/$ID"
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  [ ! -f "$ST/queue/$ID" ]
+  grep -q '^result=failed: engine error after 3 tries: claude verifier exited 1' "$ST/done/$ID"
+  grep -q '(autofix-failed: engine error after 3 tries' "$REPO/docs/found-issues.md"
+}
+
+@test "autofix run: FOUND_ISSUES_AUTOFIX_OUTAGE_MAX sets how many outages are tolerated" {
+  export FI_STANDIN_VERIFIER_CRASH=1 FOUND_ISSUES_AUTOFIX_OUTAGE_MAX=1
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=failed: engine error after 1 tries' "$ST/done/$ID"
+}
+
+@test "autofix run: a verdict clears the outage count" {
+  fi_af_item_set "$ST/queue/$ID" outages 2
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped' "$ST/done/$ID"
+  grep -q '^outages=0$' "$ST/done/$ID"
+}
+
 @test "autofix run: codex stops at the token cap before the verifier" {
   git config found-issues.autofix.codexRunTokens 1000
   run "$FI_BIN" autofix run "$ID" --engine codex

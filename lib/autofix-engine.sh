@@ -38,7 +38,7 @@
 
 FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_BARGS=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
 FI_AF_RESULT="" FI_AF_RESULT_TEXT="" FI_AF_APPROVE="false" FI_AF_REASON=""
-FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0
+FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0 FI_AF_VERDICT_OK=0
 
 # macOS ships no `timeout`. Poll once a second; on the limit, TERM then KILL.
 # The child gets its own process group (perl setpgrp — bash 3.2 has no
@@ -286,7 +286,7 @@ fi_af_parse_result() {
 }
 
 fi_af_parse_verdict() {
-  FI_AF_APPROVE="false" FI_AF_REASON="no parseable verdict"
+  FI_AF_APPROVE="false" FI_AF_REASON="no parseable verdict" FI_AF_VERDICT_OK=0
   local t="$1" v rest="$1" n=0
   [[ "$t" == *"{"*"}"* ]] || return 0
   # One verdict only: "true then false" must not read as approve.
@@ -296,6 +296,7 @@ fi_af_parse_verdict() {
   t="${t%\}*}}"
   v="$(printf '%s' "$t" | jq -r 'if (.approve | type) == "boolean" then "\(.approve)\t\(.reason // "")" else empty end' 2>/dev/null || true)"
   [[ -n "$v" ]] || return 0
+  FI_AF_VERDICT_OK=1
   FI_AF_APPROVE="${v%%$'\t'*}"
   FI_AF_REASON="${v#*$'\t'}"
   FI_AF_REASON="${FI_AF_REASON//$'\n'/ }"

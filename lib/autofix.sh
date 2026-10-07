@@ -72,6 +72,12 @@ _fi_af_verify() {
   fi_af_collect "$engine" "$base.out" "$base.last"
   if [[ "$engine" == codex ]]; then fi_af_codex_note "$AFI_id" verifier; fi
   fi_af_parse_verdict "$FI_AF_TEXT"
+  # A verifier that exited non-zero and left no parseable verdict (a crash,
+  # a lost login, the watchdog's timeout) never ran: an outage, not a reject.
+  # A verdict it did leave stands whatever its exit code.
+  if [[ -z "$FI_AF_ENGINE_ERR" ]] && (( rc != 0 )) && (( FI_AF_VERDICT_OK != 1 )); then
+    FI_AF_ENGINE_ERR="$engine verifier exited $rc"
+  fi
   fi_af_log "$AFI_id" "attempt $n: verifier rc=$rc approve=$FI_AF_APPROVE reason=$FI_AF_REASON"
 }
 
@@ -141,6 +147,10 @@ _fi_af_fix_loop() {
     if [[ -n "$FI_AF_ENGINE_ERR" ]]; then
       FI_AF_OUTCOME=outage FI_AF_OUTCOME_TEXT="$FI_AF_ENGINE_ERR"; return 0
     fi
+    # A verdict (either way) ends the run of outages.
+    if [[ "${AFI_outages:-0}" != 0 && -f "$FI_AF_ST/running/$id" ]]; then
+      fi_af_item_set "$FI_AF_ST/running/$id" outages 0; AFI_outages=0
+    fi
     if [[ "$FI_AF_APPROVE" != "true" ]]; then
       why="verifier rejected: $FI_AF_REASON"; feedback="The reviewer rejected it: $FI_AF_REASON"; continue
     fi
@@ -157,8 +167,15 @@ _fi_af_fix_loop() {
 
 # Spec §5 for one claimed item: the fix loop, then ship. Every path ends in
 # _fi_af_end, except an engine outage, which requeues (rc 7).
+# Outages in a row that finish a spot item failed.
+_fi_af_outage_limit() {
+  local n="${FOUND_ISSUES_AUTOFIX_OUTAGE_MAX:-3}"
+  [[ "$n" =~ ^[1-9][0-9]*$ ]] || n=3
+  printf '%s' "$n"
+}
+
 _fi_af_run_one() {
-  local id="$1" engine_opt="$2" engine
+  local id="$1" engine_opt="$2" engine n_out
   fi_af_claim "$id" || return $?
   fi_af_item_read "$FI_AF_ST/running/$id" || return 0
   if [[ "$AFI_kind" == "sweep" ]]; then _fi_af_run_sweep "$id" "$engine_opt"; return; fi
@@ -173,8 +190,17 @@ _fi_af_run_one() {
   _fi_af_fix_loop "$id" "$engine"
   case "$FI_AF_OUTCOME" in
     outage)
-      # The item goes back to the queue untagged and the drain stops.
+      # The item goes back to the queue untagged and the drain stops, until
+      # FOUND_ISSUES_AUTOFIX_OUTAGE_MAX outages in a row (default 3): a
+      # persistent one (an account that cannot use the verifier model) would
+      # otherwise re-run the paid fixer every day, forever.
       FI_AF_WHY="$FI_AF_OUTCOME_TEXT"
+      n_out=$(( ${AFI_outages:-0} + 1 ))
+      fi_af_item_set "$FI_AF_ST/running/$id" outages "$n_out"
+      if (( n_out >= $(_fi_af_outage_limit) )); then
+        _fi_af_end "$id" failed "engine error after $n_out tries: $FI_AF_OUTCOME_TEXT"
+        return 0
+      fi
       fi_af_requeue "$id" "engine error: $FI_AF_OUTCOME_TEXT"
       return 7 ;;
     approved)

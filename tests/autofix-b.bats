@@ -207,6 +207,24 @@ tap_fail_cmd() {
   [ -f "$ST/queue/$ID" ]
 }
 
+@test "b: a verifier that dies with no verdict requeues the item instead of rejecting" {
+  claim; fix_it
+  export FI_STANDIN_VERIFIER_CRASH=1
+  run "$FI_BIN" autofix verify "$ID"
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"claude verifier exited 1"* ]]
+  [ -f "$ST/queue/$ID" ]
+  ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
+}
+
+@test "b: a verifier that exits non-zero but left a verdict keeps it" {
+  claim; fix_it
+  export FI_STANDIN_VERIFIER_RC=1
+  run "$FI_BIN" autofix verify "$ID"
+  [ "$status" -eq 0 ]
+  grep -q '^verdict=approve$' "$ST/running/$ID"
+}
+
 @test "b: ship refuses without an approving verdict" {
   claim; fix_it
   run "$FI_BIN" autofix ship "$ID"
