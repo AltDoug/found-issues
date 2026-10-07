@@ -51,6 +51,10 @@ teardown() { fi_teardown_tmp; }
   [ "$(printf '%s' "$settings" | jq -r '.sandbox.failIfUnavailable')" = true ]
   [ "$(printf '%s' "$settings" | jq -r '.sandbox.allowUnsandboxedCommands')" = false ]
   [ "$(printf '%s' "$settings" | jq -r '.sandbox.network.allowedDomains[0]')" = '*' ]
+  # package caches writable, found-issues' own cache not
+  printf '%s' "$settings" | jq -e '.sandbox.filesystem.allowWrite | index("~/.cache") and index("~/Library/Caches")' >/dev/null
+  printf '%s' "$settings" | jq -e '.sandbox.filesystem.denyWrite == ["~/.cache/found-issues"]' >/dev/null
+  ! printf '%s' "$settings" | jq -e '.sandbox.filesystem.allowWrite | map(select(startswith("~/.claude"))) | length > 0' >/dev/null || false
 }
 
 @test "autofix engine: no sandbox runtime - claude fixer fails open without --settings and warns" {
