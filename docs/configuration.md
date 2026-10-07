@@ -188,20 +188,24 @@ gets, sets and unsets them with validation:
 found-issues config                          # every setting, its value and source
 found-issues config autofix true             # this repo (prints the auto-merge disclosure)
 found-issues config autofix.dailyFixes 3 --global
-found-issues config autofix.sweepMax --unset
+found-issues config autofix.sweepBatch --unset
 ```
 
 | Key (`found-issues.…`) | Default | What it controls |
 |---|---|---|
 | `autofix` | `false` | Turns auto-fix on. Fix PRs merge themselves and runs bill your account. |
 | `autofix.engine` | `auto` | `claude`, `codex`, or `auto` (the session's own harness) |
+| `autofix.codexModel` | `gpt-6.1-sol` | Codex fixer (effort medium) and classifier (effort low) model, or `inherit` for `~/.codex/config.toml` |
+| `autofix.codexVerifierModel` | `gpt-6-astra` | Codex verifier model (effort high), or `inherit` |
+| `autofix.codexRunTokens` | unset (no cap) | Codex tokens per spot run, e.g. `800000` (about 3x a measured spot run); checked before each child, so one child can overshoot |
+| `autofix.codexSweepTokens` | unset (no cap) | Codex tokens per sweep (all batches), e.g. `2400000` |
 | `autofix.testCommand` | detected | The command that proves a fix (bats, npm test, pytest, go, cargo, make) |
 | `autofix.dailyFixes` | `5` | Spot fixes per repo per day |
 | `autofix.dailySweeps` | `1` | Sweeps per repo per day |
 | `autofix.sweepThreshold` | `5` | Fixable entries that trigger a sweep (`/found-issues:setup` offers 5, 10, 20 or any whole number) |
-| `autofix.sweepMax` | `8` | Entries one sweep fixes |
-| `autofix.runBudget` | `3` | USD estimate per spot run (Claude Code's `total_cost_usd`) |
-| `autofix.sweepBudget` | `10` | USD estimate per sweep |
+| `autofix.sweepBatch` | `8` | Fixes per sweep PR; a sweep fixes every fixable entry, one PR per batch (a legacy `sweepMax` is read when this is unset) |
+| `autofix.runBudget` | unset (no cap) | USD estimate per spot run (Claude Code's `total_cost_usd`) |
+| `autofix.sweepBudget` | unset (no cap) | USD estimate per sweep, shared by all of its batches |
 | `autofix.runTimeoutMin` | `20` | Minutes per engine call |
 
 | Variable | Default | What it controls |

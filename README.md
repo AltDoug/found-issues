@@ -175,7 +175,9 @@ in your checkout waits until you push it.
 - **Runs bill your Claude or Codex account, including in the background.**
   Default caps per repo: 5 spot fixes and 1 sweep a day. There is no dollar
   cap unless you set one (`found-issues config autofix.runBudget <usd>`,
-  `autofix.sweepBudget <usd>`).
+  `autofix.sweepBudget <usd>`). Codex runs use pinned models (`gpt-6.1-sol`
+  for fixing, `gpt-6-astra` for verifying; `inherit` keeps your own) and can
+  stop at a token cap (`autofix.codexRunTokens`, `autofix.codexSweepTokens`).
 - See it: `🔧N` (running) and `❓N` (decisions waiting) in the statusline,
   `found-issues autofix status`, a "since last session" line at session
   start, and `found-issues doctor`.
@@ -232,7 +234,7 @@ regression report is welcome.
 
 ## Status
 
-**v3.2.1** — opt-in auto-fix and auto-sweep on top of the ledger;
+**v3.3.0** — opt-in auto-fix and auto-sweep on top of the ledger;
 actively developed and dogfooded (this repo's own ledger is maintained by
 the plugin). End-to-end runtime probes exercise the generated statusline
 shims against synthetic Claude Code stdin on every CI run, and stand-in
