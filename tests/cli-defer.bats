@@ -117,6 +117,16 @@ EOF
   [ "$(printf '%s' "$entry" | grep -o ']' | wc -l | tr -d ' ')" = 1 ]
 }
 
+@test "defer: a newline, CR or tab in --reason becomes one space and leaves one ledger line (3.3.1 review)" {
+  fi_run log "src/foo.py:42 — null check missing"
+  fi_run defer "src/foo.py:42" --reason $'line1\nline2\r\nline3\tend'
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'src/foo.py:42' docs/found-issues.md)" = 1 ]
+  grep -qF "(reason: line1 line2 line3 end)" docs/found-issues.md
+  [ "$(grep -c '^- ' docs/found-issues.md)" = 1 ]
+  ! grep -q $'\r' docs/found-issues.md || false
+}
+
 @test "defer: a reason with parentheses parses back whole, so the next defer strips it completely" {
   fi_source_lib canonicalize; fi_source_lib parse-entries
   fi_run log "src/foo.py:42 — null check missing"
