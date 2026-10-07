@@ -122,7 +122,8 @@ _fi_pick_group_idx() {
 # _fi_pick_sub_for <group index> — FI_PICK_SUB = the shortest run of whole
 # symptom words, starting at the first word where this entry differs from every
 # other (else the first word where it differs from any), that selects only this
-# entry; else its date. Empty when nothing does (identical entries).
+# entry; else its full symptom, else its date. Empty when nothing does
+# (identical entries).
 _fi_pick_sub_for() {
   local c="$1" n="${#_fi_pg_sym[@]}" o i k_all="" k_min="" all_differ d start len sub
   local -a wc wo starts
@@ -162,7 +163,10 @@ _fi_pick_sub_for() {
       if [[ "$FI_PICK_IDX" == " $c" ]]; then FI_PICK_SUB="$sub"; return 0; fi
     done
   done
-  # No short run: the entry's date.
+  # No short run: the entry's full symptom when it selects only this entry
+  # (one symptom inside another, like "here" in "there"), then its date.
+  _fi_pick_group_idx "${_fi_pg_sym[$c]}"
+  if [[ -n "${_fi_pg_sym[$c]}" && "$FI_PICK_IDX" == " $c" ]]; then FI_PICK_SUB="${_fi_pg_sym[$c]}"; return 0; fi
   local re_date='^-[[:space:]]+\[[a-z]+\]([[:space:]]+\[!\])?[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})'
   if [[ "${_fi_pg_line[$c]}" =~ $re_date ]]; then
     sub="${BASH_REMATCH[2]}"   # _fi_pick_group_idx runs its own =~

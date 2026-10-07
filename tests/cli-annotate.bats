@@ -453,6 +453,22 @@ EOF
   unset GH_MOCK_PR_VIEW
 }
 
+@test "annotate-pr: symptoms where one fragment is inside the other pick by the full symptom (3.3.1 review)" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src docs && echo x > src/hot.py
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-09-10 src/hot.py:4 — beta fails here
+- [open] 2026-09-10 src/hot.py:4 — beta fails there
+EOF
+  fi_run annotate-pr 9 --pick src/hot.py:4
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"cannot be told apart"* ]]
+  _assert_each_printed_pick_selects_one "$output" 2
+  unset GH_MOCK_PR_VIEW
+}
+
 @test "annotate-pr: --pick applies even when the touched-files fetch is empty" {
   _setup_pr_repo
   export GH_MOCK_PR_VIEW=$'9\t'
