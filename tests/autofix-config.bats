@@ -84,13 +84,14 @@ src() {
   git config found-issues.autofix.dailyFixes lots
   run fi_af_int dailyFixes 5
   [ "${lines[${#lines[@]}-1]}" = 5 ]
-  # default 3: a measured live claude fix (2 attempts) cost $1.58 (2026-10-03)
-  [ "$(fi_af_budget)" = 3 ]
+  # 3.3.0: no default dollar cap; a set value is read, a bad one means no cap
+  [ -z "$(fi_af_budget)" ]
   git config found-issues.autofix.runBudget 1.5
   [ "$(fi_af_budget)" = 1.5 ]
   git config found-issues.autofix.runBudget '$2'
   run fi_af_budget
-  [ "${lines[${#lines[@]}-1]}" = 3 ]
+  [[ "$output" == *"is not a USD amount"* ]]
+  [ -z "$(fi_af_budget 2>/dev/null)" ]
 }
 
 @test "autofix config: dirs are per repo under the state and cache roots" {
@@ -151,4 +152,72 @@ src() {
   [ "$output" = claude ]
   CODEX_THREAD_ID=x PATH="/usr/bin:/bin" run fi_af_engine
   [ "$output" = codex ]
+}
+
+@test "config validates model names" {
+  run "$FI_BIN" config autofix.codexModel 'gpt 6'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"takes a Codex model name"* ]]
+  run "$FI_BIN" config autofix.codexModel inherit
+  [ "$status" -eq 0 ]
+  run "$FI_BIN" config autofix.codexVerifierModel gpt-6-astra
+  [ "$status" -eq 0 ]
+  run "$FI_BIN" config
+  echo "$output" | grep -Eq '^found-issues\.autofix\.codexModel +inherit +\(local\)$'
+}
+
+@test "config: a model value is refused when it starts with a dash and inherit is normalized to lower case" {
+  src
+  FI_CFG_KIND=model FI_CFG_KEY=autofix.codexModel FI_CFG_VAL=-x run _fi_cfg_valid
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"takes a Codex model name"* ]]
+  run "$FI_BIN" config autofix.codexModel Inherit
+  [ "$status" -eq 0 ]
+  [ "$(git config found-issues.autofix.codexModel)" = inherit ]
+}
+
+@test "config: the legacy sweepMax can be unset, here and globally, but not set" {
+  git config found-issues.autofix.sweepMax 3
+  git config --global found-issues.autofix.sweepMax 4
+  run "$FI_BIN" config autofix.sweepMax 5
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"autofix.sweepBatch"* ]]
+  [ "$(git config found-issues.autofix.sweepMax)" = 3 ]
+  run "$FI_BIN" config autofix.sweepMax --unset
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Unset found-issues.autofix.sweepMax (local)"* ]]
+  [ "$(git config --local --get found-issues.autofix.sweepMax || true)" = "" ]
+  [ "$(git config --global found-issues.autofix.sweepMax)" = 4 ]
+  run "$FI_BIN" config autofix.sweepMax --unset --global
+  [ "$status" -eq 0 ]
+  [ -z "$(git config --get found-issues.autofix.sweepMax || true)" ]
+}
+
+@test "config: the listing shows the batch size a legacy sweepMax sets" {
+  run "$FI_BIN" config
+  echo "$output" | grep -Eq '^found-issues\.autofix\.sweepBatch +8 +\(default\)$'
+  git config found-issues.autofix.sweepMax 3
+  run "$FI_BIN" config
+  echo "$output" | grep -Eq '^found-issues\.autofix\.sweepBatch +3 \(from legacy sweepMax\) +\(local\)$'
+  git config found-issues.autofix.sweepBatch 5
+  run "$FI_BIN" config
+  echo "$output" | grep -Eq '^found-issues\.autofix\.sweepBatch +5 +\(local\)$'
+  ! echo "$output" | grep -q 'legacy' || false
+}
+
+@test "config: token cap keys are unset by default, validate and fall back to no cap" {
+  src
+  [ -z "$(fi_af_token_cap)" ]
+  run "$FI_BIN" config autofix.codexRunTokens 0
+  [ "$status" -eq 2 ]
+  git config found-issues.autofix.codexSweepTokens lots
+  run fi_af_cap_int codexSweepTokens
+  [[ "$output" == *"not a positive integer"* ]]
+  [ "${lines[${#lines[@]}-1]}" != lots ]
+  AFI_kind=sweep
+  [ -z "$(fi_af_token_cap 2>/dev/null)" ]
+  git config --unset found-issues.autofix.codexSweepTokens
+  run "$FI_BIN" config
+  echo "$output" | grep -Eq '^found-issues\.autofix\.codexRunTokens +\(default\)$'
+  echo "$output" | grep -Eq '^found-issues\.autofix\.codexSweepTokens +\(default\)$'
 }

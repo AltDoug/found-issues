@@ -207,6 +207,24 @@ tap_fail_cmd() {
   [ -f "$ST/queue/$ID" ]
 }
 
+@test "b: a verifier that dies with no verdict requeues the item instead of rejecting" {
+  claim; fix_it
+  export FI_STANDIN_VERIFIER_CRASH=1
+  run "$FI_BIN" autofix verify "$ID"
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"claude verifier exited 1"* ]]
+  [ -f "$ST/queue/$ID" ]
+  ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
+}
+
+@test "b: a verifier that exits non-zero but left a verdict keeps it" {
+  claim; fix_it
+  export FI_STANDIN_VERIFIER_RC=1
+  run "$FI_BIN" autofix verify "$ID"
+  [ "$status" -eq 0 ]
+  grep -q '^verdict=approve$' "$ST/running/$ID"
+}
+
 @test "b: ship refuses without an approving verdict" {
   claim; fix_it
   run "$FI_BIN" autofix ship "$ID"
@@ -248,12 +266,14 @@ tap_fail_cmd() {
 @test "b: verify switched off mid-fix requeues the item and runs no verifier" {
   claim; fix_it
   "$FI_BIN" autofix off >/dev/null
+  : > "$FI_STANDIN_TRACE"
   run "$FI_BIN" autofix verify "$ID"
   [ "$status" -eq 8 ]
   [[ "$output" == *"requeued; stop"* ]]
   [ -f "$ST/queue/$ID" ]
   [ ! -e "$ST/running/$ID" ]
-  ! grep -q 'opus' "$FI_STANDIN_TRACE" 2>/dev/null || false
+  [ -f "$FI_STANDIN_TRACE" ]
+  ! grep -q 'opus' "$FI_STANDIN_TRACE" || false
 }
 
 @test "b: ship switched off after approval requeues the item and opens no PR" {
@@ -276,4 +296,17 @@ tap_fail_cmd() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"autofix verify"* ]]
   ! grep -q '^pr create' "$GH_MOCK_TRACE" 2>/dev/null || false
+}
+
+@test "autofix verify (launcher B): a codex item past its token cap fails without a verifier" {
+  claim; fix_it
+  fi_af_item_set "$ST/running/$ID" engine codex
+  fi_af_item_set "$ST/running/$ID" tokens 700000
+  git config found-issues.autofix.codexRunTokens 600000
+  : > "$FI_STANDIN_TRACE"
+  run "$FI_BIN" autofix verify "$ID"
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"failed: run budget spent; stop"* ]]
+  [ -f "$FI_STANDIN_TRACE" ]
+  ! grep -q 'read-only' "$FI_STANDIN_TRACE" || false
 }

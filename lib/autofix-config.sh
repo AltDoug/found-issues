@@ -8,7 +8,9 @@
 # Functions:
 #   fi_af_cfg <key> <default>
 #   fi_af_int <key> <default>
+#   fi_af_cap_int <key>
 #   fi_af_budget
+#   fi_af_codex_margs <fixer|verifier|classifier>
 #   fi_af_root
 #   fi_af_enabled
 #   fi_af_dirs <owner/repo>
@@ -38,17 +40,66 @@ fi_af_int() {
   printf '%s' "$((10#$v))"
 }
 
-# A sweep fixes up to sweepMax entries, so it has its own budget (phase 4
-# ruling 4: about $1 per entry was measured in phase 3).
+# 3.3.0 spec section 9: fixes per sweep PR. sweepMax (<= 3.2.x: entries per
+# sweep) still sets it when sweepBatch is unset.
+fi_af_sweep_batch() {
+  if [[ -n "$(fi_af_cfg sweepBatch "")" ]]; then fi_af_int sweepBatch 8
+  elif [[ -n "$(fi_af_cfg sweepMax "")" ]]; then fi_af_int sweepMax 8
+  else printf '8'; fi
+}
+
+# 3.3.0: an opt-in cap. Unset prints nothing (no cap); a value that is not a
+# positive integer warns and also means no cap.
+fi_af_cap_int() {
+  local v
+  v="$(fi_af_cfg "$1" "")"
+  [[ -n "$v" ]] || return 0
+  if [[ ! "$v" =~ ^[0-9]+$ ]] || (( 10#$v < 1 )); then
+    fi_err "found-issues: found-issues.autofix.$1=$v is not a positive integer — no cap"
+    return 0
+  fi
+  printf '%s' "$((10#$v))"
+}
+
+# Dollar cap for this run, or nothing: opt-in since 3.3.0 (spec §8). A
+# sweep has its own key, which covers every batch of the sweep.
 fi_af_budget() {
-  local v key=runBudget def=3
-  [[ "${AFI_kind:-}" == "sweep" ]] && key=sweepBudget def=10
-  v="$(fi_af_cfg "$key" "$def")"
+  local v key=runBudget
+  [[ "${AFI_kind:-}" == "sweep" ]] && key=sweepBudget
+  v="$(fi_af_cfg "$key" "")"
+  [[ -n "$v" ]] || return 0
   if [[ ! "$v" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-    fi_err "found-issues: found-issues.autofix.$key=$v is not a USD amount — using $def"
-    v="$def"
+    fi_err "found-issues: found-issues.autofix.$key=$v is not a USD amount — no dollar cap"
+    return 0
   fi
   printf '%s' "$v"
+}
+
+# 3.3.0 spec section 1: the -m/effort pair for one Codex role. Effort is fixed
+# per role in code, as the claude engine's is. inherit (any case) leaves both
+# out, so the user's ~/.codex/config.toml decides. A value that is empty after
+# trimming or starts with '-' (a raw `git config` typo such as "--unset" would
+# reach codex as a flag) is ignored: the role default is used and
+# FI_AF_MWARN says so. Sets FI_AF_MARGS, FI_AF_MDESC and FI_AF_MWARN.
+FI_AF_MARGS=() FI_AF_MDESC="" FI_AF_MWARN=""
+fi_af_codex_margs() {
+  local key=codexModel def=gpt-6.1-sol effort=medium role="$1" m lc
+  case "$1" in
+    classifier) effort=low ;;
+    verifier) key=codexVerifierModel def=gpt-6-astra effort=high ;;
+  esac
+  m="$(fi_af_cfg "$key" "$def")"
+  m="${m#"${m%%[![:space:]]*}"}"
+  m="${m%"${m##*[![:space:]]}"}"
+  FI_AF_MARGS=() FI_AF_MWARN=""
+  if [[ -z "$m" || "$m" == -* ]]; then
+    FI_AF_MWARN="invalid codex model '$(fi_af_cfg "$key" "$def")' for $role; using default $def"
+    m="$def"
+  fi
+  lc="$(printf '%s' "$m" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$lc" == inherit ]]; then FI_AF_MDESC=inherit; return 0; fi
+  FI_AF_MARGS=(-m "$m" -c "model_reasoning_effort=$effort")
+  FI_AF_MDESC="$m ($effort)"
 }
 
 fi_af_root() {
@@ -166,13 +217,17 @@ fi_af_no_prompts() {
 # Spec §8 settings: key|kind|default ("" = detected or none).
 _FI_CFG_KEYS='autofix|bool|false
 autofix.engine|engine|auto
+autofix.codexModel|model|gpt-6.1-sol
+autofix.codexVerifierModel|model|gpt-6-astra
 autofix.testCommand|text|
 autofix.dailyFixes|int|5
 autofix.dailySweeps|int|1
 autofix.sweepThreshold|int|5
-autofix.sweepMax|int|8
-autofix.runBudget|usd|3
-autofix.sweepBudget|usd|10
+autofix.sweepBatch|int|8
+autofix.runBudget|usd|
+autofix.sweepBudget|usd|
+autofix.codexRunTokens|int|
+autofix.codexSweepTokens|int|
 autofix.runTimeoutMin|int|20'
 
 FI_CFG_KEY="" FI_CFG_KIND="" FI_CFG_DEF="" FI_CFG_VAL="" FI_CFG_SRC=""
@@ -212,6 +267,10 @@ _fi_cfg_valid() {
       if [[ ! "$FI_CFG_VAL" =~ ^[0-9]+(\.[0-9]+)?$ || "$FI_CFG_VAL" =~ ^0+(\.0+)?$ ]]; then
         fi_err "config: found-issues.$FI_CFG_KEY takes a USD amount above 0, e.g. 3 or 2.5"; return 1
       fi ;;
+    model)
+      [[ "$(printf '%s' "$FI_CFG_VAL" | tr '[:upper:]' '[:lower:]')" == inherit ]] && FI_CFG_VAL=inherit
+      [[ "$FI_CFG_VAL" =~ ^[A-Za-z0-9._:/-]+$ && "$FI_CFG_VAL" != -* ]] \
+        || { fi_err "config: found-issues.$FI_CFG_KEY takes a Codex model name (e.g. gpt-6.1-sol) or inherit"; return 1; } ;;
     text)
       [[ -n "$FI_CFG_VAL" ]] || { fi_err "config: found-issues.$FI_CFG_KEY needs a value"; return 1; } ;;
   esac
@@ -238,6 +297,34 @@ fi_cfg_show_line() {
   fi
 }
 
+# 3.3.0: only a legacy sweepMax is set, so the sweepBatch row shows the batch
+# size the sweep really uses and where it came from (git config scope).
+_fi_cfg_legacy_batch() {
+  local out
+  [[ "$FI_CFG_KEY" == autofix.sweepBatch && "$FI_CFG_SRC" == default ]] || return 0
+  out="$(git config --show-scope --get found-issues.autofix.sweepMax 2>/dev/null || true)"
+  [[ -n "$out" ]] || return 0
+  FI_CFG_SRC="${out%%$'\t'*}" FI_CFG_VAL="$(fi_af_sweep_batch 2>/dev/null || printf 8) (from legacy sweepMax)"
+}
+
+# autofix.sweepMax was replaced by autofix.sweepBatch (3.3.0). It is no longer
+# a setting (setting it is refused, naming the new key) but --unset still
+# removes a value an older version left behind, here or with --global.
+_fi_cfg_legacy_sweepmax() {
+  local scope="$1" unset_it="$2" val="$3"
+  if (( unset_it )); then
+    if [[ "$scope" == --local ]]; then
+      git rev-parse --git-dir >/dev/null 2>&1 \
+        || { fi_err "config: not in a git repo — use --global to unset it for every repo"; return 1; }
+    fi
+    git config "$scope" --unset found-issues.autofix.sweepMax 2>/dev/null || true
+    printf 'Unset found-issues.autofix.sweepMax (%s)\n' "${scope#--}"
+    return 0
+  fi
+  fi_err "config: autofix.sweepMax is replaced by autofix.sweepBatch (fixes per sweep PR): set that instead; autofix.sweepMax --unset still removes an old value"
+  return 2
+}
+
 # Phase 5 ruling 7: list, get, set (this repo, or --global), --unset.
 cmd_config() {
   local key="" val="" unset_it=0 scope=--local line
@@ -262,9 +349,13 @@ cmd_config() {
   if [[ -z "$key" ]]; then
     while IFS= read -r line; do
       fi_cfg_show_line "${line%%|*}"
+      _fi_cfg_legacy_batch
       printf 'found-issues.%-24s %s  (%s)\n' "$FI_CFG_KEY" "$FI_CFG_VAL" "$FI_CFG_SRC"
     done <<<"$_FI_CFG_KEYS"
     return 0
+  fi
+  if [[ "$(printf '%s' "${key#found-issues.}" | tr '[:upper:]' '[:lower:]')" == autofix.sweepmax ]]; then
+    _fi_cfg_legacy_sweepmax "$scope" "$unset_it" "$val"; return
   fi
   _fi_cfg_spec "$key" || { fi_err "config: unknown setting $key (run: found-issues config)"; return 2; }
   if [[ "$scope" == --local ]] && { (( unset_it )) || [[ -n "$val" ]]; }; then

@@ -26,12 +26,19 @@
 #   fi_af_parse_result <text>
 #   fi_af_parse_verdict <text>
 #   fi_af_budget_left
+#   fi_af_budget_args
+#   fi_af_token_cap
+#   fi_af_tokens_left
+#   fi_af_run_budget_left <engine>
+#   fi_af_spent_text <engine>
+#   fi_af_codex_note <id> <role>
+#   fi_af_codex_desc <role>
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
-FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
+FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_BARGS=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
 FI_AF_RESULT="" FI_AF_RESULT_TEXT="" FI_AF_APPROVE="false" FI_AF_REASON=""
-FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR=""
+FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0 FI_AF_VERDICT_OK=0
 
 # macOS ships no `timeout`. Poll once a second; on the limit, TERM then KILL.
 # The child gets its own process group (perl setpgrp — bash 3.2 has no
@@ -172,9 +179,12 @@ EOF
 fi_af_fixer_cmd() {
   local engine="$1" prompt="$2" last="$3"
   if [[ "$engine" == "codex" ]]; then
-    FI_AF_CMD=(codex exec --sandbox workspace-write -C "$AFI_wt" --ephemeral --json -o "$last" "$prompt")
+    fi_af_codex_margs fixer
+    FI_AF_CMD=(codex exec --sandbox workspace-write -C "$AFI_wt" --ephemeral --json
+      ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"} -o "$last" "$prompt")
   else
-    FI_AF_CMD=(claude -p --model sonnet --max-budget-usd "$(fi_af_budget_left || printf '0.10')"
+    fi_af_budget_args
+    FI_AF_CMD=(claude -p --model sonnet ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 40 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools "${FI_AF_TOOLS[@]}"
@@ -186,10 +196,12 @@ fi_af_verifier_cmd() {
   local engine="$1" prompt="$2" last="$3" schema="$4"
   if [[ "$engine" == "codex" ]]; then
     printf '%s\n' '{"type":"object","properties":{"approve":{"type":"boolean"},"reason":{"type":"string"}},"required":["approve","reason"],"additionalProperties":false}' >"$schema"
+    fi_af_codex_margs verifier
     FI_AF_CMD=(codex exec --sandbox read-only -C "$AFI_wt" --ephemeral --json
-      -c model_reasoning_effort=high --output-schema "$schema" -o "$last" "$prompt")
+      ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"} --output-schema "$schema" -o "$last" "$prompt")
   else
-    FI_AF_CMD=(claude -p --model opus --effort high --max-budget-usd "$(fi_af_budget_left || printf '0.10')"
+    fi_af_budget_args
+    FI_AF_CMD=(claude -p --model opus --effort high ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 15 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools Read Grep Glob "Bash(found-issues autofix search ${AFI_id:-} *)"
@@ -197,13 +209,57 @@ fi_af_verifier_cmd() {
   fi
 }
 
+# 3.3.0: does a failed Codex turn's text say the model itself was refused?
+# model ... (not found|does not exist|...) or (unknown|invalid|unsupported)
+# model, case-insensitive; never when it speaks of a usage limit, a rate
+# limit or an overload.
+_fi_af_model_rejected() {
+  local t re_limit re_a re_b
+  t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  re_limit='usage limit|rate limit|rate-limit|overloaded'
+  re_a='model.*(not found|does not exist|not supported|unsupported|not available|invalid|unknown|no access|do not have access)'
+  re_b='(unknown|invalid|unsupported) model'
+  [[ "$t" =~ $re_limit ]] && return 1
+  [[ "$t" =~ $re_a || "$t" =~ $re_b ]]
+}
+
 fi_af_collect() {
   local engine="$1" out="$2" last="$3" c t
-  FI_AF_TEXT="" FI_AF_ENGINE_ERR=""
+  FI_AF_TEXT="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0
   if [[ "$engine" == "codex" ]]; then
     [[ -n "$last" && -f "$last" ]] && FI_AF_TEXT="$(cat "$last")"
     t="$(jq -s '[.[] | select(.type=="turn.completed") | (.usage.input_tokens // 0) + (.usage.output_tokens // 0)] | add // 0' "$out" 2>/dev/null || true)"
-    [[ "$t" =~ ^[0-9]+$ ]] && FI_AF_TOKENS=$((FI_AF_TOKENS + t))
+    [[ "$t" =~ ^[0-9]+$ ]] || t=0
+    FI_AF_CHILD_TOKENS="$t"
+    FI_AF_TOKENS=$((FI_AF_TOKENS + t))
+    # 3.3.0 spec section 4: a rejected model (or any failed turn) is an outage.
+    # Measured: the message is a JSON error envelope inside a string; a
+    # message that is not an envelope object (a bare number, a quoted string)
+    # is the text itself. Never empty for a turn.failed event.
+    FI_AF_ENGINE_ERR="$(jq -Rrn '
+      def msg: (try (.error | objects | .message) catch null) // "turn failed";
+      [inputs | (try fromjson catch empty) | select(type == "object" and .type == "turn.failed") | msg]
+      | last // empty
+      | if type == "string" then
+          ((try fromjson catch null) as $j
+           | if ($j | type) == "object" then (($j.error | objects | .message | strings) // ($j.message | strings) // .) else . end)
+        else tostring end
+      | if gsub("[[:space:]]"; "") == "" then "turn failed" else . end' "$out" 2>/dev/null || true)"
+    FI_AF_ENGINE_ERR="${FI_AF_ENGINE_ERR//$'\n'/ }"
+    if [[ -z "$FI_AF_ENGINE_ERR" ]] && grep -Fq '"turn.failed"' "$out" 2>/dev/null; then
+      FI_AF_ENGINE_ERR="turn failed"
+    fi
+    # A model the account cannot use leaves a marker for doctor; a clean child
+    # that spent tokens clears it. Only a model-rejection shape counts: a
+    # usage limit or an overload can name a model without it being unusable.
+    fi_af_root
+    if [[ -n "$FI_AF_ENGINE_ERR" ]]; then
+      if _fi_af_model_rejected "$FI_AF_ENGINE_ERR"; then
+        printf '%s\n' "$FI_AF_ENGINE_ERR" >"$FI_AF_ROOT/codex-model-error" 2>/dev/null || true
+      fi
+    elif (( t > 0 )); then
+      rm -f "$FI_AF_ROOT/codex-model-error" 2>/dev/null || true
+    fi
   else
     FI_AF_TEXT="$(jq -r '.result // empty' "$out" 2>/dev/null || true)"
     # An outage (usage limit, logged out, network) is is_error or an error_*
@@ -230,7 +286,7 @@ fi_af_parse_result() {
 }
 
 fi_af_parse_verdict() {
-  FI_AF_APPROVE="false" FI_AF_REASON="no parseable verdict"
+  FI_AF_APPROVE="false" FI_AF_REASON="no parseable verdict" FI_AF_VERDICT_OK=0
   local t="$1" v rest="$1" n=0
   [[ "$t" == *"{"*"}"* ]] || return 0
   # One verdict only: "true then false" must not read as approve.
@@ -240,12 +296,71 @@ fi_af_parse_verdict() {
   t="${t%\}*}}"
   v="$(printf '%s' "$t" | jq -r 'if (.approve | type) == "boolean" then "\(.approve)\t\(.reason // "")" else empty end' 2>/dev/null || true)"
   [[ -n "$v" ]] || return 0
+  FI_AF_VERDICT_OK=1
   FI_AF_APPROVE="${v%%$'\t'*}"
   FI_AF_REASON="${v#*$'\t'}"
   FI_AF_REASON="${FI_AF_REASON//$'\n'/ }"
 }
 
-# Spec §7: runBudget caps the whole run (every fixer and verifier child).
+# Spec §7/§8: runBudget caps the whole run (every child) when set; unset is
+# no cap (3.3.0, Decision 6).
 fi_af_budget_left() {
-  awk -v b="$(fi_af_budget)" -v s="$FI_AF_COST" 'BEGIN { l = b - s; if (l < 0.10) exit 1; printf "%.2f", l }'
+  local b
+  b="$(fi_af_budget)"
+  [[ -n "$b" ]] || return 0
+  awk -v b="$b" -v s="$FI_AF_COST" 'BEGIN { l = b - s; if (l < 0.10) exit 1; printf "%.2f", l }'
+}
+
+# The claude child's --max-budget-usd, only when a budget is set.
+fi_af_budget_args() {
+  local b
+  FI_AF_BARGS=()
+  [[ -n "$(fi_af_budget)" ]] || return 0
+  b="$(fi_af_budget_left || printf '0.10')"
+  FI_AF_BARGS=(--max-budget-usd "$b")
+}
+
+# 3.3.0 spec §2: Codex reports tokens, not dollars, so its runs stop on a
+# token cap instead (a sweep has its own). Opt-in: unset = no cap (Decision
+# 5). Checked before each child; one child may overshoot (Decision 3).
+fi_af_token_cap() {
+  if [[ "${AFI_kind:-}" == "sweep" ]]; then fi_af_cap_int codexSweepTokens
+  else fi_af_cap_int codexRunTokens; fi
+}
+
+fi_af_tokens_left() {
+  local cap
+  cap="$(fi_af_token_cap)"
+  [[ -n "$cap" ]] || return 0
+  (( FI_AF_TOKENS < cap )) || return 1
+  printf '%s' $(( cap - FI_AF_TOKENS ))
+}
+
+# Engine-neutral gate: dollars for claude, tokens for codex.
+fi_af_run_budget_left() {
+  if [[ "$1" == codex ]]; then fi_af_tokens_left >/dev/null
+  else fi_af_budget_left >/dev/null; fi
+}
+
+fi_af_spent_text() {
+  if [[ "$1" == codex ]]; then printf 'run budget spent (%s tokens)' "$FI_AF_TOKENS"
+  else printf 'run budget spent ($%s)' "$FI_AF_COST"; fi
+}
+
+# 3.3.0 spec section 3: one run-log line per Codex child.
+fi_af_codex_note() {
+  fi_af_codex_margs "$2"
+  local cap
+  cap="$(fi_af_token_cap)"
+  [[ -z "$FI_AF_MWARN" ]] || fi_af_log "$1" "warning: $FI_AF_MWARN"
+  fi_af_log "$1" "codex $2: model $FI_AF_MDESC, $FI_AF_CHILD_TOKENS tokens, run total $FI_AF_TOKENS${cap:+/$cap}"
+}
+
+# Doctor's description of one role; inherit names config.toml's model.
+fi_af_codex_desc() {
+  local m
+  fi_af_codex_margs "$1"
+  if [[ "$FI_AF_MDESC" != inherit ]]; then printf '%s' "$FI_AF_MDESC"; return 0; fi
+  m="$(sed -n 's/^model[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null | head -n 1)"
+  printf 'inherit (~/.codex/config.toml: %s)' "${m:-its default}"
 }

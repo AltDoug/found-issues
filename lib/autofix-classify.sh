@@ -109,12 +109,18 @@ fi_af_classify() {
     || { fi_af_log "$id" "classify: skipped (no engine resolved)"; return 0; }
   command -v "$engine" >/dev/null 2>&1 \
     || { fi_af_log "$id" "classify: skipped (no engine on PATH)"; return 0; }
+  if ! fi_af_run_budget_left "$engine"; then
+    fi_af_log "$id" "classify: skipped ($(fi_af_spent_text "$engine"))"; return 0
+  fi
   if [[ "$engine" == "codex" ]]; then
     printf '%s\n' '{"type":"object","properties":{"tags":{"type":"array","items":{"type":"object","properties":{"n":{"type":"string"},"kind":{"type":"string"},"value":{"type":"string"}},"required":["n","kind","value"],"additionalProperties":false}},"wake":{"type":"array","items":{"type":"string"}}},"required":["tags","wake"],"additionalProperties":false}' >"$base.schema.json"
+    fi_af_codex_margs classifier
     FI_AF_CMD=(codex exec --sandbox read-only -C "$AFI_wt" --ephemeral --json
+      ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"}
       --output-schema "$base.schema.json" -o "$base.last" "$(_fi_af_classify_prompt "$list")")
   else
-    FI_AF_CMD=(claude -p --model sonnet --max-budget-usd "$(fi_af_budget_left || printf '0.10')"
+    fi_af_budget_args
+    FI_AF_CMD=(claude -p --model sonnet ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 20 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools Read Grep Glob
@@ -122,11 +128,17 @@ fi_af_classify() {
   fi
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
   fi_af_collect "$engine" "$base.out" "$base.last"
+  if [[ "$engine" == codex ]]; then fi_af_codex_note "$id" classifier; fi
   if [[ -f "$FI_AF_ST/running/$id" ]]; then
     fi_af_item_set "$FI_AF_ST/running/$id" cost "$FI_AF_COST" || true
     fi_af_item_set "$FI_AF_ST/running/$id" tokens "$FI_AF_TOKENS" || true
   fi
   fi_af_log "$id" "classify: rc=$rc"
+  # A failed turn (outage, rejected model) answers nothing: tag nothing and
+  # offer nothing, so the entries are shown to the next sweep's classifier.
+  if [[ -n "$FI_AF_ENGINE_ERR" ]]; then
+    fi_af_log "$id" "classify: engine error: $FI_AF_ENGINE_ERR"; return 0
+  fi
   t="$FI_AF_TEXT"
   [[ "$t" == *"{"*"}"* ]] || return 0
   t="{${t#*\{}"

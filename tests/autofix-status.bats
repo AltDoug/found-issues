@@ -22,6 +22,18 @@ teardown() { fi_teardown_tmp; }
   [[ "$output" == *"Spent today: \$"* ]]
 }
 
+@test "autofix status: a sweep continuation shows its batch number" {
+  QID=20991231-000000-00009
+  fi_af_item_write "$ST/queue/$QID" "id=$QID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=claude "queued=$(date +%Y-%m-%dT%H:%M:%S)" crashes=0 cont=3
+  DID=20991231-000000-00008
+  fi_af_item_write "$ST/done/$DID" "id=$DID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    cont=2 finished=1 "result=stale: sweep fixed nothing"
+  run "$FI_BIN" autofix status
+  [[ "$output" == *"$QID  sweep  sweep (batch 3)"* ]]
+  [[ "$output" == *"$DID  sweep (batch 2) — stale"* ]]
+}
+
 @test "autofix status: finished items carry a finished stamp" {
   "$FI_BIN" autofix cancel "$ID" >/dev/null
   grep -qE '^finished=[0-9]+$' "$ST/done/$ID"
@@ -80,4 +92,37 @@ teardown() { fi_teardown_tmp; }
   run "$FI_BIN" autofix status
   [[ "$output" == *"into release/3.2 (the branch with the cited file)"* ]]
   [ "$(printf '%s\n' "$output" | grep -c 'into release/3.2')" = 1 ]
+}
+
+@test "autofix status: a codex run shows tokens against its cap" {
+  export GH_MOCK_PR_VIEW=$'7\t{"number":7,"state":"OPEN","statusCheckRollup":[]}'
+  export FI_STANDIN_EDIT="sed -i.bak 's/ - / + /' src/calc.sh && rm -f src/calc.sh.bak"
+  git config found-issues.autofix.codexRunTokens 600000
+  "$FI_BIN" autofix run "$ID" --engine codex >/dev/null
+  run "$FI_BIN" autofix status
+  [[ "$output" == *"3000/600000 tokens"* ]]
+}
+
+@test "autofix status: a codex run with no token cap shows its tokens alone" {
+  export GH_MOCK_PR_VIEW=$'7\t{"number":7,"state":"OPEN","statusCheckRollup":[]}'
+  export FI_STANDIN_EDIT="sed -i.bak 's/ - / + /' src/calc.sh && rm -f src/calc.sh.bak"
+  "$FI_BIN" autofix run "$ID" --engine codex >/dev/null
+  run "$FI_BIN" autofix status
+  [[ "$output" == *" 3000 tokens"* ]]
+  [[ "$output" != *"3000/"* ]]
+}
+
+@test "autofix status: a continuation's tokens row shows the whole chain against the sweep cap" {
+  git config found-issues.autofix.codexSweepTokens 2400000
+  printf 'id=c1\nkind=sweep\nloc=sweep\nengine=codex\ncont=3\ntokens=50000\nchain_tokens=2300000\nfinished=1000\nresult=shipped: PR #5, 8 fixed\n' > "$ST/done/c1"
+  run "$FI_BIN" autofix status
+  echo "$output" | grep -Fq '2350000/2400000 tokens (chain)'
+  git config --unset found-issues.autofix.codexSweepTokens
+  run "$FI_BIN" autofix status
+  echo "$output" | grep -Fq '2350000 tokens (chain)'
+  ! echo "$output" | grep -q '2350000/' || false
+  # A first batch has no chain: its own tokens, unmarked.
+  printf 'id=c0\nkind=sweep\nloc=sweep\nengine=codex\ntokens=70000\nfinished=900\nresult=shipped: PR #4, 8 fixed\n' > "$ST/done/c0"
+  run "$FI_BIN" autofix status
+  echo "$output" | grep -Eq '^ +70000 tokens$'
 }

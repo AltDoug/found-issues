@@ -38,7 +38,8 @@ Usage: found-issues autofix <command>
                               Wait for PR <N>'s checks, then squash-merge it
 Settings: git config found-issues.autofix true|false (local overrides --global),
 found-issues.autofix.{engine,testCommand,dailyFixes,runBudget,runTimeoutMin,
-dailySweeps,sweepThreshold,sweepMax,sweepBudget}.
+dailySweeps,sweepThreshold,sweepBatch,sweepBudget,codexModel,codexVerifierModel,
+codexRunTokens,codexSweepTokens}.
 EOF
 }
 
@@ -49,6 +50,7 @@ _fi_af_fix_attempt() {
   fi_af_fixer_cmd "$engine" "$(fi_af_fixer_prompt "$FI_AF_TESTCMD" "$feedback" "$engine")" "$base.last"
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
   fi_af_collect "$engine" "$base.out" "$base.last"
+  if [[ "$engine" == codex ]]; then fi_af_codex_note "$AFI_id" fixer; fi
   fi_af_parse_result "$FI_AF_TEXT"
   FI_AF_FIX_RC=$rc
   if [[ -z "$FI_AF_ENGINE_ERR" ]] && (( rc != 0 && rc != 124 )) && [[ "$FI_AF_RESULT" == "none" ]]; then
@@ -68,7 +70,14 @@ _fi_af_verify() {
     "$base.last" "$FI_AF_RUNS/verdict.schema.json"
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
   fi_af_collect "$engine" "$base.out" "$base.last"
+  if [[ "$engine" == codex ]]; then fi_af_codex_note "$AFI_id" verifier; fi
   fi_af_parse_verdict "$FI_AF_TEXT"
+  # A verifier that exited non-zero and left no parseable verdict (a crash,
+  # a lost login, the watchdog's timeout) never ran: an outage, not a reject.
+  # A verdict it did leave stands whatever its exit code.
+  if [[ -z "$FI_AF_ENGINE_ERR" ]] && (( rc != 0 )) && (( FI_AF_VERDICT_OK != 1 )); then
+    FI_AF_ENGINE_ERR="$engine verifier exited $rc"
+  fi
   fi_af_log "$AFI_id" "attempt $n: verifier rc=$rc approve=$FI_AF_APPROVE reason=$FI_AF_REASON"
 }
 
@@ -83,6 +92,8 @@ _fi_af_end() {
   if [[ -f "$r" ]]; then
     fi_af_item_set "$r" cost "$FI_AF_COST"
     fi_af_item_set "$r" tokens "$FI_AF_TOKENS"
+    # --engine can override the queued engine: status reads what actually ran.
+    [[ -z "${AFI_engine:-}" ]] || fi_af_item_set "$r" engine "$AFI_engine"
   fi
   fi_af_finish "$@"
 }
@@ -98,8 +109,8 @@ _fi_af_fix_loop() {
   FI_AF_OUTCOME="" FI_AF_OUTCOME_TEXT=""
   for n in 1 2; do
     touch "$FI_AF_ST/lock" 2>/dev/null || true
-    if [[ "$engine" == "claude" ]] && ! fi_af_budget_left >/dev/null; then
-      why="run budget spent (\$$FI_AF_COST)"; break
+    if ! fi_af_run_budget_left "$engine"; then
+      why="$(fi_af_spent_text "$engine")"; break
     fi
     (( n == 1 )) || _fi_af_reset_wt
     _fi_af_fix_attempt "$engine" "$n" "$feedback"
@@ -128,10 +139,18 @@ _fi_af_fix_loop() {
       why="tests fail"; feedback="The test command failed."$'\n'"$(fi_af_test_report "$tlog" 20)"
       continue
     fi
-    if [[ "$engine" == "claude" ]] && ! fi_af_budget_left >/dev/null; then
-      why="run budget spent (\$$FI_AF_COST)"; break
+    if ! fi_af_run_budget_left "$engine"; then
+      why="$(fi_af_spent_text "$engine")"; break
     fi
     _fi_af_verify "$engine" "$n"
+    # A verifier that could not run (outage, rejected model) is not a reject.
+    if [[ -n "$FI_AF_ENGINE_ERR" ]]; then
+      FI_AF_OUTCOME=outage FI_AF_OUTCOME_TEXT="$FI_AF_ENGINE_ERR"; return 0
+    fi
+    # A verdict (either way) ends the run of outages.
+    if [[ "${AFI_outages:-0}" != 0 && -f "$FI_AF_ST/running/$id" ]]; then
+      fi_af_item_set "$FI_AF_ST/running/$id" outages 0; AFI_outages=0
+    fi
     if [[ "$FI_AF_APPROVE" != "true" ]]; then
       why="verifier rejected: $FI_AF_REASON"; feedback="The reviewer rejected it: $FI_AF_REASON"; continue
     fi
@@ -148,12 +167,23 @@ _fi_af_fix_loop() {
 
 # Spec §5 for one claimed item: the fix loop, then ship. Every path ends in
 # _fi_af_end, except an engine outage, which requeues (rc 7).
+# Outages in a row that finish a spot item failed.
+_fi_af_outage_limit() {
+  local n="${FOUND_ISSUES_AUTOFIX_OUTAGE_MAX:-3}"
+  [[ "$n" =~ ^[1-9][0-9]*$ ]] || n=3
+  printf '%s' "$n"
+}
+
 _fi_af_run_one() {
-  local id="$1" engine_opt="$2" engine
+  local id="$1" engine_opt="$2" engine n_out
+  # Every item of a drain starts from zero spend, before the claim: a sweep's
+  # classify child runs inside the claim and would otherwise add its cost and
+  # tokens (and check its cap) on top of the previous item's. A continuation
+  # is seeded with its chain's spend by _fi_af_chain_seed.
+  FI_AF_COST=0 FI_AF_TOKENS=0 FI_AF_CHILD_TOKENS=0
   fi_af_claim "$id" || return $?
   fi_af_item_read "$FI_AF_ST/running/$id" || return 0
   if [[ "$AFI_kind" == "sweep" ]]; then _fi_af_run_sweep "$id" "$engine_opt"; return; fi
-  FI_AF_COST=0 FI_AF_TOKENS=0
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
     _fi_af_end "$id" manual "no test command"; return 0
   fi
@@ -164,8 +194,17 @@ _fi_af_run_one() {
   _fi_af_fix_loop "$id" "$engine"
   case "$FI_AF_OUTCOME" in
     outage)
-      # The item goes back to the queue untagged and the drain stops.
+      # The item goes back to the queue untagged and the drain stops, until
+      # FOUND_ISSUES_AUTOFIX_OUTAGE_MAX outages in a row (default 3): a
+      # persistent one (an account that cannot use the verifier model) would
+      # otherwise re-run the paid fixer every day, forever.
       FI_AF_WHY="$FI_AF_OUTCOME_TEXT"
+      n_out=$(( ${AFI_outages:-0} + 1 ))
+      fi_af_item_set "$FI_AF_ST/running/$id" outages "$n_out"
+      if (( n_out >= $(_fi_af_outage_limit) )); then
+        _fi_af_end "$id" failed "engine error after $n_out tries: $FI_AF_OUTCOME_TEXT"
+        return 0
+      fi
       fi_af_requeue "$id" "engine error: $FI_AF_OUTCOME_TEXT"
       return 7 ;;
     approved)
@@ -306,7 +345,8 @@ cmd_autofix() {
       fi_af_b_enabled "$1" || return
       if [[ "$sub" == "ship" && "$AFI_kind" == "sweep" ]]; then
         fi_af_no_prompts
-        FI_AF_COST="${AFI_cost:-0}" FI_AF_TOKENS="${AFI_tokens:-0}" FI_AF_TESTCMD=""
+        _fi_af_chain_seed
+        FI_AF_TESTCMD=""
         if fi_af_sweep_finish "$1"; then
           fi_af_item_read "$FI_AF_ST/done/$1"
           case "$AFI_result" in

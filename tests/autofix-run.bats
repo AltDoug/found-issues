@@ -107,6 +107,14 @@ teardown() { fi_teardown_tmp; }
   [ "$(grep -c '^claude' "$FI_STANDIN_TRACE")" = 1 ]
 }
 
+@test "autofix run: with no budget set a claude run never stops on cost" {
+  export FI_STANDIN_COST=50
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped' "$ST/done/$ID"
+  ! grep -q -- '--max-budget-usd' "$FI_STANDIN_TRACE" || false
+}
+
 @test "autofix run: drains the rest of the queue oldest first" {
   printf -- '- [open] 2026-10-02 test.sh:2 — second thing (fix: small)\n' >> "$REPO/docs/found-issues.md"
   git -C "$REPO" commit -qam "second entry" && git -C "$REPO" push -q
@@ -221,4 +229,101 @@ teardown() { fi_teardown_tmp; }
   run "$FI_BIN" autofix run "$ID" --engine claude
   [ "$status" -eq 3 ]
   [ -f "$ST/day/$(date +%Y-%m-%d).capped" ]
+}
+
+@test "autofix run: a codex fixer on a rejected model requeues as an outage" {
+  export FI_STANDIN_CODEX_FAIL=workspace-write
+  run "$FI_BIN" autofix run "$ID" --engine codex
+  [ "$status" -eq 7 ]
+  [ -f "$ST/queue/$ID" ]
+  grep -q "requeued: engine error: The 'bad-model' model is not supported" "$FI_AF_RUNS/$ID.log"
+  ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
+}
+
+@test "autofix run: a verifier engine error requeues instead of counting as a reject" {
+  export FI_STANDIN_CODEX_FAIL=read-only
+  run "$FI_BIN" autofix run "$ID" --engine codex
+  [ "$status" -eq 7 ]
+  [ -f "$ST/queue/$ID" ]
+  [ ! -d "$REPO/.claude/worktrees/fi-autofix-$ID" ]
+  ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
+}
+
+@test "autofix run: a verifier that dies with no verdict is an outage, not a reject" {
+  export FI_STANDIN_VERIFIER_CRASH=1
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 7 ]
+  [ -f "$ST/queue/$ID" ]
+  grep -q 'requeued: engine error: claude verifier exited 1' "$FI_AF_RUNS/$ID.log"
+  ! grep -q 'autofix-failed' "$REPO/docs/found-issues.md" || false
+  grep -q '^outages=1$' "$ST/queue/$ID"
+}
+
+@test "autofix run: a codex verifier timeout exit with no verdict is an outage" {
+  export FI_STANDIN_VERIFIER_CRASH=124
+  run "$FI_BIN" autofix run "$ID" --engine codex
+  [ "$status" -eq 7 ]
+  [ -f "$ST/queue/$ID" ]
+  grep -q 'requeued: engine error: codex verifier exited 124' "$FI_AF_RUNS/$ID.log"
+}
+
+@test "autofix run: a verifier that exits non-zero but left a verdict keeps the verdict" {
+  export FI_STANDIN_VERIFIER_RC=1
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped' "$ST/done/$ID"
+}
+
+@test "autofix run: the third outage in a row finishes the item failed with the outage text" {
+  export FI_STANDIN_VERIFIER_CRASH=1
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 7 ]
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 7 ]
+  grep -q '^outages=2$' "$ST/queue/$ID"
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  [ ! -f "$ST/queue/$ID" ]
+  grep -q '^result=failed: engine error after 3 tries: claude verifier exited 1' "$ST/done/$ID"
+  grep -q '(autofix-failed: engine error after 3 tries' "$REPO/docs/found-issues.md"
+}
+
+@test "autofix run: FOUND_ISSUES_AUTOFIX_OUTAGE_MAX sets how many outages are tolerated" {
+  export FI_STANDIN_VERIFIER_CRASH=1 FOUND_ISSUES_AUTOFIX_OUTAGE_MAX=1
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=failed: engine error after 1 tries' "$ST/done/$ID"
+}
+
+@test "autofix run: a verdict clears the outage count" {
+  fi_af_item_set "$ST/queue/$ID" outages 2
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped' "$ST/done/$ID"
+  grep -q '^outages=0$' "$ST/done/$ID"
+}
+
+@test "autofix run: codex stops at the token cap before the verifier" {
+  git config found-issues.autofix.codexRunTokens 1000
+  run "$FI_BIN" autofix run "$ID" --engine codex
+  [ "$status" -eq 0 ]
+  grep -q '^result=failed: run budget spent (1500 tokens)' "$ST/done/$ID"
+  grep -q '(autofix-failed: run budget spent \[1500 tokens\])' "$REPO/docs/found-issues.md"
+  # the fixer prompt says read-only, so match the verifier's sandbox flag
+  [ "$(grep -c 'sandbox.read-only' "$FI_STANDIN_TRACE")" = 0 ]
+}
+
+@test "autofix run: the claude budget ignores the codex token cap" {
+  git config found-issues.autofix.codexRunTokens 1
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped' "$ST/done/$ID"
+}
+
+@test "autofix run: the run log names each codex child's model and tokens against the cap" {
+  run "$FI_BIN" autofix run "$ID" --engine codex
+  [ "$status" -eq 0 ]
+  grep -q 'codex fixer: model gpt-6.1-sol (medium), 1500 tokens, run total 1500$' "$FI_AF_RUNS/$ID.log"
+  grep -q 'codex verifier: model gpt-6-astra (high), 1500 tokens, run total 3000$' "$FI_AF_RUNS/$ID.log"
+  grep -q 'Run cost: .*codex models: fixer gpt-6.1-sol (medium), verifier gpt-6-astra (high)' "$FI_AF_RUNS/$ID.pr-body.md"
 }

@@ -188,20 +188,24 @@ gets, sets and unsets them with validation:
 found-issues config                          # every setting, its value and source
 found-issues config autofix true             # this repo (prints the auto-merge disclosure)
 found-issues config autofix.dailyFixes 3 --global
-found-issues config autofix.sweepMax --unset
+found-issues config autofix.sweepBatch --unset
 ```
 
 | Key (`found-issues.…`) | Default | What it controls |
 |---|---|---|
 | `autofix` | `false` | Turns auto-fix on. Fix PRs merge themselves and runs bill your account. |
 | `autofix.engine` | `auto` | `claude`, `codex`, or `auto` (the session's own harness) |
+| `autofix.codexModel` | `gpt-6.1-sol` | Codex fixer (effort medium) and classifier (effort low) model, or `inherit` for `~/.codex/config.toml` |
+| `autofix.codexVerifierModel` | `gpt-6-astra` | Codex verifier model (effort high), or `inherit` |
+| `autofix.codexRunTokens` | unset (no cap) | Codex tokens per spot run, e.g. `800000` (about 3x a measured spot run); checked before each child, so one child can overshoot |
+| `autofix.codexSweepTokens` | unset (no cap) | Codex tokens per sweep (all batches), e.g. `2400000` |
 | `autofix.testCommand` | detected | The command that proves a fix (bats, npm test, pytest, go, cargo, make) |
 | `autofix.dailyFixes` | `5` | Spot fixes per repo per day |
 | `autofix.dailySweeps` | `1` | Sweeps per repo per day |
 | `autofix.sweepThreshold` | `5` | Fixable entries that trigger a sweep (`/found-issues:setup` offers 5, 10, 20 or any whole number) |
-| `autofix.sweepMax` | `8` | Entries one sweep fixes |
-| `autofix.runBudget` | `3` | USD estimate per spot run (Claude Code's `total_cost_usd`) |
-| `autofix.sweepBudget` | `10` | USD estimate per sweep |
+| `autofix.sweepBatch` | `8` | Fixes per sweep PR; a sweep fixes every fixable entry, one PR per batch (a legacy `sweepMax` is read when this is unset: the listing then shows `<n> (from legacy sweepMax)`, `found-issues config autofix.sweepMax --unset [--global]` removes it, and setting it is refused in favour of this key) |
+| `autofix.runBudget` | unset (no cap) | USD estimate per spot run (Claude Code's `total_cost_usd`) |
+| `autofix.sweepBudget` | unset (no cap) | USD estimate per sweep, shared by all of its batches |
 | `autofix.runTimeoutMin` | `20` | Minutes per engine call |
 
 | Variable | Default | What it controls |
@@ -212,6 +216,7 @@ found-issues config autofix.sweepMax --unset
 | `FOUND_ISSUES_AUTOFIX_LOCK_STALE` | `3600` | Seconds after which a repo's run lock counts as abandoned |
 | `FOUND_ISSUES_AUTOFIX_SHIP_TRIES` | `3` | Ship attempts a sweep gets. A failed ship keeps the sweep's branch and requeues it so the next run only ships; the last failure ends the sweep failed, its branch still kept |
 | `FOUND_ISSUES_AUTOFIX_SHIP_WAIT` | `900` | Seconds before a requeued sweep retries its ship |
+| `FOUND_ISSUES_AUTOFIX_OUTAGE_MAX` | `3` | Engine outages in a row (a failed turn, a verifier that died) after which a spot item finishes failed with the last outage text instead of being requeued again |
 | `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS` | `runTimeoutMin` × 60 | Per engine-call timeout override |
 | `FOUND_ISSUES_AUTOFIX_MERGE_POLLS` / `_MERGE_SLEEP` | `60` / `60` | How long `autofix merge-when-green` waits for checks |
 | `FOUND_ISSUES_AUTOFIX_WAIT_RECHECK` | `900` | Seconds before a waiting item (its cited file is not on the landing branch yet, or has uncommitted or unpushed changes) is looked at again |

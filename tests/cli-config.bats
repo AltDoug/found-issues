@@ -11,11 +11,13 @@ teardown() { fi_teardown_tmp; }
   run "$FI_BIN" config
   [ "$status" -eq 0 ]
   for k in autofix autofix.engine autofix.testCommand autofix.dailyFixes autofix.dailySweeps \
-           autofix.sweepThreshold autofix.sweepMax autofix.runBudget autofix.sweepBudget autofix.runTimeoutMin; do
+           autofix.sweepThreshold autofix.sweepBatch autofix.runBudget autofix.sweepBudget autofix.runTimeoutMin; do
     [[ "$output" == *"found-issues.$k "* ]] || false
   done
   [[ "$output" == *"found-issues.autofix.dailyFixes"*"5"*"(default)"* ]]
   [[ "$output" == *"found-issues.autofix.testCommand"*"sh test.sh"*"(local)"* ]]
+  [[ "$output" == *"found-issues.autofix.runBudget"*"(default)"* ]]
+  [[ "$output" == *"found-issues.autofix.sweepBudget"*"(default)"* ]]
 }
 
 @test "config: set writes this repo, get reads it back" {
@@ -27,12 +29,12 @@ teardown() { fi_teardown_tmp; }
 }
 
 @test "config: --global writes the global file and local overrides it" {
-  "$FI_BIN" config autofix.sweepMax 4 --global
-  [ "$(git config --global --get found-issues.autofix.sweepMax)" = 4 ]
+  "$FI_BIN" config autofix.sweepBatch 4 --global
+  [ "$(git config --global --get found-issues.autofix.sweepBatch)" = 4 ]
   run "$FI_BIN" config
-  [[ "$output" == *"found-issues.autofix.sweepMax"*"4"*"(global)"* ]]
-  "$FI_BIN" config autofix.sweepMax 6
-  run "$FI_BIN" config autofix.sweepMax
+  [[ "$output" == *"found-issues.autofix.sweepBatch"*"4"*"(global)"* ]]
+  "$FI_BIN" config autofix.sweepBatch 6
+  run "$FI_BIN" config autofix.sweepBatch
   [ "$output" = 6 ]
 }
 

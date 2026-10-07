@@ -9,13 +9,24 @@ teardown() { fi_teardown_tmp; }
 
 @test "doctor auto-fix: on, with test command source, caps and the auto-merge sentence" {
   git config found-issues.autofix.dailyFixes 2
+  git config found-issues.autofix.sweepMax 3
   run "$FI_BIN" doctor
   [[ "$output" == *"== Auto-fix =="* ]]
   [[ "$output" == *"Auto-fix: on"* ]]
   [[ "$output" == *"Test command: sh test.sh (local)"* ]]
   [[ "$output" == *"2 spot fixes/day"* ]]
+  [[ "$output" == *"3 fixes per PR"* ]]
   [[ "$output" == *"Fix PRs merge themselves"* ]]
   [[ "$output" == *"claude:"* ]]
+}
+
+@test "doctor auto-fix: unset caps read as no cap" {
+  run "$FI_BIN" doctor
+  [[ "$output" == *"no dollar cap per run"* ]]
+  [[ "$output" == *"no dollar cap per sweep"* ]]
+  git config found-issues.autofix.runBudget 3
+  run "$FI_BIN" doctor
+  [[ "$output" == *'$3 per run'* ]]
 }
 
 @test "doctor auto-fix: off says how to turn it on" {
@@ -36,4 +47,54 @@ teardown() { fi_teardown_tmp; }
   run "$FI_BIN" doctor
   [[ "$output" == *"claude not on PATH"* ]]
   [[ "$output" == *"codex not on PATH"* ]]
+}
+
+@test "doctor auto-fix: codex models per role and the token caps" {
+  git config found-issues.autofix.codexVerifierModel inherit
+  mkdir -p "$TMP/codexhome"; printf 'model = "gpt-6-astra"\n' > "$TMP/codexhome/config.toml"
+  CODEX_HOME="$TMP/codexhome" run "$FI_BIN" doctor
+  [[ "$output" == *"Codex models: fixer gpt-6.1-sol (medium), verifier inherit (~/.codex/config.toml: gpt-6-astra), classifier gpt-6.1-sol (low)"* ]]
+  [[ "$output" == *"no token cap per run"* ]]
+  git config found-issues.autofix.codexRunTokens 600000
+  CODEX_HOME="$TMP/codexhome" run "$FI_BIN" doctor
+  [[ "$output" == *"600000 Codex tokens per run"* ]]
+}
+
+@test "doctor auto-fix: warns when the last codex child failed on its model" {
+  fi_af_queue_fixture
+  export FI_STANDIN_CODEX_FAIL=workspace-write
+  "$FI_BIN" autofix run "$ID" --engine codex >/dev/null || true
+  run "$FI_BIN" doctor
+  [[ "$output" == *"Last Codex run failed on its model"* ]]
+  [[ "$output" == *"found-issues config autofix.codexModel"* ]]
+}
+
+@test "doctor auto-fix: a usage limit that names the model is not a model error" {
+  fi_af_queue_fixture
+  export FI_STANDIN_CODEX_FAIL=workspace-write
+  export FI_STANDIN_CODEX_FAIL_MSG="You have hit your usage limit for model gpt-6.1-sol"
+  "$FI_BIN" autofix run "$ID" --engine codex >/dev/null || true
+  run "$FI_BIN" doctor
+  [[ "$output" != *"Last Codex run failed on its model"* ]]
+}
+
+@test "doctor auto-fix: a dash-led codex model is called out and the default shown" {
+  git config found-issues.autofix.codexModel '--unset'
+  run "$FI_BIN" doctor
+  [[ "$output" == *"invalid codex model '--unset' for fixer; using default gpt-6.1-sol"* ]]
+  [[ "$output" == *"Codex models: fixer gpt-6.1-sol (medium)"* ]]
+}
+
+@test "doctor auto-fix: an invalid dollar cap is called out as ignored, a valid one shown" {
+  git config found-issues.autofix.runBudget 3usd
+  git config found-issues.autofix.sweepBudget 12.5
+  run "$FI_BIN" doctor
+  [[ "$output" == *"invalid runBudget '3usd' (ignored: no dollar cap)"* ]]
+  [[ "$output" == *'$12.5 per sweep'* ]]
+  [[ "$output" != *'$3usd'* ]]
+  git config found-issues.autofix.runBudget 3
+  git config found-issues.autofix.sweepBudget '$9'
+  run "$FI_BIN" doctor
+  [[ "$output" == *'$3 per run'* ]]
+  [[ "$output" == *"invalid sweepBudget '\$9' (ignored: no dollar cap)"* ]]
 }

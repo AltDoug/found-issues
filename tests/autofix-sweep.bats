@@ -210,11 +210,13 @@ sweep_queue() { # queue a sweep for the fixture; sets SID and ST
   [ -s "$ST/day/$(date +%Y-%m-%d).sweep" ]
 }
 
-@test "sweep claim: honours sweepMax" {
+@test "sweep claim: takes every fixable entry, no count limit" {
   fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
   git config found-issues.autofix.sweepMax 2
   "$FI_BIN" autofix claim "$SID" >/dev/null
-  [ "$(wc -l < "$ST/sweeps/$SID.entries" | tr -d ' ')" = 2 ]
+  # The 4 fixture entries plus the one sweep_queue logged; the old
+  # sweepMax-sized claim would have kept 2.
+  [ "$(wc -l < "$ST/sweeps/$SID.entries" | tr -d ' ')" = 5 ]
 }
 
 @test "sweep claim: nothing fixable any more finishes the sweep stale" {
@@ -233,7 +235,7 @@ sweep_queue() { # queue a sweep for the fixture; sets SID and ST
   [ "$status" -eq 5 ]
   grep -q '^result=stale: no test command$' "$ST/done/$SID"
   [ ! -s "$ST/day/$(date +%Y-%m-%d).sweep" ]
-  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q . "$FI_STANDIN_TRACE"
+  [ ! -s "$FI_STANDIN_TRACE" ]
   [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
 }
 
@@ -285,8 +287,8 @@ sweep_queue() { # queue a sweep for the fixture; sets SID and ST
   [ -f "$ST/queue/$SID" ]
 }
 
-sweep_edit() { # the stand-in fixer fixes whichever entry its prompt names, with a test
-  export FI_STANDIN_EDIT='case "$FI_STANDIN_PROMPT" in *"src/calc.sh:1"*) sed -i.bak "s/ - / + /" src/calc.sh; rm -f src/calc.sh.bak; printf "[ \"\$(add 2 3)\" = 5 ]\n" >> test.sh ;; esac; for f in src/f*.sh; do n="${f#src/f}"; n="${n%.sh}"; case "$FI_STANDIN_PROMPT" in *"src/f$n.sh:1"*) sed -i.bak "s/- 1/+ 0/" "$f"; rm -f "$f.bak"; printf "[ \"\$(f%s 2)\" = 2 ]\n" "$n" >> test.sh ;; esac; done'
+sweep_edit() { # the stand-in fixer fixes whichever entry its prompt names, with its own test file
+  export FI_STANDIN_EDIT='mkdir -p tests; case "$FI_STANDIN_PROMPT" in *"src/calc.sh:1"*) sed -i.bak "s/ - / + /" src/calc.sh; rm -f src/calc.sh.bak; printf "[ \"\$(add 2 3)\" = 5 ]\n" >> tests/t_calc.sh ;; esac; for f in src/f*.sh; do n="${f#src/f}"; n="${n%.sh}"; case "$FI_STANDIN_PROMPT" in *"src/f$n.sh:1"*) sed -i.bak "s/- 1/+ 0/" "$f"; rm -f "$f.bak"; printf "[ \"\$(f%s 2)\" = 2 ]\n" "$n" >> tests/t_f$n.sh ;; esac; done'
 }
 gh_mock() {
   export GH_MOCK_TRACE="$TMP/gh.trace" GH_MOCK_PR_CREATE_URL=https://github.com/foo/bar/pull/9
@@ -435,7 +437,7 @@ gh_mock() {
   [[ "$output" == *"tests fail at base"* ]]
   grep -q '^result=stale: tests fail at base$' "$ST/done/$SID"
   [ -s "$ST/day/$(date +%Y-%m-%d).sweep" ]
-  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q . "$FI_STANDIN_TRACE"
+  [ ! -s "$FI_STANDIN_TRACE" ]
   [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
 }
 
@@ -510,6 +512,102 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   grep -q '^ship_tries=2$' "$ST/queue/$SID"
 }
 
+# 3.3.0 (spec section 9): a sweep fixes every fixable entry and ships one PR
+# per sweepBatch fixes; the rest waits in a continuation item.
+@test "sweep run: ships a PR per batch and queues the next batch" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  sweep_queue
+  source "$FI_BIN"; fi_af_context
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 2 fixed' "$ST/done/$SID"
+  grep -q 'sweep: batch 1 closes at 2 fixes' "$FI_AF_RUNS/$SID.log"
+  grep -q 'sweep: queued batch 2 as ' "$FI_AF_RUNS/$SID.log"
+  grep -q 'found-issues sweep (2 entries, batch 1)' "$GH_MOCK_TRACE"
+  # Launcher A drains the continuation in the same run.
+  n="$(grep -l '^cont=2' "$ST"/done/* | wc -l | tr -d ' ')"
+  [ "$n" = 1 ]
+  c="$(grep -l '^cont=2' "$ST"/done/*)"
+  grep -q '^engine=claude$' "$c"
+  grep -q '^base=main$' "$c"
+  grep -q 'found-issues sweep (2 entries, batch 2)' "$GH_MOCK_TRACE"
+  ! grep -q 'autofix-failed' docs/found-issues.md || false
+}
+
+@test "sweep run: a continuation takes no second daily slot and carries the chain's spend" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  git config found-issues.autofix.dailySweeps 1
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  c="$(grep -l '^cont=2' "$ST"/done/*)"
+  grep -q '^result=shipped' "$c"
+  [ "$(grep -c . "$ST/day/$(date +%Y-%m-%d).sweep")" = 1 ]
+  # The chain's running total rides in chain_cost; the item's own cost is its batch only.
+  awk -F= '$1=="chain_cost" && $2+0 > 0.5 { ok=1 } END { exit !ok }' "$c"
+  # So summing the done items counts the chain's spend once: 5 entries at 0.50 each.
+  total="$(awk -F= '$1=="cost" { s += $2 } END { printf "%.2f", s }' "$ST"/done/*)"
+  [ "$total" = "2.50" ]
+}
+
+@test "sweep run: a batch closes only at a file boundary" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 1
+  # A second entry on src/f1.sh: it sorts next to the first f1 entry.
+  run "$FI_BIN" log --fix medium 'src/f1.sh:1 — f1 ignores its argument'
+  SID="$(printf '%s\n' "$output" | sed -n 's/^AUTOFIX-SWEEP-DUE //p')"
+  ST="$FOUND_ISSUES_STATE_DIR/autofix/foo__bar"
+  [ -n "$SID" ]
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 2 fixed' "$ST/done/$SID"
+}
+
+@test "sweep claim: a continuation skips files in skip_files" {
+  fi_af_sweep_fixture 4; fi_use_standins
+  source "$FI_BIN"; fi_af_context
+  QID=20991231-000000-00003
+  fi_af_item_write "$FI_AF_ST/queue/$QID" "id=$QID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=claude "queued=$(date +%Y-%m-%dT%H:%M:%S)" crashes=0 cont=2 "cap_day=$(date +%Y-%m-%d)" \
+    skip_files=src/f1.sh base=main
+  run "$FI_BIN" autofix claim "$QID"
+  [ "$status" -eq 0 ]
+  grep -q "sweep: skip src/f1.sh:1 (file in an earlier batch's PR)" "$FI_AF_RUNS/$QID.log"
+  [ "$(wc -l < "$FI_AF_ST/sweeps/$QID.entries" | tr -d ' ')" = 3 ]
+  ! grep -q 'src/f1.sh' "$FI_AF_ST/sweeps/$QID.entries" || false
+  # No classify pass and no second day slot for a continuation.
+  [ ! -s "$FI_STANDIN_TRACE" ]
+  [ ! -s "$FI_AF_ST/day/$(date +%Y-%m-%d).sweep" ]
+}
+
+@test "sweep run: a failed batch ship queues no continuation" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  git config remote.origin.pushurl "$TMP/nowhere.git"
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude || true
+  grep -q '^ship_tries=1$' "$ST/queue/$SID"
+  [ "$(find "$ST/queue" "$ST/done" -type f | wc -l | tr -d ' ')" = 1 ]
+  ! grep -q '^cont=' "$ST"/queue/* "$ST"/done/* 2>/dev/null || false
+  # The retry ships the same commits; the rest waits for the next sweep.
+  git config --unset remote.origin.pushurl
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/queue/$SID" wait_next ""
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 2 fixed' "$ST/done/$SID"
+  [ "$(find "$ST/queue" "$ST/done" -type f | wc -l | tr -d ' ')" = 1 ]
+  ! grep -q '^cont=' "$ST"/queue/* "$ST"/done/* 2>/dev/null || false
+}
+
+@test "config: sweepMax still sets the batch size when sweepBatch is unset" {
+  fi_af_fixture
+  source "$FI_BIN"; fi_af_context
+  [ "$(fi_af_sweep_batch)" = 8 ]
+  git config found-issues.autofix.sweepMax 3
+  [ "$(fi_af_sweep_batch)" = 3 ]
+  git config found-issues.autofix.sweepBatch 5
+  [ "$(fi_af_sweep_batch)" = 5 ]
+}
+
 @test "sweep: a ship-retry sweep queued on an earlier day is not retired as never launched" {
   fi_af_sweep_fixture 4
   source "$FI_BIN"; fi_af_context
@@ -580,4 +678,190 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   touch -t 202001010000 "$FI_AF_ST/queue/$QID"
   _fi_af_sweep_retire_stale
   grep -q "^result=stale: ship retry never launched; branch $(sweep_branch) kept" "$FI_AF_ST/done/$QID"
+}
+
+@test "sweep run: the codex token cap stops the sweep and ships what it committed" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  # 1500 tokens per child: with or without a classify child, entry 1 is
+  # fixed and verified and the cap stops entry 2 before its verifier.
+  git config found-issues.autofix.codexSweepTokens 3500
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine codex
+  grep -q '^result=shipped: PR #9, 1 fixed' "$ST/done/$SID"
+  ! grep -q 'autofix-failed' docs/found-issues.md || false
+}
+
+@test "sweep run: a continuation keeps its own engine whatever --engine says" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  source "$FI_BIN"; fi_af_context
+  QID=20991231-000000-00004
+  fi_af_item_write "$FI_AF_ST/queue/$QID" "id=$QID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=codex "queued=$(date +%Y-%m-%dT%H:%M:%S)" crashes=0 cont=2 "cap_day=$(date +%Y-%m-%d)" base=main
+  "$FI_BIN" autofix run "$QID" --engine claude
+  grep -q '^codex' "$FI_STANDIN_TRACE"
+  ! grep -q '^claude' "$FI_STANDIN_TRACE" || false
+  grep -q '^engine=codex$' "$FI_AF_ST/done/$QID"
+  grep -q 'engine codex' "$FI_AF_RUNS/$QID.pr-body.md"
+}
+
+@test "sweep run: a fresh sweep still lets --engine override the queued engine" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/queue/$SID" engine codex
+  "$FI_BIN" autofix run "$SID" --engine claude
+  ! grep -q '^codex' "$FI_STANDIN_TRACE" || false
+  grep -q '^claude' "$FI_STANDIN_TRACE"
+}
+
+@test "sweep run: the engine a sweep ran on is persisted, so its PR body names no codex models for a claude run" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/queue/$SID" engine codex
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^engine=claude$' "$ST/done/$SID"
+  grep -q 'launcher A, engine claude' "$FI_AF_RUNS/$SID.pr-body.md"
+  ! grep -q 'codex models' "$FI_AF_RUNS/$SID.pr-body.md" || false
+}
+
+@test "sweep run: a codex sweep's PR body names the model of each role" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine codex
+  source "$FI_BIN"; fi_af_context
+  grep -q '^engine=codex$' "$ST/done/$SID"
+  grep -q 'Run cost: .*codex models: fixer gpt-6.1-sol (medium), verifier gpt-6-astra (high)' "$FI_AF_RUNS/$SID.pr-body.md"
+}
+
+@test "sweep run: a continuation carries the base reason, so status shows it for both batches" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  c="$(grep -l '^cont=2' "$ST"/done/*)"
+  grep -q '^base_why=default branch$' "$ST/done/$SID"
+  grep -q '^base_why=default branch$' "$c"
+  run "$FI_BIN" autofix status
+  [ "$(printf '%s\n' "$output" | grep -c 'into main (default branch)')" -ge 2 ]
+  ! printf '%s\n' "$output" | grep -q '(?)' || false
+}
+
+@test "sweep run: a sweep after a spot item in one drain starts from zero spend, classify included" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  printf -- '- [open] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small)\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-10-01 src/u1.sh:1 — nobody has tagged this\n' >> docs/found-issues.md
+  git add -A && git commit -q -m calc && git push -q origin main
+  git config found-issues.autofix.codexSweepTokens 3500
+  source "$FI_BIN"; fi_af_context
+  fi_af_queue_spot "$(grep -m1 'add subtracts' docs/found-issues.md)" >/dev/null
+  SPOT="$(ls "$FI_AF_ST/queue" | head -1)"
+  fi_af_new_id; SID="$FI_AF_ID"
+  fi_af_item_write "$FI_AF_ST/queue/$SID" "id=$SID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=codex "queued=2099-01-01T00:00:00" crashes=0
+  ST="$FI_AF_ST"
+  "$FI_BIN" autofix run "$SPOT" --engine codex
+  grep -q '^result=shipped' "$ST/done/$SPOT"
+  grep -q '^tokens=3000$' "$ST/done/$SPOT"
+  [ -f "$ST/done/$SID" ]
+  grep -q 'classify: rc=' "$FI_AF_RUNS/$SID.log"
+  # 1500 per child: classify (1500), entry 1 fixed and verified (4500) meets
+  # the 3500 cap before entry 2. The spot item's 3000 are not on top of it:
+  # with them the classifier alone would have left 4500 and entry 1 never ran.
+  grep -q '^result=shipped: PR #9, 1 fixed' "$ST/done/$SID"
+  grep -q '^tokens=4500$' "$ST/done/$SID"
+}
+
+# Spec section 9: a full batch closes at the first file boundary, whatever the
+# last outcome was; batch PRs never touch the same file or ledger lines.
+@test "sweep run: a settled entry on the last file of a full batch lets the batch close at the boundary" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 1
+  # A second entry on src/f1.sh: it sorts next to the first f1 entry. Its
+  # verifier rejects twice, so it settles failed with the batch already full.
+  run "$FI_BIN" log --fix medium 'src/f1.sh:1 — f1 ignores its argument'
+  SID="$(printf '%s\n' "$output" | sed -n 's/^AUTOFIX-SWEEP-DUE //p')"
+  ST="$FOUND_ISSUES_STATE_DIR/autofix/foo__bar"
+  printf '%s\n' '{"approve":true,"reason":"ok"}' '{"approve":false,"reason":"no"}' '{"approve":false,"reason":"no"}' > "$TMP/verdicts"
+  export FI_STANDIN_VERDICTS="$TMP/verdicts"
+  source "$FI_BIN"; fi_af_context
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 1 fixed' "$ST/done/$SID"
+  grep -q 'sweep: batch 1 closes at 1 fixes' "$FI_AF_RUNS/$SID.log"
+  grep -q 'sweep: queued batch 2 as ' "$FI_AF_RUNS/$SID.log"
+  [ "$(grep -c '	fixed	' "$ST/sweeps/$SID.outcomes")" = 1 ]
+  [ "$(grep -c '	failed	' "$ST/sweeps/$SID.outcomes")" = 1 ]
+}
+
+@test "sweep run: a continuation's PR leaves the PR branch ledger alone and still annotates the source ledger" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  sweep_queue
+  source "$FI_BIN"; fi_af_context
+  "$FI_BIN" autofix run "$SID" --engine claude
+  br1="fi/sweep/${SID%%-*}-${SID##*-}"
+  c="$(grep -l '^cont=2' "$ST"/done/*)"
+  br2="$(sed -n 's/^branch=//p' "$c")"
+  [ -n "$br2" ]
+  # Batch 1 keeps today's behaviour: one annotation commit on its branch.
+  git -C "$TMP/remote.git" log --format=%s "main..$br1" | grep -q '^docs(found-issues): annotate 2 entries with PR 9'
+  # The continuation commits no ledger change at all.
+  ! git -C "$TMP/remote.git" log --format=%s "main..$br2" | grep -q 'docs(found-issues)' || false
+  [ -z "$(git -C "$TMP/remote.git" log --format=%H "main..$br2" -- docs/found-issues.md)" ]
+  grep -q 'PR-branch ledger annotation skipped for a continuation batch' "$FI_AF_RUNS/${c##*/}.log"
+  # The source checkout's ledger is annotated for every shipped entry.
+  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 5 ]
+}
+
+@test "sweep run: a continuation skips an entry whose file an earlier batch changed without citing it" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  printf 'helper() { :; }\n' > src/helper.sh
+  printf -- '- [open] 2026-10-09 src/helper.sh:1 — helper does nothing (fix: medium)\n' >> docs/found-issues.md
+  git add -A && git commit -q -m helper && git push -q origin main
+  # Fixing f1 also edits src/helper.sh, which no fixed entry cites.
+  export FI_STANDIN_EDIT="$FI_STANDIN_EDIT"'; case "$FI_STANDIN_PROMPT" in *"src/f1.sh:1"*) echo "# touched by the f1 fix" >> src/helper.sh ;; esac'
+  git config found-issues.autofix.sweepBatch 2
+  sweep_queue
+  source "$FI_BIN"; fi_af_context
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 2 fixed' "$ST/done/$SID"
+  c="$(grep -l '^cont=2' "$ST"/done/*)"
+  # skip_files holds the batch's whole diff: the cited source files, the
+  # uncited helper and the fixers' test files.
+  skip="$(sed -n 's/^skip_files=//p' "$c")"
+  [[ ":$skip:" == *":src/helper.sh:"* ]]
+  [[ ":$skip:" == *":tests/t_f1.sh:"* ]]
+  grep -q "sweep: skip src/helper.sh:1 (file in an earlier batch's PR)" "$FI_AF_RUNS/${c##*/}.log"
+  ! grep -q 'src/helper.sh' "$ST/sweeps/${c##*/}.entries" || false
+  grep -q 'helper does nothing (fix: medium)$' docs/found-issues.md
+}
+
+@test "sweep run: a continuation's fix that edits a skip_files path is undone and settled skipped" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  export FI_STANDIN_EDIT="$FI_STANDIN_EDIT"'; case "$FI_STANDIN_PROMPT" in *"src/f2.sh:1"*) echo "shared" >> shared.txt ;; esac'
+  source "$FI_BIN"; fi_af_context
+  QID=20991231-000000-00005
+  fi_af_item_write "$FI_AF_ST/queue/$QID" "id=$QID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=claude "queued=$(date +%Y-%m-%dT%H:%M:%S)" crashes=0 cont=2 "cap_day=$(date +%Y-%m-%d)" \
+    skip_files=shared.txt base=main
+  ST="$FI_AF_ST"
+  "$FI_BIN" autofix run "$QID" --engine claude
+  grep -q '^result=shipped: PR #[0-9]*, 3 fixed' "$ST/done/$QID"
+  grep -q "^src/f2.sh:1	skipped	.*	touches shared.txt (file in an earlier batch's PR)$" "$ST/sweeps/$QID.outcomes"
+  br="$(sed -n 's/^branch=//p' "$ST/done/$QID")"
+  [ -z "$(git -C "$TMP/remote.git" log --format=%H "main..$br" -- shared.txt)" ]
+  [ "$(git -C "$TMP/remote.git" log --format=%s "main..$br" | grep -c '^fix: ')" = 3 ]
+  # The entry is untouched on the ledger: not failed, not annotated.
+  grep -q 'f2 subtracts one (fix: medium)$' docs/found-issues.md
+  grep -q '1 skipped' "$FI_AF_RUNS/$QID.pr-body.md"
+}
+
+@test "sweep: a full batch closes before an entry that does not parse, whatever FE_path held" {
+  fi_af_sweep_fixture 2
+  source "$FI_BIN"; fi_af_context
+  mkdir -p "$FI_AF_ST/sweeps"
+  e1='- [open] 2026-10-01 src/f1.sh:1 — f1 subtracts one (fix: medium)'
+  printf '%s\nnot an entry line\n' "$e1" > "$FI_AF_ST/sweeps/b1.entries"
+  git config found-issues.autofix.sweepBatch 1
+  AFI_fixed=1 AFI_cur=2 AFI_entry="$e1" AFI_id=b1
+  FE_path=src/f1.sh
+  run _fi_af_sweep_batch_closes b1
+  [ "$status" -eq 0 ]
 }

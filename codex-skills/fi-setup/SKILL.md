@@ -334,9 +334,9 @@ anything:
 
 > **Auto-fix is off.** When it's on, in a GitHub repo with `gh` signed in and a test command:
 >
-> - Entries tagged `(fix: small)` are fixed in the background, each in its own worktree, branch and PR. When 5 entries are fixable, one sweep fixes up to 8 entries in a single PR.
+> - Entries tagged `(fix: small)` are fixed in the background, each in its own worktree, branch and PR. When 5 entries are fixable, one sweep fixes them all, one PR per 8 fixes.
 > - **Fix PRs merge themselves.** Each fix must pass the repo's tests and a read-only reviewer model, then its PR is set to auto-merge. No human approves it.
-> - **Runs bill your Claude or Codex account, including in the background** where you don't see them. Default caps per repo: 5 spot fixes and 1 sweep a day, up to 8 entries per sweep, $3 per fix run, $10 per sweep, 20 minutes per run (`found-issues config` changes them).
+> - **Runs bill your Claude or Codex account, including in the background** where you don't see them. Default caps per repo: 5 spot fixes and 1 sweep a day, 8 fixes per PR, 20 minutes per run. Runs have no dollar cap unless you set one (`found-issues config autofix.runBudget <usd>`, `autofix.sweepBudget <usd>`); `found-issues config` changes the rest.
 > - Issues that need a decision are never auto-fixed; they wait in `$fi-decide`.
 > - Turn it off any time: `found-issues autofix off` stops it in every repo at once; `found-issues config autofix false` turns this repo off; `FOUND_ISSUES_AUTOFIX=off` stops it for one shell.
 
@@ -351,14 +351,14 @@ multi-select above):
 3. `Turn on in every repo` — run `found-issues config autofix true --global`.
 
 If the user turned it on, ask one more single-select `AskUserQuestion`:
-"Start a sweep when how many entries are fixable?" (a sweep fixes up to 8
-entries in one PR, whatever the number chosen here):
+"Start a sweep when how many entries are fixable?" (a sweep fixes every fixable
+entry, one PR per 8 fixes, whatever the number chosen here):
 
 1. `5 (Recommended)` — description: "The default: sweeps start early and
    stay small."
-2. `10` — description: "Fewer sweep runs; a sweep still fixes up to 8."
+2. `10` — description: "Fewer sweep runs; a sweep still fixes every fixable entry."
 3. `20` — description: "Sweeps only on a large backlog; a sweep still
-   fixes up to 8."
+   fixes every fixable entry."
 
 The automatic Other slot takes any whole number of 1 or more; ask again if
 the answer is not one. Write the choice at the scope auto-fix was turned on

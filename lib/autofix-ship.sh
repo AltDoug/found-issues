@@ -112,6 +112,13 @@ fi_af_spawn() {
   ( cd "$cwd" && nohup "$FI_SELF" "$@" </dev/null >>"$FI_AF_RUNS/spawn.log" 2>&1 & )
 }
 
+# 3.3.0: a Codex run's PR body names the model each role ran on.
+_fi_af_pr_models() {
+  [[ "${AFI_engine:-}" == codex ]] || return 0
+  printf ' \xe2\x80\x94 codex models: fixer %s, verifier %s' \
+    "$(fi_af_codex_margs fixer; printf '%s' "$FI_AF_MDESC")" "$(fi_af_codex_margs verifier; printf '%s' "$FI_AF_MDESC")"
+}
+
 _fi_af_pr_body() {
   local tlog="$1"
   printf 'Unattended fix by found-issues auto-fix (launcher %s, engine %s).\n\n' "${AFI_launcher:-A}" "${AFI_engine:-?}"
@@ -119,7 +126,9 @@ _fi_af_pr_body() {
   printf 'Tests: `%s` passed. Last lines:\n\n' "$FI_AF_TESTCMD"
   tail -n 15 "$tlog" 2>/dev/null | sed 's/^/    /'
   printf '\nVerifier: approved — %s\n' "${FI_AF_VERDICT_REASON:-n/a}"
-  printf 'Run cost: $%s (claude), %s tokens (codex)\n\n' "${FI_AF_COST:-0}" "${FI_AF_TOKENS:-0}"
+  printf 'Run cost: $%s (claude), %s tokens (codex)' "${FI_AF_COST:-0}" "${FI_AF_TOKENS:-0}"
+  _fi_af_pr_models
+  printf '\n\n'
   printf 'This PR merges itself when its checks pass (found-issues auto-fix policy).\n'
 }
 
@@ -172,10 +181,17 @@ _fi_af_publish() {
   fi_af_log "$AFI_id" "opened PR #$FI_AF_PR"
 
   ann="(PR: $AFI_slug#$FI_AF_PR)"
-  # The PR branch's ledger, when origin already has the entry (prompt-9).
-  for p in docs/found-issues.md .found-issues.md; do
-    [[ -f "$wt/$p" ]] && { wl="$p"; break; }
-  done
+  # The PR branch's ledger, when origin already has the entry (prompt-9). A
+  # continuation batch leaves it alone: batch PRs are cut from the same base
+  # and adjacent-line annotations would conflict once the first merges (spec
+  # section 9); the source ledger below is where sync closes the entry.
+  if _fi_af_sweep_is_cont; then
+    fi_af_log "$AFI_id" "PR-branch ledger annotation skipped for a continuation batch"
+  else
+    for p in docs/found-issues.md .found-issues.md; do
+      [[ -f "$wt/$p" ]] && { wl="$p"; break; }
+    done
+  fi
   while IFS=$'\t' read -r key loc || [[ -n "$key" ]]; do
     [[ -n "$key" ]] || continue
     AFI_key="$key" AFI_loc="$loc"
