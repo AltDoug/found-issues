@@ -437,6 +437,22 @@ EOF
   unset GH_MOCK_PR_VIEW
 }
 
+@test "annotate-pr: a fragment that only matches suggested or annotation text is refused (3.3.1 review)" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tlib/x.sh'
+  mkdir -p lib docs && echo x > lib/x.sh
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-09-10 lib/x.sh:10 — flaky download (suggested: retry on 503)
+- [open] 2026-09-12 lib/x.sh:10 — parser drops tail
+EOF
+  fi_run annotate-pr 9 --pick "lib/x.sh:10 — retry"
+  [ "$status" -ne 0 ]
+  ! grep -q '(PR: org/repo#9)' docs/found-issues.md || false
+  [[ "$output" == *"no [open] entry matches"* ]]
+  unset GH_MOCK_PR_VIEW
+}
+
 @test "annotate-pr: --pick applies even when the touched-files fetch is empty" {
   _setup_pr_repo
   export GH_MOCK_PR_VIEW=$'9\t'

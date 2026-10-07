@@ -100,18 +100,21 @@ _fi_pick_group_load() {
 
 # _fi_pick_group_idx <fragment> — FI_PICK_IDX = " <i> <j>..." of the group
 # entries the extended pick form selects: the fragment inside the symptom, and
-# only when no symptom holds it, inside the whole line (so a date or an
-# annotation word can still tell apart an entry whose symptom is a strict
-# prefix of another's).
+# only when no symptom holds it, an entry whose date IS the fragment (so a date
+# can still tell apart an entry whose symptom is a strict prefix of another's;
+# suggested and annotation text never select, 3.3.1).
 _fi_pick_group_idx() {
   local frag="$1" i n="${#_fi_pg_sym[@]}"
+  local re_date='^-[[:space:]]+\[[a-z]+\]([[:space:]]+\[!\])?[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})'
   FI_PICK_IDX=""
   for (( i = 0; i < n; i++ )); do
     [[ "${_fi_pg_sym[$i]}" == *"$frag"* ]] && FI_PICK_IDX+=" $i"
   done
   [[ -n "$FI_PICK_IDX" ]] && return 0
   for (( i = 0; i < n; i++ )); do
-    [[ "${_fi_pg_line[$i]}" == *"$frag"* ]] && FI_PICK_IDX+=" $i"
+    if [[ "${_fi_pg_line[$i]}" =~ $re_date && "${BASH_REMATCH[2]}" == "$frag" ]]; then
+      FI_PICK_IDX+=" $i"
+    fi
   done
   return 0
 }
@@ -119,10 +122,9 @@ _fi_pick_group_idx() {
 # _fi_pick_sub_for <group index> — FI_PICK_SUB = the shortest run of whole
 # symptom words, starting at the first word where this entry differs from every
 # other (else the first word where it differs from any), that selects only this
-# entry; else its date, else a word from its full line that does. Empty when
-# nothing does (identical entries).
+# entry; else its date. Empty when nothing does (identical entries).
 _fi_pick_sub_for() {
-  local c="$1" n="${#_fi_pg_sym[@]}" o i j k_all="" k_min="" all_differ d start len sub w
+  local c="$1" n="${#_fi_pg_sym[@]}" o i k_all="" k_min="" all_differ d start len sub
   local -a wc wo starts
   FI_PICK_SUB=""
   read -r -a wc <<<"${_fi_pg_sym[$c]}"
@@ -160,19 +162,13 @@ _fi_pick_sub_for() {
       if [[ "$FI_PICK_IDX" == " $c" ]]; then FI_PICK_SUB="$sub"; return 0; fi
     done
   done
-  # Nothing in the symptom: the entry's date, then any other word of the line.
+  # No short run: the entry's date.
   local re_date='^-[[:space:]]+\[[a-z]+\]([[:space:]]+\[!\])?[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})'
   if [[ "${_fi_pg_line[$c]}" =~ $re_date ]]; then
-    _fi_pick_group_idx "${BASH_REMATCH[2]}"
-    if [[ "$FI_PICK_IDX" == " $c" ]]; then FI_PICK_SUB="${BASH_REMATCH[2]}"; return 0; fi
+    sub="${BASH_REMATCH[2]}"   # _fi_pick_group_idx runs its own =~
+    _fi_pick_group_idx "$sub"
+    if [[ "$FI_PICK_IDX" == " $c" ]]; then FI_PICK_SUB="$sub"; return 0; fi
   fi
-  read -r -a wo <<<"${_fi_pg_line[$c]}"
-  for (( j = 0; j < ${#wo[@]}; j++ )); do
-    w="${wo[$j]}"
-    (( ${#w} >= 4 )) || continue
-    _fi_pick_group_idx "$w"
-    if [[ "$FI_PICK_IDX" == " $c" ]]; then FI_PICK_SUB="$w"; return 0; fi
-  done
   return 1
 }
 
@@ -207,9 +203,7 @@ _fi_pick_hints() {
       _fi_pick_dq "$FI_PICK_SUB"
       printf '    %s --pick "%s — %s"\n' "$rerun" "$loc" "$FI_PICK_Q"
     else
-      printf '    no distinguishing text: this entry cannot be told apart from its neighbours; pick by the full line, or fix the ledger first:\n'
-      _fi_pick_dq "${hit#*" — "}"
-      printf '    %s --pick "%s — %s"\n' "$rerun" "$loc" "$FI_PICK_Q"
+      printf '    no distinguishing text: this entry cannot be told apart from its neighbours (same symptom, same date); fix the ledger first\n'
     fi
   done <<<"$hit_lines"
 }
