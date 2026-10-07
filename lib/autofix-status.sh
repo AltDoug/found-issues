@@ -268,7 +268,7 @@ fi_af_summary() {
 
 # Phase 5 ruling 9: auto-fix readiness at a glance, on or off (spec §8).
 fi_af_doctor() {
-  local p="$1" w="$2" x="$3" gh_user="$4" e v rb sb rt st
+  local p="$1" w="$2" x="$3" gh_user="$4" e v rb sb rt st r
   git rev-parse --show-toplevel >/dev/null 2>&1 || return 0
   printf '== Auto-fix ==\n'
   if fi_af_enabled; then
@@ -298,6 +298,10 @@ fi_af_doctor() {
   printf '   Engine: %s -> %s\n' "$(fi_af_cfg engine auto)" "${e:-none available}"
   printf '   Codex models: fixer %s, verifier %s, classifier %s\n' \
     "$(fi_af_codex_desc fixer)" "$(fi_af_codex_desc verifier)" "$(fi_af_codex_desc classifier)"
+  for r in fixer verifier classifier; do
+    fi_af_codex_margs "$r"
+    [[ -z "$FI_AF_MWARN" ]] || printf '%s %s\n' "$w" "$FI_AF_MWARN"
+  done
   fi_af_root
   if [[ -s "$FI_AF_ROOT/codex-model-error" ]]; then
     printf '%s Last Codex run failed on its model: %s\n' "$w" "$(head -n 1 "$FI_AF_ROOT/codex-model-error")"

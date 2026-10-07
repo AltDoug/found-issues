@@ -166,6 +166,16 @@ src() {
   [[ "$output" == *"found-issues.autofix.codexModel"*"inherit"*"(local)"* ]]
 }
 
+@test "config: a model value is refused when it starts with a dash and inherit is normalized to lower case" {
+  src
+  FI_CFG_KIND=model FI_CFG_KEY=autofix.codexModel FI_CFG_VAL=-x run _fi_cfg_valid
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"takes a Codex model name"* ]]
+  run "$FI_BIN" config autofix.codexModel Inherit
+  [ "$status" -eq 0 ]
+  [ "$(git config found-issues.autofix.codexModel)" = inherit ]
+}
+
 @test "config: token cap keys are unset by default, validate and fall back to no cap" {
   src
   [ -z "$(fi_af_token_cap)" ]

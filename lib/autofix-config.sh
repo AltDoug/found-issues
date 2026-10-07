@@ -76,18 +76,28 @@ fi_af_budget() {
 }
 
 # 3.3.0 spec section 1: the -m/effort pair for one Codex role. Effort is fixed
-# per role in code, as the claude engine's is. inherit leaves both out, so the
-# user's ~/.codex/config.toml decides. Sets FI_AF_MARGS and FI_AF_MDESC.
-FI_AF_MARGS=() FI_AF_MDESC=""
+# per role in code, as the claude engine's is. inherit (any case) leaves both
+# out, so the user's ~/.codex/config.toml decides. A value that is empty after
+# trimming or starts with '-' (a raw `git config` typo such as "--unset" would
+# reach codex as a flag) is ignored: the role default is used and
+# FI_AF_MWARN says so. Sets FI_AF_MARGS, FI_AF_MDESC and FI_AF_MWARN.
+FI_AF_MARGS=() FI_AF_MDESC="" FI_AF_MWARN=""
 fi_af_codex_margs() {
-  local key=codexModel def=gpt-6.1-sol effort=medium m
+  local key=codexModel def=gpt-6.1-sol effort=medium role="$1" m lc
   case "$1" in
     classifier) effort=low ;;
     verifier) key=codexVerifierModel def=gpt-6-astra effort=high ;;
   esac
   m="$(fi_af_cfg "$key" "$def")"
-  FI_AF_MARGS=()
-  if [[ "$m" == inherit ]]; then FI_AF_MDESC=inherit; return 0; fi
+  m="${m#"${m%%[![:space:]]*}"}"
+  m="${m%"${m##*[![:space:]]}"}"
+  FI_AF_MARGS=() FI_AF_MWARN=""
+  if [[ -z "$m" || "$m" == -* ]]; then
+    FI_AF_MWARN="invalid codex model '$(fi_af_cfg "$key" "$def")' for $role; using default $def"
+    m="$def"
+  fi
+  lc="$(printf '%s' "$m" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$lc" == inherit ]]; then FI_AF_MDESC=inherit; return 0; fi
   FI_AF_MARGS=(-m "$m" -c "model_reasoning_effort=$effort")
   FI_AF_MDESC="$m ($effort)"
 }
@@ -258,7 +268,8 @@ _fi_cfg_valid() {
         fi_err "config: found-issues.$FI_CFG_KEY takes a USD amount above 0, e.g. 3 or 2.5"; return 1
       fi ;;
     model)
-      [[ "$FI_CFG_VAL" =~ ^[A-Za-z0-9._:/-]+$ ]] \
+      [[ "$(printf '%s' "$FI_CFG_VAL" | tr '[:upper:]' '[:lower:]')" == inherit ]] && FI_CFG_VAL=inherit
+      [[ "$FI_CFG_VAL" =~ ^[A-Za-z0-9._:/-]+$ && "$FI_CFG_VAL" != -* ]] \
         || { fi_err "config: found-issues.$FI_CFG_KEY takes a Codex model name (e.g. gpt-6.1-sol) or inherit"; return 1; } ;;
     text)
       [[ -n "$FI_CFG_VAL" ]] || { fi_err "config: found-issues.$FI_CFG_KEY needs a value"; return 1; } ;;

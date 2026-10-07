@@ -59,6 +59,23 @@ teardown() { fi_teardown_tmp; }
   grep -q -- '--allowedTools' "$FI_STANDIN_TRACE"
 }
 
+@test "classify: a failed engine turn tags nothing, even when its text looks like an answer" {
+  export FI_STANDIN_ERROR='{"tags":[{"n":"U1","kind":"fix","value":"small"}],"wake":[]}'
+  AFI_wt="$REPO" AFI_id=c1 AFI_engine=claude AFI_root="$REPO"
+  before="$(cksum < docs/found-issues.md)"
+  fi_af_classify docs/found-issues.md c1
+  [ "$(cksum < docs/found-issues.md)" = "$before" ]
+  grep -q 'classify: engine error: ' "$FI_AF_RUNS/c1.log"
+  [ ! -s "$FI_AF_ST/classify-offered" ]
+  unset FI_STANDIN_ERROR
+  export FI_STANDIN_CODEX_FAIL=read-only
+  AFI_engine=codex
+  fi_af_classify docs/found-issues.md c2
+  [ "$(cksum < docs/found-issues.md)" = "$before" ]
+  grep -q 'classify: engine error: ' "$FI_AF_RUNS/c2.log"
+  [ ! -s "$FI_AF_ST/classify-offered" ]
+}
+
 @test "classify: nothing to classify runs no model" {
   printf '# found-issues\n\n- [open] 2026-10-01 src/calc.sh:1 — tagged (fix: small)\n' > docs/found-issues.md
   AFI_wt="$REPO" AFI_id=c1 AFI_engine=claude

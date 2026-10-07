@@ -246,6 +246,57 @@ teardown() { fi_teardown_tmp; }
   [ "$FI_AF_MDESC" = "inherit" ]
 }
 
+@test "autofix engine: inherit drops -m and effort for the fixer and classifier too, under set -u" {
+  git config found-issues.autofix.codexModel inherit
+  set -u
+  fi_af_fixer_cmd codex "P" "$TMP/last"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/fix"
+  ! grep -qx -- '-m' "$TMP/fix" || false
+  ! grep -q 'model_reasoning_effort' "$TMP/fix" || false
+  [ "${FI_AF_CMD[${#FI_AF_CMD[@]}-1]}" = "P" ]
+  fi_af_codex_margs classifier
+  [ "${#FI_AF_MARGS[@]}" -eq 0 ]
+  [ "$FI_AF_MDESC" = "inherit" ]
+  printf -- '- [open] 2026-10-01 src/calc.sh:1 — untagged thing\n' >> docs/found-issues.md
+  export FI_STANDIN_TRACE="$TMP/trace"
+  FI_AF_RUNS="$TMP"; AFI_engine=codex
+  fi_af_classify docs/found-issues.md t1 || true
+  set +u
+  grep -q '^codex' "$TMP/trace"
+  ! grep -q 'model_reasoning_effort' "$TMP/trace" || false
+}
+
+@test "autofix engine: inherit is matched in any case" {
+  git config found-issues.autofix.codexVerifierModel INHERIT
+  fi_af_verifier_cmd codex "V" "$TMP/last" "$TMP/schema"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/ver"
+  ! grep -qx -- '-m' "$TMP/ver" || false
+  fi_af_codex_margs verifier
+  [ "$FI_AF_MDESC" = "inherit" ]
+  git config found-issues.autofix.codexModel ' Inherit '
+  fi_af_codex_margs fixer
+  [ "${#FI_AF_MARGS[@]}" -eq 0 ]
+}
+
+@test "autofix engine: a model value starting with a dash is ignored with a warning and the default is used" {
+  git config found-issues.autofix.codexModel '--unset'
+  fi_af_codex_margs fixer
+  [ "${FI_AF_MARGS[*]}" = "-m gpt-6.1-sol -c model_reasoning_effort=medium" ]
+  [ "$FI_AF_MWARN" = "invalid codex model '--unset' for fixer; using default gpt-6.1-sol" ]
+  git config found-issues.autofix.codexVerifierModel '   '
+  fi_af_codex_margs verifier
+  [ "${FI_AF_MARGS[*]}" = "-m gpt-6-astra -c model_reasoning_effort=high" ]
+  [[ "$FI_AF_MWARN" == "invalid codex model '   ' for verifier; using default gpt-6-astra" ]]
+  git config found-issues.autofix.codexModel gpt-ok
+  fi_af_codex_margs fixer
+  [ -z "$FI_AF_MWARN" ]
+  fi_af_log t1 "x"
+  FI_AF_RUNS="$TMP"; git config found-issues.autofix.codexModel '-x'
+  FI_AF_CHILD_TOKENS=1 FI_AF_TOKENS=1 fi_af_codex_note t1 fixer
+  grep -q 'warning: invalid codex model .-x. for fixer; using default gpt-6.1-sol' "$TMP/t1.log"
+  grep -q 'codex fixer: model gpt-6.1-sol (medium)' "$TMP/t1.log"
+}
+
 @test "autofix engine: a custom codex model passes through as one argv element" {
   git config found-issues.autofix.codexModel 'org/model:tag-1.2'
   fi_af_fixer_cmd codex "P" "$TMP/last"

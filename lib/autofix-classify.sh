@@ -134,6 +134,11 @@ fi_af_classify() {
     fi_af_item_set "$FI_AF_ST/running/$id" tokens "$FI_AF_TOKENS" || true
   fi
   fi_af_log "$id" "classify: rc=$rc"
+  # A failed turn (outage, rejected model) answers nothing: tag nothing and
+  # offer nothing, so the entries are shown to the next sweep's classifier.
+  if [[ -n "$FI_AF_ENGINE_ERR" ]]; then
+    fi_af_log "$id" "classify: engine error: $FI_AF_ENGINE_ERR"; return 0
+  fi
   t="$FI_AF_TEXT"
   [[ "$t" == *"{"*"}"* ]] || return 0
   t="{${t#*\{}"

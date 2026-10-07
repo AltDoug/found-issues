@@ -352,6 +352,7 @@ fi_af_codex_note() {
   fi_af_codex_margs "$2"
   local cap
   cap="$(fi_af_token_cap)"
+  [[ -z "$FI_AF_MWARN" ]] || fi_af_log "$1" "warning: $FI_AF_MWARN"
   fi_af_log "$1" "codex $2: model $FI_AF_MDESC, $FI_AF_CHILD_TOKENS tokens, run total $FI_AF_TOKENS${cap:+/$cap}"
 }
 

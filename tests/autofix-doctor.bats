@@ -77,3 +77,10 @@ teardown() { fi_teardown_tmp; }
   run "$FI_BIN" doctor
   [[ "$output" != *"Last Codex run failed on its model"* ]]
 }
+
+@test "doctor auto-fix: a dash-led codex model is called out and the default shown" {
+  git config found-issues.autofix.codexModel '--unset'
+  run "$FI_BIN" doctor
+  [[ "$output" == *"invalid codex model '--unset' for fixer; using default gpt-6.1-sol"* ]]
+  [[ "$output" == *"Codex models: fixer gpt-6.1-sol (medium)"* ]]
+}
