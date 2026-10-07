@@ -33,6 +33,7 @@ teardown() { fi_teardown_tmp; }
 }
 
 @test "autofix engine: claude fixer is sandboxed - restricted, no MCP, named tools, sandbox settings" {
+  fi_af_sandbox_available() { return 0; }
   fi_af_allowlist 'sh test.sh'
   fi_af_fixer_cmd claude "P" "$TMP/last"
   printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
@@ -50,6 +51,40 @@ teardown() { fi_teardown_tmp; }
   [ "$(printf '%s' "$settings" | jq -r '.sandbox.failIfUnavailable')" = true ]
   [ "$(printf '%s' "$settings" | jq -r '.sandbox.allowUnsandboxedCommands')" = false ]
   [ "$(printf '%s' "$settings" | jq -r '.sandbox.network.allowedDomains[0]')" = '*' ]
+}
+
+@test "autofix engine: no sandbox runtime - claude fixer fails open without --settings and warns" {
+  fi_af_sandbox_available() { return 1; }
+  fi_af_allowlist 'sh test.sh'
+  fi_af_fixer_cmd claude "P" "$TMP/last"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  ! grep -qx -- '--settings' "$TMP/argv" || false
+  grep -qx -- '--restricted' "$TMP/argv"
+  grep -qx -- '--strict-mcp-config' "$TMP/argv"
+  [ "$(awk '/^--tools$/{f=1;next} /^--/{f=0} f' "$TMP/argv" | tr '\n' ' ')" = "Read Edit Write Glob Grep Bash " ]
+  [[ "$FI_AF_SBWARN" == *"unsandboxed"* ]]
+  # a sandboxed build clears the warning; codex never sets it
+  fi_af_sandbox_available() { return 0; }
+  fi_af_fixer_cmd claude "P" "$TMP/last"
+  [ -z "$FI_AF_SBWARN" ]
+  fi_af_sandbox_available() { return 1; }
+  fi_af_fixer_cmd codex "P" "$TMP/last"
+  [ -z "$FI_AF_SBWARN" ]
+}
+
+@test "autofix engine: sandbox runtime detection by platform" {
+  mkdir -p "$TMP/sbin"
+  stub() { printf '#!/bin/sh\n%s\n' "$2" > "$TMP/sbin/$1"; chmod +x "$TMP/sbin/$1"; }
+  PATH="$TMP/sbin:$PATH"
+  stub uname 'echo MINGW64_NT-10.0-26100'
+  ! fi_af_sandbox_available || false
+  stub uname 'echo Linux'
+  stub bwrap 'exit 0'
+  stub socat 'exit 0'
+  fi_af_sandbox_available
+  stub uname 'echo Darwin'
+  stub sandbox-exec 'exit 0'
+  fi_af_sandbox_available
 }
 
 @test "autofix engine: claude verifier is restricted with no MCP and only its search tools" {
