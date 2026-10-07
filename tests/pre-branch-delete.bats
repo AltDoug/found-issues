@@ -184,9 +184,19 @@ EOF
   : > docs/found-issues.md
 
   input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/work"}}'
-  run bash -c "echo '$input' | '$HOOK'"
+  # Claude: the note reaches the model as PreToolUse additionalContext on
+  # stdout (stderr on exit 0 is never delivered), one JSON object, no stderr.
+  run bash -c "echo '$input' | FOUND_ISSUES_HARNESS=claude '$HOOK' 2>'$TMP/err'"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"promote-guard skipped"* ]] || [[ "$output" == *"does not track"* ]]
+  [ ! -s "$TMP/err" ]
+  [ "$(printf '%s' "$output" | jq -s 'length')" = 1 ]
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext | contains("promote-guard skipped")' >/dev/null
+  # Codex keeps the note on stderr.
+  run bash -c "echo '$input' | FOUND_ISSUES_HARNESS=codex '$HOOK' 2>'$TMP/err'"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  grep -q 'promote-guard skipped' "$TMP/err"
 }
 
 @test "pre-branch-delete: respects inline FOUND_ISSUES_PROMOTE_GUARD=off prefix in the command string" {

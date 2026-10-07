@@ -86,6 +86,31 @@ teardown() { fi_teardown_tmp; }
   [ -z "$output" ]
 }
 
+@test "pre-emit: claude gets PreToolUse additionalContext JSON on stdout" {
+  CLAUDE_CODE_ENTRYPOINT=cli FOUND_ISSUES_HARNESS=claude fi_emit_pre_context $'warn\nline "q"' >"$TMP/out" 2>"$TMP/err"
+  [ ! -s "$TMP/err" ]
+  jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' "$TMP/out" >/dev/null
+  jq -e '.hookSpecificOutput.additionalContext == "warn\nline \"q\""' "$TMP/out" >/dev/null
+}
+
+@test "pre-emit: codex keeps the advisory on stderr" {
+  FOUND_ISSUES_HARNESS=codex fi_emit_pre_context "advisory text" >"$TMP/out" 2>"$TMP/err"
+  [ ! -s "$TMP/out" ]
+  grep -q 'advisory text' "$TMP/err"
+}
+
+@test "pre-emit: claude without jq keeps the advisory on stderr" {
+  FOUND_ISSUES_HARNESS=claude PATH="/usr/bin/nonexistent" fi_emit_pre_context "advisory text" >"$TMP/out" 2>"$TMP/err"
+  [ ! -s "$TMP/out" ]
+  grep -q 'advisory text' "$TMP/err"
+}
+
+@test "pre-emit: empty text emits nothing" {
+  FOUND_ISSUES_HARNESS=claude fi_emit_pre_context "" >"$TMP/out" 2>"$TMP/err"
+  [ ! -s "$TMP/out" ]
+  [ ! -s "$TMP/err" ]
+}
+
 @test "session-emit: plain text on claude" {
   CLAUDE_CODE_ENTRYPOINT=cli run fi_emit_session_context "hello world"
   [ "$output" = "hello world" ]

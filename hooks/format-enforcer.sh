@@ -277,8 +277,16 @@ case "$mode" in
     exit 0
     ;;
   git)
-    # Passive warn — emit to stderr but allow
-    printf '%s\n' "$report" >&2
+    # Passive warn, allow. stderr on a PreToolUse exit 0 reaches nobody, so
+    # on Claude the report goes out as additionalContext on stdout
+    # (fi_emit_pre_context; Codex and no-jq keep stderr).
+    if [[ -n "$lib_dir" && -f "$lib_dir/harness.sh" ]]; then
+      # shellcheck source=../lib/harness.sh
+      source "$lib_dir/harness.sh"
+      fi_emit_pre_context "$report"
+    else
+      printf '%s\n' "$report" >&2
+    fi
     exit 0
     ;;
   github-direct|github-pr)
