@@ -342,6 +342,81 @@ _setup_pr_repo() {
   unset GH_MOCK_PR_VIEW
 }
 
+# Each "--pick" the refusal prints must select exactly one co-located entry.
+_assert_each_printed_pick_selects_one() { # $1 = refusal output, $2 = expected pick count
+  local picks pick n=0 total
+  picks="$(printf '%s\n' "$1" | sed -n 's/^  .* --pick "\(src\/hot\.py:[0-9]* — .*\)"$/\1/p')"
+  [ -n "$picks" ]
+  cp docs/found-issues.md "$TMP/ledger.orig"
+  while IFS= read -r pick; do
+    [ -n "$pick" ] || continue
+    cp "$TMP/ledger.orig" docs/found-issues.md
+    fi_run annotate-pr 9 --pick "$pick"
+    [ "$status" -eq 0 ]
+    total="$(grep -c '(PR: org/repo#9)' docs/found-issues.md)"
+    [ "$total" -eq 1 ]
+    n=$((n + 1))
+  done <<<"$picks"
+  [ "$n" -eq "$2" ]
+  cp "$TMP/ledger.orig" docs/found-issues.md
+}
+
+@test "annotate-pr: an ambiguous pick prints a distinguishing --pick per candidate (amended copy next to the original)" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src docs && echo x > src/hot.py
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-09-10 src/hot.py:2 — null deref crash
+- [open] 2026-09-12 src/hot.py:2 — null deref crash on startup when config is missing
+EOF
+  fi_run annotate-pr 9 --pick "src/hot.py:2 — null deref"
+  [ "$status" -ne 0 ]
+  ! grep -q '(PR: org/repo#9)' docs/found-issues.md || false
+  [[ "$output" == *"refusing picks"* ]]
+  # the extended copy is told apart by its first extra word, the original by its date
+  [[ "$output" == *'--pick "src/hot.py:2 — on"'* ]]
+  [[ "$output" == *'--pick "src/hot.py:2 — 2026-09-10"'* ]]
+  _assert_each_printed_pick_selects_one "$output" 2
+  unset GH_MOCK_PR_VIEW
+}
+
+@test "annotate-pr: distinguishing picks start at the first differing word and are whole-word runs" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src docs && echo x > src/hot.py
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-09-10 src/hot.py:3 — crash in parser on empty input
+- [open] 2026-09-10 src/hot.py:3 — crash in lexer on empty input
+- [open] 2026-09-10 src/hot.py:3 — crash in parser on null input
+EOF
+  fi_run annotate-pr 9 --pick src/hot.py:3
+  [ "$status" -ne 0 ]
+  ! grep -q '(PR: org/repo#9)' docs/found-issues.md || false
+  [[ "$output" == *'--pick "src/hot.py:3 — lexer"'* ]]
+  [[ "$output" == *'--pick "src/hot.py:3 — parser on empty"'* ]]
+  [[ "$output" == *'--pick "src/hot.py:3 — null"'* ]]
+  _assert_each_printed_pick_selects_one "$output" 3
+  unset GH_MOCK_PR_VIEW
+}
+
+@test "annotate-pr: two byte-identical co-located entries say so and never guess" {
+  _setup_pr_repo
+  export GH_MOCK_PR_VIEW=$'9\tsrc/hot.py'
+  mkdir -p src docs && echo x > src/hot.py
+  cat > docs/found-issues.md <<'EOF'
+# found-issues
+- [open] 2026-09-10 src/hot.py:2 — null deref crash
+- [open] 2026-09-10 src/hot.py:2 — null deref crash
+EOF
+  fi_run annotate-pr 9 --pick src/hot.py:2
+  [ "$status" -ne 0 ]
+  ! grep -q '(PR: org/repo#9)' docs/found-issues.md || false
+  [[ "$output" == *"no distinguishing text"* ]]
+  unset GH_MOCK_PR_VIEW
+}
+
 @test "annotate-pr: --pick applies even when the touched-files fetch is empty" {
   _setup_pr_repo
   export GH_MOCK_PR_VIEW=$'9\t'
