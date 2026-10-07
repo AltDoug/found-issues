@@ -323,15 +323,36 @@ _fi_af_sweep_advance() {
   AFI_attempts=0 AFI_verdict=""
 }
 
+# In a continuation batch: the first staged path of <wt> (against <ref>) that
+# is in skip_files, on stdout; rc 1 when none (or not a continuation).
+_fi_af_sweep_skip_hit() {
+  local p
+  _fi_af_sweep_is_cont && [[ -n "${AFI_skip_files:-}" ]] || return 1
+  while IFS= read -r p || [[ -n "$p" ]]; do
+    if [[ -n "$p" && ":$AFI_skip_files:" == *":$p:"* ]]; then printf '%s' "$p"; return 0; fi
+  done < <(git -C "$1" -c core.quotepath=off diff --cached --name-only "$2" 2>/dev/null)
+  return 1
+}
+
 # The verifier approved FI_AF_TREE: commit exactly that tree as this entry's
-# one commit (spec §6 step 4).
+# one commit (spec §6 step 4). rc 0 committed; rc 1 refused (the caller
+# settles it failed); rc 2 dropped and already settled as skipped.
 fi_af_sweep_commit() {
-  local id="$1" r="$FI_AF_ST/running/$1" frag
+  local id="$1" r="$FI_AF_ST/running/$1" frag p
   FI_AF_WHY=""
   fi_af_reset_ledger "$AFI_wt" "$AFI_head"
   git -C "$AFI_wt" add -A >/dev/null 2>&1 || true
   if [[ -z "$FI_AF_TREE" || "$(git -C "$AFI_wt" write-tree 2>/dev/null)" != "$FI_AF_TREE" ]]; then
     FI_AF_WHY="the change differs from what the verifier approved"; return 1
+  fi
+  # A continuation batch is cut from origin/<base>, where an earlier batch's
+  # PR may not be merged: a change to one of that chain's files would conflict
+  # with it (spec section 9). The entry is dropped, not failed: it stays
+  # eligible for the next sweep once those PRs have merged.
+  if p="$(_fi_af_sweep_skip_hit "$AFI_wt" "$AFI_head")"; then
+    FI_AF_WHY="touches $p (file in an earlier batch's PR)"
+    fi_af_sweep_settle "$id" skipped "$FI_AF_WHY"
+    return 2
   fi
   fi_parse_entry_vars "$AFI_entry" || true
   frag="${FE_symptom:-$AFI_loc}"
@@ -362,11 +383,15 @@ fi_af_sweep_settle() {
   _fi_af_sweep_record "$outcome" "$text"
   fi_af_log "$id" "sweep: $AFI_loc $outcome: $text"
   _fi_af_sweep_advance
+  # Whatever the last outcome was, a full batch closes at the first file
+  # boundary; checking only after a commit let a settled entry carry the
+  # batch past it.
+  _fi_af_sweep_close_if_full "$id" "${AFI_engine:-}" || true
 }
 
-# Right after a commit (AFI_cur already points at the next entry): the batch
-# is full and the next entry cites another file, so the batch closes here. A
-# file never straddles two PRs. rc 1 = keep going.
+# Right after an entry settles or commits (AFI_cur already points at the
+# next entry): the batch is full and the next entry cites another file, so
+# the batch closes here. A file never straddles two PRs. rc 1 = keep going.
 _fi_af_sweep_batch_closes() {
   local id="$1" f="$FI_AF_ST/sweeps/$1.entries" i=0 line next="" prev
   (( ${AFI_fixed:-0} >= $(fi_af_sweep_batch) )) || return 1
@@ -390,7 +415,7 @@ _fi_af_sweep_batch_closes() {
 _fi_af_sweep_close_if_full() {
   local id="$1" engine="$2" r="$FI_AF_ST/running/$1"
   _fi_af_sweep_batch_closes "$id" || return 1
-  fi_af_item_set "$r" engine "$engine"
+  [[ -z "$engine" ]] || fi_af_item_set "$r" engine "$engine"
   fi_af_item_set "$r" more 1
   AFI_more=1
   return 0
@@ -439,7 +464,7 @@ _fi_af_sweep_batch_no() {
 # then one PR (spec §6 steps 4-5). A budget stop or an engine outage leaves
 # the current entry untouched and ships what is committed (ruling 7).
 _fi_af_run_sweep() {
-  local id="$1" engine_opt="$2" r="$FI_AF_ST/running/$1" engine want
+  local id="$1" engine_opt="$2" r="$FI_AF_ST/running/$1" engine want rc
   fi_af_item_read "$r" || return 0
   _fi_af_chain_seed
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
@@ -470,11 +495,13 @@ _fi_af_run_sweep() {
         fi_af_log "$id" "sweep: engine error: $FI_AF_OUTCOME_TEXT"
         _fi_af_reset_wt; break ;;
       approved)
-        if fi_af_sweep_commit "$id"; then
-          _fi_af_sweep_close_if_full "$id" "$engine" && break
-        else
-          fi_af_sweep_settle "$id" failed "commit: $FI_AF_WHY"
-        fi ;;
+        rc=0
+        fi_af_sweep_commit "$id" || rc=$?
+        case $rc in
+          0) _fi_af_sweep_close_if_full "$id" "$engine" && break ;;
+          2) ;;
+          *) fi_af_sweep_settle "$id" failed "commit: $FI_AF_WHY" ;;
+        esac ;;
       failed)
         if [[ "$FI_AF_OUTCOME_TEXT" == "run budget spent"* ]]; then
           fi_af_log "$id" "sweep: $FI_AF_OUTCOME_TEXT"
@@ -483,6 +510,8 @@ _fi_af_run_sweep() {
         fi_af_sweep_settle "$id" failed "$FI_AF_OUTCOME_TEXT" ;;
       *) fi_af_sweep_settle "$id" "$FI_AF_OUTCOME" "$FI_AF_OUTCOME_TEXT" ;;
     esac
+    # A settled entry can close a full batch too (fi_af_sweep_settle).
+    [[ "${AFI_more:-}" == 1 ]] && break
   done
   # `autofix off` mid-sweep gives it back untouched, like B's verify and
   # ship (exit 8): nothing ships and nothing merges after the switch.
@@ -498,7 +527,7 @@ _fi_af_run_sweep() {
 # "2 fixed, 1 failed" from the outcomes file.
 _fi_af_sweep_tally() {
   local f="$FI_AF_ST/sweeps/$1.outcomes" k c loc out key text t=""
-  for k in fixed already-fixed decide manual failed; do
+  for k in fixed already-fixed decide manual failed skipped; do
     c=0
     if [[ -f "$f" ]]; then
       while IFS=$'\t' read -r loc out key text || [[ -n "$loc" ]]; do
@@ -532,9 +561,9 @@ fi_af_sweep_finish() {
 }
 
 # The continuation item: what fi_af_sweep_check writes, plus the chain state.
-# skip_files holds every file an earlier batch of the chain fixed: their PRs
-# may not be merged yet, so a later batch cut from origin/<base> must not
-# touch them. The item keeps this batch's base and resolved engine.
+# skip_files holds every file an earlier batch of the chain changed (the
+# paths its entries cite plus its whole diff): their PRs may not be merged
+# yet, so a later batch cut from origin/<base> must not touch them. The item keeps this batch's base and resolved engine.
 _fi_af_sweep_queue_next() {
   local id="$1" nxt skip="${AFI_skip_files:-}" loc out key text p
   nxt=$(( $(_fi_af_sweep_batch_no) + 1 ))
@@ -543,6 +572,13 @@ _fi_af_sweep_queue_next() {
     p="${loc%%:*}"
     [[ -n "$p" && ":$skip:" != *":$p:"* ]] && skip+="${skip:+:}$p"
   done <"$FI_AF_ST/sweeps/$id.outcomes"
+  # Every file this batch changed, not just the ones its entries cite: a
+  # fixer's test file or a shared helper conflicts with the batch's PR too.
+  if [[ -n "${AFI_base_sha:-}" && -n "${AFI_head:-}" ]]; then
+    while IFS= read -r p || [[ -n "$p" ]]; do
+      [[ -n "$p" && ":$skip:" != *":$p:"* ]] && skip+="${skip:+:}$p"
+    done < <(git -C "$AFI_root" -c core.quotepath=off diff --name-only "$AFI_base_sha" "$AFI_head" 2>/dev/null)
+  fi
   fi_af_new_id
   fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID" "id=$FI_AF_ID" "kind=sweep" \
     "root=$AFI_root" "slug=$AFI_slug" "loc=sweep" "engine=$AFI_engine" \

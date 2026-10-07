@@ -529,7 +529,7 @@ _fi_af_ledger_outcome() {
     already-fixed) fi_af_ledger_resolve ;;
     decide|manual) fi_af_ledger_tag "$1" "$2" ;;
     failed)        fi_af_ledger_tag autofix-failed "$2" ;;
-    shipped|stale) return 0 ;;
+    shipped|stale|skipped) return 0 ;;
     *) fi_err "autofix: unknown outcome $1"; return 2 ;;
   esac
 }

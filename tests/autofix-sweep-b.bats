@@ -21,7 +21,8 @@ fix_current() { # fix the entry `next` names (an fN entry), with a test
   [ -n "$loc" ]
   n="${loc#src/f}"; n="${n%.sh}"
   sed -i.bak 's/- 1/+ 0/' "$WT/$loc"; rm -f "$WT/$loc.bak"
-  printf '[ "$(f%s 2)" = 2 ]\n' "$n" >> "$WT/test.sh"
+  mkdir -p "$WT/tests"
+  printf '[ "$(f%s 2)" = 2 ]\n' "$n" >> "$WT/tests/t_f$n.sh"
 }
 
 @test "sweep b: brief lists next, test, verify, release and ship" {
@@ -131,7 +132,7 @@ fix_current() { # fix the entry `next` names (an fN entry), with a test
   [[ "$output" == *"PR #9"* ]]
   [ "$(grep -l '^cont=2' "$ST"/queue/* | wc -l | tr -d ' ')" = 1 ]
   c="$(grep -l '^cont=2' "$ST"/queue/*)"
-  grep -q '^skip_files=src/f[0-9]*\.sh$' "$c"
+  grep -q '^skip_files=src/f[0-9]*\.sh:tests/t_f[0-9]*\.sh$' "$c"
   grep -q '^base=main$' "$c"
   grep -q '^chain_cost=' "$c"
   grep -q 'found-issues sweep (1 entries, batch 1)' "$GH_MOCK_TRACE"
@@ -141,4 +142,25 @@ fix_current() { # fix the entry `next` names (an fN entry), with a test
   run "$FI_BIN" autofix brief "$SID"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Exit 3: the tests fail"* ]]
+}
+
+@test "sweep b: a settled entry on the last file of a full batch closes the batch" {
+  git config found-issues.autofix.sweepBatch 1
+  # A second entry on the first entry's file, next to it in the list.
+  first="$(sed -n 1p "$ST/sweeps/$SID.entries")"
+  { printf '%s\n' "$first"; printf '%s\n' "${first/subtracts one/ignores its argument}"; sed -n '2,$p' "$ST/sweeps/$SID.entries"; } > "$TMP/entries"
+  cp "$TMP/entries" "$ST/sweeps/$SID.entries"
+  fix_current
+  run "$FI_BIN" autofix verify "$SID"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"closes at"* ]]
+  grep -q '^more=$' "$ST/running/$SID"
+  run "$FI_BIN" autofix release "$SID" --failed "no"
+  [ "$status" -eq 0 ]
+  grep -q '^more=1$' "$ST/running/$SID"
+  run "$FI_BIN" autofix next "$SID"
+  [[ "$output" == "No entries left. Run: found-issues autofix ship $SID" ]]
+  run "$FI_BIN" autofix ship "$SID"
+  [ "$status" -eq 0 ]
+  [ "$(grep -l '^cont=2' "$ST"/queue/* | wc -l | tr -d ' ')" = 1 ]
 }

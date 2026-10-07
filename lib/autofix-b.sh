@@ -157,7 +157,11 @@ fi_af_b_verify() {
   fi_af_touch_lock "$id"
   if [[ "$FI_AF_APPROVE" == "true" ]] && (( sweep )); then
     FI_AF_VERDICT_REASON="$FI_AF_REASON"
-    if ! fi_af_sweep_commit "$id"; then
+    local crc=0
+    fi_af_sweep_commit "$id" || crc=$?
+    if (( crc == 2 )); then
+      printf 'not committed (%s): entry skipped.\nNext: found-issues autofix next %s\n' "$FI_AF_WHY" "$id"; return 5
+    elif (( crc != 0 )); then
       fi_af_sweep_settle "$id" failed "commit: $FI_AF_WHY"
       printf 'not committed (%s): entry marked failed.\nNext: found-issues autofix next %s\n' "$FI_AF_WHY" "$id"; return 5
     fi

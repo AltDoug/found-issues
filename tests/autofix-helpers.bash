@@ -54,7 +54,10 @@ fi_af_sweep_fixture() {
   local n="${1:-5}" i
   fi_af_fixture
   printf '# found-issues\n\n' > docs/found-issues.md
-  printf '. ./src/calc.sh\n' > test.sh
+  # Each fix adds its own test as tests/t_<name>.sh, picked up here, so two
+  # entries' fixes never edit the same test file (which a later batch of a
+  # chain would have to skip, spec section 9).
+  printf '. ./src/calc.sh\nfor t in tests/t_*.sh; do [ -f "$t" ] && . "./$t"; done\n' > test.sh
   for (( i = 1; i <= n; i++ )); do
     printf 'f%s() { echo $(( $1 - 1 )); }\n' "$i" > "src/f$i.sh"
     printf '. ./src/f%s.sh\n' "$i" >> test.sh
