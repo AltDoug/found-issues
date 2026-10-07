@@ -20,6 +20,7 @@
 #   fi_af_allowlist <test-command>
 #   fi_af_fixer_prompt <test-command> <feedback> [<engine>]
 #   fi_af_verifier_prompt <diff>
+#   fi_af_sandbox_available
 #   fi_af_fixer_cmd <engine> <prompt> <last-file>
 #   fi_af_verifier_cmd <engine> <prompt> <last-file> <schema-file>
 #   fi_af_collect <engine> <out> <last-file>
@@ -36,6 +37,19 @@
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
+# The fixer's Bash sandbox (3.3.1). Measured live 2026-10-07 (Claude Code
+# 2.1.292): with --restricted, `sh test.sh` could not write under $HOME
+# ("Operation not permitted"), could reach https://example.com (200), and
+# dangerouslyDisableSandbox was ignored. network.allowedDomains is needed:
+# without it every outbound host answers 403. Git still works from the
+# fixer's linked worktree: `git add` there wrote the index under the main
+# repo's .git while a plain write to the main checkout was refused (measured
+# 2026-10-07, same build). Per-user package caches stay writable so a test
+# command that fills one (go test, cargo test, uv run, gradle, npm) behaves
+# as it does at baseline; found-issues' own cache stays denied (measured the
+# same day: ~/.cache writable, ~/.cache/found-issues and ~/Documents refused).
+FI_AF_SANDBOX_SETTINGS='{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false,"network":{"allowedDomains":["*"]},"filesystem":{"allowWrite":["~/.cache","~/Library/Caches","~/.npm","~/.cargo/registry","~/.cargo/git","~/go/pkg/mod","~/.gradle/caches","~/.m2/repository"],"denyWrite":["~/.cache/found-issues"]}}}'
+FI_AF_SBWARN=""
 FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_BARGS=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
 FI_AF_RESULT="" FI_AF_RESULT_TEXT="" FI_AF_APPROVE="false" FI_AF_REASON=""
 FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0 FI_AF_VERDICT_OK=0
@@ -176,15 +190,44 @@ Reply with only a JSON object: {"approve": true or false, "reason": "<one senten
 EOF
 }
 
+# 0 when this host has the runtime Claude Code's Bash sandbox needs:
+# Seatbelt (sandbox-exec) on macOS, bubblewrap + socat on Linux and WSL2;
+# native Windows has none.
+fi_af_sandbox_available() {
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) command -v sandbox-exec >/dev/null 2>&1 ;;
+    Linux) command -v bwrap >/dev/null 2>&1 && command -v socat >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
 fi_af_fixer_cmd() {
-  local engine="$1" prompt="$2" last="$3"
+  local engine="$1" prompt="$2" last="$3" sb=()
+  FI_AF_SBWARN=""
   if [[ "$engine" == "codex" ]]; then
     fi_af_codex_margs fixer
     FI_AF_CMD=(codex exec --sandbox workspace-write -C "$AFI_wt" --ephemeral --json
       ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"} -o "$last" "$prompt")
   else
     fi_af_budget_args
-    FI_AF_CMD=(claude -p --model sonnet ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
+    # 3.3.1: --restricted confines Edit/Write to the worktree and ignores the
+    # user/project/local settings; --strict-mcp-config (no --mcp-config) loads
+    # no MCP server. --tools names the only tools the role gets; the
+    # --allowedTools Bash(...) patterns stay the gate on which commands run;
+    # --settings turns on the OS sandbox for that Bash command (writes outside
+    # the worktree denied, network open, no dangerouslyDisableSandbox escape,
+    # and no start at all when a present runtime fails). A host with no
+    # sandbox runtime fails open instead: no --settings, a run-log warning,
+    # and --restricted plus no MCP still apply (ruling 2026-10-07).
+    if fi_af_sandbox_available; then
+      sb=(--settings "$FI_AF_SANDBOX_SETTINGS")
+    else
+      FI_AF_SBWARN="no Claude sandbox runtime on this host (macOS sandbox-exec, or bubblewrap + socat on Linux): the fixer's test command runs unsandboxed; its file tools stay confined to the worktree"
+    fi
+    FI_AF_CMD=(claude -p --restricted --strict-mcp-config
+      ${sb[@]+"${sb[@]}"}
+      --tools Read Edit Write Glob Grep Bash
+      --model sonnet ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 40 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools "${FI_AF_TOOLS[@]}"
@@ -201,7 +244,9 @@ fi_af_verifier_cmd() {
       ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"} --output-schema "$schema" -o "$last" "$prompt")
   else
     fi_af_budget_args
-    FI_AF_CMD=(claude -p --model opus --effort high ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
+    FI_AF_CMD=(claude -p --restricted --strict-mcp-config
+      --tools Read Glob Grep Bash
+      --model opus --effort high ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 15 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools Read Grep Glob "Bash(found-issues autofix search ${AFI_id:-} *)"

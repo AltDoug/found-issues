@@ -156,7 +156,7 @@ teardown() {
   [[ "$output" == *"no/such/branch"* ]]
 }
 
-@test "promote --apply: does not copy [fixed] or [deferred] entries" {
+@test "promote --apply: copies [open] and [deferred] entries verbatim, never [fixed]" {
   mkdir -p docs src
   printf 'a\n' > src/foo.py
   printf '# found-issues\n\n' > docs/found-issues.md
@@ -164,19 +164,54 @@ teardown() {
 
   git checkout -q -b feature/mixed
   printf -- '- [fixed] 2026-02-09 src/foo.py:3 — already fixed (fixed: 2026-02-09)\n' >> docs/found-issues.md
-  printf -- '- [deferred] 2026-02-09 src/foo.py:4 — parked (reason: later)\n' >> docs/found-issues.md
-  printf -- '- [open] 2026-02-09 src/foo.py:5 — the only one that should move\n' >> docs/found-issues.md
+  printf -- '- [deferred] 2026-02-09 src/foo.py:4 — parked (reason: later) (touched: 2026-02-20, 2026-03-01) (defer-cycle: 2)\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-02-09 src/foo.py:5 — should move too\n' >> docs/found-issues.md
   git add -A && git commit -q -m "mixed entries"
 
   git checkout -q main
   git checkout -q -b chore/promote-mixed
   fi_run promote --apply --from feature/mixed
   [ "$status" -eq 0 ]
-  grep -q 'the only one that should move' docs/found-issues.md
+  [[ "$output" == *"Applied 2 entries"* ]]
+  grep -q 'should move too' docs/found-issues.md
+  # the deferred line is copied byte-for-byte, defer-cycle and reason included
+  grep -Fxq -- '- [deferred] 2026-02-09 src/foo.py:4 — parked (reason: later) (touched: 2026-02-20, 2026-03-01) (defer-cycle: 2)' docs/found-issues.md
   run grep -q 'already fixed' docs/found-issues.md
   [ "$status" -ne 0 ]
-  run grep -q 'parked' docs/found-issues.md
-  [ "$status" -ne 0 ]
+}
+
+@test "promote --apply: a deferred entry already on the default branch is not copied again" {
+  mkdir -p docs src
+  printf 'a\n' > src/foo.py
+  printf '# found-issues\n\n- [deferred] 2026-02-09 src/foo.py:4 — parked (reason: later)\n' > docs/found-issues.md
+  git add -A && git commit -q -m base
+
+  git checkout -q -b feature/dup
+  # same entry, now open again with an extra annotation: same dedup key
+  printf '# found-issues\n\n- [open] 2026-02-09 src/foo.py:4 — parked (touched: 2026-03-01)\n' > docs/found-issues.md
+  git add -A && git commit -q -m "re-opened"
+
+  git checkout -q main
+  git checkout -q -b chore/promote-dup
+  fi_run promote --apply --from feature/dup
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to apply"* ]]
+  [ "$(grep -c 'parked' docs/found-issues.md)" = 1 ]
+}
+
+@test "promote: lists a branch-only deferred entry" {
+  fi_run log "src/foo.py:1 — entry on main"
+  git add -A; git commit -q -m "init"
+  git checkout -q -b feat/test
+  fi_run log "src/bar.py:1 — branch-only entry"
+  fi_run defer "src/bar.py:1" --reason "later"
+  git add -A; git commit -q -m "branch entry, deferred"
+
+  fi_run promote
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[deferred]"* ]]
+  [[ "$output" == *"src/bar.py:1"* ]]
+  [[ "$output" == *"1 entry needs promotion"* ]]
 }
 
 # The dedup check must consider entries added earlier in the SAME run, not just

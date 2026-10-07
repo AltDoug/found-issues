@@ -53,6 +53,25 @@ cmd_defer() {
     esac
   done
 
+  # (reason: ...) is read back with [^)]+ (the defer strip, the parser tail,
+  # fi_extract_reason), so a ")" or "(" or a bracket in the text would cut it
+  # short and leave a stray ")" or "]" behind on the next defer. Swap all four
+  # for braces, which keep the text readable: "(JIRA-1234)" -> "{JIRA-1234}".
+  # A newline, CR or tab would split the entry over several ledger lines (or
+  # hide the rest of it from the line-based parser): each becomes one space,
+  # CRLF included. Parameter expansion only, no subshell (3.3.1).
+  if [[ -n "$reason" ]]; then
+    reason="${reason//$'\r\n'/ }"
+    reason="${reason//$'\n'/ }"
+    reason="${reason//$'\r'/ }"
+    reason="${reason//$'\t'/ }"
+    local lp='(' rp=')' lb='[' rb=']' ocb='{' ccb='}'
+    reason="${reason//"$lp"/$ocb}"
+    reason="${reason//"$rp"/$ccb}"
+    reason="${reason//"$lb"/$ocb}"
+    reason="${reason//"$rb"/$ccb}"
+  fi
+
   if [[ -z "$match" ]]; then
     fi_err "defer: missing <match> argument"
     fi_err "Usage: found-issues defer <match> [--reason \"<text>\"] [--mute-until YYYY-MM-DD] [--until pr:<o/r#N>|date:<YYYY-MM-DD>|\"<text>\"]"

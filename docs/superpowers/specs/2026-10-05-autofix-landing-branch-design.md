@@ -80,7 +80,7 @@ In `lib/sync.sh` (`_fi_pr_info`, ~line 135, and the landed check, ~line 220):
 |---|---|
 | `gh` missing or failing in the gone-upstream lookup | default branch, `base_why=X gone, base unknown` |
 | no pushed ancestor | default branch, `base_why=no pushed ancestor` |
-| fetch of the landing branch fails | item fails `git fetch failed` (unchanged) |
+| fetch of the landing branch fails | item waits (rc 8, `waiting=git fetch failed`) like any other wait: no spot slot, no `autofix-failed` tag, rechecked on the next stop; the offline wait counts toward `FOUND_ISSUES_AUTOFIX_WAIT_MAX` (3.3.1; before, the item failed) |
 | landing branch deleted between claim and PR | `gh pr create` fails, existing failure path |
 
 Auto-fix never pushes to the landing branch. It only pushes its own `fi/*` branch and opens a PR.

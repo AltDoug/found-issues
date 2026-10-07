@@ -318,6 +318,9 @@ fi_af_doctor() {
   done
   e="$(fi_af_engine 2>/dev/null || true)"
   printf '   Engine: %s -> %s\n' "$(fi_af_cfg engine auto)" "${e:-none available}"
+  if [[ "$e" == claude ]] && ! fi_af_sandbox_available; then
+    printf '%s No Claude sandbox runtime (macOS sandbox-exec, or bubblewrap + socat on Linux): the fixer'"'"'s test command runs unsandboxed\n' "$w"
+  fi
   printf '   Codex models: fixer %s, verifier %s, classifier %s\n' \
     "$(fi_af_codex_desc fixer)" "$(fi_af_codex_desc verifier)" "$(fi_af_codex_desc classifier)"
   for r in fixer verifier classifier; do

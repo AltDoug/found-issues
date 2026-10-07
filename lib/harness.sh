@@ -58,6 +58,23 @@ fi_emit_post_context() {
   fi
 }
 
+# Emit a PreToolUse advisory (a hook that allows the call but wants the model
+# to see a note). Claude Code does NOT deliver stderr on a PreToolUse exit 0
+# (it reaches nobody), but it does deliver hookSpecificOutput.additionalContext
+# on stdout, so that is the path on Claude (measured 2026-10-06). Codex and the
+# no-jq fallback keep the advisory on stderr, the pre-3.3.1 behavior. Always
+# returns 0; the caller picks the hook's exit code.
+fi_emit_pre_context() {
+  local text="${1:-}"
+  [[ -z "$text" ]] && return 0
+  if [[ "$(fi_detect_harness)" != "codex" ]] && command -v jq >/dev/null 2>&1; then
+    printf '%s' "$text" | jq -Rs '{hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: .}}'
+  else
+    printf '%s\n' "$text" >&2
+  fi
+  return 0
+}
+
 # Emit SessionStart context text for the current harness. Claude Code
 # injects plain stdout as context (legacy contract, unchanged); Codex's
 # session-start.command.output JSON Schema mirrors the PostToolUse shape

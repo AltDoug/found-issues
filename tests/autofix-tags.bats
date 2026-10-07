@@ -70,6 +70,20 @@ teardown() { fi_teardown_tmp; }
   done
 }
 
+@test "offlimits: matching folds case and .envrc is secrets" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  for p in src/Auth/login.py .ENV .Env.Local web/.envrc .ENVRC Config/SECRETS/x.yml; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "secrets" ]
+  done
+  for p in .GitHub/Workflows/ci.yml JENKINSFILE; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "ci" ]
+  done
+  for p in PACKAGE.JSON cargo.lock; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "dependencies" ]
+  done
+  run fi_offlimits_category "src/Author.py"; [ "$status" -eq 1 ]
+}
+
 @test "offlimits: lookalikes are not off-limits" {
   fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
   for p in src/author.py lib/clock.py blocklist.py tools/migrate_helpers.py docs/package.json.md src/authority/x.ts README.md; do
@@ -101,6 +115,16 @@ teardown() { fi_teardown_tmp; }
   [ "$FI_RETAGGED" = "- [open] 2026-10-03 src/a.sh:1 — bug (PR: o/r#1) (decided: A)" ]
   fi_entry_retag "- [deferred] 2026-10-03 src/a.sh:1 — bug (reason: x) (until: date:2026-01-01)" drop-until ""
   [ "$FI_RETAGGED" = "- [deferred] 2026-10-03 src/a.sh:1 — bug (reason: x)" ]
+}
+
+@test "retag: legacy (fix: none known) text is user text and is never deleted" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  fi_entry_retag "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known)" fix "small"
+  [ "$FI_RETAGGED" = "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known) (fix: small)" ]
+  fi_entry_retag "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known) (fix: large)" decide "A or B?"
+  [ "$FI_RETAGGED" = "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known) (decide: A or B?)" ]
+  fi_entry_retag "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known) (until: date:2026-01-01)" drop-until ""
+  [ "$FI_RETAGGED" = "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known)" ]
 }
 
 @test "tag_resolve: --fix on an off-limits path becomes manual off-limits" {

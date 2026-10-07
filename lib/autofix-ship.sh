@@ -192,21 +192,38 @@ _fi_af_publish() {
       [[ -f "$wt/$p" ]] && { wl="$p"; break; }
     done
   fi
+  local annotated=$'\n' pushed=0 cur
   while IFS=$'\t' read -r key loc || [[ -n "$key" ]]; do
     [[ -n "$key" ]] || continue
     AFI_key="$key" AFI_loc="$loc"
-    if [[ -n "$wl" ]] && fi_af_annotate_ledger "$wt/$wl" "$ann"; then n=$((n + 1)); msg="annotate $loc with PR $FI_AF_PR"; fi
-    # The source checkout's ledger, where sync will close the entry on merge.
-    fi_af_annotate_ledger "" "$ann" || fi_af_log "$AFI_id" "source ledger annotation failed for $loc"
+    if [[ -n "$wl" ]] && fi_af_annotate_ledger "$wt/$wl" "$ann"; then
+      n=$((n + 1)); msg="annotate $loc with PR $FI_AF_PR"; annotated+="$key"$'\n'
+    fi
   done <"$rows"
-  AFI_key="$keep_key" AFI_loc="$keep_loc"
   if (( n > 0 )); then
     (( n == 1 )) || msg="annotate $n entries with PR $FI_AF_PR"
     git -C "$wt" add -- "$wl"
     if git -C "$wt" commit -q -m "docs(found-issues): $msg" >>"$runlog" 2>&1; then
-      git -C "$wt" push -q origin "$br" >>"$runlog" 2>&1 || fi_af_log "$AFI_id" "ledger annotation push failed"
+      if git -C "$wt" push -q origin "$br" >>"$runlog" 2>&1; then pushed=1; else fi_af_log "$AFI_id" "ledger annotation push failed"; fi
     fi
   fi
+  # The source checkout's ledger, where sync will close the entry on merge. A
+  # PR that lands on the branch this checkout is on already carries the
+  # annotation, and an uncommitted copy here would abort the user's next
+  # plain git pull (3.3.1). Anywhere else (a continuation batch, an entry
+  # origin never saw, another branch) the source ledger is annotated.
+  cur="$(git -C "$AFI_root" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  while IFS=$'\t' read -r key loc || [[ -n "$key" ]]; do
+    [[ -n "$key" ]] || continue
+    AFI_key="$key" AFI_loc="$loc"
+    if (( pushed )) && [[ -n "$cur" && "$cur" == "$base" && "$annotated" == *$'\n'"$key"$'\n'* ]]; then
+      fi_af_log "$AFI_id" "source ledger annotation skipped for $loc: the PR lands on $base, this checkout's branch, and carries it"
+      fi_af_inflight_mark "$key" "$FI_AF_PR" || fi_af_log "$AFI_id" "in-flight record failed for $loc"
+      continue
+    fi
+    fi_af_annotate_ledger "" "$ann" || fi_af_log "$AFI_id" "source ledger annotation failed for $loc"
+  done <"$rows"
+  AFI_key="$keep_key" AFI_loc="$keep_loc"
 
   if ( cd "$wt" && gh pr merge "$FI_AF_PR" --auto --squash --repo "$AFI_slug" ) >>"$runlog" 2>&1; then
     FI_AF_MERGE="auto"

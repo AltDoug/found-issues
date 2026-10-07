@@ -79,6 +79,139 @@ fi_split_picks() {
   printf '%s' "$out"
 }
 
+# --- distinguishing-pick search (3.3.1) -----------------------------------
+# When a pick matches several co-located entries the refusal also prints, per
+# candidate, a ready `--pick "<loc> — <substring>"` that selects only it. The
+# group is every [open] entry at the pick's location, so a printed pick can
+# never pull in an entry the original fragment had excluded.
+_fi_pg_line=() _fi_pg_sym=()
+
+# _fi_pick_group_load <newline-terminated lines> — fill _fi_pg_line/_fi_pg_sym.
+_fi_pick_group_load() {
+  local l
+  _fi_pg_line=() _fi_pg_sym=()
+  while IFS= read -r l; do
+    [[ -n "$l" ]] || continue
+    fi_parse_entry_vars "$l" || continue
+    _fi_pg_line+=("$l")
+    _fi_pg_sym+=("$FE_symptom")
+  done <<<"$1"
+}
+
+# _fi_pick_group_idx <fragment> — FI_PICK_IDX = " <i> <j>..." of the group
+# entries the extended pick form selects: the fragment inside the symptom, and
+# only when no symptom holds it, an entry whose date IS the fragment (so a date
+# can still tell apart an entry whose symptom is a strict prefix of another's;
+# suggested and annotation text never select, 3.3.1).
+_fi_pick_group_idx() {
+  local frag="$1" i n="${#_fi_pg_sym[@]}"
+  local re_date='^-[[:space:]]+\[[a-z]+\]([[:space:]]+\[!\])?[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})'
+  FI_PICK_IDX=""
+  for (( i = 0; i < n; i++ )); do
+    [[ "${_fi_pg_sym[$i]}" == *"$frag"* ]] && FI_PICK_IDX+=" $i"
+  done
+  [[ -n "$FI_PICK_IDX" ]] && return 0
+  for (( i = 0; i < n; i++ )); do
+    if [[ "${_fi_pg_line[$i]}" =~ $re_date && "${BASH_REMATCH[2]}" == "$frag" ]]; then
+      FI_PICK_IDX+=" $i"
+    fi
+  done
+  return 0
+}
+
+# _fi_pick_sub_for <group index> — FI_PICK_SUB = the shortest run of whole
+# symptom words, starting at the first word where this entry differs from every
+# other (else the first word where it differs from any), that selects only this
+# entry; else its full symptom, else its date. Empty when nothing does
+# (identical entries).
+_fi_pick_sub_for() {
+  local c="$1" n="${#_fi_pg_sym[@]}" o i k_all="" k_min="" all_differ d start len sub
+  local -a wc wo starts
+  FI_PICK_SUB=""
+  read -r -a wc <<<"${_fi_pg_sym[$c]}"
+  local nw="${#wc[@]}"
+  for (( i = 0; i < nw; i++ )); do
+    all_differ=1
+    for (( o = 0; o < n; o++ )); do
+      (( o == c )) && continue
+      read -r -a wo <<<"${_fi_pg_sym[$o]}"
+      if (( i < ${#wo[@]} )) && [[ "${wo[$i]}" == "${wc[$i]}" ]]; then all_differ=0; break; fi
+    done
+    if (( all_differ )) && [[ -z "$k_all" ]]; then k_all="$i"; fi
+  done
+  for (( o = 0; o < n; o++ )); do
+    (( o == c )) && continue
+    read -r -a wo <<<"${_fi_pg_sym[$o]}"
+    d=""
+    for (( i = 0; i < nw; i++ )); do
+      if (( i >= ${#wo[@]} )) || [[ "${wo[$i]}" != "${wc[$i]}" ]]; then d="$i"; break; fi
+    done
+    [[ -n "$d" ]] && { [[ -z "$k_min" ]] || (( d < k_min )) && k_min="$d"; }
+  done
+  starts=()
+  [[ -n "$k_all" ]] && starts+=("$k_all")
+  if [[ -n "$k_min" ]]; then
+    for (( i = k_min; i < nw; i++ )); do
+      [[ "$i" == "$k_all" ]] || starts+=("$i")
+    done
+  fi
+  for start in ${starts[@]+"${starts[@]}"}; do
+    sub=""
+    for (( len = 1; start + len <= nw; len++ )); do
+      sub="${sub:+$sub }${wc[$((start + len - 1))]}"
+      _fi_pick_group_idx "$sub"
+      if [[ "$FI_PICK_IDX" == " $c" ]]; then FI_PICK_SUB="$sub"; return 0; fi
+    done
+  done
+  # No short run: the entry's full symptom when it selects only this entry
+  # (one symptom inside another, like "here" in "there"), then its date.
+  _fi_pick_group_idx "${_fi_pg_sym[$c]}"
+  if [[ -n "${_fi_pg_sym[$c]}" && "$FI_PICK_IDX" == " $c" ]]; then FI_PICK_SUB="${_fi_pg_sym[$c]}"; return 0; fi
+  local re_date='^-[[:space:]]+\[[a-z]+\]([[:space:]]+\[!\])?[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})'
+  if [[ "${_fi_pg_line[$c]}" =~ $re_date ]]; then
+    sub="${BASH_REMATCH[2]}"   # _fi_pick_group_idx runs its own =~
+    _fi_pick_group_idx "$sub"
+    if [[ "$FI_PICK_IDX" == " $c" ]]; then FI_PICK_SUB="$sub"; return 0; fi
+  fi
+  return 1
+}
+
+# _fi_pick_dq <text> — FI_PICK_Q = text escaped for use inside double quotes.
+_fi_pick_dq() {
+  local t="$1" bt='`'
+  t="${t//\\/\\\\}"
+  t="${t//\"/\\\"}"
+  t="${t//\$/\\\$}"
+  t="${t//$bt/\\$bt}"
+  FI_PICK_Q="$t"
+}
+
+# _fi_pick_hints <group lines> <hit lines> <loc> <rerun_cmd> — stdout: one ready
+# `--pick "<loc> — <substring>"` per hit, led by the entry it selects.
+_fi_pick_hints() {
+  local hit_lines="$2" loc="$3" rerun="$4" hit g n sym used=" "
+  _fi_pick_group_load "$1"
+  n="${#_fi_pg_line[@]}"
+  while IFS= read -r hit; do
+    [[ -n "$hit" ]] || continue
+    # The group index of this hit (identical lines are taken in order).
+    for (( g = 0; g < n; g++ )); do
+      [[ "$used" == *" $g "* ]] && continue
+      [[ "${_fi_pg_line[$g]}" == "$hit" ]] && break
+    done
+    (( g < n )) || continue
+    used+="$g "
+    sym="${_fi_pg_sym[$g]}"
+    printf '  for "%s":\n' "${sym:0:70}"
+    if _fi_pick_sub_for "$g"; then
+      _fi_pick_dq "$FI_PICK_SUB"
+      printf '    %s --pick "%s — %s"\n' "$rerun" "$loc" "$FI_PICK_Q"
+    else
+      printf '    no distinguishing text: this entry cannot be told apart from its neighbours (same symptom, same date); fix the ledger first\n'
+    fi
+  done <<<"$hit_lines"
+}
+
 # Apply explicit --pick selectors.
 #   $1 file, $2 annotation, $3 picks_nl (newline-separated selectors),
 #   $4 cmd_label (annotate-pr|annotate-commit), $5 rerun_cmd (hint text)
@@ -102,17 +235,20 @@ fi_annotate_apply_picks() {
   auto_annotation="$(fi_auto_form "$annotation")"
   local promoted=0
 
-  local -a pick_arr=() pick_hits=() pick_lines=()
+  local -a pick_arr=() pick_hits=() pick_lines=() pick_group=()
   local pick
   while IFS= read -r pick; do
     [[ -z "$pick" ]] && continue
     pick_arr+=("$pick")
     pick_hits+=(0)
     pick_lines+=("")
+    pick_group+=("")
   done <<<"$picks_nl"
 
-  # Pass A: per selector, count matching [open] entries and keep their lines.
-  local line loc sym i p_loc p_frag
+  # Pass A: per selector, collect every [open] entry at its location (the
+  # group), then select within it: the whole group for a plain location, the
+  # fragment matches for the extended form.
+  local line loc i p_loc p_frag k
   # Final-partial-line guard (READ-LOOP GUARD, bin/found-issues). This pass only
   # scans, but dropping the final entry here makes it unpickable — the pick
   # reports "no [open] entry matches" for an entry that is plainly there.
@@ -120,25 +256,33 @@ fi_annotate_apply_picks() {
     [[ "$line" =~ ^-\ \[open\] ]] || continue
     fi_entry_loc_v "$line" || continue
     loc="$FE_loc"
-    sym="$FE_symptom"
     for (( i = 0; i < ${#pick_arr[@]}; i++ )); do
       pick="${pick_arr[$i]}"
-      if [[ "$pick" == *" — "* ]]; then
-        p_loc="${pick%% — *}"
-        p_frag="${pick#* — }"
-        [[ "$loc" == "$p_loc" ]] || continue
-        [[ "$sym" == *"$p_frag"* ]] || continue
-      else
-        [[ "$loc" == "$pick" ]] || continue
-      fi
-      pick_hits[$i]=$(( ${pick_hits[$i]} + 1 ))
-      pick_lines[$i]+="$line"$'\n'
+      p_loc="$pick"
+      [[ "$pick" == *" — "* ]] && p_loc="${pick%% — *}"
+      [[ "$loc" == "$p_loc" ]] || continue
+      pick_group[$i]+="$line"$'\n'
     done
   done <"$file"
+  for (( i = 0; i < ${#pick_arr[@]}; i++ )); do
+    [[ -n "${pick_group[$i]}" ]] || continue
+    pick="${pick_arr[$i]}"
+    _fi_pick_group_load "${pick_group[$i]}"
+    if [[ "$pick" == *" — "* ]]; then
+      _fi_pick_group_idx "${pick#* — }"
+    else
+      FI_PICK_IDX=""
+      for (( k = 0; k < ${#_fi_pg_line[@]}; k++ )); do FI_PICK_IDX+=" $k"; done
+    fi
+    for k in $FI_PICK_IDX; do
+      pick_hits[$i]=$(( ${pick_hits[$i]} + 1 ))
+      pick_lines[$i]+="${_fi_pg_line[$k]}"$'\n'
+    done
+  done
 
   # Partition selectors: single hit → annotate; several hits → refuse;
   # zero hits → report (a bad selection must never fail silently).
-  local auto_set="" unmatched="" ambiguous=""
+  local auto_set="" unmatched="" ambiguous="" ambiguous_hints="" hint
   for (( i = 0; i < ${#pick_arr[@]}; i++ )); do
     if (( ${pick_hits[$i]} == 0 )); then
       unmatched+="  ${pick_arr[$i]}"$'\n'
@@ -150,6 +294,10 @@ fi_annotate_apply_picks() {
         [[ -z "$line" ]] && continue
         ambiguous+="    $line"$'\n'
       done <<<"${pick_lines[$i]}"
+      # $(...) drops the trailing newline: put it back so the next pick's
+      # hints and the output after them start their own line (3.3.1).
+      hint="$(_fi_pick_hints "${pick_group[$i]}" "${pick_lines[$i]}" "${pick_arr[$i]%% — *}" "$rerun_cmd")"
+      [[ -z "$hint" ]] || ambiguous_hints+="$hint"$'\n'
     fi
   done
 
@@ -198,8 +346,12 @@ fi_annotate_apply_picks() {
   fi
   if [[ -n "$ambiguous" ]]; then
     printf '%s: refusing picks that match several co-located entries:\n%s' "$cmd_label" "$ambiguous"
-    printf 'Disambiguate with the extended pick form (location + symptom fragment):\n'
-    printf '  %s --pick "<path:line> — <symptom fragment>"\n' "$rerun_cmd"
+    if [[ -n "$ambiguous_hints" ]]; then
+      printf 'Re-run with the pick that selects exactly one of them:\n%s' "$ambiguous_hints"
+    else
+      printf 'Disambiguate with the extended pick form (location + symptom fragment):\n'
+      printf '  %s --pick "<path:line> — <symptom fragment>"\n' "$rerun_cmd"
+    fi
   fi
   if [[ -n "$unmatched" ]]; then
     printf '%s: no [open] entry matches pick:\n%s' "$cmd_label" "$unmatched"

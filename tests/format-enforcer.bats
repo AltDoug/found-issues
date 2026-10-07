@@ -61,13 +61,25 @@ HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/hooks/format-enforcer.s
   [ "$status" -eq 0 ]
 }
 
-@test "format-enforcer: warns (exit 0) in git mode" {
+@test "format-enforcer: warns (exit 0) in git mode, as PreToolUse additionalContext on stdout for claude" {
   unset FOUND_ISSUES_MODE
-  export FOUND_ISSUES_MODE=git
+  export FOUND_ISSUES_MODE=git FOUND_ISSUES_HARNESS=claude
   input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [open] 2026-05-08 src/foo.py:42 — bug PR #5"}}'
-  run bash -c "echo '$input' | '$HOOK'"
+  run bash -c "echo '$input' | '$HOOK' 2>'$TMP/err'"
   [ "$status" -eq 0 ]
-  # Warning should be emitted to stderr though
+  [ ! -s "$TMP/err" ]
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext | contains("found-issues format violations in found-issues.md")' >/dev/null
+}
+
+@test "format-enforcer: git mode keeps the advisory on stderr for codex" {
+  unset FOUND_ISSUES_MODE
+  export FOUND_ISSUES_MODE=git FOUND_ISSUES_HARNESS=codex
+  input='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"docs/found-issues.md","content":"- [open] 2026-05-08 src/foo.py:42 — bug PR #5"}}'
+  run bash -c "echo '$input' | '$HOOK' 2>'$TMP/err'"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  grep -q 'found-issues format violations in found-issues.md' "$TMP/err"
 }
 
 @test "format-enforcer: blocks Edit with bad new_string" {

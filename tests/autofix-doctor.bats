@@ -98,3 +98,18 @@ teardown() { fi_teardown_tmp; }
   [[ "$output" == *'$3 per run'* ]]
   [[ "$output" == *"invalid sweepBudget '\$9' (ignored: no dollar cap)"* ]]
 }
+
+@test "doctor auto-fix: a host with no Claude sandbox runtime gets a warning line" {
+  git config found-issues.autofix.engine claude
+  mkdir -p "$TMP/sbin"
+  printf '#!/bin/sh\necho MINGW64_NT-10.0-26100\n' > "$TMP/sbin/uname"
+  chmod +x "$TMP/sbin/uname"
+  PATH="$TMP/sbin:$PATH" run "$FI_BIN" doctor
+  [[ "$output" == *"Engine: claude -> claude"* ]]
+  [[ "$output" == *"No Claude sandbox runtime"* ]]
+  printf '#!/bin/sh\necho Darwin\n' > "$TMP/sbin/uname"
+  printf '#!/bin/sh\nexit 0\n' > "$TMP/sbin/sandbox-exec"
+  chmod +x "$TMP/sbin/sandbox-exec"
+  PATH="$TMP/sbin:$PATH" run "$FI_BIN" doctor
+  [[ "$output" != *"No Claude sandbox runtime"* ]]
+}

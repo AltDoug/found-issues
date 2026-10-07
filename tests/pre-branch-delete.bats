@@ -47,6 +47,31 @@ teardown() {
   [[ "$output" == *"unpromoted"* ]] || [[ "$output" == *"not yet promoted"* ]]
 }
 
+@test "pre-branch-delete: a branch-only deferred entry blocks delete until promoted" {
+  fi_run log "src/foo.py:1 — main entry"
+  git add -A; git commit -q -m "init"
+  git checkout -q -b feat/test
+  fi_run log "src/branch_only.py:1 — branch-only"
+  fi_run defer "src/branch_only.py:1" --reason "parked"
+  git add -A; git commit -q -m "branch entry, deferred"
+  git checkout -q main
+
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/test"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"[deferred]"* ]]
+  [[ "$output" == *"branch_only.py"* ]]
+
+  # Promote it onto main (verbatim copy), then the delete is allowed.
+  git checkout -q -b promote/feat main
+  fi_run promote --apply --from feat/test
+  [ "$status" -eq 0 ]
+  git add -A; git commit -q -m "promote"
+  git checkout -q main; git merge -q --ff-only promote/feat
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
 @test "pre-branch-delete: catches 'git branch -D' (force delete)" {
   fi_run log "src/foo.py:1 — main"
   git add -A; git commit -q -m "init"
@@ -184,9 +209,19 @@ EOF
   : > docs/found-issues.md
 
   input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/work"}}'
-  run bash -c "echo '$input' | '$HOOK'"
+  # Claude: the note reaches the model as PreToolUse additionalContext on
+  # stdout (stderr on exit 0 is never delivered), one JSON object, no stderr.
+  run bash -c "echo '$input' | FOUND_ISSUES_HARNESS=claude '$HOOK' 2>'$TMP/err'"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"promote-guard skipped"* ]] || [[ "$output" == *"does not track"* ]]
+  [ ! -s "$TMP/err" ]
+  [ "$(printf '%s' "$output" | jq -s 'length')" = 1 ]
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null
+  printf '%s' "$output" | jq -e '.hookSpecificOutput.additionalContext | contains("promote-guard skipped")' >/dev/null
+  # Codex keeps the note on stderr.
+  run bash -c "echo '$input' | FOUND_ISSUES_HARNESS=codex '$HOOK' 2>'$TMP/err'"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  grep -q 'promote-guard skipped' "$TMP/err"
 }
 
 @test "pre-branch-delete: respects inline FOUND_ISSUES_PROMOTE_GUARD=off prefix in the command string" {

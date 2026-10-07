@@ -96,6 +96,48 @@ EOF
   grep -F "(defer-cycle: 3)" docs/found-issues.md
 }
 
+@test "defer: parentheses and brackets in --reason become braces; defer, re-defer and promote-deferred leave no stray ) or ]" {
+  fi_run log "src/foo.py:42 — null check missing"
+  fi_run defer "src/foo.py:42" --reason "blocked on legal review (JIRA-1234)"
+  [ "$status" -eq 0 ]
+  grep -qF "(reason: blocked on legal review {JIRA-1234})" docs/found-issues.md
+  fi_run promote-deferred "src/foo.py:42"
+  [ "$status" -eq 0 ]
+  grep -qF "(reason: blocked on legal review {JIRA-1234})" docs/found-issues.md
+  fi_run defer "src/foo.py:42" --reason "a [b] c"
+  [ "$status" -eq 0 ]
+  grep -qF "(reason: a {b} c)" docs/found-issues.md
+  ! grep -qF "legal review" docs/found-issues.md || false
+  fi_run promote-deferred "src/foo.py:42"
+  [ "$status" -eq 0 ]
+  # one reason group, balanced parentheses, and the only ] left is the status
+  entry="$(grep '^- ' docs/found-issues.md)"
+  [ "$(printf '%s' "$entry" | grep -o '(reason:' | wc -l | tr -d ' ')" = 1 ]
+  [ "$(printf '%s' "$entry" | grep -o '(' | wc -l | tr -d ' ')" = "$(printf '%s' "$entry" | grep -o ')' | wc -l | tr -d ' ')" ]
+  [ "$(printf '%s' "$entry" | grep -o ']' | wc -l | tr -d ' ')" = 1 ]
+}
+
+@test "defer: a newline, CR or tab in --reason becomes one space and leaves one ledger line (3.3.1 review)" {
+  fi_run log "src/foo.py:42 — null check missing"
+  fi_run defer "src/foo.py:42" --reason $'line1\nline2\r\nline3\tend'
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'src/foo.py:42' docs/found-issues.md)" = 1 ]
+  grep -qF "(reason: line1 line2 line3 end)" docs/found-issues.md
+  [ "$(grep -c '^- ' docs/found-issues.md)" = 1 ]
+  ! grep -q $'\r' docs/found-issues.md || false
+}
+
+@test "defer: a reason with parentheses parses back whole, so the next defer strips it completely" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries
+  fi_run log "src/foo.py:42 — null check missing"
+  fi_run defer "src/foo.py:42" --reason "see (JIRA-1) and [wiki]"
+  [ "$status" -eq 0 ]
+  line="$(grep -F '[deferred]' docs/found-issues.md)"
+  [ "$(fi_extract_reason "$line")" = "see {JIRA-1} and {wiki}" ]
+  fi_annotation_tail_v "$line"
+  [[ "$FI_ANN_TAIL" == *"(reason: see {JIRA-1} and {wiki})"* ]]
+}
+
 # === 2026-05-10 UX audit surface 4.4 — --mute-until flag ===
 
 @test "defer: --mute-until adds (mute-until: ...) annotation" {

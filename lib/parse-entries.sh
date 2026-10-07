@@ -150,7 +150,9 @@ fi_annotation_tail() {
 # Same walk, result in $FI_ANN_TAIL — no subshell for in-process callers.
 fi_annotation_tail_v() {
   local line="$1" tail=""
-  local re_tail_group='\((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested|fix|decide|decided|manual|until|autofix-failed): [^)]*\)[[:space:]]*$'
+  # Only (fix: small|medium|large) is a fix tag; any other "(fix: ...)" text is
+  # user text and stays in the symptom (and fi_entry_retag keeps it).
+  local re_tail_group='\(((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested|decide|decided|manual|until|autofix-failed): [^)]*|fix: (small|medium|large))\)[[:space:]]*$'
   while [[ "$line" =~ $re_tail_group ]]; do
     local grp="${BASH_REMATCH[0]}"
     tail="${grp}${tail}"

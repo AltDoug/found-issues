@@ -113,6 +113,7 @@ fi_af_queue_spot() {
   key="$FI_KEY"
   fi_entry_loc_v "$entry" || return 0
   fi_af_dirs "$slug" || return 0
+  fi_af_inflight_check "$key" && return 0
   for f in "$FI_AF_ST"/queue/* "$FI_AF_ST"/running/*; do
     [[ -f "$f" ]] || continue
     fi_af_item_read "$f" || true
@@ -198,10 +199,44 @@ fi_af_find_entry() {
   return 1
 }
 
+# 3.3.1: ship skips the source ledger annotation when the PR lands on the
+# checkout's own branch, so the local entry still looks unfixed. It leaves
+# an in-flight record instead (key, PR, epoch seconds); a record younger than
+# 14 days keeps the entry from being fixed again, an older one is dropped.
+fi_af_inflight_file() {
+  local ck
+  read -r ck _ < <(printf '%s' "$1" | cksum)
+  FI_AF_INFLIGHT_FILE="$FI_AF_ST/inflight/$ck"
+}
+
+fi_af_inflight_mark() {
+  fi_af_inflight_file "$1"
+  mkdir -p "$FI_AF_ST/inflight" 2>/dev/null || return 1
+  printf 'key=%s\npr=%s\nts=%s\n' "$1" "$2" "$(date +%s)" >"$FI_AF_INFLIGHT_FILE"
+}
+
+# rc 0 and FI_AF_INFLIGHT_PR set when <key> has a fresh record.
+fi_af_inflight_check() {
+  local ts
+  FI_AF_INFLIGHT_PR=""
+  fi_af_inflight_file "$1"
+  [[ -f "$FI_AF_INFLIGHT_FILE" ]] || return 1
+  ts="$(_fi_af_field "$FI_AF_INFLIGHT_FILE" ts)" || ts=""
+  if [[ "$ts" =~ ^[0-9]+$ ]] && (( $(date +%s) - ts < 14 * 86400 )); then
+    FI_AF_INFLIGHT_PR="$(_fi_af_field "$FI_AF_INFLIGHT_FILE" pr)" || FI_AF_INFLIGHT_PR=""
+    return 0
+  fi
+  rm -f "$FI_AF_INFLIGHT_FILE"
+  return 1
+}
+
 # Spec §5.1: still [open], fixable now, no fix reference, never failed.
 fi_af_eligible() {
   FI_AF_WHY=""
   fi_af_find_entry || { FI_AF_WHY="entry is no longer [open]"; return 1; }
+  if fi_af_inflight_check "$AFI_key"; then
+    FI_AF_WHY="fix in flight in PR #$FI_AF_INFLIGHT_PR"; return 1
+  fi
   fi_parse_entry_vars "$FI_AF_ENTRY"
   if [[ -n "$FE_prs$FE_prs_auto$FE_commits$FE_commits_auto" ]]; then
     FI_AF_WHY="entry already has a fix reference"; return 1
@@ -398,8 +433,11 @@ _fi_af_file_busy() {
 _fi_af_wait_check() {
   local q="$1" p why now since
   p="$(_fi_af_entry_file)" || return 0
-  git -C "$AFI_root" fetch -q origin "$AFI_base" 2>/dev/null || return 0
-  if ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
+  # An offline claim waits like any other wait: no daily slot, no failed tag,
+  # and it counts toward the wait maximum.
+  if ! git -C "$AFI_root" fetch -q origin "$AFI_base" 2>/dev/null; then
+    why="git fetch failed"
+  elif ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
     why="$p not on origin/$AFI_base"
   elif _fi_af_file_busy "$p"; then
     why="$p busy in $AFI_root"

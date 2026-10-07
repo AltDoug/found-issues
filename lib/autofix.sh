@@ -48,6 +48,7 @@ _fi_af_fix_attempt() {
   local engine="$1" n="$2" feedback="$3" base="$FI_AF_RUNS/$AFI_id.fix$n" rc=0
   fi_af_allowlist "$FI_AF_TESTCMD" "$AFI_id"
   fi_af_fixer_cmd "$engine" "$(fi_af_fixer_prompt "$FI_AF_TESTCMD" "$feedback" "$engine")" "$base.last"
+  [[ -z "$FI_AF_SBWARN" ]] || fi_af_log "$AFI_id" "warning: $FI_AF_SBWARN"
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
   fi_af_collect "$engine" "$base.out" "$base.last"
   if [[ "$engine" == codex ]]; then fi_af_codex_note "$AFI_id" fixer; fi

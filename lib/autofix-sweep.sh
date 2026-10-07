@@ -74,6 +74,7 @@ fi_af_sweep_candidates() {
     path="$FE_path" date="$FE_date"
     fi_entry_dedup_key_v "$entry" "$root" || continue
     [[ "$FI_AF_SPOT_KEYS" == *$'\n'"$FI_KEY"$'\n'* ]] && continue
+    fi_af_inflight_check "$FI_KEY" && continue
     n=$((n + 1))
     printf '%s\t%s\t%s\t%05d\t%s\n' "$crit" "$path" "$date" "$n" "$entry"
   done < <(fi_entries "$file" open 2>/dev/null || true) \

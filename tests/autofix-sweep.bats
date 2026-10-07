@@ -304,7 +304,11 @@ gh_mock() {
   br="fi/sweep/${SID%%-*}-${SID##*-}"
   [ "$(git -C "$TMP/remote.git" log --format=%s "main..$br" | grep -c '^fix: ')" = 5 ]
   [ "$(grep -c '^pr create' "$GH_MOCK_TRACE")" = 1 ]
-  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 5 ]
+  # The PR lands on main, the checkout's own branch: the four entries origin
+  # has are annotated on the PR branch only (no uncommitted copy here that
+  # would abort the next pull); the entry origin never saw is annotated here.
+  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 1 ]
+  grep -F 'add subtracts' docs/found-issues.md | grep -q '(PR: foo/bar#9)'
   [ "$(git -C "$TMP/remote.git" show "$br:docs/found-issues.md" | grep -c '(PR: foo/bar#9)')" = 4 ]
   grep -q '^pr merge 9 --auto --squash --repo foo/bar$' "$GH_MOCK_TRACE"
   grep -q 'found-issues sweep (5 entries)' "$GH_MOCK_TRACE"
@@ -359,6 +363,8 @@ gh_mock() {
 
 @test "sweep run: a spot item for an entry the sweep shipped retires stale" {
   fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  # Runs ON the landing branch (main): the source ledger is not annotated, the
+  # in-flight record keeps the shipped entry from being fixed a second time.
   "$FI_BIN" autofix run "$SID" --engine claude
   entry="$(grep -m1 'f1 subtracts' docs/found-issues.md)"
   source "$FI_BIN"; fi_af_context
@@ -376,7 +382,9 @@ gh_mock() {
   ST="$FOUND_ISSUES_STATE_DIR/autofix/foo__bar"
   "$FI_BIN" autofix run "$SID" --engine claude
   grep -q '^result=shipped: PR #9, 5 fixed' "$ST/done/$SID"
-  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 5 ]
+  # On main (the PR's base) only the entry origin never saw is annotated here,
+  # the freshly logged f1 duplicate; the other four ride the PR branch.
+  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 1 ]
   ! grep -q '(PR: foo/bar#9) (PR: foo/bar#9)' docs/found-issues.md || false
   grep -F 'f1 ignores its argument' docs/found-issues.md | grep -q '(PR: foo/bar#9)'
 }
@@ -468,7 +476,7 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   grep -q '^result=shipped: PR #9, 5 fixed' "$ST/done/$SID"
   [ "$(grep -c '^claude' "$FI_STANDIN_TRACE")" = "$engine_calls" ]
   [ "$(git -C "$TMP/remote.git" log --format=%s "main..$(sweep_branch)" | grep -c '^fix: ')" = 5 ]
-  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 5 ]
+  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 1 ]   # only the entry origin never saw; the rest ride the PR
   [ -z "$(git branch --list "$(sweep_branch)")" ]
 }
 
@@ -806,8 +814,11 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   ! git -C "$TMP/remote.git" log --format=%s "main..$br2" | grep -q 'docs(found-issues)' || false
   [ -z "$(git -C "$TMP/remote.git" log --format=%H "main..$br2" -- docs/found-issues.md)" ]
   grep -q 'PR-branch ledger annotation skipped for a continuation batch' "$FI_AF_RUNS/${c##*/}.log"
-  # The source checkout's ledger is annotated for every shipped entry.
-  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 5 ]
+  # The source checkout's ledger is annotated for the continuation batches'
+  # entries (f3, f4, calc). Batch 1's two entries (f1, f2) ride its PR branch
+  # and are skipped here, because the PR lands on this checkout's branch.
+  [ "$(grep -c '(PR: foo/bar#9)' docs/found-issues.md)" = 3 ]
+  ! grep -E 'src/f[12]\.sh:1 .*\(PR: foo/bar#9\)' docs/found-issues.md || false
 }
 
 @test "sweep run: a continuation skips an entry whose file an earlier batch changed without citing it" {

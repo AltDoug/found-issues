@@ -32,6 +32,95 @@ teardown() { fi_teardown_tmp; }
   ! grep -qx 'bypassPermissions' "$TMP/argv" || false
 }
 
+@test "autofix engine: claude fixer is sandboxed - restricted, no MCP, named tools, sandbox settings" {
+  fi_af_sandbox_available() { return 0; }
+  fi_af_allowlist 'sh test.sh'
+  fi_af_fixer_cmd claude "P" "$TMP/last"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  grep -qx -- '--restricted' "$TMP/argv"
+  grep -qx -- '--strict-mcp-config' "$TMP/argv"
+  ! grep -qx -- '--mcp-config' "$TMP/argv" || false
+  grep -qx -- '--tools' "$TMP/argv"
+  # --tools is followed by exactly the fixer's six tools, then the next flag.
+  [ "$(awk '/^--tools$/{f=1;next} /^--/{f=0} f' "$TMP/argv" | tr '\n' ' ')" = "Read Edit Write Glob Grep Bash " ]
+  # the --allowedTools Bash(...) allowlist is still the gate
+  grep -qx 'Bash(sh test.sh)' "$TMP/argv"
+  grep -qx -- '--settings' "$TMP/argv"
+  settings="$(awk '/^--settings$/{getline; print}' "$TMP/argv")"
+  [ "$(printf '%s' "$settings" | jq -r '.sandbox.enabled')" = true ]
+  [ "$(printf '%s' "$settings" | jq -r '.sandbox.failIfUnavailable')" = true ]
+  [ "$(printf '%s' "$settings" | jq -r '.sandbox.allowUnsandboxedCommands')" = false ]
+  [ "$(printf '%s' "$settings" | jq -r '.sandbox.network.allowedDomains[0]')" = '*' ]
+  # package caches writable, found-issues' own cache not
+  printf '%s' "$settings" | jq -e '.sandbox.filesystem.allowWrite | index("~/.cache") and index("~/Library/Caches")' >/dev/null
+  printf '%s' "$settings" | jq -e '.sandbox.filesystem.denyWrite == ["~/.cache/found-issues"]' >/dev/null
+  ! printf '%s' "$settings" | jq -e '.sandbox.filesystem.allowWrite | map(select(startswith("~/.claude"))) | length > 0' >/dev/null || false
+}
+
+@test "autofix engine: no sandbox runtime - claude fixer fails open without --settings and warns" {
+  fi_af_sandbox_available() { return 1; }
+  fi_af_allowlist 'sh test.sh'
+  fi_af_fixer_cmd claude "P" "$TMP/last"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  ! grep -qx -- '--settings' "$TMP/argv" || false
+  grep -qx -- '--restricted' "$TMP/argv"
+  grep -qx -- '--strict-mcp-config' "$TMP/argv"
+  [ "$(awk '/^--tools$/{f=1;next} /^--/{f=0} f' "$TMP/argv" | tr '\n' ' ')" = "Read Edit Write Glob Grep Bash " ]
+  [[ "$FI_AF_SBWARN" == *"unsandboxed"* ]]
+  # a sandboxed build clears the warning; codex never sets it
+  fi_af_sandbox_available() { return 0; }
+  fi_af_fixer_cmd claude "P" "$TMP/last"
+  [ -z "$FI_AF_SBWARN" ]
+  fi_af_sandbox_available() { return 1; }
+  fi_af_fixer_cmd codex "P" "$TMP/last"
+  [ -z "$FI_AF_SBWARN" ]
+}
+
+@test "autofix engine: sandbox runtime detection by platform" {
+  mkdir -p "$TMP/sbin"
+  stub() { printf '#!/bin/sh\n%s\n' "$2" > "$TMP/sbin/$1"; chmod +x "$TMP/sbin/$1"; }
+  PATH="$TMP/sbin:$PATH"
+  stub uname 'echo MINGW64_NT-10.0-26100'
+  ! fi_af_sandbox_available || false
+  stub uname 'echo Linux'
+  stub bwrap 'exit 0'
+  stub socat 'exit 0'
+  fi_af_sandbox_available
+  stub uname 'echo Darwin'
+  stub sandbox-exec 'exit 0'
+  fi_af_sandbox_available
+}
+
+@test "autofix engine: claude verifier is restricted with no MCP and only its search tools" {
+  AFI_id=t1
+  fi_af_verifier_cmd claude "V" "$TMP/last" "$TMP/schema"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  grep -qx -- '--restricted' "$TMP/argv"
+  grep -qx -- '--strict-mcp-config' "$TMP/argv"
+  [ "$(awk '/^--tools$/{f=1;next} /^--/{f=0} f' "$TMP/argv" | tr '\n' ' ')" = "Read Glob Grep Bash " ]
+  grep -qx 'Bash(found-issues autofix search t1 \*)' "$TMP/argv"
+  # no Edit/Write in the verifier, and no sandbox block (it runs no test command)
+  ! grep -qx 'Edit' "$TMP/argv" || false
+  ! grep -qx 'Write' "$TMP/argv" || false
+  ! grep -qx -- '--settings' "$TMP/argv" || false
+}
+
+@test "autofix engine: codex argv carries none of the claude sandbox flags" {
+  fi_af_allowlist 'sh test.sh'
+  fi_af_fixer_cmd codex "P" "$TMP/last"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  grep -qx 'workspace-write' "$TMP/argv"
+  ! grep -qx -- '--restricted' "$TMP/argv" || false
+  ! grep -qx -- '--strict-mcp-config' "$TMP/argv" || false
+  ! grep -qx -- '--tools' "$TMP/argv" || false
+  ! grep -qx -- '--settings' "$TMP/argv" || false
+  fi_af_verifier_cmd codex "P" "$TMP/last" "$TMP/schema"
+  printf '%s\n' "${FI_AF_CMD[@]}" > "$TMP/argv"
+  grep -qx 'read-only' "$TMP/argv"
+  ! grep -qx -- '--restricted' "$TMP/argv" || false
+  ! grep -qx -- '--strict-mcp-config' "$TMP/argv" || false
+}
+
 @test "autofix engine: a set runBudget puts --max-budget-usd on every claude child" {
   git config found-issues.autofix.runBudget 2
   fi_af_allowlist 'sh test.sh'
@@ -83,7 +172,7 @@ teardown() { fi_teardown_tmp; }
   grep -qx 'high' "$TMP/argv"
   grep -qx 'Read' "$TMP/argv" && grep -qx 'Grep' "$TMP/argv" && grep -qx 'Glob' "$TMP/argv"
   ! grep -qx 'Edit' "$TMP/argv" || false
-  [ "$(grep -c '^Bash' "$TMP/argv")" -eq 1 ]
+  [ "$(grep -c '^Bash(' "$TMP/argv")" -eq 1 ]
   grep -qx 'Bash(found-issues autofix search t1 \*)' "$TMP/argv"
   [ "${FI_AF_CMD[${#FI_AF_CMD[@]}-1]}" = "V" ]
 }

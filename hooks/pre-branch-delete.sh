@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # pre-branch-delete.sh — PreToolUse hook on Bash
 #
-# Hard-blocks branch deletions if the branch has [open] found-issues entries
+# Hard-blocks branch deletions if the branch has [open] or [deferred] found-issues entries
 # whose dedup key (path:line:symptom) does not appear in the default branch's
 # version of the file. Reason: deleting a branch with unpromoted entries
 # silently loses them — the whole point of /found-issues:promote is to
@@ -291,6 +291,7 @@ source "$lib_dir/canonicalize.sh"
 
 # Check each target, grouped by the directory git runs in (`git -C dir`).
 problems=()
+_fi_notes=""
 _fi_orig_dir="$PWD"
 _fi_dirs="$(for rec in "${branches[@]}"; do printf '%s\n' "${rec%%$'\t'*}"; done | awk '!seen[$0]++')"
 while IFS= read -r _fi_dir; do
@@ -329,10 +330,11 @@ while IFS= read -r _fi_dir; do
   # main keyset and false-positive-blocks every delete.
   if ! git cat-file -e "origin/$default_branch:$rel_path" 2>/dev/null \
       && ! git cat-file -e "$default_branch:$rel_path" 2>/dev/null; then
-    {
-      echo "found-issues: $default_branch does not track $rel_path; promote-guard skipped."
-      echo "Entries are local-only in this repo and are not lost by branch deletion."
-    } >&2
+    # Buffered, emitted once at the end: an advisory on stderr with exit 0
+    # reaches nobody (see fi_emit_pre_context), and a mid-loop JSON write
+    # could produce several objects.
+    _fi_notes+="found-issues: $default_branch does not track $rel_path; promote-guard skipped."$'\n'
+    _fi_notes+="Entries are local-only in this repo and are not lost by branch deletion."$'\n'
     continue
   fi
 
@@ -360,8 +362,9 @@ while IFS= read -r _fi_dir; do
       || git show "origin/$branch:$rel_path" 2>/dev/null \
       || true)"
     [[ -z "$branch_content" ]] && continue
-    # Nothing [open] on the branch = nothing to lose.
-    _fi_re_open=$'(^|\n)-[[:space:]]+\\[open\\]'
+    # Nothing [open] or [deferred] on the branch = nothing to lose (a
+    # branch-only deferred entry is lost with the branch too, 3.3.1).
+    _fi_re_open=$'(^|\n)-[[:space:]]+\\[(open|deferred)\\]'
     [[ "$branch_content" =~ $_fi_re_open ]] || continue
 
     if (( ! _fi_keyset_built )); then
@@ -410,7 +413,7 @@ while IFS= read -r _fi_dir; do
     # Find branch [open] entries whose dedup key is not in main's keyset.
     branch_unpromoted=""
     while IFS= read -r line; do
-      if [[ "$line" =~ ^-[[:space:]]+\[open\] ]]; then
+      if [[ "$line" =~ ^-[[:space:]]+\[(open|deferred)\] ]]; then
         if ! fi_entry_dedup_key_v "$line" "$repo_root"; then
           # Parse failed — treat as unpromoted (safer than silently allowing).
           branch_unpromoted+="$line"$'\n'
@@ -427,9 +430,22 @@ while IFS= read -r _fi_dir; do
 done <<<"$_fi_dirs"
 cd "$_fi_orig_dir"
 
+# Advisory notes: stdout additionalContext on a clean allow, plain stderr
+# ahead of the block message otherwise (stderr is delivered on exit 2).
+_fi_notes="${_fi_notes%$'\n'}"
 if [[ ${#problems[@]} -eq 0 ]]; then
+  if [[ -n "$_fi_notes" ]]; then
+    if [[ -f "$lib_dir/harness.sh" ]]; then
+      # shellcheck source=../lib/harness.sh
+      source "$lib_dir/harness.sh"
+      fi_emit_pre_context "$_fi_notes"
+    else
+      printf '%s\n' "$_fi_notes" >&2
+    fi
+  fi
   exit 0
 fi
+[[ -n "$_fi_notes" ]] && printf '%s\n' "$_fi_notes" >&2
 
 # Block with detailed message. No bypass hint here: this text is what the
 # agent reads, and naming the off switch made skipping the guard the cheapest
@@ -444,7 +460,7 @@ fi
     if [[ "$branch" == *'$'* || "$branch" == *'`'* ]]; then
       echo "Branch '$branch' cannot be checked before the command runs:"
     else
-      echo "Branch '$branch' has [open] found-issues entries not yet promoted to '$default_branch':"
+      echo "Branch '$branch' has [open] or [deferred] found-issues entries not yet promoted to '$default_branch':"
     fi
     echo
     while IFS= read -r entry; do

@@ -155,6 +155,32 @@ queue_entry() { # $1 = ledger line to append and queue; sets id
   [ ! -d "$FI_AF_ST/lock" ]
 }
 
+@test "wait: an unreachable origin waits on git fetch failed without a slot, a worktree or a failed tag" {
+  queue_entry "- [open] 2026-10-05 src/calc.sh:1 — bug (fix: small)"
+  mv "$TMP/remote.git" "$TMP/remote-gone.git"                  # origin unreachable
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 8 ]
+  [[ "$output" == *"waits — git fetch failed"* ]]
+  [ -f "$FI_AF_ST/queue/$id" ]
+  grep -q '^waiting=git fetch failed$' "$FI_AF_ST/queue/$id"
+  grep -q '^wait_since=[0-9]' "$FI_AF_ST/queue/$id"
+  grep -q '^wait_next=[0-9]' "$FI_AF_ST/queue/$id"
+  [ ! -e "$FI_AF_ST/day/$(date +%Y-%m-%d).spot" ]
+  [ ! -d "$REPO/.claude/worktrees/fi-autofix-$id" ]
+  [ ! -d "$FI_AF_ST/lock" ]
+  ! grep -q 'autofix-failed' docs/found-issues.md || false
+}
+
+@test "wait: an offline wait counts toward the wait maximum like any wait" {
+  queue_entry "- [open] 2026-10-05 src/calc.sh:1 — bug (fix: small)"
+  mv "$TMP/remote.git" "$TMP/remote-gone.git"                  # origin unreachable
+  run "$FI_BIN" autofix claim "$id"; [ "$status" -eq 8 ]
+  fi_af_item_set "$FI_AF_ST/queue/$id" wait_since 1000
+  run "$FI_BIN" autofix claim "$id"
+  [ "$status" -eq 5 ]
+  grep -q '^result=stale: git fetch failed$' "$FI_AF_ST/done/$id"
+}
+
 @test "wait: an uncommitted edit to the cited file makes it busy" {
   printf '# local edit\n' >> src/calc.sh
   id="$(fi_af_queue_spot "$(grep -m1 '^- \[open\]' docs/found-issues.md)" >/dev/null; ls "$FI_AF_ST/queue" | head -1)"

@@ -14,7 +14,8 @@
 
 # === Subcommand: promote ===
 #
-# Lists [open] entries on current branch that are not yet on the default branch.
+# Lists [open] and [deferred] entries on current branch that are not yet on the
+# default branch.
 # Does NOT auto-edit the default branch — prints entries for the user/agent
 # to consolidate manually (consistent with "no direct push to main").
 
@@ -24,6 +25,8 @@
 # the same key, so promote no longer re-opens it (2026-10-03 audit, prompt-7 /
 # cli-8). Builtin-only.
 _fi_pkeys=$'\n'
+# Entries promote and the branch-delete guard carry: [open] and [deferred].
+_fi_re_promotable='^-[[:space:]]+\[(open|deferred)\]'
 _fi_promote_keys() {
   local l
   while IFS= read -r l || [[ -n "$l" ]]; do
@@ -32,8 +35,8 @@ _fi_promote_keys() {
   done <<< "$1"
 }
 
-# Copy [open] entries from <source-branch>'s ledger into the current branch's
-# ledger, verbatim and serialized. Backs `promote --apply --from <branch>`.
+# Copy [open] and [deferred] entries from <source-branch>'s ledger into the
+# current branch's ledger, verbatim and serialized. Backs `promote --apply --from <branch>`.
 #
 # Runs on the TARGET branch (freshly cut from the default branch), reading the
 # source with `git show`, because by step 5 of the promote workflow the operator
@@ -78,9 +81,10 @@ fi_promote_apply() {
   tmp="$(fi_ledger_tmp "$file")"
   cat "$file" > "$tmp"
   while IFS= read -r line; do
-    # [open] only: [fixed] entries are already resolved history, and a
-    # [deferred] entry carries defer-cycle state that belongs to its branch.
-    [[ "$line" =~ ^-\ \[open\] ]] || continue
+    # [open] and [deferred]: a branch-only deferred entry is lost with the
+    # branch just like an open one (3.3.1), and is copied verbatim, defer-cycle
+    # and reason included. [fixed] entries are already resolved history.
+    [[ "$line" =~ $_fi_re_promotable ]] || continue
     # -F -x: exact whole-line match. Substring matching here is the cmd_archive
     # data-loss bug in reverse — a prefix entry would be silently skipped.
     #
@@ -99,7 +103,7 @@ fi_promote_apply() {
   fi_ledger_replace "$file" "$tmp"
 
   if (( added == 0 )); then
-    printf 'promote: nothing to apply — every [open] entry on %s is already here.\n' "$from_branch"
+    printf 'promote: nothing to apply — every [open] and [deferred] entry on %s is already here.\n' "$from_branch"
   elif (( added == 1 )); then
     printf 'Applied 1 entry from %s.\n' "$from_branch"
   else
@@ -192,7 +196,7 @@ cmd_promote() {
   # the entry most likely to need promoting is the one just appended — exactly
   # the one an unguarded loop omits.
   while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" =~ ^-\ \[open\] ]]; then
+    if [[ "$line" =~ $_fi_re_promotable ]]; then
       fi_entry_dedup_key_v "$line" "$repo_root" || FI_KEY="$line"
       if [[ "$_fi_pkeys" != *$'\n'"$FI_KEY"$'\n'* ]]; then
         printf '%s\n' "$line"
@@ -202,7 +206,7 @@ cmd_promote() {
   done <"$file"
 
   if [[ "$needs_promotion" -eq 0 ]]; then
-    printf '(none — branch is in sync with %s for [open] entries)\n' "$default_branch"
+    printf '(none — branch is in sync with %s for [open] and [deferred] entries)\n' "$default_branch"
     return 0
   fi
 

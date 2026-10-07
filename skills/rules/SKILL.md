@@ -28,7 +28,7 @@ On `/found-issues:sync`, for each unannotated `[open]` entry: read the code at `
 
 ## Branch deletion
 
-Before deleting any branch, consolidate its `[open]` entries missing from main: `/found-issues:promote`. The pre-delete hook blocks otherwise.
+Before deleting any branch, consolidate its `[open]` and `[deferred]` entries missing from main: `/found-issues:promote`. The pre-delete hook blocks otherwise.
 
 ## Stop-hook marker (if enabled)
 
