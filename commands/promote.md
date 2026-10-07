@@ -1,11 +1,11 @@
 ---
-description: Consolidate [open] entries from current branch into the default branch before deletion
-codex-description: Copy [open] entries that exist only on the current branch onto the default branch before the branch is deleted — entries logged mid-branch would otherwise die with it. Run before branch cleanup; the pre-branch-delete hook blocks deletion until it has run. Despite the similar name it is unrelated to /found-issues:promote-deferred, which flips a single [deferred] entry back to [open] in place.
+description: Consolidate [open] and [deferred] entries from current branch into the default branch before deletion
+codex-description: Copy [open] and [deferred] entries that exist only on the current branch onto the default branch before the branch is deleted — entries logged mid-branch would otherwise die with it. Run before branch cleanup; the pre-branch-delete hook blocks deletion until it has run. Despite the similar name it is unrelated to /found-issues:promote-deferred, which flips a single [deferred] entry back to [open] in place.
 argument-hint: (no arguments — operates on current branch)
 allowed-tools: Bash(found-issues:*), Bash(git:*), Bash(gh:*), Read
 ---
 
-Move `[open]` entries that exist only on the current branch over to the
+Move `[open]` and `[deferred]` entries that exist only on the current branch over to the
 default branch, so they survive when this branch gets deleted.
 
 The `pre-branch-delete` hook will hard-block branch deletion until this
@@ -23,7 +23,7 @@ found-issues promote
 The CLI:
 - Confirms you're on a non-default branch
 - Compares this branch's `docs/found-issues.md` against the default branch's version
-- Lists `[open]` entries on this branch not yet on the default branch
+- Lists `[open]` and `[deferred]` entries on this branch not yet on the default branch
   under any status (matched by entry, so one the default branch already
   fixed or archived is not listed)
 - Prints zero or more entries that need to be carried over
@@ -57,9 +57,10 @@ If the current branch won't be merged (it's exploratory, abandoned, etc.):
    ```
 
    This reads the source branch's ledger with `git show` and appends its
-   `[open]` entries **verbatim**, so original dates survive and entry age
-   stays honest. It is idempotent, so a re-run adds nothing. `[fixed]` and
-   `[deferred]` entries are deliberately left behind.
+   `[open]` and `[deferred]` entries **verbatim**, so original dates survive
+   and entry age stays honest (a deferred entry keeps its reason and
+   defer-cycle). It is idempotent, so a re-run adds nothing. `[fixed]`
+   entries are already resolved history and are deliberately left behind.
 
    **Never append to `docs/found-issues.md` with `Edit` or `Write`.** The
    ledger is a shared file that concurrent sessions also write; a direct edit
