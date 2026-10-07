@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # pre-branch-delete.sh — PreToolUse hook on Bash
 #
-# Hard-blocks branch deletions if the branch has [open] found-issues entries
+# Hard-blocks branch deletions if the branch has [open] or [deferred] found-issues entries
 # whose dedup key (path:line:symptom) does not appear in the default branch's
 # version of the file. Reason: deleting a branch with unpromoted entries
 # silently loses them — the whole point of /found-issues:promote is to
@@ -362,8 +362,9 @@ while IFS= read -r _fi_dir; do
       || git show "origin/$branch:$rel_path" 2>/dev/null \
       || true)"
     [[ -z "$branch_content" ]] && continue
-    # Nothing [open] on the branch = nothing to lose.
-    _fi_re_open=$'(^|\n)-[[:space:]]+\\[open\\]'
+    # Nothing [open] or [deferred] on the branch = nothing to lose (a
+    # branch-only deferred entry is lost with the branch too, 3.3.1).
+    _fi_re_open=$'(^|\n)-[[:space:]]+\\[(open|deferred)\\]'
     [[ "$branch_content" =~ $_fi_re_open ]] || continue
 
     if (( ! _fi_keyset_built )); then
@@ -412,7 +413,7 @@ while IFS= read -r _fi_dir; do
     # Find branch [open] entries whose dedup key is not in main's keyset.
     branch_unpromoted=""
     while IFS= read -r line; do
-      if [[ "$line" =~ ^-[[:space:]]+\[open\] ]]; then
+      if [[ "$line" =~ ^-[[:space:]]+\[(open|deferred)\] ]]; then
         if ! fi_entry_dedup_key_v "$line" "$repo_root"; then
           # Parse failed — treat as unpromoted (safer than silently allowing).
           branch_unpromoted+="$line"$'\n'
@@ -459,7 +460,7 @@ fi
     if [[ "$branch" == *'$'* || "$branch" == *'`'* ]]; then
       echo "Branch '$branch' cannot be checked before the command runs:"
     else
-      echo "Branch '$branch' has [open] found-issues entries not yet promoted to '$default_branch':"
+      echo "Branch '$branch' has [open] or [deferred] found-issues entries not yet promoted to '$default_branch':"
     fi
     echo
     while IFS= read -r entry; do
