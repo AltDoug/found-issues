@@ -218,6 +218,7 @@ _fi_af_publish() {
     AFI_key="$key" AFI_loc="$loc"
     if (( pushed )) && [[ -n "$cur" && "$cur" == "$base" && "$annotated" == *$'\n'"$key"$'\n'* ]]; then
       fi_af_log "$AFI_id" "source ledger annotation skipped for $loc: the PR lands on $base, this checkout's branch, and carries it"
+      fi_af_inflight_mark "$key" "$FI_AF_PR" || fi_af_log "$AFI_id" "in-flight record failed for $loc"
       continue
     fi
     fi_af_annotate_ledger "" "$ann" || fi_af_log "$AFI_id" "source ledger annotation failed for $loc"

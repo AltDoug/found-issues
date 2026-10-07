@@ -21,7 +21,10 @@ teardown() { fi_teardown_tmp; }
   grep -q '^cost=0.5000$' "$ST/done/$ID"
   [ ! -d "$REPO/.claude/worktrees/fi-autofix-$ID" ]
   [ ! -d "$ST/lock" ]
-  grep -q '(PR: foo/bar#7)' "$REPO/docs/found-issues.md"
+  # The PR lands on main, this checkout's branch: it carries the annotation, so
+  # the source ledger stays clean and the entry is recorded as in flight.
+  ! grep -q '(PR: foo/bar#7)' "$REPO/docs/found-issues.md" || false
+  [ "$(ls "$ST/inflight" | wc -l | tr -d ' ')" = 1 ]
   [ "$(grep -c '^claude' "$FI_STANDIN_TRACE")" = 2 ]
   grep -q '^pr merge 7 --auto --squash --repo foo/bar$' "$GH_MOCK_TRACE"
 }

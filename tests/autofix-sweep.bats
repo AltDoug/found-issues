@@ -363,9 +363,8 @@ gh_mock() {
 
 @test "sweep run: a spot item for an entry the sweep shipped retires stale" {
   fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
-  # Off the landing branch, so the source ledger carries the sweep's PR
-  # annotation (a checkout on the landing branch gets it from the PR instead).
-  git switch -q -c elsewhere
+  # Runs ON the landing branch (main): the source ledger is not annotated, the
+  # in-flight record keeps the shipped entry from being fixed a second time.
   "$FI_BIN" autofix run "$SID" --engine claude
   entry="$(grep -m1 'f1 subtracts' docs/found-issues.md)"
   source "$FI_BIN"; fi_af_context

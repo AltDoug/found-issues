@@ -40,6 +40,48 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   grep -rq 'source ledger annotation skipped for src/calc.sh:1' "$FI_AF_RUNS"
 }
 
+@test "autofix ship: a PR landing on the checkout's own branch records the entry as in flight" {
+  fix_it
+  "$FI_BIN" autofix ship "$ID"
+  [ "$(ls "$ST/inflight" | wc -l | tr -d ' ')" = 1 ]
+  f="$ST/inflight/$(ls "$ST/inflight")"
+  grep -q '^key=' "$f"
+  grep -qx 'pr=7' "$f"
+  grep -Eq '^ts=[0-9]+$' "$f"
+}
+
+@test "autofix ship: an entry in flight is not eligible again and a sweep skips it" {
+  fix_it
+  "$FI_BIN" autofix ship "$ID"
+  entry="$(grep -m1 '^- \[open\]' docs/found-issues.md)"
+  fi_af_context   # setup already sourced the CLI
+  fi_entry_dedup_key_v "$entry" "$REPO"
+  AFI_root="$REPO" AFI_key="$FI_KEY"
+  rc=0; fi_af_eligible || rc=$?
+  [ "$rc" -eq 1 ]
+  [ "$FI_AF_WHY" = "fix in flight in PR #7" ]
+  [ -z "$(fi_af_sweep_candidates docs/found-issues.md "$REPO" 10)" ]
+  # a later log of the same entry does not queue a second spot fix
+  rm -f "$ST"/queue/* "$ST"/running/*
+  fi_af_queue_spot "$entry" >/dev/null
+  [ -z "$(ls -A "$ST/queue")" ]
+  [ -z "$(ls -A "$ST/running")" ]
+}
+
+@test "autofix ship: an in-flight record older than 14 days does not block" {
+  fix_it
+  "$FI_BIN" autofix ship "$ID"
+  f="$ST/inflight/$(ls "$ST/inflight")"
+  old=$(( $(date +%s) - 15 * 86400 ))
+  sed -i.bak "s/^ts=.*/ts=$old/" "$f"; rm -f "$f.bak"
+  entry="$(grep -m1 '^- \[open\]' docs/found-issues.md)"
+  fi_af_context   # setup already sourced the CLI
+  fi_entry_dedup_key_v "$entry" "$REPO"
+  AFI_root="$REPO" AFI_key="$FI_KEY"
+  fi_af_eligible
+  [ -n "$(fi_af_sweep_candidates docs/found-issues.md "$REPO" 10)" ]
+}
+
 @test "autofix ship: a PR landing on another branch than the checkout's annotates both ledgers" {
   fix_it
   git switch -q -c elsewhere
