@@ -1,5 +1,5 @@
 ---
-description: Rules for how AI agents maintain docs/found-issues.md — logging, annotation after PR/commit, sync, branch-deletion guard, dead code. Injected into every session by the found-issues SessionStart hook.
+description: Core rules for how AI agents maintain docs/found-issues.md — what to log and how, annotation after PR/commit, the stop marker and the hard rules. Injected into every session by the found-issues SessionStart hook.
 disable-model-invocation: true
 ---
 

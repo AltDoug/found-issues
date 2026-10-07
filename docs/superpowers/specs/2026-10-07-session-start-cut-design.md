@@ -12,7 +12,7 @@ descriptions (~0.8k), identical with auto-fix on or off. The injection is
 re-sent with every API call of the session (median 59 calls/session), and 21 of
 26 resumed transcripts hold it twice.
 
-Goal: cut the session-start injection to ≤1.8 KB on a 150-entry ledger without
+Goal: cut the session-start injection to about 2 KB (≤2.4 KB) on a 150-entry ledger without
 making agents log out-of-scope issues less often or less correctly.
 
 ## 2. Release model
@@ -48,7 +48,7 @@ Dropped from the injection: the 15-entry list, the duplicate annotate footer,
 the `loc-override` HTML comment, and the long sync / promote / dead-code /
 format sections (relocated, section 5).
 
-Budget: ≤1.8 KB on the 150-entry fixture ledger, enforced by a test.
+Budget: fixed parts ≤1600 B, each entry line ≤160 B, whole output ≤2400 B on the 150-entry fixture (1 critical, 3 path-less); enforced by tests. Corrected 2026-10-07 during planning: 1.8 KB could not hold the core plus the data fence plus four entries.
 
 ## 4. First-touch hook (new)
 
