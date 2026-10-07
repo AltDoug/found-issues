@@ -690,3 +690,81 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   grep -q '^result=shipped: PR #9, 1 fixed' "$ST/done/$SID"
   ! grep -q 'autofix-failed' docs/found-issues.md || false
 }
+
+@test "sweep run: a continuation keeps its own engine whatever --engine says" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  source "$FI_BIN"; fi_af_context
+  QID=20991231-000000-00004
+  fi_af_item_write "$FI_AF_ST/queue/$QID" "id=$QID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=codex "queued=$(date +%Y-%m-%dT%H:%M:%S)" crashes=0 cont=2 "cap_day=$(date +%Y-%m-%d)" base=main
+  "$FI_BIN" autofix run "$QID" --engine claude
+  grep -q '^codex' "$FI_STANDIN_TRACE"
+  ! grep -q '^claude' "$FI_STANDIN_TRACE" || false
+  grep -q '^engine=codex$' "$FI_AF_ST/done/$QID"
+  grep -q 'engine codex' "$FI_AF_RUNS/$QID.pr-body.md"
+}
+
+@test "sweep run: a fresh sweep still lets --engine override the queued engine" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/queue/$SID" engine codex
+  "$FI_BIN" autofix run "$SID" --engine claude
+  ! grep -q '^codex' "$FI_STANDIN_TRACE" || false
+  grep -q '^claude' "$FI_STANDIN_TRACE"
+}
+
+@test "sweep run: the engine a sweep ran on is persisted, so its PR body names no codex models for a claude run" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_set "$ST/queue/$SID" engine codex
+  "$FI_BIN" autofix run "$SID" --engine claude
+  grep -q '^engine=claude$' "$ST/done/$SID"
+  grep -q 'launcher A, engine claude' "$FI_AF_RUNS/$SID.pr-body.md"
+  ! grep -q 'codex models' "$FI_AF_RUNS/$SID.pr-body.md" || false
+}
+
+@test "sweep run: a codex sweep's PR body names the model of each role" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock; sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine codex
+  source "$FI_BIN"; fi_af_context
+  grep -q '^engine=codex$' "$ST/done/$SID"
+  grep -q 'Run cost: .*codex models: fixer gpt-6.1-sol (medium), verifier gpt-6-astra (high)' "$FI_AF_RUNS/$SID.pr-body.md"
+}
+
+@test "sweep run: a continuation carries the base reason, so status shows it for both batches" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  git config found-issues.autofix.sweepBatch 2
+  sweep_queue
+  "$FI_BIN" autofix run "$SID" --engine claude
+  c="$(grep -l '^cont=2' "$ST"/done/*)"
+  grep -q '^base_why=default branch$' "$ST/done/$SID"
+  grep -q '^base_why=default branch$' "$c"
+  run "$FI_BIN" autofix status
+  [ "$(printf '%s\n' "$output" | grep -c 'into main (default branch)')" -ge 2 ]
+  ! printf '%s\n' "$output" | grep -q '(?)' || false
+}
+
+@test "sweep run: a sweep after a spot item in one drain starts from zero spend, classify included" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_edit; gh_mock
+  printf -- '- [open] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small)\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-10-01 src/u1.sh:1 — nobody has tagged this\n' >> docs/found-issues.md
+  git add -A && git commit -q -m calc && git push -q origin main
+  git config found-issues.autofix.codexSweepTokens 3500
+  source "$FI_BIN"; fi_af_context
+  fi_af_queue_spot "$(grep -m1 'add subtracts' docs/found-issues.md)" >/dev/null
+  SPOT="$(ls "$FI_AF_ST/queue" | head -1)"
+  fi_af_new_id; SID="$FI_AF_ID"
+  fi_af_item_write "$FI_AF_ST/queue/$SID" "id=$SID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=codex "queued=2099-01-01T00:00:00" crashes=0
+  ST="$FI_AF_ST"
+  "$FI_BIN" autofix run "$SPOT" --engine codex
+  grep -q '^result=shipped' "$ST/done/$SPOT"
+  grep -q '^tokens=3000$' "$ST/done/$SPOT"
+  [ -f "$ST/done/$SID" ]
+  grep -q 'classify: rc=' "$FI_AF_RUNS/$SID.log"
+  # 1500 per child: classify (1500), entry 1 fixed and verified (4500) meets
+  # the 3500 cap before entry 2. The spot item's 3000 are not on top of it:
+  # with them the classifier alone would have left 4500 and entry 1 never ran.
+  grep -q '^result=shipped: PR #9, 1 fixed' "$ST/done/$SID"
+  grep -q '^tokens=4500$' "$ST/done/$SID"
+}

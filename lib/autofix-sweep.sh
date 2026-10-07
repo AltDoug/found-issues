@@ -425,6 +425,11 @@ _fi_af_chain_save() {
   fi_af_item_set "$1" tokens "$(_fi_af_own_tokens)"
 }
 
+# rc 0 when the loaded item is a continuation (batch 2 or later).
+_fi_af_sweep_is_cont() {
+  [[ "${AFI_cont:-}" =~ ^[0-9]+$ ]] && (( 10#$AFI_cont >= 2 ))
+}
+
 # This batch's number: 1 for the first, cont for a continuation.
 _fi_af_sweep_batch_no() {
   if [[ "${AFI_cont:-}" =~ ^[0-9]+$ ]] && (( 10#$AFI_cont >= 2 )); then printf '%s' "$((10#$AFI_cont))"; else printf '1'; fi
@@ -434,7 +439,7 @@ _fi_af_sweep_batch_no() {
 # then one PR (spec §6 steps 4-5). A budget stop or an engine outage leaves
 # the current entry untouched and ships what is committed (ruling 7).
 _fi_af_run_sweep() {
-  local id="$1" engine_opt="$2" r="$FI_AF_ST/running/$1" engine
+  local id="$1" engine_opt="$2" r="$FI_AF_ST/running/$1" engine want
   fi_af_item_read "$r" || return 0
   _fi_af_chain_seed
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
@@ -443,10 +448,19 @@ _fi_af_run_sweep() {
   # A ship retry calls no engine: it must not fail for want of one.
   if [[ "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then
     engine="${AFI_engine:-${engine_opt:-claude}}"
-  elif ! engine="$(fi_af_engine "${engine_opt:-$AFI_engine}")" || ! command -v "$engine" >/dev/null 2>&1; then
-    fi_af_finish "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
+  else
+    # A chain never switches engines (spec section 9): a continuation keeps
+    # the engine its first batch resolved, whatever launcher or harness runs
+    # it; --engine only decides for a fresh sweep.
+    want="${engine_opt:-$AFI_engine}"
+    if _fi_af_sweep_is_cont && [[ -n "$AFI_engine" ]]; then want="$AFI_engine"; fi
+    if ! engine="$(fi_af_engine "$want")" || ! command -v "$engine" >/dev/null 2>&1; then
+      fi_af_finish "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
+    fi
   fi
   AFI_engine="$engine"
+  # The engine the sweep really ran on, for its PR body and the status row.
+  fi_af_item_set "$r" engine "$engine"
   while fi_af_sweep_load "$id"; do
     fi_af_enabled || break
     _fi_af_fix_loop "$id" "$engine"
@@ -534,7 +548,7 @@ _fi_af_sweep_queue_next() {
     "root=$AFI_root" "slug=$AFI_slug" "loc=sweep" "engine=$AFI_engine" \
     "queued=$(date +%Y-%m-%dT%H:%M:%S)" "crashes=0" \
     "cont=$nxt" "cap_day=$(fi_today)" "chain_cost=${FI_AF_COST:-0}" "chain_tokens=${FI_AF_TOKENS:-0}" \
-    "base=$AFI_base" "skip_files=$skip"
+    "base=$AFI_base" "base_why=$AFI_base_why" "skip_files=$skip"
   fi_af_log "$id" "sweep: queued batch $nxt as $FI_AF_ID"
 }
 

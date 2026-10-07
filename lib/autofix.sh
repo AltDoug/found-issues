@@ -176,10 +176,14 @@ _fi_af_outage_limit() {
 
 _fi_af_run_one() {
   local id="$1" engine_opt="$2" engine n_out
+  # Every item of a drain starts from zero spend, before the claim: a sweep's
+  # classify child runs inside the claim and would otherwise add its cost and
+  # tokens (and check its cap) on top of the previous item's. A continuation
+  # is seeded with its chain's spend by _fi_af_chain_seed.
+  FI_AF_COST=0 FI_AF_TOKENS=0 FI_AF_CHILD_TOKENS=0
   fi_af_claim "$id" || return $?
   fi_af_item_read "$FI_AF_ST/running/$id" || return 0
   if [[ "$AFI_kind" == "sweep" ]]; then _fi_af_run_sweep "$id" "$engine_opt"; return; fi
-  FI_AF_COST=0 FI_AF_TOKENS=0
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
     _fi_af_end "$id" manual "no test command"; return 0
   fi
