@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.1] - 2026-10-07
+
+### Security
+- The Claude auto-fix children are sandboxed. The fixer, verifier and classifier now run with `--restricted`: Edit/Write can only touch the run's worktree (a write elsewhere is refused), your user/project/local Claude settings are not loaded, and each role gets only the tools it needs. They also run with `--strict-mcp-config` and no MCP config, so none of your MCP servers is reachable. The fixer's test command runs inside the Claude OS sandbox (writes outside the worktree denied, network still open, no escape hatch, and the fixer does not start if the sandbox is unavailable). Codex children are unchanged. A test that writes outside the repo (a temp dir under `$HOME`, a global cache) may now fail in an auto-fix run: look for "Operation not permitted" or "is outside" in the run log (`found-issues autofix status`) and fix the test or park the entry.
+
 ## [3.3.0] - 2026-10-06
 
 ### Changed

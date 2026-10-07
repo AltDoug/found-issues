@@ -120,7 +120,9 @@ fi_af_classify() {
       --output-schema "$base.schema.json" -o "$base.last" "$(_fi_af_classify_prompt "$list")")
   else
     fi_af_budget_args
-    FI_AF_CMD=(claude -p --model sonnet ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
+    FI_AF_CMD=(claude -p --restricted --strict-mcp-config
+      --tools Read Glob Grep
+      --model sonnet ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 20 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools Read Grep Glob

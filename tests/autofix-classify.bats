@@ -57,6 +57,12 @@ teardown() { fi_teardown_tmp; }
   [[ "$p" != *"already tagged"* ]]
   [[ "$p" != *"waits on a date"* ]]
   grep -q -- '--allowedTools' "$FI_STANDIN_TRACE"
+  # 3.3.1: restricted, no MCP, read-only tools only, no sandbox settings
+  t="$(tr '\037' '\n' < "$FI_STANDIN_TRACE")"
+  [[ "$t" == *$'\n--restricted\n'* ]]
+  [[ "$t" == *$'\n--strict-mcp-config\n'* ]]
+  [[ "$t" == *$'\n--tools\nRead\nGlob\nGrep\n--'* ]]
+  [[ "$t" != *$'\n--settings\n'* ]]
 }
 
 @test "classify: a failed engine turn tags nothing, even when its text looks like an answer" {

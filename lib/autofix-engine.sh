@@ -36,6 +36,12 @@
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
+# The fixer's Bash sandbox (3.3.1). Measured live 2026-10-07 (Claude Code
+# 2.1.292): with --restricted, `sh test.sh` could not write under $HOME
+# ("Operation not permitted"), could reach https://example.com (200), and
+# dangerouslyDisableSandbox was ignored. network.allowedDomains is needed:
+# without it every outbound host answers 403.
+FI_AF_SANDBOX_SETTINGS='{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false,"network":{"allowedDomains":["*"]}}}'
 FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_BARGS=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
 FI_AF_RESULT="" FI_AF_RESULT_TEXT="" FI_AF_APPROVE="false" FI_AF_REASON=""
 FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0 FI_AF_VERDICT_OK=0
@@ -184,7 +190,17 @@ fi_af_fixer_cmd() {
       ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"} -o "$last" "$prompt")
   else
     fi_af_budget_args
-    FI_AF_CMD=(claude -p --model sonnet ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
+    # 3.3.1: --restricted confines Edit/Write to the worktree and ignores the
+    # user/project/local settings; --strict-mcp-config (no --mcp-config) loads
+    # no MCP server. --tools names the only tools the role gets; the
+    # --allowedTools Bash(...) patterns stay the gate on which commands run;
+    # --settings turns on the OS sandbox for that Bash command (writes outside
+    # the worktree denied, network open, no dangerouslyDisableSandbox escape,
+    # and no start at all when the sandbox is unavailable).
+    FI_AF_CMD=(claude -p --restricted --strict-mcp-config
+      --settings "$FI_AF_SANDBOX_SETTINGS"
+      --tools Read Edit Write Glob Grep Bash
+      --model sonnet ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 40 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools "${FI_AF_TOOLS[@]}"
@@ -201,7 +217,9 @@ fi_af_verifier_cmd() {
       ${FI_AF_MARGS[@]+"${FI_AF_MARGS[@]}"} --output-schema "$schema" -o "$last" "$prompt")
   else
     fi_af_budget_args
-    FI_AF_CMD=(claude -p --model opus --effort high ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
+    FI_AF_CMD=(claude -p --restricted --strict-mcp-config
+      --tools Read Glob Grep Bash
+      --model opus --effort high ${FI_AF_BARGS[@]+"${FI_AF_BARGS[@]}"}
       --max-turns 15 --no-session-persistence
       --permission-mode dontAsk --permission-prompts none
       --allowedTools Read Grep Glob "Bash(found-issues autofix search ${AFI_id:-} *)"
