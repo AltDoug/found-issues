@@ -24,10 +24,19 @@
 # migration (spec §3.3). Matching is by exact name or whole path segment so
 # author.py, clock.py and migrate_helpers.py are not caught.
 fi_offlimits_category() {
+  local was=0 rc
+  # nocasematch folds case so src/Auth/login.py and .ENV match, without a
+  # subshell per path (bash 3.2: no ${p,,}); restored as fi_icontains does.
+  shopt -q nocasematch && was=1
+  shopt -s nocasematch
+  _fi_offlimits_category_body "$1"; rc=$?
+  (( was )) || shopt -u nocasematch
+  return $rc
+}
+
+_fi_offlimits_category_body() {
   local p="$1"
   [[ -z "$p" ]] && return 1
-  # Fold case so src/Auth/login.py and .ENV match (bash 3.2: no ${p,,}).
-  p=$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')
   case "$p" in
     /*|../*|*/../*) printf 'outside-repo'; return 0 ;;
   esac
