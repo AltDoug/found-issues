@@ -22,13 +22,18 @@ FI_STANDIN_NO_TAGS='{"tags":[],"wake":[]}'
 # A failed turn exits before any edit or -o write, like the real codex.
 if [[ -n "${FI_STANDIN_CODEX_FAIL:-}" && ( "$sandbox" == "$FI_STANDIN_CODEX_FAIL" || "$FI_STANDIN_CODEX_FAIL" == all ) ]]; then
   printf '{"type":"thread.started"}\n'
-  printf '%s\n' '{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The '"'"'bad-model'"'"' model is not supported when using Codex with a ChatGPT account.\"}}"}}'
+  msg="${FI_STANDIN_CODEX_FAIL_MSG:-The 'bad-model' model is not supported when using Codex with a ChatGPT account.}"
+  inner="$(jq -cn --arg m "$msg" '{type:"error",status:400,error:{type:"invalid_request_error",message:$m}}')"
+  jq -cn --arg m "$inner" '{type:"turn.failed",error:{message:$m}}'
   echo 'Reading additional input from stdin...' >&2
   exit 1
 fi
 if [[ "$FI_STANDIN_PROMPT" == *"found-issues classifier"* ]]; then
   text="${FI_STANDIN_CLASSIFY:-$FI_STANDIN_NO_TAGS}"
 elif [[ "$sandbox" == "read-only" ]]; then
+  # A verifier that dies without a verdict or a turn.failed event, like a
+  # crash, a lost login or the watchdog's TERM.
+  [[ -n "${FI_STANDIN_VERIFIER_CRASH:-}" ]] && exit "$FI_STANDIN_VERIFIER_CRASH"
   text='{"approve":true,"reason":"ok"}'
   if [[ -n "${FI_STANDIN_VERDICTS:-}" && -s "$FI_STANDIN_VERDICTS" ]]; then
     IFS= read -r text <"$FI_STANDIN_VERDICTS"
@@ -42,3 +47,6 @@ fi
 [[ -n "$last" ]] && printf '%s\n' "$text" >"$last"
 printf '{"type":"thread.started"}\n'
 printf '{"type":"turn.completed","usage":{"input_tokens":%s,"cached_input_tokens":0,"output_tokens":300}}\n' "${FI_STANDIN_TOKENS:-1200}"
+# A verifier that answers and still exits non-zero.
+[[ "$sandbox" == "read-only" && -n "${FI_STANDIN_VERIFIER_RC:-}" ]] && exit "$FI_STANDIN_VERIFIER_RC"
+exit 0

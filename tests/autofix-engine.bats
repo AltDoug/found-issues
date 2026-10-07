@@ -273,6 +273,43 @@ teardown() { fi_teardown_tmp; }
   [ "$FI_AF_CHILD_TOKENS" = 1500 ]
 }
 
+@test "autofix engine: a turn.failed whose message is not a JSON object still gives the engine error text" {
+  FI_AF_TOKENS=0
+  printf '%s\n' '{"type":"turn.failed","error":{"message":"500"}}' > "$TMP/f1.jsonl"
+  fi_af_collect codex "$TMP/f1.jsonl" "$TMP/last"
+  [ "$FI_AF_ENGINE_ERR" = "500" ]
+  printf '%s\n' '{"type":"turn.failed","error":{"message":"\"boom\""}}' > "$TMP/f2.jsonl"
+  fi_af_collect codex "$TMP/f2.jsonl" "$TMP/last"
+  [ -n "$FI_AF_ENGINE_ERR" ]
+  [[ "$FI_AF_ENGINE_ERR" == *boom* ]]
+  printf '%s\n' '{"type":"turn.failed","error":"flat"}' > "$TMP/f3.jsonl"
+  fi_af_collect codex "$TMP/f3.jsonl" "$TMP/last"
+  [ "$FI_AF_ENGINE_ERR" = "turn failed" ]
+  printf '%s\n' '{"type":"turn.failed","error":{"message":""}}' > "$TMP/f4.jsonl"
+  fi_af_collect codex "$TMP/f4.jsonl" "$TMP/last"
+  [ "$FI_AF_ENGINE_ERR" = "turn failed" ]
+}
+
+@test "autofix engine: only a model-rejection text leaves the doctor marker" {
+  FI_AF_TOKENS=0
+  fi_af_root
+  rm -f "$FI_AF_ROOT/codex-model-error"
+  printf '%s\n' '{"type":"turn.failed","error":{"message":"{\"error\":{\"message\":\"You have hit your usage limit for model gpt-6-astra\"}}"}}' > "$TMP/u.jsonl"
+  fi_af_collect codex "$TMP/u.jsonl" "$TMP/last"
+  [ -n "$FI_AF_ENGINE_ERR" ]
+  [ ! -e "$FI_AF_ROOT/codex-model-error" ]
+  printf '%s\n' '{"type":"turn.failed","error":{"message":"{\"error\":{\"message\":\"Model gpt-6-astra is overloaded, not available right now\"}}"}}' > "$TMP/o.jsonl"
+  fi_af_collect codex "$TMP/o.jsonl" "$TMP/last"
+  [ ! -e "$FI_AF_ROOT/codex-model-error" ]
+  printf '%s\n' '{"type":"turn.failed","error":{"message":"{\"error\":{\"message\":\"The model `x` does not exist\"}}"}}' > "$TMP/m.jsonl"
+  fi_af_collect codex "$TMP/m.jsonl" "$TMP/last"
+  [ -s "$FI_AF_ROOT/codex-model-error" ]
+  rm -f "$FI_AF_ROOT/codex-model-error"
+  printf '%s\n' '{"type":"turn.failed","error":{"message":"Unknown model: zzz"}}' > "$TMP/m2.jsonl"
+  fi_af_collect codex "$TMP/m2.jsonl" "$TMP/last"
+  [ -s "$FI_AF_ROOT/codex-model-error" ]
+}
+
 @test "autofix engine: tokens left shrink with use and run out at the cap" {
   git config found-issues.autofix.codexRunTokens 1000
   FI_AF_TOKENS=400

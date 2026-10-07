@@ -9,6 +9,8 @@
 #   FI_STANDIN_SLEEP   seconds to sleep first (watchdog tests)
 #   FI_STANDIN_ERROR   act like an outage: is_error result with this text, exit 1
 #   FI_STANDIN_CLASSIFY the sweep classifier's JSON reply (default no tags)
+#   FI_STANDIN_VERIFIER_CRASH exit code of a verifier that dies with no output
+#   FI_STANDIN_VERIFIER_RC    exit code of a verifier that answers and still exits non-zero
 # FI_STANDIN_EDIT sees the prompt (the last argument) as $FI_STANDIN_PROMPT.
 set -euo pipefail
 if [[ -n "${FI_STANDIN_TRACE:-}" ]]; then
@@ -32,6 +34,7 @@ for a in "$@"; do
   prev="$a"
 done
 if (( verifier )); then
+  [[ -n "${FI_STANDIN_VERIFIER_CRASH:-}" ]] && exit "$FI_STANDIN_VERIFIER_CRASH"
   text='{"approve":true,"reason":"ok"}'
   if [[ -n "${FI_STANDIN_VERDICTS:-}" && -s "$FI_STANDIN_VERDICTS" ]]; then
     IFS= read -r text <"$FI_STANDIN_VERDICTS"
@@ -44,3 +47,5 @@ else
 fi
 jq -n --arg r "$text" --argjson c "${FI_STANDIN_COST:-0.25}" \
   '{type:"result",subtype:"success",is_error:false,result:$r,total_cost_usd:$c,permission_denials:[]}'
+(( verifier )) && [[ -n "${FI_STANDIN_VERIFIER_RC:-}" ]] && exit "$FI_STANDIN_VERIFIER_RC"
+exit 0

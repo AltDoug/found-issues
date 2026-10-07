@@ -68,3 +68,12 @@ teardown() { fi_teardown_tmp; }
   [[ "$output" == *"Last Codex run failed on its model"* ]]
   [[ "$output" == *"found-issues config autofix.codexModel"* ]]
 }
+
+@test "doctor auto-fix: a usage limit that names the model is not a model error" {
+  fi_af_queue_fixture
+  export FI_STANDIN_CODEX_FAIL=workspace-write
+  export FI_STANDIN_CODEX_FAIL_MSG="You have hit your usage limit for model gpt-6.1-sol"
+  "$FI_BIN" autofix run "$ID" --engine codex >/dev/null || true
+  run "$FI_BIN" doctor
+  [[ "$output" != *"Last Codex run failed on its model"* ]]
+}

@@ -209,6 +209,20 @@ fi_af_verifier_cmd() {
   fi
 }
 
+# 3.3.0: does a failed Codex turn's text say the model itself was refused?
+# model ... (not found|does not exist|...) or (unknown|invalid|unsupported)
+# model, case-insensitive; never when it speaks of a usage limit, a rate
+# limit or an overload.
+_fi_af_model_rejected() {
+  local t re_limit re_a re_b
+  t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  re_limit='usage limit|rate limit|rate-limit|overloaded'
+  re_a='model.*(not found|does not exist|not supported|unsupported|not available|invalid|unknown|no access|do not have access)'
+  re_b='(unknown|invalid|unsupported) model'
+  [[ "$t" =~ $re_limit ]] && return 1
+  [[ "$t" =~ $re_a || "$t" =~ $re_b ]]
+}
+
 fi_af_collect() {
   local engine="$1" out="$2" last="$3" c t
   FI_AF_TEXT="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0
@@ -219,15 +233,31 @@ fi_af_collect() {
     FI_AF_CHILD_TOKENS="$t"
     FI_AF_TOKENS=$((FI_AF_TOKENS + t))
     # 3.3.0 spec section 4: a rejected model (or any failed turn) is an outage.
-    # Measured: the message is a JSON error envelope inside a string.
-    FI_AF_ENGINE_ERR="$(jq -rs '[.[] | select(.type=="turn.failed") | (.error.message // "turn failed")] | last // empty | ((fromjson? | .error.message // .message) // .)' "$out" 2>/dev/null || true)"
+    # Measured: the message is a JSON error envelope inside a string; a
+    # message that is not an envelope object (a bare number, a quoted string)
+    # is the text itself. Never empty for a turn.failed event.
+    FI_AF_ENGINE_ERR="$(jq -Rrn '
+      def msg: (try (.error | objects | .message) catch null) // "turn failed";
+      [inputs | (try fromjson catch empty) | select(type == "object" and .type == "turn.failed") | msg]
+      | last // empty
+      | if type == "string" then
+          ((try fromjson catch null) as $j
+           | if ($j | type) == "object" then (($j.error | objects | .message | strings) // ($j.message | strings) // .) else . end)
+        else tostring end
+      | if gsub("[[:space:]]"; "") == "" then "turn failed" else . end' "$out" 2>/dev/null || true)"
     FI_AF_ENGINE_ERR="${FI_AF_ENGINE_ERR//$'\n'/ }"
+    if [[ -z "$FI_AF_ENGINE_ERR" ]] && grep -Fq '"turn.failed"' "$out" 2>/dev/null; then
+      FI_AF_ENGINE_ERR="turn failed"
+    fi
     # A model the account cannot use leaves a marker for doctor; a clean child
-    # that spent tokens clears it.
+    # that spent tokens clears it. Only a model-rejection shape counts: a
+    # usage limit or an overload can name a model without it being unusable.
     fi_af_root
-    if [[ -n "$FI_AF_ENGINE_ERR" ]] && [[ "$(printf '%s' "$FI_AF_ENGINE_ERR" | tr '[:upper:]' '[:lower:]')" == *model* ]]; then
-      printf '%s\n' "$FI_AF_ENGINE_ERR" >"$FI_AF_ROOT/codex-model-error" 2>/dev/null || true
-    elif [[ -z "$FI_AF_ENGINE_ERR" ]] && (( t > 0 )); then
+    if [[ -n "$FI_AF_ENGINE_ERR" ]]; then
+      if _fi_af_model_rejected "$FI_AF_ENGINE_ERR"; then
+        printf '%s\n' "$FI_AF_ENGINE_ERR" >"$FI_AF_ROOT/codex-model-error" 2>/dev/null || true
+      fi
+    elif (( t > 0 )); then
       rm -f "$FI_AF_ROOT/codex-model-error" 2>/dev/null || true
     fi
   else
