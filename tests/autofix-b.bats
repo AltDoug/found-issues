@@ -266,12 +266,14 @@ tap_fail_cmd() {
 @test "b: verify switched off mid-fix requeues the item and runs no verifier" {
   claim; fix_it
   "$FI_BIN" autofix off >/dev/null
+  : > "$FI_STANDIN_TRACE"
   run "$FI_BIN" autofix verify "$ID"
   [ "$status" -eq 8 ]
   [[ "$output" == *"requeued; stop"* ]]
   [ -f "$ST/queue/$ID" ]
   [ ! -e "$ST/running/$ID" ]
-  ! grep -q 'opus' "$FI_STANDIN_TRACE" 2>/dev/null || false
+  [ -f "$FI_STANDIN_TRACE" ]
+  ! grep -q 'opus' "$FI_STANDIN_TRACE" || false
 }
 
 @test "b: ship switched off after approval requeues the item and opens no PR" {
@@ -301,8 +303,10 @@ tap_fail_cmd() {
   fi_af_item_set "$ST/running/$ID" engine codex
   fi_af_item_set "$ST/running/$ID" tokens 700000
   git config found-issues.autofix.codexRunTokens 600000
+  : > "$FI_STANDIN_TRACE"
   run "$FI_BIN" autofix verify "$ID"
   [ "$status" -eq 6 ]
   [[ "$output" == *"failed: run budget spent; stop"* ]]
-  ! grep -q 'read-only' "$FI_STANDIN_TRACE" 2>/dev/null || false
+  [ -f "$FI_STANDIN_TRACE" ]
+  ! grep -q 'read-only' "$FI_STANDIN_TRACE" || false
 }

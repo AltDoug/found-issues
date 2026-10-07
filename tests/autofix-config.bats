@@ -163,7 +163,7 @@ src() {
   run "$FI_BIN" config autofix.codexVerifierModel gpt-6-astra
   [ "$status" -eq 0 ]
   run "$FI_BIN" config
-  [[ "$output" == *"found-issues.autofix.codexModel"*"inherit"*"(local)"* ]]
+  echo "$output" | grep -Eq '^found-issues\.autofix\.codexModel +inherit +\(local\)$'
 }
 
 @test "config: a model value is refused when it starts with a dash and inherit is normalized to lower case" {
@@ -218,6 +218,6 @@ src() {
   [ -z "$(fi_af_token_cap 2>/dev/null)" ]
   git config --unset found-issues.autofix.codexSweepTokens
   run "$FI_BIN" config
-  [[ "$output" == *"found-issues.autofix.codexRunTokens"*"(default)"* ]]
-  [[ "$output" == *"found-issues.autofix.codexSweepTokens"*"(default)"* ]]
+  echo "$output" | grep -Eq '^found-issues\.autofix\.codexRunTokens +\(default\)$'
+  echo "$output" | grep -Eq '^found-issues\.autofix\.codexSweepTokens +\(default\)$'
 }

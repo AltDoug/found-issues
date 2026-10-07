@@ -235,7 +235,7 @@ sweep_queue() { # queue a sweep for the fixture; sets SID and ST
   [ "$status" -eq 5 ]
   grep -q '^result=stale: no test command$' "$ST/done/$SID"
   [ ! -s "$ST/day/$(date +%Y-%m-%d).sweep" ]
-  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q . "$FI_STANDIN_TRACE"
+  [ ! -s "$FI_STANDIN_TRACE" ]
   [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
 }
 
@@ -437,7 +437,7 @@ gh_mock() {
   [[ "$output" == *"tests fail at base"* ]]
   grep -q '^result=stale: tests fail at base$' "$ST/done/$SID"
   [ -s "$ST/day/$(date +%Y-%m-%d).sweep" ]
-  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q . "$FI_STANDIN_TRACE"
+  [ ! -s "$FI_STANDIN_TRACE" ]
   [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
 }
 
@@ -575,7 +575,7 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   [ "$(wc -l < "$FI_AF_ST/sweeps/$QID.entries" | tr -d ' ')" = 3 ]
   ! grep -q 'src/f1.sh' "$FI_AF_ST/sweeps/$QID.entries" || false
   # No classify pass and no second day slot for a continuation.
-  [ ! -f "$FI_STANDIN_TRACE" ] || ! grep -q . "$FI_STANDIN_TRACE" || false
+  [ ! -s "$FI_STANDIN_TRACE" ]
   [ ! -s "$FI_AF_ST/day/$(date +%Y-%m-%d).sweep" ]
 }
 
