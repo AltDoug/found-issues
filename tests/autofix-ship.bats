@@ -30,8 +30,19 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   grep -q '^pr merge 7 --auto --squash --repo foo/bar$' "$GH_MOCK_TRACE"
 }
 
-@test "autofix ship: annotates both the PR branch ledger and the source ledger" {
+@test "autofix ship: a PR landing on the checkout's own branch annotates only the PR branch ledger" {
   fix_it
+  [ "$(git branch --show-current)" = main ]
+  "$FI_BIN" autofix ship "$ID"
+  git -C "$TMP/remote.git" show "$BR:docs/found-issues.md" | grep -q 'add subtracts (fix: small) (PR: foo/bar#7)$'
+  ! grep -q '(PR: foo/bar#7)' "$REPO/docs/found-issues.md" || false
+  [ -z "$(git -C "$REPO" status --porcelain -- docs/found-issues.md)" ]
+  grep -rq 'source ledger annotation skipped for src/calc.sh:1' "$FI_AF_RUNS"
+}
+
+@test "autofix ship: a PR landing on another branch than the checkout's annotates both ledgers" {
+  fix_it
+  git switch -q -c elsewhere
   "$FI_BIN" autofix ship "$ID"
   git -C "$TMP/remote.git" show "$BR:docs/found-issues.md" | grep -q 'add subtracts (fix: small) (PR: foo/bar#7)$'
   grep -q 'add subtracts (fix: small) (PR: foo/bar#7)$' "$REPO/docs/found-issues.md"
