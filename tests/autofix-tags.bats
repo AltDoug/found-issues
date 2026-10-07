@@ -117,6 +117,16 @@ teardown() { fi_teardown_tmp; }
   [ "$FI_RETAGGED" = "- [deferred] 2026-10-03 src/a.sh:1 — bug (reason: x)" ]
 }
 
+@test "retag: legacy (fix: none known) text is user text and is never deleted" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  fi_entry_retag "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known)" fix "small"
+  [ "$FI_RETAGGED" = "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known) (fix: small)" ]
+  fi_entry_retag "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known) (fix: large)" decide "A or B?"
+  [ "$FI_RETAGGED" = "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known) (decide: A or B?)" ]
+  fi_entry_retag "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known) (until: date:2026-01-01)" drop-until ""
+  [ "$FI_RETAGGED" = "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known)" ]
+}
+
 @test "tag_resolve: --fix on an off-limits path becomes manual off-limits" {
   fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
   fi_tag_resolve fix small .github/workflows/ci.yml "$TMP"

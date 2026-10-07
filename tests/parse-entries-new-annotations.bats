@@ -30,3 +30,15 @@ setup() { fi_source_lib parse-entries; }
   # Critical: prs field must NOT contain the closed ref
   [[ "$output" != *"prs=foo/bar#41"* ]]
 }
+
+@test "fi_parse_entry: only (fix: small|medium|large) is a tag, other (fix: ...) text stays in the symptom" {
+  fi_parse_entry_vars '- [open] 2026-10-03 src/a.sh:1 — legacy (fix: none known)'
+  [ "$FE_symptom" = "legacy (fix: none known)" ]
+  [ -z "$FE_fixtag" ]
+  fi_parse_entry_vars '- [open] 2026-10-03 src/a.sh:1 — legacy (fix: none known) (decide: A or B?)'
+  [ "$FE_symptom" = "legacy (fix: none known)" ]
+  [ "$FE_decide" = "A or B?" ]
+  fi_parse_entry_vars '- [open] 2026-10-03 src/a.sh:1 — legacy (fix: medium)'
+  [ "$FE_symptom" = "legacy" ]
+  [ "$FE_fixtag" = "medium" ]
+}
