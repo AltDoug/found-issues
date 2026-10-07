@@ -398,8 +398,11 @@ _fi_af_file_busy() {
 _fi_af_wait_check() {
   local q="$1" p why now since
   p="$(_fi_af_entry_file)" || return 0
-  git -C "$AFI_root" fetch -q origin "$AFI_base" 2>/dev/null || return 0
-  if ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
+  # An offline claim waits like any other wait: no daily slot, no failed tag,
+  # and it counts toward the wait maximum.
+  if ! git -C "$AFI_root" fetch -q origin "$AFI_base" 2>/dev/null; then
+    why="git fetch failed"
+  elif ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
     why="$p not on origin/$AFI_base"
   elif _fi_af_file_busy "$p"; then
     why="$p busy in $AFI_root"
