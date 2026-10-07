@@ -17,6 +17,15 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 - A failed Codex turn (for example a model your account cannot use) is an outage that requeues, with the real error text, instead of a failed attempt; this now also holds for the verifier.
+- A verifier that exits non-zero without leaving a verdict (a crash, a lost login, a timeout) is an outage too, on both launchers, instead of a reject. A spot item whose runs end in an outage `FOUND_ISSUES_AUTOFIX_OUTAGE_MAX` times in a row (default 3) now finishes failed with the last outage text, instead of re-running the paid fixer every day.
+- The "last Codex run failed on its model" warning in `doctor` fires only when the error says the model was refused (not found, unsupported, unknown), not on a usage limit or an overload that merely names a model. A Codex error message that is not a JSON object is shown as is.
+- A sweep's later batches no longer conflict with the batch PRs before them: a continuation skips every file an earlier batch of the chain changed (not only the ones its entries cite), drops a fix that touches one of them (the entry stays open for the next sweep), and leaves the PR branch's ledger alone (the source ledger is still annotated, so sync closes the entries as before).
+- A full batch closes at the first file boundary whatever the last outcome was; a failed or skipped entry could carry it past the boundary and past `sweepBatch`.
+- A continuation keeps the engine of its first batch even when a hook from the other harness launches it. The engine a sweep actually ran on is what its PR body and `autofix status` show, and a continuation shows the same landing-branch reason as its first batch.
+- A sweep that follows another item in one `autofix run` drain no longer starts with that item's spend, so its token cap and recorded cost cover only itself.
+- `found-issues config autofix.sweepMax --unset` works again (here and with `--global`); setting it is refused in favour of `autofix.sweepBatch`, and the listing shows `<n> (from legacy sweepMax)` on the `sweepBatch` row. `doctor` says when a dollar cap is set to a value the engine ignores, and `autofix status` shows a continuation's tokens as the whole chain against the sweep cap.
+- A Codex model value that starts with `-` or is blank (a raw `git config` typo) is ignored with a warning in the run log and `doctor`, and the role's default is used; `inherit` is matched in any case.
+- A classify pass whose engine turn failed tags nothing, even when the error text happens to look like an answer.
 
 ## [3.2.1] - 2026-10-06
 

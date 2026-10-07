@@ -216,6 +216,7 @@ found-issues config autofix.sweepBatch --unset
 | `FOUND_ISSUES_AUTOFIX_LOCK_STALE` | `3600` | Seconds after which a repo's run lock counts as abandoned |
 | `FOUND_ISSUES_AUTOFIX_SHIP_TRIES` | `3` | Ship attempts a sweep gets. A failed ship keeps the sweep's branch and requeues it so the next run only ships; the last failure ends the sweep failed, its branch still kept |
 | `FOUND_ISSUES_AUTOFIX_SHIP_WAIT` | `900` | Seconds before a requeued sweep retries its ship |
+| `FOUND_ISSUES_AUTOFIX_OUTAGE_MAX` | `3` | Engine outages in a row (a failed turn, a verifier that died) after which a spot item finishes failed with the last outage text instead of being requeued again |
 | `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS` | `runTimeoutMin` × 60 | Per engine-call timeout override |
 | `FOUND_ISSUES_AUTOFIX_MERGE_POLLS` / `_MERGE_SLEEP` | `60` / `60` | How long `autofix merge-when-green` waits for checks |
 | `FOUND_ISSUES_AUTOFIX_WAIT_RECHECK` | `900` | Seconds before a waiting item (its cited file is not on the landing branch yet, or has uncommitted or unpushed changes) is looked at again |
