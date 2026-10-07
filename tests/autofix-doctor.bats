@@ -84,3 +84,17 @@ teardown() { fi_teardown_tmp; }
   [[ "$output" == *"invalid codex model '--unset' for fixer; using default gpt-6.1-sol"* ]]
   [[ "$output" == *"Codex models: fixer gpt-6.1-sol (medium)"* ]]
 }
+
+@test "doctor auto-fix: an invalid dollar cap is called out as ignored, a valid one shown" {
+  git config found-issues.autofix.runBudget 3usd
+  git config found-issues.autofix.sweepBudget 12.5
+  run "$FI_BIN" doctor
+  [[ "$output" == *"invalid runBudget '3usd' (ignored: no dollar cap)"* ]]
+  [[ "$output" == *'$12.5 per sweep'* ]]
+  [[ "$output" != *'$3usd'* ]]
+  git config found-issues.autofix.runBudget 3
+  git config found-issues.autofix.sweepBudget '$9'
+  run "$FI_BIN" doctor
+  [[ "$output" == *'$3 per run'* ]]
+  [[ "$output" == *"invalid sweepBudget '\$9' (ignored: no dollar cap)"* ]]
+}

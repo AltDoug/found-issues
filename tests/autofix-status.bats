@@ -111,3 +111,18 @@ teardown() { fi_teardown_tmp; }
   [[ "$output" == *" 3000 tokens"* ]]
   [[ "$output" != *"3000/"* ]]
 }
+
+@test "autofix status: a continuation's tokens row shows the whole chain against the sweep cap" {
+  git config found-issues.autofix.codexSweepTokens 2400000
+  printf 'id=c1\nkind=sweep\nloc=sweep\nengine=codex\ncont=3\ntokens=50000\nchain_tokens=2300000\nfinished=1000\nresult=shipped: PR #5, 8 fixed\n' > "$ST/done/c1"
+  run "$FI_BIN" autofix status
+  echo "$output" | grep -Fq '2350000/2400000 tokens (chain)'
+  git config --unset found-issues.autofix.codexSweepTokens
+  run "$FI_BIN" autofix status
+  echo "$output" | grep -Fq '2350000 tokens (chain)'
+  ! echo "$output" | grep -q '2350000/' || false
+  # A first batch has no chain: its own tokens, unmarked.
+  printf 'id=c0\nkind=sweep\nloc=sweep\nengine=codex\ntokens=70000\nfinished=900\nresult=shipped: PR #4, 8 fixed\n' > "$ST/done/c0"
+  run "$FI_BIN" autofix status
+  echo "$output" | grep -Eq '^ +70000 tokens$'
+}

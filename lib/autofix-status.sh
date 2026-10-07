@@ -103,12 +103,21 @@ _fi_af_loc_label() {
   fi
 }
 
-# 3.3.0: a Codex item's tokens, against its cap when one is set.
+# 3.3.0: a Codex item's tokens, against its cap when one is set. A
+# continuation's cap covers the whole chain, so its row shows the chain's
+# total (the batches before it plus its own) marked "(chain)"; the sums of
+# what was spent (spent today, the summary) stay on each item's own tokens.
 _fi_af_tokens_row() {
-  local cap
-  [[ "${AFI_engine:-}" == codex && "${AFI_tokens:-}" =~ ^[0-9]+$ ]] && (( AFI_tokens > 0 )) || return 0
+  local cap own="${AFI_tokens:-0}" total chain=""
+  [[ "${AFI_engine:-}" == codex ]] || return 0
+  [[ "$own" =~ ^[0-9]+$ ]] || own=0
+  total="$own"
+  if [[ "${AFI_chain_tokens:-}" =~ ^[0-9]+$ ]]; then
+    total=$(( AFI_chain_tokens + own )) chain=" (chain)"
+  fi
+  (( total > 0 )) || return 0
   cap="$(fi_af_token_cap)"
-  printf '      %s%s tokens\n' "$AFI_tokens" "${cap:+/$cap}"
+  printf '      %s%s tokens%s\n' "$total" "${cap:+/$cap}" "$chain"
 }
 
 # Spec §8: queue, running, today's counts against caps, decisions waiting,
@@ -266,6 +275,19 @@ fi_af_summary() {
   printf '%s.\n' "$s"
 }
 
+# 3.3.0: the dollar cap doctor reports is the value fi_af_budget accepts, not
+# the raw setting: a set value the engine ignores ("3usd") is called out.
+# $1 = run | sweep.
+_fi_af_doctor_budget() {
+  local key=runBudget raw v
+  [[ "$1" == sweep ]] && key=sweepBudget
+  raw="$(fi_af_cfg "$key" "")"
+  if [[ -z "$raw" ]]; then printf 'no dollar cap per %s' "$1"; return 0; fi
+  if [[ "$1" == sweep ]]; then v="$(AFI_kind=sweep fi_af_budget 2>/dev/null)"; else v="$(AFI_kind="" fi_af_budget 2>/dev/null)"; fi
+  if [[ -n "$v" ]]; then printf '$%s per %s' "$v" "$1"; return 0; fi
+  printf "invalid %s '%s' (ignored: no dollar cap)" "$key" "$raw"
+}
+
 # Phase 5 ruling 9: auto-fix readiness at a glance, on or off (spec §8).
 fi_af_doctor() {
   local p="$1" w="$2" x="$3" gh_user="$4" e v rb sb rt st r
@@ -307,9 +329,7 @@ fi_af_doctor() {
     printf '%s Last Codex run failed on its model: %s\n' "$w" "$(head -n 1 "$FI_AF_ROOT/codex-model-error")"
     printf '   Fix: found-issues config autofix.codexModel <model> (or inherit); same for autofix.codexVerifierModel\n'
   fi
-  rb="$(fi_af_cfg runBudget "")" sb="$(fi_af_cfg sweepBudget "")"
-  [[ -n "$rb" ]] && rb="\$$rb per run" || rb="no dollar cap per run"
-  [[ -n "$sb" ]] && sb="\$$sb per sweep" || sb="no dollar cap per sweep"
+  rb="$(_fi_af_doctor_budget run)" sb="$(_fi_af_doctor_budget sweep)"
   rt="$(fi_af_cap_int codexRunTokens)" st="$(fi_af_cap_int codexSweepTokens)"
   [[ -n "$rt" ]] && rt="$rt Codex tokens per run" || rt="no token cap per run"
   [[ -n "$st" ]] && st="$st per sweep" || st="no token cap per sweep"
