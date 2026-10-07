@@ -35,7 +35,7 @@ If you defer an entry that was previously `[deferred]` → promoted → now `[op
 
 ## Optional `--reason "<text>"`
 
-Captures a short human note explaining WHY this entry is being deferred. Stored as `(reason: ...)` on the entry. Replaces any existing `(reason: ...)` from a prior cycle. Helpful for future re-review.
+Captures a short human note explaining WHY this entry is being deferred. Stored as `(reason: ...)` on the entry. Replaces any existing `(reason: ...)` from a prior cycle. Helpful for future re-review. Parentheses and square brackets in the text are stored as braces (`(JIRA-1234)` becomes `{JIRA-1234}`), because the annotation itself is delimited by them; avoid them in the first place.
 
 ## Optional `--until <trigger>` (v3)
 
@@ -64,5 +64,5 @@ Suppresses the recurrence nudge (the "now Nx, threshold M" stderr message and th
 Example:
 
 ```bash
-found-issues defer src/auth.py:88 --reason "blocked on legal review (JIRA-1234)" --mute-until 2026-08-01
+found-issues defer src/auth.py:88 --reason "blocked on legal review, JIRA-1234" --mute-until 2026-08-01
 ```

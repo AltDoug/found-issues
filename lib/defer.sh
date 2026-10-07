@@ -53,6 +53,14 @@ cmd_defer() {
     esac
   done
 
+  # (reason: ...) is read back with [^)]+ (the defer strip, the parser tail,
+  # fi_extract_reason), so a ")" or "(" or a bracket in the text would cut it
+  # short and leave a stray ")" or "]" behind on the next defer. Swap all four
+  # for braces, which keep the text readable: "(JIRA-1234)" -> "{JIRA-1234}".
+  if [[ -n "$reason" ]]; then
+    reason="$(printf '%s' "$reason" | tr '()[]' '{}{}')"
+  fi
+
   if [[ -z "$match" ]]; then
     fi_err "defer: missing <match> argument"
     fi_err "Usage: found-issues defer <match> [--reason \"<text>\"] [--mute-until YYYY-MM-DD] [--until pr:<o/r#N>|date:<YYYY-MM-DD>|\"<text>\"]"
