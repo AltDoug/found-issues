@@ -4,7 +4,8 @@
 #
 # Sourced by bin/found-issues. Defines functions only.
 # Compatible with bash 3.2+ (macOS system bash). Builtin-only except
-# fi_offlimits_check's single `git ls-files`.
+# fi_offlimits_category's `tr` case fold and fi_offlimits_check's single
+# `git ls-files`.
 #
 # Spec: docs/superpowers/specs/2026-10-03-autofix-v3-design.md §3.
 #
@@ -25,6 +26,8 @@
 fi_offlimits_category() {
   local p="$1"
   [[ -z "$p" ]] && return 1
+  # Fold case so src/Auth/login.py and .ENV match (bash 3.2: no ${p,,}).
+  p=$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')
   case "$p" in
     /*|../*|*/../*) printf 'outside-repo'; return 0 ;;
   esac
@@ -34,11 +37,11 @@ fi_offlimits_category() {
   esac
   local base="${p##*/}"
   case "$base" in
-    .gitlab-ci*|Jenkinsfile) printf 'ci'; return 0 ;;
-    .env|.env.*|*.pem|*.key) printf 'secrets'; return 0 ;;
+    .gitlab-ci*|jenkinsfile) printf 'ci'; return 0 ;;
+    .env|.env.*|.envrc|*.pem|*.key) printf 'secrets'; return 0 ;;
     package.json|package-lock.json|yarn.lock|pnpm-lock.yaml|bun.lock|bun.lockb|\
-    go.mod|go.sum|Cargo.toml|Cargo.lock|pyproject.toml|poetry.lock|uv.lock|\
-    requirements*.txt|Gemfile|Gemfile.lock)
+    go.mod|go.sum|cargo.toml|cargo.lock|pyproject.toml|poetry.lock|uv.lock|\
+    requirements*.txt|gemfile|gemfile.lock)
       printf 'dependencies'; return 0 ;;
   esac
   local rest="$p" seg stem

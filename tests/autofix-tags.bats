@@ -70,6 +70,20 @@ teardown() { fi_teardown_tmp; }
   done
 }
 
+@test "offlimits: matching folds case and .envrc is secrets" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  for p in src/Auth/login.py .ENV .Env.Local web/.envrc .ENVRC Config/SECRETS/x.yml; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "secrets" ]
+  done
+  for p in .GitHub/Workflows/ci.yml JENKINSFILE; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "ci" ]
+  done
+  for p in PACKAGE.JSON cargo.lock; do
+    run fi_offlimits_category "$p"; [ "$status" -eq 0 ]; [ "$output" = "dependencies" ]
+  done
+  run fi_offlimits_category "src/Author.py"; [ "$status" -eq 1 ]
+}
+
 @test "offlimits: lookalikes are not off-limits" {
   fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
   for p in src/author.py lib/clock.py blocklist.py tools/migrate_helpers.py docs/package.json.md src/authority/x.ts README.md; do
