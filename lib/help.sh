@@ -26,8 +26,9 @@ COMMANDS
                                         (Claude runs /found-issues:log for you;
                                         /fi is available via install-fi-alias)
   sync                                  Annotation-driven flip + tombstone close
-  list [--status=open|deferred|fixed|all] [--json] [--cwd PATH]
+  list [--status=open|deferred|fixed|all] [--path RELPATH] [--json] [--cwd PATH]
                                         Print ledger entries (default: open).
+                                        --path lists open entries for one file (ignored with --json).
                                         --json emits structured entries for tooling
                                         (used by /found-issues:fix). Resolves the
                                         ledger like status: --cwd, else

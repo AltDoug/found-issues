@@ -145,6 +145,8 @@ source "$FI_LIB_DIR/autofix.sh"
 source "$FI_LIB_DIR/promote-deferred.sh"
 # shellcheck source=../lib/list-status.sh
 source "$FI_LIB_DIR/list-status.sh"
+# shellcheck source=../lib/session-context.sh
+source "$FI_LIB_DIR/session-context.sh"
 # shellcheck source=../lib/segment-cache.sh
 source "$FI_LIB_DIR/segment-cache.sh"
 
