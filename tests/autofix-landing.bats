@@ -168,8 +168,7 @@ queue_entry() { # $1 = ledger line to append and queue; sets id
   [ ! -e "$FI_AF_ST/day/$(date +%Y-%m-%d).spot" ]
   [ ! -d "$REPO/.claude/worktrees/fi-autofix-$id" ]
   [ ! -d "$FI_AF_ST/lock" ]
-  run rg -c 'autofix-failed' docs/found-issues.md
-  [ "$status" -eq 1 ]
+  ! grep -q 'autofix-failed' docs/found-issues.md || false
 }
 
 @test "wait: an offline wait counts toward the wait maximum like any wait" {
