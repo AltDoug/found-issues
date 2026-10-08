@@ -4,7 +4,7 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.4.0] - 2026-10-07
+## [3.4.0] - 2026-10-08
 
 ### Added
 - First-touch hook: the first time a session reads or edits a file, the agent sees that file's open entries (up to 5, once per file per session). Codex: on the first `apply_patch` to the file.
