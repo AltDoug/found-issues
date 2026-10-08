@@ -102,6 +102,7 @@ EOF
 }
 
 @test "session-start: criticals are capped by FOUND_ISSUES_SESSION_INJECT_MAX and long lines are cut (hook-20)" {
+  export FOUND_ISSUES_SESSION_CONTEXT=full
   mkdir -p docs
   long="$(printf 'x%.0s' $(seq 1 400))"
   for i in 1 2 3 4 5; do

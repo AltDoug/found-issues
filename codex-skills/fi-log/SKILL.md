@@ -67,3 +67,7 @@ $fi-log workflow/shutdown — SIGTERM kills detached sessions silently (suggeste
 
 The third form (no path:line) is for abstract observations that don't
 have a single file location.
+
+## Dead code
+
+Zero importers → do not edit, do not delete. Log with prefix `dead code:`, then find the actually-live component via the route/page that triggered the symptom and continue there.

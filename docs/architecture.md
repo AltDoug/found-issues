@@ -29,6 +29,8 @@ How the pieces fit together.
                     │      └► pre-branch-delete        │
                     │  • PostToolUse(Bash)             │
                     │      └► post-bash-dispatch       │
+                    │  • PostToolUse(Read/Edit/Write)  │
+                    │      └► first-touch              │
                     └────────────────┬─────────────────┘
                                      │
                                      │ shell out
@@ -85,10 +87,21 @@ How the pieces fit together.
 
 ### Rules (injected by SessionStart)
 
-`skills/rules/SKILL.md` is the source of the agent rules, and
-`hooks/session-start.sh` injects its body (frontmatter stripped) into
-every session — plain stdout on Claude Code, the `additionalContext` JSON
-envelope on Codex. This is what makes the agent *proactively* log issues.
+`hooks/session-start.sh` injects the agent rules into every new session —
+plain stdout on Claude Code, the `additionalContext` JSON envelope on Codex.
+This is what makes the agent *proactively* log issues. Which text it injects
+depends on `FOUND_ISSUES_SESSION_CONTEXT` (3.4.0):
+
+- `standard` (the default): the complete rules text from `lib/rules-full.md`
+  (minus its loc-override comment) plus the lean entry block (status line,
+  critical entries, up to 3 entries no file hook can surface, one pointer).
+- `lean` (opt-in): only the ~1 KB core, which is the body of
+  `skills/rules/SKILL.md` (frontmatter stripped), plus the same lean entry block.
+- `full` (rollback): `lib/rules-full.md` verbatim plus the 3.3.1 `[open]` list.
+
+A resumed session (`source: resume`) gets none of this, because its transcript
+already holds the context from its first start; the hook's mechanical work
+(sync, onboarding marker, auto-fix summary) still runs.
 Until 2.10.x the Claude side relied on the skill being auto-loaded, but
 its `disable-model-invocation: true` does the opposite — it keeps a skill
 out of the model's context unless the user types its slash command — so
@@ -113,17 +126,18 @@ Bash scripts in `hooks/`, registered via `hooks/hooks.json` on Claude
 Code (the plugin manifest) or via `found-issues install-codex-hooks`
 into `$CODEX_HOME/hooks.json` on Codex — see Harness adapters below for
 why registration differs by harness. They turn the CLAUDE.md rules into
-mechanical behavior. Six lifecycle hooks plus one optional per-repo git
+mechanical behavior. Seven lifecycle hooks plus one optional per-repo git
 hook:
 
 | Hook | Event | Job |
 |---|---|---|
-| `session-start.sh` | SessionStart | Run sync silently, inject `[open]` entries into context (fenced as untrusted data), auto-migrate broken custom statusline targets |
+| `session-start.sh` | SessionStart | Run sync silently, inject the full rules and a lean ledger summary (criticals, up to 3 entries for files not in the repo, a pointer line; fenced as untrusted data) into a new session's context. With no open entries only the rules print. `FOUND_ISSUES_SESSION_CONTEXT=lean` swaps the rules for a ~1 KB core; `full` restores the 3.3.1 `[open]` list. A resumed session gets no injection. Auto-migrate broken custom statusline targets |
 | `stop-reminder.sh` | Stop | Ask for the `<!-- found-issues-checked: ... -->` marker after turns with substantive tool use (Edit/Write/MultiEdit/mutating Bash): a block once per session in sessions that edited code, else one non-blocking reminder (3.2.1); pure-conversation turns and non-interactive (`CLAUDE_CODE_ENTRYPOINT != cli`) sessions pass through |
 | `prompt-nudge.sh` | UserPromptSubmit | Hand a pending stop-reminder reminder to the model with the next prompt, once (no extra turn) |
 | `format-enforcer.sh` | PreToolUse Write/Edit | Block malformed entries before they land |
 | `pre-branch-delete.sh` | PreToolUse Bash | Block branch deletion if entries unpromoted |
 | `post-bash-dispatch.sh` | PostToolUse Bash | Auto-annotate PR/commit entries matching just-changed lines (`--hook-auto`), surfacing only judgment cases; background `sync` after `gh pr merge`/`close`/`reopen` |
+| `first-touch.sh` | PostToolUse Read/Edit/Write/MultiEdit (Codex: `apply_patch`) | The first time a session touches a file, show that file's `[open]` entries (up to 5, then a `found-issues list --path` pointer), once per file per session |
 | `pre-commit.sh` | git pre-commit (per-repo, opt-in) | Format check at commit time |
 
 Hooks fail open — if anything goes wrong, they exit 0 silently rather
@@ -135,14 +149,17 @@ One CLI, one `lib/`, one ledger — two thin adapters translate the same
 core into each harness's own UI conventions:
 
 - **Claude Code adapter** — `commands/*.md` slash commands
-  (`/found-issues:<name>`) plus the rules from `skills/rules/SKILL.md`,
-  injected into context every session by the SessionStart hook.
+  (`/found-issues:<name>`) plus the SessionStart rules injection described
+  above (the complete rules from `lib/rules-full.md` by default; only the
+  `skills/rules/SKILL.md` core in `lean` mode).
 - **Codex adapter** — `codex-skills/fi-<name>/SKILL.md`, generated from
   `commands/*.md` by `scripts/gen-codex-skills.sh` (invoked as `$fi-<name>`
-  mentions or by description match), plus SessionStart rules injection:
-  `hooks/session-start.sh` emits the rules body into context on Codex
-  (wrapped in Codex's SessionStart JSON envelope — see below), since
-  — the same body Claude Code receives as plain stdout.
+  mentions or by description match), plus the same SessionStart rules
+  injection: `hooks/session-start.sh` builds the same text for the active
+  `FOUND_ISSUES_SESSION_CONTEXT` mode (the complete rules by default, the
+  core in `lean`), rewrites the Claude-only `/found-issues:` syntax to `$fi-`
+  mentions, and emits it together with the ledger block as one JSON envelope
+  (see below).
 
 The hook *scripts* themselves are shared, not adapted — every script in
 `hooks/` runs unmodified on both harnesses; the same JSON payload shape
@@ -238,7 +255,7 @@ The lifecycle of a single issue from observation to closure:
    - The CLI's sync logic checks `[open]` entries with `(PR: ...)` annotations
    - For each: `gh pr view 42 --json state` → state is `MERGED`, base is the default branch
    - Flips the entry to `[fixed] (PR: org/repo#42) (fixed: 2026-05-08)`
-   - SessionStart hook re-reads the (now smaller) `[open]` list, injects it into Claude's context
+   - SessionStart hook re-reads the (now smaller) `[open]` list and injects a lean summary into Claude's context: the critical entries, up to 3 entries for files not in the repo, and a pointer line. Each file's entries reach the agent later, when it first reads or edits that file (the first-touch hook)
 
 7. **Status display** — At the same time, the SessionStart hook calls `found-issues status --format=plain` and includes the count in its output ("3 issues open"). The user sees this on session start.
 

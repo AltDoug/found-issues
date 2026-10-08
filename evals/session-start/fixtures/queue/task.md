@@ -1,0 +1,1 @@
+Deque.pop() in src/queue.js returns the wrong item. Fix it. Deques are normally restored from disk with load() in src/store.js, so make sure pop() is right for items that come back that way. Run sh test.sh when done.

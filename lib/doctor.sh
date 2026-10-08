@@ -276,6 +276,10 @@ cmd_doctor() {
         printf '%s found-issues is installed in Codex (%s) but its hooks were never wired —\n' "$section_fail" "$codex_home"
         printf '   no rules, ledger context, guards or Stop nudge reach Codex sessions.\n'
         printf '   Fix: found-issues install-codex-hooks, then run /hooks once in an interactive Codex session.\n' ;;
+      incomplete)
+        printf '%s Codex hooks are only partly wired: the first-touch hook (3.4.0) is missing,\n' "$section_fail"
+        printf '   so Codex sessions do not see a file'"'"'s open ledger entries when they first touch it.\n'
+        printf '   Fix: re-run found-issues install-codex-hooks, then /hooks in Codex to trust the new entry.\n' ;;
       stale)
         printf '%s Codex hook entries point at scripts that no longer exist (plugin updated?).\n' "$section_fail"
         printf '   Fix: found-issues install-codex-hooks (self-heals the paths), then /hooks in Codex.\n' ;;

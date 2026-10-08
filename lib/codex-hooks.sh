@@ -106,7 +106,7 @@ fi_shell_quote() {
 # found-issues at run time, so the entries never change.
 fi_codex_shim_dir() { printf '%s/found-issues/hooks' "$1"; }
 
-# fi_codex_write_shims <codex_home> — (re)write the five shims. Content may
+# fi_codex_write_shims <codex_home> — (re)write the six shims. Content may
 # change freely: trust pins the hooks.json entry, not the script it runs.
 fi_codex_write_shims() {
   local home="$1" dir root h q_home q_root
@@ -118,7 +118,7 @@ fi_codex_write_shims() {
   root="$(cd "$FI_BIN_DIR/.." && pwd -P)"
   q_home="$(fi_shell_quote "$home")"
   q_root="$(fi_shell_quote "$root")"
-  for h in session-start format-enforcer pre-branch-delete post-bash-dispatch stop-reminder; do
+  for h in session-start format-enforcer pre-branch-delete post-bash-dispatch first-touch stop-reminder; do
     cat > "$dir/$h.sh.tmp" <<EOF || return 1
 #!/usr/bin/env bash
 # found-issues stable Codex hook shim — written by \`found-issues install-codex-hooks\`.
@@ -160,7 +160,7 @@ EOF
   done
 }
 
-# Build the JSON object of found-issues' own hook entries (4 events, 5
+# Build the JSON object of found-issues' own hook entries (4 events, 6
 # command entries), commands resolved to the current install
 # root. Each script path is single-quoted (fi_shell_quote) so the
 # generated command string is safe if the install root ever contains a
@@ -168,18 +168,20 @@ EOF
 fi_codex_hooks_new_entries_json() {
   local hooks_dir
   hooks_dir="$(fi_codex_shim_dir "$1")"
-  local q_session q_fmt q_preb q_postb q_stop
+  local q_session q_fmt q_preb q_postb q_stop q_ft
   q_session="$(fi_shell_quote "$hooks_dir/session-start.sh")"
   q_fmt="$(fi_shell_quote "$hooks_dir/format-enforcer.sh")"
   q_preb="$(fi_shell_quote "$hooks_dir/pre-branch-delete.sh")"
   q_postb="$(fi_shell_quote "$hooks_dir/post-bash-dispatch.sh")"
   q_stop="$(fi_shell_quote "$hooks_dir/stop-reminder.sh")"
+  q_ft="$(fi_shell_quote "$hooks_dir/first-touch.sh")"
   jq -n \
     --arg session_cmd "env FOUND_ISSUES_HARNESS=codex $q_session" \
     --arg fmt_cmd "env FOUND_ISSUES_HARNESS=codex $q_fmt" \
     --arg preb_cmd "env FOUND_ISSUES_HARNESS=codex $q_preb" \
     --arg postb_cmd "env FOUND_ISSUES_HARNESS=codex $q_postb" \
     --arg stop_cmd "env FOUND_ISSUES_HARNESS=codex $q_stop" \
+    --arg ft_cmd "env FOUND_ISSUES_HARNESS=codex $q_ft" \
     '{
       SessionStart: [ { hooks: [ { type: "command", command: $session_cmd } ] } ],
       PreToolUse: [
@@ -187,7 +189,8 @@ fi_codex_hooks_new_entries_json() {
         { matcher: "Bash", hooks: [ { type: "command", command: $preb_cmd } ] }
       ],
       PostToolUse: [
-        { matcher: "Bash", hooks: [ { type: "command", command: $postb_cmd } ] }
+        { matcher: "Bash", hooks: [ { type: "command", command: $postb_cmd } ] },
+        { matcher: "apply_patch", hooks: [ { type: "command", command: $ft_cmd } ] }
       ],
       Stop: [ { hooks: [ { type: "command", command: $stop_cmd } ] } ]
     }'
@@ -309,6 +312,7 @@ $(cd "$FI_BIN_DIR/.." && pwd) — or the newest version in Codex's plugin cache)
   PreToolUse  (Write|Edit|MultiEdit|apply_patch) -> $hooks_dir/format-enforcer.sh
   PreToolUse  (Bash)                             -> $hooks_dir/pre-branch-delete.sh
   PostToolUse (Bash)                             -> $hooks_dir/post-bash-dispatch.sh
+  PostToolUse (apply_patch)                      -> $hooks_dir/first-touch.sh
   Stop                                           -> $hooks_dir/stop-reminder.sh
 
 NEXT: Codex skips new hook entries until you trust them. Open an
@@ -372,6 +376,8 @@ cmd_uninstall_codex_hooks() {
 # fi_codex_wiring_state [<codex_home>] prints one word:
 #   absent    found-issues is not installed in Codex — nothing to check
 #   unwired   installed, but hooks.json has none of our entries
+#   incomplete our entries are wired but the first-touch entry (3.4.0) is
+#             missing: an upgrader who has not re-run install-codex-hooks
 #   stale     our entries point at scripts that no longer exist (plugin update)
 #   untrusted wired, but config.toml has no [hooks.state] record for some entry
 #   ok        wired and every entry has a trust record
@@ -392,6 +398,9 @@ fi_codex_wiring_state() {
   fi
   if [[ ! -f "$hooks_file" ]] || ! grep -Fq "$FI_CODEX_HOOKS_SENTINEL" "$hooks_file" 2>/dev/null; then
     printf 'unwired'; return 0
+  fi
+  if ! grep -Fq 'first-touch.sh' "$hooks_file" 2>/dev/null; then
+    printf 'incomplete'; return 0
   fi
   command -v jq >/dev/null 2>&1 || { printf 'ok'; return 0; }
   local abs_file rows row key script missing=0 stale=0

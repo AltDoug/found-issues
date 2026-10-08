@@ -17,7 +17,7 @@
 # ledger file. Default filter: open — the actionable set, matching the
 # statusline's mental model.
 cmd_list() {
-  local status_filter="open" json="no" cwd=""
+  local status_filter="open" json="no" cwd="" path_filter=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --status=*) status_filter="${1#--status=}"; shift ;;
@@ -35,6 +35,14 @@ cmd_list() {
           return 2
         fi
         cwd="$2"; shift 2
+        ;;
+      --path=*)   path_filter="${1#--path=}"; shift ;;
+      --path)
+        if [[ $# -lt 2 || -z "$2" ]]; then
+          printf 'found-issues list: --path requires a path\n' >&2
+          return 2
+        fi
+        path_filter="$2"; shift 2
         ;;
       --json)     json="yes"; shift ;;
       *)
@@ -65,7 +73,11 @@ cmd_list() {
   fi
 
   if [[ "$json" == "no" ]]; then
-    fi_entries "$file" "$status_filter"
+    if [[ -n "$path_filter" ]]; then
+      fi_sc_entries_for_path "$file" "$path_filter"
+    else
+      fi_entries "$file" "$status_filter"
+    fi
     return 0
   fi
 

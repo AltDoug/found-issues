@@ -1,0 +1,1 @@
+The add() function in src/calc.sh returns the wrong result, and unlike the other operations it does not print through fmt_result from src/fmt.sh. Fix it so it is correct and consistent with them. Run sh test.sh when done.

@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**6 lifecycle hooks · 14 slash commands · 1407 tests on Linux/macOS · zero manual bookkeeping**
+**7 lifecycle hooks · 14 slash commands · 1470 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -64,7 +64,7 @@ found-issues install-codex-hooks
 `install-codex-hooks` is a required one-time step (re-run after `codex
 plugin update`): Codex 0.144.5 removed plugin-bundled hooks, so
 found-issues wires SessionStart / format-enforcer / branch-guard /
-annotator into Codex's own `$CODEX_HOME/hooks.json` instead. Then start a
+annotator / first-touch into Codex's own `$CODEX_HOME/hooks.json` instead. Then start a
 new Codex session. The ledger (`docs/found-issues.md`) is shared across
 harnesses with no migration or sync step — a repo worked on from both
 Claude Code and Codex is just one ledger. Skills are available as
@@ -80,8 +80,10 @@ poke the system:
 > *"What's open in found-issues?"* · *"Show me the critical ones"* ·
 > *"Run /found-issues:fix"*
 
-The ledger is auto-loaded into context every session, so plain-English
-queries work without any command.
+At the start of each new session the hook loads the agent rules plus a short
+ledger summary (the critical entries and a status line); a file's own open
+entries appear when you first read or edit it. Plain-English queries work
+without any command, and `found-issues list` shows everything.
 
 ## What it does
 
@@ -234,7 +236,7 @@ regression report is welcome.
 
 ## Status
 
-**v3.3.1** — opt-in auto-fix and auto-sweep on top of the ledger;
+**v3.4.0** — opt-in auto-fix and auto-sweep on top of the ledger;
 actively developed and dogfooded (this repo's own ledger is maintained by
 the plugin). End-to-end runtime probes exercise the generated statusline
 shims against synthetic Claude Code stdin on every CI run, and stand-in

@@ -183,6 +183,58 @@ seed_codex_plugin() {
   [[ "$output" != *"install-codex-hooks"* ]]
 }
 
+# A 3.3.x install: every hook wired through the stable shims except first-touch.
+seed_pre_first_touch() {
+  seed_codex_plugin
+  fi_run install-codex-hooks --codex-home "$CODEX_HOME"
+  jq 'del(.hooks.PostToolUse[] | select(.matcher == "apply_patch"))' "$CODEX_HOME/hooks.json" > "$CODEX_HOME/h.tmp"
+  mv "$CODEX_HOME/h.tmp" "$CODEX_HOME/hooks.json"
+}
+
+@test "doctor: reports Codex hooks without the first-touch entry as incomplete, with the fix" {
+  seed_pre_first_touch
+  fi_run doctor
+  [[ "$output" == *"partly wired"* ]]
+  [[ "$output" == *"install-codex-hooks"* ]]
+  [[ "$output" == *"/hooks"* ]]
+  [[ "$output" != *"never wired"* ]]
+}
+
+@test "doctor: re-running install-codex-hooks clears the incomplete report" {
+  seed_pre_first_touch
+  fi_run install-codex-hooks --codex-home "$CODEX_HOME"
+  fi_run doctor
+  [[ "$output" != *"partly wired"* ]]
+}
+
+@test "wiring state: incomplete when first-touch is missing, untrusted once it is back" {
+  seed_pre_first_touch
+  run bash -c ". '$TEST_REPO_ROOT/lib/codex-hooks.sh'; fi_codex_wiring_state '$CODEX_HOME'"
+  [ "$output" = "incomplete" ]
+  fi_run install-codex-hooks --codex-home "$CODEX_HOME"
+  run bash -c ". '$TEST_REPO_ROOT/lib/codex-hooks.sh'; fi_codex_wiring_state '$CODEX_HOME'"
+  [ "$output" = "untrusted" ]
+}
+
+@test "session-start (claude): once a day, says the Codex hooks are incomplete" {
+  seed_pre_first_touch
+  mkdir -p repo && cd repo && fi_init_git
+  run env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
+  [[ "$output" == *"incomplete in Codex"* ]]
+  [[ "$output" == *"install-codex-hooks"* ]]
+  [[ "$output" != *"inactive in Codex"* ]]
+  run env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
+  [[ "$output" != *"incomplete in Codex"* ]]
+}
+
+@test "session-start (claude): fully wired Codex hooks print no Codex notice" {
+  seed_codex_plugin
+  fi_run install-codex-hooks --codex-home "$CODEX_HOME"
+  mkdir -p repo && cd repo && fi_init_git
+  run env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
+  [[ "$output" != *"in Codex"* ]]
+}
+
 @test "codex stop: an empty session_id does not swallow the transcript path" {
   codex_stop "$(stop_payload "The answer is 4." "$(rollout no)" false "")"
   [ "$status" -eq 0 ]

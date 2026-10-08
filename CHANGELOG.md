@@ -4,6 +4,22 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.0] - 2026-10-08
+
+### Added
+- First-touch hook: the first time a session reads or edits a file, the agent sees that file's open entries (up to 5, once per file per session). Codex: on the first `apply_patch` to the file.
+- `found-issues list --path <path>` lists one file's open entries.
+- `FOUND_ISSUES_SESSION_CONTEXT=lean` injects only a ~1 KB core of the rules (opt-in; it logged fewer planted bugs in the 3.4.0 eval).
+- `FOUND_ISSUES_SESSION_CONTEXT=full` brings back the 3.3.x session-start text.
+
+### Changed
+- Session start injects about 4 KB instead of about 8 KB (measured on this repo's own ledger: 3965 B against 8255 B): the full rules stay, but the [open] list is replaced by the critical entries and up to 3 entries no file hook can surface.
+- A resumed session no longer gets the session-start text a second time.
+- Codex: re-run `found-issues install-codex-hooks`, then `/hooks`, to wire the new first-touch hook. Until then `found-issues doctor` reports the Codex hooks as incomplete, and a Claude session start says so once a day.
+
+### Fixed
+- The SessionStart hook injected no ledger entries at all when `found-issues` was found on PATH by its bare name (true in shells Claude Code spawns, where the plugin's bin is on PATH): the CLI path was never resolved, so the hook's lib was not found. It now resolves the name to an absolute path first.
+
 ## [3.3.1] - 2026-10-07
 
 ### Security

@@ -255,6 +255,7 @@ EOF
 # === v1.6.0: injected [open] entries are fenced as untrusted data ===
 
 @test "session-start: injected entries are fenced with an untrusted-data preamble" {
+  export FOUND_ISSUES_SESSION_CONTEXT=full
   FAKE_HOME="$(mktemp -d)"
   mkdir -p "$FAKE_HOME/.claude"
   fi_init_git
@@ -281,6 +282,7 @@ run_session_start_hook() {
 }
 
 @test "session-start: caps injected entries and reports the remainder" {
+  export FOUND_ISSUES_SESSION_CONTEXT=full
   FAKE_HOME="$(mktemp -d)"
   mkdir -p "$FAKE_HOME/.claude"
   fi_init_git
@@ -302,6 +304,7 @@ run_session_start_hook() {
 }
 
 @test "session-start: unannotated entries take the cap slots before PR-annotated in-flight ones" {
+  export FOUND_ISSUES_SESSION_CONTEXT=full
   FAKE_HOME="$(mktemp -d)"
   mkdir -p "$FAKE_HOME/.claude"
   fi_init_git
@@ -326,6 +329,7 @@ run_session_start_hook() {
 }
 
 @test "session-start: criticals always injected even over the cap" {
+  export FOUND_ISSUES_SESSION_CONTEXT=full
   FAKE_HOME="$(mktemp -d)"
   mkdir -p "$FAKE_HOME/.claude"
   fi_init_git
@@ -357,6 +361,7 @@ run_session_start_hook() {
 }
 
 @test "session-start: non-numeric inject max falls back to default and exits 0" {
+  export FOUND_ISSUES_SESSION_CONTEXT=full
   FAKE_HOME="$(mktemp -d)"
   mkdir -p "$FAKE_HOME/.claude"
   fi_init_git
@@ -394,6 +399,7 @@ run_session_start_hook() {
 }
 
 @test "session-start on codex: JSON envelope contains both the rules heading and the ledger entries fence" {
+  export FOUND_ISSUES_SESSION_CONTEXT=full
   unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
   export PLUGIN_DATA="$TMP/pd"
   fi_init_git
@@ -448,6 +454,7 @@ run_session_start_hook() {
 # prefix, not grep '[!]' anywhere in the entry line ===
 
 @test "session-start: symptom text containing literal [!] is not miscounted as critical" {
+  export FOUND_ISSUES_SESSION_CONTEXT=full
   FAKE_HOME="$(mktemp -d)"
   mkdir -p "$FAKE_HOME/.claude"
   fi_init_git
