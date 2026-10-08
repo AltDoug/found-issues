@@ -11,9 +11,10 @@ overrides.
 
 ## Hook opt-outs
 
-The plugin registers 6 hooks in `hooks/hooks.json` (see
+The plugin registers 7 hooks in `hooks/hooks.json` (see
 [architecture](architecture.md) for the full table): `format-enforcer`,
-`pre-branch-delete`, `post-bash-dispatch`, `session-start`,
+`pre-branch-delete`, `post-bash-dispatch`, `first-touch` (it has no switch
+in this table), `session-start`,
 `stop-reminder`, and `prompt-nudge` (it delivers the stop-reminder's
 non-blocking reminder and is off whenever that is). `post-bash-dispatch` is a router — it fires on every
 PostToolUse `Bash` call and dispatches up to three independent routes

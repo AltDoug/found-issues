@@ -41,7 +41,8 @@ found-issues install-codex-hooks
 ```
 
 This wires SessionStart, the format enforcer (Write/Edit and apply_patch),
-the branch-delete guard, the PostToolUse annotator and the Stop nudge into
+the branch-delete guard, the PostToolUse annotator, the first-touch file
+hook and the Stop nudge into
 Codex's own `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`). It's
 idempotent — safe to re-run. Each entry runs a stable shim that follows
 `codex plugin` updates on its own, so it never needs re-running per

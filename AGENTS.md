@@ -106,8 +106,8 @@ found-issues install-codex-hooks
 ```
 
 This installs SessionStart (rules + ledger injection), the format
-enforcer, the branch-delete guard, the PostToolUse annotator and the Stop
-nudge into `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`;
+enforcer, the branch-delete guard, the PostToolUse annotator, the
+first-touch file hook and the Stop nudge into `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`;
 override with `--codex-home <path>` or `FOUND_ISSUES_CODEX_HOME`). It's
 idempotent — safe to re-run. Since 2.10.3 each entry runs a stable shim
 under `$CODEX_HOME/found-issues/hooks/` that picks the newest found-issues
