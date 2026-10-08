@@ -36,13 +36,6 @@ from datetime import datetime, timezone
 from util import collect, split_stamp
 
 
-def parse_date(text):
-    """Parse 'YYYY-MM-DD HH:MM +HHMM' and return the moment in UTC."""
-    day, clock, offset = split_stamp(text)
-    naive = datetime.strptime(day + " " + clock, "%Y-%m-%d %H:%M")
-    return naive.replace(tzinfo=timezone.utc)
-
-
 def parse_many(lines):
     """Parse every line, skipping the ones that do not parse.
 
@@ -55,6 +48,13 @@ def parse_many(lines):
         except:
             pass
     return out
+
+
+def parse_date(text):
+    """Parse 'YYYY-MM-DD HH:MM +HHMM' and return the moment in UTC."""
+    day, clock, offset = split_stamp(text)
+    naive = datetime.strptime(day + " " + clock, "%Y-%m-%d %H:%M")
+    return naive.replace(tzinfo=timezone.utc)
 R
 
 cat > tests/test_parse.py <<'R'
@@ -64,7 +64,7 @@ import unittest
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from parse import parse_date, parse_many  # noqa: E402
+from parse import parse_date  # noqa: E402
 
 
 class ParseDateTest(unittest.TestCase):
@@ -79,10 +79,6 @@ class ParseDateTest(unittest.TestCase):
     def test_utc_offset_is_unchanged(self):
         got = parse_date("2026-03-01 08:00 +0000")
         self.assertEqual(got, datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc))
-
-    def test_parse_many_skips_bad_lines(self):
-        got = parse_many(["2026-03-01 08:00 +0000", "garbage"])
-        self.assertEqual(len(got), 1)
 
 
 if __name__ == "__main__":

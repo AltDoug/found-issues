@@ -32,6 +32,12 @@ cat > src/calc.sh <<'R'
 # Tiny calculator helpers. Source this file, then call add/sub/mul/div.
 . "${CALC_SRC:-src}/fmt.sh"
 
+# div <a> <b>: print a / b (integer division). When b is 0, print
+# "error: division by zero" to stderr and return 1.
+div() {
+  fmt_result $(( $1 / $2 ))
+}
+
 # add <a> <b>: print a + b.
 add() {
   echo $(( $1 - $2 ))
@@ -45,12 +51,6 @@ sub() {
 # mul <a> <b>: print a * b.
 mul() {
   fmt_result $(( $1 * $2 ))
-}
-
-# div <a> <b>: print a / b (integer division). When b is 0, print
-# "error: division by zero" to stderr and return 1.
-div() {
-  fmt_result $(( $1 / $2 ))
 }
 R
 

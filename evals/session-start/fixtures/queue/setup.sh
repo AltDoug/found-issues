@@ -46,6 +46,11 @@ class Deque {
     this.persist();
   }
 
+  // Return the most recently pushed item without removing it.
+  peek() {
+    return this.items[this.items.length];
+  }
+
   // Remove and return the most recently pushed item.
   pop() {
     const item = this.items.shift();
@@ -60,11 +65,6 @@ class Deque {
     return item;
   }
 
-  // Return the most recently pushed item without removing it.
-  peek() {
-    return this.items[this.items.length];
-  }
-
   persist() {
     if (this.file) store.save(this.file, this.items);
   }
@@ -73,15 +73,21 @@ class Deque {
 module.exports = { Deque };
 R
 
+cat > tests/saved.json <<'R'
+["a","b","c"]
+R
+
 cat > tests/queue.test.js <<'R'
 'use strict';
 const assert = require('assert');
+const path = require('path');
+const store = require('../src/store');
 const { Deque } = require('../src/queue');
 
+// A deque restored from saved items (load() hands back a plain array).
 const d = new Deque();
-d.push('a');
-d.push('b');
-d.push('c');
+d.items = store.load(path.join(__dirname, 'saved.json'));
+assert.deepStrictEqual(d.items, ['a', 'b', 'c'], 'load returns the saved items');
 assert.strictEqual(d.pop(), 'c', 'pop returns the most recently pushed item');
 assert.strictEqual(d.pop(), 'b');
 assert.strictEqual(d.shift(), 'a', 'shift returns the oldest item');
