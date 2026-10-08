@@ -62,19 +62,26 @@ fi
 input="$(cat 2>/dev/null || echo '{}')"
 fi_ss_source=""
 [[ "$input" =~ \"source\"[[:space:]]*:[[:space:]]*\"([a-z]+)\" ]] && fi_ss_source="${BASH_REMATCH[1]}"
-fi_ss_mode="${FOUND_ISSUES_SESSION_CONTEXT:-lean}"
-[[ "$fi_ss_mode" == full ]] || fi_ss_mode=lean
+# standard (default, also any unknown value): full rules + lean entry block.
+# lean (opt-in): ~1 KB core rules + lean entry block. full (rollback): 3.3.1.
+fi_ss_mode="${FOUND_ISSUES_SESSION_CONTEXT:-standard}"
+[[ "$fi_ss_mode" == full || "$fi_ss_mode" == lean ]] || fi_ss_mode=standard
 # A resumed transcript already holds the injected context (3.4.0).
 fi_ss_inject=1
 [[ "$fi_ss_source" == resume ]] && fi_ss_inject=0
 
 codex_rules_block=""
 __fi_rules="${PLUGIN_ROOT:-$__fi_hook_dir/..}/skills/rules/SKILL.md"
-# Lean (default): the ~1 KB core in skills/rules/SKILL.md. Full mode
-# (FOUND_ISSUES_SESSION_CONTEXT=full): the complete pre-3.4.0 rules text.
+# standard (default): lib/rules-full.md minus its loc-override comment line and
+# leading blank lines. lean (opt-in): the ~1 KB core in skills/rules/SKILL.md.
+# full (FOUND_ISSUES_SESSION_CONTEXT=full): lib/rules-full.md verbatim, the
+# complete pre-3.4.0 rules text. A missing rules-full.md falls back to the core.
 __fi_rules_body() {
-  if [[ "$fi_ss_mode" == full && -f "${PLUGIN_ROOT:-$__fi_hook_dir/..}/lib/rules-full.md" ]]; then
-    cat "${PLUGIN_ROOT:-$__fi_hook_dir/..}/lib/rules-full.md"
+  local full="${PLUGIN_ROOT:-$__fi_hook_dir/..}/lib/rules-full.md"
+  if [[ "$fi_ss_mode" == full && -f "$full" ]]; then
+    cat "$full"
+  elif [[ "$fi_ss_mode" == standard && -f "$full" ]]; then
+    LC_ALL=C awk '/^<!-- loc-override:/ { next } !started && $0 == "" { next } { started = 1; print }' "$full"
   else
     # Strip YAML frontmatter (everything before the second '---' fence).
     LC_ALL=C awk 'c >= 2 { print } /^---$/ { c++ }' "$__fi_rules"
@@ -689,7 +696,7 @@ EOF
   printf '\nEntries for a file appear when you first open or edit it; `found-issues list` shows all.\n'
 }
 
-__fi_render() { if [[ "$fi_ss_mode" == full ]]; then fi_render_ledger_context; else fi_render_ledger_lean; fi; }
+__fi_render() { if [[ "$fi_ss_mode" == full ]]; then fi_render_ledger_context; else fi_render_ledger_lean; fi; }  # standard and lean share the lean renderer
 
 if [[ "$harness" == "codex" ]]; then
   __fi_ledger_output="$(__fi_render)"

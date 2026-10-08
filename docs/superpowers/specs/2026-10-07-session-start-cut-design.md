@@ -151,3 +151,17 @@ claude-plugins marketplace bump, sync PR.
 
 Auto-fix child slimming, Stop-hook block → nudge, annotate-output compaction,
 list/fix bounding, log length caps, sync pre-filter (later sub-projects).
+
+## 12. Eval outcome (2026-10-07)
+
+The section 9 A/B eval FAILED for the lean session start. Planted
+out-of-scope bugs logged: old (3.3.1) 28/30, lean 22/30 (pass rule: new >=
+old - 1). Task completion was 15/15 for both. Median input tokens: 139,704
+(old) vs 114,077 (lean). Two lean runs noticed bugs but offered to log them
+instead of logging.
+
+Per section 9, the default became approach C: `standard` (the full rules plus
+the lean entry block; the entry block, footer and comment are the only cuts).
+`lean` stays as an opt-in mode and `full` as the rollback. `standard` was then
+re-evaluated against old; results are in
+`docs/e2e/v3.4-session-start-eval-2026-10-07-standard.md`.

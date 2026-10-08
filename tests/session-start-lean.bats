@@ -64,7 +64,7 @@ run_hook() {
 
 @test "lean session start: 150-entry ledger stays within 2400 bytes" {
   mkdir -p "$TMP/home/.claude"; make_ledger_150
-  out="$(run_hook '{"source":"startup","session_id":"s1"}')"
+  out="$(FOUND_ISSUES_SESSION_CONTEXT=lean run_hook '{"source":"startup","session_id":"s1"}')"
   [ "$(printf '%s' "$out" | wc -c | tr -d ' ')" -le 2400 ]
   [[ "$out" == *"CRITICAL-ONE"* ]]
   [[ "$out" == *"TOPIC-A"* && "$out" == *"TOPIC-B"* && "$out" == *"TOPIC-C"* ]]
@@ -75,7 +75,7 @@ run_hook() {
 
 @test "lean session start: entry lines are clipped to 160 bytes" {
   mkdir -p "$TMP/home/.claude"; make_ledger_150
-  out="$(run_hook '{"source":"startup"}')"
+  out="$(FOUND_ISSUES_SESSION_CONTEXT=lean run_hook '{"source":"startup"}')"
   long="$(printf '%s\n' "$out" | LC_ALL=C awk '/^- \[/ && length($0) > 160' | wc -l | tr -d ' ')"
   [ "$long" -eq 0 ]
 }
@@ -105,7 +105,7 @@ run_hook() {
 
 @test "lean session start: no ledger still prints the core rules" {
   mkdir -p "$TMP/home/.claude"; fi_init_git
-  out="$(run_hook '{"source":"startup"}')"
+  out="$(FOUND_ISSUES_SESSION_CONTEXT=lean run_hook '{"source":"startup"}')"
   [[ "$out" == *"Issues found and not tracked"* ]]
 }
 
@@ -119,4 +119,26 @@ run_hook() {
     PATH="$TMP/pathbin:$PATH" HOME="$TMP/home" CLAUDE_CODE_ENTRYPOINT=sdk-cli \
     CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" bash "$TEST_REPO_ROOT/hooks/session-start.sh")"
   [[ "$out" == *"BARE-CRIT"* ]]
+}
+
+@test "standard session start: full rules plus the lean entry block" {
+  mkdir -p "$TMP/home/.claude"; make_ledger_150
+  out="$(run_hook '{"source":"startup","session_id":"s1"}')"
+  [[ "$out" == *"## Sync"* ]]
+  [[ "$out" == *"CRITICAL-ONE"* ]]
+  [[ "$out" == *"TOPIC-A"* ]]
+  [[ "$out" == *"when you first open or edit"* ]]
+  [[ "$out" != *"bug number 146"* ]]
+  [[ "$out" != *"loc-override"* ]]
+  [[ "$out" != *"more [open] entries"* ]]
+  # measured 4284 B on this fixture (2026-10-07); bound = next 100 up (4300) + 200
+  [ "$(printf '%s' "$out" | wc -c | tr -d ' ')" -le 4500 ]
+}
+
+@test "standard session start: unknown mode value falls back to standard" {
+  mkdir -p "$TMP/home/.claude"; make_ledger_150
+  a="$(run_hook '{"source":"startup","session_id":"s1"}')"
+  b="$(FOUND_ISSUES_SESSION_CONTEXT=bogus run_hook '{"source":"startup","session_id":"s1"}')"
+  [ -n "$a" ]
+  [ "$a" = "$b" ]
 }

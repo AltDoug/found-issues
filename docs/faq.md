@@ -193,8 +193,8 @@ verification rules — please report.
 Only if you have open entries. If `[open]` count is zero, the
 SessionStart hook prints no ledger banner: no count line and no entries,
 so a fresh repo or a repo where everything's been resolved gets none.
-The agent rules are separate: a new session still gets the core rules
-(about 1 KB; `FOUND_ISSUES_SESSION_CONTEXT=full` restores the full text)
+The agent rules are separate: a new session still gets the full rules
+(`FOUND_ISSUES_SESSION_CONTEXT=lean` shrinks them to a ~1 KB core)
 whatever the count. A resumed session gets no injection at all.
 
 If you're in a repo with permanent backlog that you've consciously

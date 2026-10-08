@@ -91,9 +91,10 @@ How the pieces fit together.
 `hooks/session-start.sh` injects its body (frontmatter stripped) into
 every new session — plain stdout on Claude Code, the `additionalContext`
 JSON envelope on Codex. This is what makes the agent *proactively* log
-issues. Since 3.4.0 the default `lean` mode injects that file as the
-~1 KB core; `FOUND_ISSUES_SESSION_CONTEXT=full` injects the complete
-pre-3.4.0 text from `lib/rules-full.md` instead. A resumed session
+issues. Since 3.4.0 the default `standard` mode injects the complete
+rules text from `lib/rules-full.md` (minus its loc-override comment) with a
+lean entry block; `FOUND_ISSUES_SESSION_CONTEXT=lean` injects only the ~1 KB
+core from that file, and `full` also restores the 3.3.1 `[open]` list. A resumed session
 (`source: resume`) gets no injection, because its transcript already
 holds the context from its first start.
 Until 2.10.x the Claude side relied on the skill being auto-loaded, but
@@ -125,7 +126,7 @@ hook:
 
 | Hook | Event | Job |
 |---|---|---|
-| `session-start.sh` | SessionStart | Run sync silently, inject the rules core and a lean ledger summary (criticals, up to 3 entries for files not in the repo, a pointer line; fenced as untrusted data) into a new session's context. With no open entries only the rules core prints. `FOUND_ISSUES_SESSION_CONTEXT=full` restores the full rules and `[open]` list. A resumed session gets no injection. Auto-migrate broken custom statusline targets |
+| `session-start.sh` | SessionStart | Run sync silently, inject the full rules and a lean ledger summary (criticals, up to 3 entries for files not in the repo, a pointer line; fenced as untrusted data) into a new session's context. With no open entries only the rules print. `FOUND_ISSUES_SESSION_CONTEXT=lean` swaps the rules for a ~1 KB core; `full` restores the 3.3.1 `[open]` list. A resumed session gets no injection. Auto-migrate broken custom statusline targets |
 | `stop-reminder.sh` | Stop | Ask for the `<!-- found-issues-checked: ... -->` marker after turns with substantive tool use (Edit/Write/MultiEdit/mutating Bash): a block once per session in sessions that edited code, else one non-blocking reminder (3.2.1); pure-conversation turns and non-interactive (`CLAUDE_CODE_ENTRYPOINT != cli`) sessions pass through |
 | `prompt-nudge.sh` | UserPromptSubmit | Hand a pending stop-reminder reminder to the model with the next prompt, once (no extra turn) |
 | `format-enforcer.sh` | PreToolUse Write/Edit | Block malformed entries before they land |
