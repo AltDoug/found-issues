@@ -56,8 +56,10 @@ for arm in $arms; do
   bash "$HERE/fixtures/$fx/setup.sh" "$work" >/dev/null 2>&1 || fi_eval_die "setup failed for probe $arm"
   json="$EVAL_OUT/probe/$arm.json"
   prompt="Not counting this question itself, how many times does the exact string ${needle} appear in your context? Reply with the number alone on the first line. Then, on following lines, quote the full text line of each occurrence."
-  # shellcheck disable=SC2086
-  fi_eval_claude "$arm" "$work" haiku "$PROBE_BUDGET" 2 $EVAL_PERM -- "$prompt" > "$json" 2> "$json.err"
+  # The probe gets NO tools (no Bash, Skill, Read or Grep): with any of them the
+  # model could grep the ledger file and report the token as present even if the
+  # hook injected nothing. It must answer from the injected context alone.
+  fi_eval_claude "$arm" "$work" haiku "$PROBE_BUDGET" 2 --tools "" --permission-mode acceptEdits -- "$prompt" > "$json" 2> "$json.err"
   rc=$?
   cost="$(jq -r '.total_cost_usd // empty' "$json" 2>/dev/null || true)"
   [[ -n "$cost" ]] || cost="$PROBE_BUDGET"
