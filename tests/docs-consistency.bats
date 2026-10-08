@@ -105,3 +105,26 @@ fi_first_line() {
   # raised 3700->4200 for v3.0.0: the fix-tag rule is how entries get classified at log time (spec 2026-10-03 §3), and the rules are the only channel that reaches the logging agent.
   [ "$size" -le 4200 ]
 }
+
+# --- 3.4.0: the docs describe what session start really injects ---
+
+@test "docs-consistency: README no longer says the ledger is auto-loaded every session" {
+  run grep -c 'auto-loaded into context every session' "$README"
+  [ "$output" = "0" ]
+  grep -q 'first read or edit' "$README"
+}
+
+@test "docs-consistency: architecture names rules-full.md as the default injection and SKILL.md as lean only" {
+  arch="$REPO_ROOT/docs/architecture.md"
+  grep -q 'standard. (the default)' "$arch"
+  grep -q 'lib/rules-full.md' "$arch"
+  grep -q '`lean` (opt-in): only the ~1 KB core, which is the body of' "$arch"
+  run grep -c "emits the rules core into context on Codex" "$arch"
+  [ "$output" = "0" ]
+}
+
+@test "docs-consistency: the rules skill description does not claim default injection" {
+  d="$(sed -n '2p' "$REPO_ROOT/skills/rules/SKILL.md")"
+  [[ "$d" != *"Injected into every session"* ]]
+  [[ "$d" == *"FOUND_ISSUES_SESSION_CONTEXT=lean"* ]]
+}

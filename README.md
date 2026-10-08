@@ -8,7 +8,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**7 lifecycle hooks · 14 slash commands · 1444 tests on Linux/macOS · zero manual bookkeeping**
+**7 lifecycle hooks · 14 slash commands · 1470 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -80,8 +80,10 @@ poke the system:
 > *"What's open in found-issues?"* · *"Show me the critical ones"* ·
 > *"Run /found-issues:fix"*
 
-The ledger is auto-loaded into context every session, so plain-English
-queries work without any command.
+At the start of each new session the hook loads the agent rules plus a short
+ledger summary (the critical entries and a status line); a file's own open
+entries appear when you first read or edit it. Plain-English queries work
+without any command, and `found-issues list` shows everything.
 
 ## What it does
 

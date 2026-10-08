@@ -142,3 +142,122 @@ run_hook() {
   [ -n "$a" ]
   [ "$a" = "$b" ]
 }
+
+# --- 3.4.0 final fix wave ---
+
+@test "lean session start: a no-git root .found-issues.md resolves paths against its own directory" {
+  mkdir -p "$TMP/home/.claude" src
+  printf '1\n' > src/real.sh
+  { printf '# found-issues\n\n'
+    printf -- '- [open] 2026-09-03 src/real.sh:1 — REAL-FILE-ENTRY\n'
+    printf -- '- [open] 2026-09-04 workflow/release — TOPIC-Z\n'
+  } > .found-issues.md
+  out="$(run_hook '{"source":"startup","session_id":"s1"}')"
+  [[ "$out" == *"TOPIC-Z"* ]]
+  [[ "$out" != *"REAL-FILE-ENTRY"* ]]
+}
+
+@test "session start: compact clears this session seen-files and no one else's" {
+  mkdir -p "$TMP/home/.claude" "$TMP/cache/sessions"
+  : > "$TMP/cache/sessions/s1"; : > "$TMP/cache/sessions/s1.agent-7"
+  : > "$TMP/cache/sessions/s10"; : > "$TMP/cache/sessions/s2"
+  make_ledger_150
+  FOUND_ISSUES_CACHE_DIR="$TMP/cache" run_hook '{"source":"compact","session_id":"s1"}' >/dev/null
+  [ ! -e "$TMP/cache/sessions/s1" ]
+  [ ! -e "$TMP/cache/sessions/s1.agent-7" ]
+  [ -e "$TMP/cache/sessions/s10" ]
+  [ -e "$TMP/cache/sessions/s2" ]
+}
+
+@test "session start: clear also clears the seen-files, startup and resume do not" {
+  mkdir -p "$TMP/home/.claude" "$TMP/cache/sessions"
+  make_ledger_150
+  for src in startup resume; do
+    : > "$TMP/cache/sessions/s1"
+    FOUND_ISSUES_CACHE_DIR="$TMP/cache" run_hook "{\"source\":\"$src\",\"session_id\":\"s1\"}" >/dev/null
+    [ -e "$TMP/cache/sessions/s1" ]
+  done
+  FOUND_ISSUES_CACHE_DIR="$TMP/cache" run_hook '{"source":"clear","session_id":"s1"}' >/dev/null
+  [ ! -e "$TMP/cache/sessions/s1" ]
+}
+
+@test "session start: a hostile session id on compact deletes nothing" {
+  mkdir -p "$TMP/home/.claude" "$TMP/cache/sessions"
+  : > "$TMP/cache/sessions/keep"; : > "$TMP/cache/sessions/.hidden"; : > "$TMP/cache/victim"
+  make_ledger_150
+  for bad in '..' '.' '.hidden' '../victim'; do
+    FOUND_ISSUES_CACHE_DIR="$TMP/cache" run_hook "{\"source\":\"compact\",\"session_id\":\"$bad\"}" >/dev/null
+  done
+  [ -e "$TMP/cache/sessions/keep" ]
+  [ -e "$TMP/cache/sessions/.hidden" ]
+  [ -e "$TMP/cache/victim" ]
+}
+
+# An entry whose clip point lands inside a multibyte character, at every
+# alignment (the header before the dashes is a fixed 37 bytes, so 1-3 padding
+# bytes cover all three offsets).
+make_utf8_ledger() {
+  mkdir -p "$TMP/home/.claude" docs
+  { printf '# found-issues\n\n'
+    for pad in 1 2 3; do
+      printf -- '- [open] [!] 2026-09-02 ghost/p%s.sh:1 — %s%s\n' "$pad" "$(printf 'x%.0s' $(seq 1 "$pad"))" "$(printf '\xe2\x80\x94%.0s' $(seq 1 120))"
+    done
+  } > docs/found-issues.md
+}
+
+@test "lean session start: a clipped entry line is still valid UTF-8" {
+  fi_init_git; make_utf8_ledger
+  out="$(FOUND_ISSUES_SESSION_CONTEXT=lean run_hook '{"source":"startup"}')"
+  [[ "$out" == *"..."* ]]
+  printf '%s' "$out" | iconv -f UTF-8 -t UTF-8 >/dev/null
+}
+
+@test "full session start: a clipped entry line is still valid UTF-8" {
+  fi_init_git; make_utf8_ledger
+  out="$(FOUND_ISSUES_SESSION_CONTEXT=full run_hook '{"source":"startup"}')"
+  [[ "$out" == *"..."* ]]
+  printf '%s' "$out" | iconv -f UTF-8 -t UTF-8 >/dev/null
+}
+
+# --- resume: nothing injected, mechanical work still runs (spec 8) ---
+
+# A deferred entry whose until-trigger is past: sync flips it to [open].
+make_due_ledger() {
+  mkdir -p "$TMP/home/.claude" docs
+  printf -- '- [deferred] 2026-09-01 a.sh:1 — past (until: date:2026-01-01)\n' > docs/found-issues.md
+}
+
+@test "resume (standard): no injection, but the due until-trigger still syncs" {
+  make_due_ledger
+  out="$(run_hook '{"source":"resume","session_id":"s1"}')"
+  [ -z "$out" ]
+  grep -q '^- \[open\] 2026-09-01 a.sh:1 — past$' docs/found-issues.md
+}
+
+@test "resume (lean): no injection, but the due until-trigger still syncs" {
+  make_due_ledger
+  out="$(FOUND_ISSUES_SESSION_CONTEXT=lean run_hook '{"source":"resume","session_id":"s1"}')"
+  [ -z "$out" ]
+  grep -q '^- \[open\] 2026-09-01 a.sh:1 — past$' docs/found-issues.md
+}
+
+@test "resume (full): no injection, but the due until-trigger still syncs" {
+  make_due_ledger
+  out="$(FOUND_ISSUES_SESSION_CONTEXT=full run_hook '{"source":"resume","session_id":"s1"}')"
+  [ -z "$out" ]
+  grep -q '^- \[open\] 2026-09-01 a.sh:1 — past$' docs/found-issues.md
+}
+
+@test "resume (codex): no injection, but the due until-trigger still syncs" {
+  make_due_ledger
+  out="$(FOUND_ISSUES_HARNESS=codex run_hook '{"source":"resume","session_id":"s1"}')"
+  [ -z "$out" ]
+  grep -q '^- \[open\] 2026-09-01 a.sh:1 — past$' docs/found-issues.md
+}
+
+@test "startup (codex): the same ledger does inject, so the resume silence is the skip" {
+  make_due_ledger
+  out="$(FOUND_ISSUES_HARNESS=codex run_hook '{"source":"startup","session_id":"s1"}')"
+  [[ "$out" == *"additionalContext"* ]]
+  [[ "$out" == *"Issues found and not tracked"* ]]
+}

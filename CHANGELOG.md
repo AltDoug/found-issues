@@ -15,6 +15,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - Session start injects about 4 KB instead of about 8 KB (measured on this repo's own ledger: 3965 B against 8255 B): the full rules stay, but the [open] list is replaced by the critical entries and up to 3 entries no file hook can surface.
 - A resumed session no longer gets the session-start text a second time.
+- Codex: re-run `found-issues install-codex-hooks`, then `/hooks`, to wire the new first-touch hook. Until then `found-issues doctor` reports the Codex hooks as incomplete, and a Claude session start says so once a day.
 
 ### Fixed
 - The SessionStart hook injected no ledger entries at all when `found-issues` was found on PATH by its bare name (true in shells Claude Code spawns, where the plugin's bin is on PATH): the CLI path was never resolved, so the hook's lib was not found. It now resolves the name to an absolute path first.

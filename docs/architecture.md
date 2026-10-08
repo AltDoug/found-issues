@@ -87,16 +87,21 @@ How the pieces fit together.
 
 ### Rules (injected by SessionStart)
 
-`skills/rules/SKILL.md` is the source of the agent rules, and
-`hooks/session-start.sh` injects its body (frontmatter stripped) into
-every new session — plain stdout on Claude Code, the `additionalContext`
-JSON envelope on Codex. This is what makes the agent *proactively* log
-issues. Since 3.4.0 the default `standard` mode injects the complete
-rules text from `lib/rules-full.md` (minus its loc-override comment) with a
-lean entry block; `FOUND_ISSUES_SESSION_CONTEXT=lean` injects only the ~1 KB
-core from that file, and `full` also restores the 3.3.1 `[open]` list. A resumed session
-(`source: resume`) gets no injection, because its transcript already
-holds the context from its first start.
+`hooks/session-start.sh` injects the agent rules into every new session —
+plain stdout on Claude Code, the `additionalContext` JSON envelope on Codex.
+This is what makes the agent *proactively* log issues. Which text it injects
+depends on `FOUND_ISSUES_SESSION_CONTEXT` (3.4.0):
+
+- `standard` (the default): the complete rules text from `lib/rules-full.md`
+  (minus its loc-override comment) plus the lean entry block (status line,
+  critical entries, up to 3 entries no file hook can surface, one pointer).
+- `lean` (opt-in): only the ~1 KB core, which is the body of
+  `skills/rules/SKILL.md` (frontmatter stripped), plus the same lean entry block.
+- `full` (rollback): `lib/rules-full.md` verbatim plus the 3.3.1 `[open]` list.
+
+A resumed session (`source: resume`) gets none of this, because its transcript
+already holds the context from its first start; the hook's mechanical work
+(sync, onboarding marker, auto-fix summary) still runs.
 Until 2.10.x the Claude side relied on the skill being auto-loaded, but
 its `disable-model-invocation: true` does the opposite — it keeps a skill
 out of the model's context unless the user types its slash command — so
@@ -144,14 +149,17 @@ One CLI, one `lib/`, one ledger — two thin adapters translate the same
 core into each harness's own UI conventions:
 
 - **Claude Code adapter** — `commands/*.md` slash commands
-  (`/found-issues:<name>`) plus the rules from `skills/rules/SKILL.md`,
-  injected into context every session by the SessionStart hook.
+  (`/found-issues:<name>`) plus the SessionStart rules injection described
+  above (the complete rules from `lib/rules-full.md` by default; only the
+  `skills/rules/SKILL.md` core in `lean` mode).
 - **Codex adapter** — `codex-skills/fi-<name>/SKILL.md`, generated from
   `commands/*.md` by `scripts/gen-codex-skills.sh` (invoked as `$fi-<name>`
-  mentions or by description match), plus SessionStart rules injection:
-  `hooks/session-start.sh` emits the rules core into context on Codex
-  (wrapped in Codex's SessionStart JSON envelope — see below), since
-  — the same body Claude Code receives as plain stdout.
+  mentions or by description match), plus the same SessionStart rules
+  injection: `hooks/session-start.sh` builds the same text for the active
+  `FOUND_ISSUES_SESSION_CONTEXT` mode (the complete rules by default, the
+  core in `lean`), rewrites the Claude-only `/found-issues:` syntax to `$fi-`
+  mentions, and emits it together with the ledger block as one JSON envelope
+  (see below).
 
 The hook *scripts* themselves are shared, not adapted — every script in
 `hooks/` runs unmodified on both harnesses; the same JSON payload shape

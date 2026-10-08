@@ -1,5 +1,5 @@
 ---
-description: Core rules for how AI agents maintain docs/found-issues.md — what to log and how, annotation after PR/commit, the stop marker and the hard rules. Injected into every session by the found-issues SessionStart hook.
+description: Core rules for how AI agents maintain docs/found-issues.md — what to log and how, annotation after PR/commit, the stop marker and the hard rules. The ~1 KB core, injected at session start only when FOUND_ISSUES_SESSION_CONTEXT=lean; the default injects the complete rules from lib/rules-full.md.
 disable-model-invocation: true
 ---
 

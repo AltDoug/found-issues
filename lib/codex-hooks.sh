@@ -376,6 +376,8 @@ cmd_uninstall_codex_hooks() {
 # fi_codex_wiring_state [<codex_home>] prints one word:
 #   absent    found-issues is not installed in Codex — nothing to check
 #   unwired   installed, but hooks.json has none of our entries
+#   incomplete our entries are wired but the first-touch entry (3.4.0) is
+#             missing: an upgrader who has not re-run install-codex-hooks
 #   stale     our entries point at scripts that no longer exist (plugin update)
 #   untrusted wired, but config.toml has no [hooks.state] record for some entry
 #   ok        wired and every entry has a trust record
@@ -396,6 +398,9 @@ fi_codex_wiring_state() {
   fi
   if [[ ! -f "$hooks_file" ]] || ! grep -Fq "$FI_CODEX_HOOKS_SENTINEL" "$hooks_file" 2>/dev/null; then
     printf 'unwired'; return 0
+  fi
+  if ! grep -Fq 'first-touch.sh' "$hooks_file" 2>/dev/null; then
+    printf 'incomplete'; return 0
   fi
   command -v jq >/dev/null 2>&1 || { printf 'ok'; return 0; }
   local abs_file rows row key script missing=0 stale=0

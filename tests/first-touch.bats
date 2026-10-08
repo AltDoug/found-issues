@@ -53,8 +53,12 @@ touch_json() { # $1 tool, $2 path, $3 session
 }
 
 @test "first-touch: outside the repo is silent" {
-  printf 'x\n' > "$TMP/outside.sh"
-  run bash "$HOOK" <<< "$(touch_json Read "$TMP/outside.sh" s1)"
+  # $TMP is the repo root here, so the outside file lives in its own mktemp -d.
+  outside="$(cd "$(mktemp -d)" && pwd -P)"
+  printf 'x\n' > "$outside/outside.sh"
+  printf -- '- [open] 2026-10-08 %s/outside.sh:1 — OUTSIDE-BUG\n' "$outside" >> docs/found-issues.md
+  run bash "$HOOK" <<< "$(touch_json Read "$outside/outside.sh" s1)"
+  rm -rf "$outside"
   [ "$status" -eq 0 ]; [ -z "$output" ]
 }
 
@@ -146,4 +150,81 @@ touch_json() { # $1 tool, $2 path, $3 session
   run env -u HOME -u XDG_CACHE_HOME -u FOUND_ISSUES_CACHE_DIR bash "$HOOK" <<< "$(touch_json Read "$PWD/src/a.sh" s1)"
   [ "$status" -eq 0 ]
   [[ "$output" == *"A-BUG-"* ]]
+}
+
+# --- 3.4.0 final fix wave ---
+
+@test "first-touch: a root .found-issues.md ledger is found" {
+  git rm -q docs/found-issues.md
+  { printf '# found-issues\n\n'; printf -- '- [open] 2026-10-08 src/a.sh:1 — DOT-LEDGER-BUG\n'; } > .found-issues.md
+  run bash "$HOOK" <<< "$(touch_json Read "$PWD/src/a.sh" s1)"
+  [ "$status" -eq 0 ]; [[ "$output" == *"DOT-LEDGER-BUG"* ]]
+}
+
+@test "first-touch: docs/found-issues.md wins over a root .found-issues.md" {
+  printf -- '- [open] 2026-10-08 src/b.sh:1 — DOT-LOSES\n' > .found-issues.md
+  printf -- '- [open] 2026-10-08 src/b.sh:1 — DOCS-WINS\n' >> docs/found-issues.md
+  run bash "$HOOK" <<< "$(touch_json Read "$PWD/src/b.sh" s1)"
+  [[ "$output" == *"DOCS-WINS"* ]]
+  [[ "$output" != *"DOT-LOSES"* ]]
+}
+
+@test "first-touch: a no-git local-mode directory with .found-issues.md works" {
+  local_dir="$(mktemp -d)"
+  mkdir -p "$local_dir/src"; printf '1\n' > "$local_dir/src/a.sh"
+  printf -- '- [open] 2026-10-08 src/a.sh:1 — LOCAL-MODE-BUG\n' > "$local_dir/.found-issues.md"
+  cd "$local_dir"
+  run bash "$HOOK" <<< "$(touch_json Read "$local_dir/src/a.sh" s1)"
+  cd "$TMP"; rm -rf "$local_dir"
+  [ "$status" -eq 0 ]; [[ "$output" == *"LOCAL-MODE-BUG"* ]]
+}
+
+@test "first-touch: a subagent touch does not consume the main thread injection" {
+  sub="$(jq -nc --arg p "$PWD/src/a.sh" --arg c "$PWD" '{tool_name:"Read", tool_input:{file_path:$p}, session_id:"s1", agent_id:"agent-7", cwd:$c}')"
+  run bash "$HOOK" <<< "$sub"; [[ "$output" == *"A-BUG-"* ]]
+  run bash "$HOOK" <<< "$sub"; [ -z "$output" ]
+  run bash "$HOOK" <<< "$(touch_json Read "$PWD/src/a.sh" s1)"
+  [[ "$output" == *"A-BUG-"* ]]
+  [ -f "$TMP/cache/sessions/s1.agent-7" ]
+  [ -f "$TMP/cache/sessions/s1" ]
+}
+
+@test "first-touch: a hostile agent_id is ignored and never escapes the sessions dir" {
+  for bad in '../x' '.' '..' 'a/b'; do
+    j="$(jq -nc --arg p "$PWD/src/a.sh" --arg c "$PWD" --arg a "$bad" '{tool_name:"Read", tool_input:{file_path:$p}, session_id:"sh", agent_id:$a, cwd:$c}')"
+    run bash "$HOOK" <<< "$j"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"A-BUG-"* ]]
+    rm -f "$TMP/cache/sessions/sh"
+  done
+  [ ! -e "$TMP/cache/x" ]
+  [ ! -e "$TMP/cache/sessions/sh..x" ]
+  [ -z "$(ls "$TMP/cache/sessions" | grep '^sh\.' || true)" ]
+}
+
+@test "first-touch: a session id of dot-dot or a leading dot records nothing" {
+  for bad in '..' '.hidden'; do
+    run bash "$HOOK" <<< "$(touch_json Read "$PWD/src/a.sh" "$bad")"
+    [[ "$output" == *"A-BUG-"* ]]
+    run bash "$HOOK" <<< "$(touch_json Read "$PWD/src/a.sh" "$bad")"
+    [[ "$output" == *"A-BUG-"* ]]
+  done
+  [ -z "$(ls -A "$TMP/cache/sessions" 2>/dev/null)" ]
+}
+
+@test "first-touch: a clipped entry never ends in a split multibyte character" {
+  long="$(printf 'e\xcc\x81%.0s' $(seq 1 100))"
+  printf -- '- [open] 2026-10-08 src/b.sh:1 — %s\n' "$long" >> docs/found-issues.md
+  for pad in 0 1 2; do
+    pre="$(printf 'x%.0s' $(seq 1 $((pad + 1))))"
+    printf -- '- [open] 2026-10-08 src/pad%s.sh:1 — %s%s\n' "$pad" "$pre" "$(printf '\xe2\x80\x94%.0s' $(seq 1 120))" >> docs/found-issues.md
+    printf '1\n' > "src/pad$pad.sh"
+    run bash "$HOOK" <<< "$(touch_json Read "$PWD/src/pad$pad.sh" "u$pad")"
+    [ "$status" -eq 0 ]
+    ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    printf '%s' "$ctx" | iconv -f UTF-8 -t UTF-8 >/dev/null
+    # jq turns a split character into U+FFFD, so a clean clip has none.
+    [[ "$ctx" != *$'\xef\xbf\xbd'* ]]
+    [[ "$ctx" == *"..."* ]]
+  done
 }
