@@ -23,7 +23,7 @@ fi_sc_entries_for_path() {
     [[ -n "$line" ]] || continue
     p="$(fi_sc_entry_path "$line")" || continue
     [[ "$p" == "$want" ]] && printf '%s\n' "$line"
-  done < <(fi_entries "$file" open 2>/dev/null || true)
+  done < <(fi_entries "$file" open 2>/dev/null | grep -F -- " $want" || true)
   return 0
 }
 

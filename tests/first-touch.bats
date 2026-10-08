@@ -49,12 +49,12 @@ touch_json() { # $1 tool, $2 path, $3 session
 @test "first-touch: a path with spaces is silent and exits 0" {
   run bash "$HOOK" <<< "$(touch_json Write "$PWD/my dir/c d.sh" s1)"
   [ "$status" -eq 0 ]
-  [[ "$output" != *"A-BUG-"* ]]
+  [ -z "$output" ]
 }
 
 @test "first-touch: outside the repo is silent" {
   printf 'x\n' > "$TMP/outside.sh"
-  run bash "$HOOK" <<< "$(touch_json Read /etc/hosts s1)"
+  run bash "$HOOK" <<< "$(touch_json Read "$TMP/outside.sh" s1)"
   [ "$status" -eq 0 ]; [ -z "$output" ]
 }
 
@@ -102,4 +102,48 @@ touch_json() { # $1 tool, $2 path, $3 session
   for k in 1 2 3 4 5 6 7 8 9 10; do bash "$HOOK" <<< "$j" >/dev/null; done
   end=$(perl -MTime::HiRes=time -e 'printf "%.0f", time*1000')
   [ $(( (end - start) / 10 )) -lt 50 ]
+}
+
+@test "first-touch: a pre-check hit with no open entry is silent, recorded, and fast" {
+  { printf '# found-issues\n\n'; for i in $(seq 1 150); do printf -- '- [open] 2026-10-01 src/z%s.sh:1 — z\n' "$i"; done
+    printf -- '- [fixed] 2026-10-01 src/old.sh:3 — OLD-BUG\n'; } > docs/found-issues.md
+  printf '1\n' > src/old.sh
+  j="$(touch_json Read "$PWD/src/old.sh" s1)"
+  run bash "$HOOK" <<< "$j"
+  [ "$status" -eq 0 ]; [ -z "$output" ]
+  grep -Fxq 'src/old.sh' "$TMP/cache/sessions/s1"
+  start=$(perl -MTime::HiRes=time -e 'printf "%.0f", time*1000')
+  for k in 1 2 3 4 5 6 7 8 9 10; do bash "$HOOK" <<< "$j" >/dev/null; done
+  end=$(perl -MTime::HiRes=time -e 'printf "%.0f", time*1000')
+  [ $(( (end - start) / 10 )) -lt 50 ]
+}
+
+@test "first-touch: the slow path itself stays cheap on a 150-entry ledger" {
+  { printf '# found-issues\n\n'; for i in $(seq 1 150); do printf -- '- [open] 2026-10-01 src/z%s.sh:1 — z\n' "$i"; done
+    printf -- '- [fixed] 2026-10-01 src/old.sh:3 — OLD-BUG\n'; } > docs/found-issues.md
+  printf '1\n' > src/old.sh
+  start=$(perl -MTime::HiRes=time -e 'printf "%.0f", time*1000')
+  for k in 1 2 3 4 5 6 7 8 9 10; do bash "$HOOK" <<< "$(touch_json Read "$PWD/src/old.sh" "u$k")" >/dev/null; done
+  end=$(perl -MTime::HiRes=time -e 'printf "%.0f", time*1000')
+  [ $(( (end - start) / 10 )) -lt 50 ]
+}
+
+@test "first-touch: an entry whose location ends the line matches" {
+  printf -- '- [open] 2026-10-02 src/eol.sh\n' >> docs/found-issues.md
+  printf '1\n' > src/eol.sh
+  run bash "$HOOK" <<< "$(touch_json Read "$PWD/src/eol.sh" s1)"
+  [ "$status" -eq 0 ]; [[ "$output" == *"src/eol.sh"* ]]
+}
+
+@test "first-touch: a prefix-lookalike path does not match" {
+  printf -- '- [open] 2026-10-02 src/a.shx:1 — LOOKALIKE\n' >> docs/found-issues.md
+  run bash "$HOOK" <<< "$(touch_json Read "$PWD/src/a.sh" s1)"
+  [[ "$output" == *"A-BUG-"* ]]
+  [[ "$output" != *"LOOKALIKE"* ]]
+}
+
+@test "first-touch: no HOME and no cache vars still exits 0" {
+  run env -u HOME -u XDG_CACHE_HOME -u FOUND_ISSUES_CACHE_DIR bash "$HOOK" <<< "$(touch_json Read "$PWD/src/a.sh" s1)"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"A-BUG-"* ]]
 }
