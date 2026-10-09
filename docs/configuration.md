@@ -202,6 +202,7 @@ found-issues config autofix.sweepBatch --unset
 | `autofix.codexRunTokens` | unset (no cap) | Codex tokens per spot run, e.g. `800000` (about 3x a measured spot run); checked before each child, so one child can overshoot |
 | `autofix.codexSweepTokens` | unset (no cap) | Codex tokens per sweep (all batches), e.g. `2400000` |
 | `autofix.testCommand` | detected | The command that proves a fix (bats, npm test, pytest, go, cargo, make) |
+| `autofix.worktreeFiles` | unset | Gitignored files your tests need (e.g. `tools/config.local.toml`), repo-relative, separated by spaces and/or commas. Auto-fix copies each into every fix worktree before the base test run, from the checkout it runs in or, for a linked worktree, from the main worktree. Only a path the repo ignores is copied, so it can never land in a fix commit; names with spaces are not supported |
 | `autofix.dailyFixes` | `5` | Spot fixes per repo per day |
 | `autofix.dailySweeps` | `1` | Sweeps per repo per day |
 | `autofix.sweepThreshold` | `5` | Fixable entries that trigger a sweep (`/found-issues:setup` offers 5, 10, 20 or any whole number) |

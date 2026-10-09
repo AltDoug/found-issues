@@ -306,6 +306,8 @@ fi_af_doctor() {
   else
     printf '%s Test command: %s (%s)\n' "$p" "$FI_CFG_VAL" "$FI_CFG_SRC"
   fi
+  fi_cfg_show_line autofix.worktreeFiles
+  [[ -z "$FI_CFG_VAL" ]] || printf '%s Local files copied into fix worktrees: %s (%s)\n' "$p" "$FI_CFG_VAL" "$FI_CFG_SRC"
   if [[ -n "$gh_user" ]]; then printf '%s gh authenticated as %s\n' "$p" "$gh_user"
   else printf '%s gh not authenticated — auto-fix cannot open PRs\n' "$x"; fi
   for e in claude codex; do

@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.1] - 2026-10-08
+
+### Fixed
+- Auto-fix's fresh fix worktrees lacked a repo's gitignored local files, so a suite that reads one (for example `tools/config.local.toml`) failed at base and every item retired "stale: tests fail at base". The new `found-issues.autofix.worktreeFiles` setting lists repo-relative paths (spaces and/or commas) that are copied into each fix and sweep worktree before the base test run, from the checkout auto-fix runs in or, for a linked worktree, from the main worktree. Only a path the repo gitignores is copied, so it can never reach a fix commit; a rejected, missing or tracked path is a run-log line and never fails the run. Off by default; set it with `found-issues config autofix.worktreeFiles "tools/config.local.toml"`.
+
 ## [3.4.0] - 2026-10-08
 
 ### Added

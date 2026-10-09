@@ -315,6 +315,52 @@ fi_af_worktree_add() {
   # origin/<base> is shared with the source checkout and moves with every
   # fetch there; the run diffs and resets against this commit instead.
   AFI_base_sha="$(git -C "$AFI_wt" rev-parse HEAD 2>/dev/null || true)"
+  fi_af_copy_worktree_files
+  return 0
+}
+
+# 3.4.1 (ledger lib/autofix-queue.sh:313): a fresh worktree lacks the repo's
+# gitignored local files (a tools/config.local.toml its tests read), so the
+# suite failed at base and the item retired stale. found-issues.autofix.
+# worktreeFiles lists repo-relative paths (spaces and/or commas) to copy in.
+# Only a path the fix worktree ignores is copied, so it can never reach a fix
+# commit. Every problem is a run-log line: the step never fails the run.
+fi_af_copy_worktree_files() {
+  local list p src main line dest
+  local -a paths
+  list="$(git -C "$AFI_root" config --get found-issues.autofix.worktreeFiles 2>/dev/null || true)"
+  [[ -n "$list" ]] || return 0
+  list="$(printf '%s' "$list" | tr ',' ' ')"
+  # A linked worktree is the usual source checkout; its main worktree is the
+  # fallback for a file only the main one holds.
+  main=""
+  while IFS= read -r line; do
+    if [[ "$line" == "worktree "* ]]; then main="${line#worktree }"; break; fi
+  done < <(git -C "$AFI_root" worktree list --porcelain 2>/dev/null)
+  read -r -a paths <<<"$list" || true
+  for p in ${paths[@]+"${paths[@]}"}; do
+    if [[ -z "$p" || "$p" == /* || "$p" == \\* || "$p" =~ ^[A-Za-z]: ]]; then
+      fi_af_log "$AFI_id" "worktreeFiles: $p rejected (must be a path inside the repo)"; continue
+    fi
+    dest="/${p//\\//}/"
+    if [[ "$dest" == */../* ]]; then
+      fi_af_log "$AFI_id" "worktreeFiles: $p rejected (must be a path inside the repo)"; continue
+    fi
+    src="$AFI_root/$p"
+    if [[ ! -f "$src" && -n "$main" && "$main" != "$AFI_root" && -f "$main/$p" ]]; then src="$main/$p"; fi
+    if [[ ! -f "$src" ]]; then
+      fi_af_log "$AFI_id" "worktreeFiles: $p not found in $AFI_root — not copied"; continue
+    fi
+    if ! git -C "$AFI_wt" check-ignore -q -- "$p" >/dev/null 2>&1; then
+      fi_af_log "$AFI_id" "worktreeFiles: $p is not gitignored — not copied"; continue
+    fi
+    if mkdir -p "$(dirname "$AFI_wt/$p")" 2>/dev/null && cp -p "$src" "$AFI_wt/$p" 2>/dev/null; then
+      fi_af_log "$AFI_id" "worktreeFiles: copied $p"
+    else
+      fi_af_log "$AFI_id" "worktreeFiles: $p could not be copied"
+    fi
+  done
+  return 0
 }
 
 # 3.2.1 (ledger lib/autofix-sweep.sh:387): once a sweep's ship has failed,
