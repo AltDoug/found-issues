@@ -334,7 +334,7 @@ fi_af_copy_worktree_files() {
   # A linked worktree is the usual source checkout; its main worktree is the
   # fallback for a file only the main one holds.
   main=""
-  while IFS= read -r line; do
+  while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "worktree "* ]]; then main="${line#worktree }"; break; fi
   done < <(git -C "$AFI_root" worktree list --porcelain 2>/dev/null)
   read -r -a paths <<<"$list" || true
