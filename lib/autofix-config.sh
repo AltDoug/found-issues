@@ -220,6 +220,7 @@ autofix.engine|engine|auto
 autofix.codexModel|model|gpt-6.1-sol
 autofix.codexVerifierModel|model|gpt-6-astra
 autofix.testCommand|text|
+autofix.worktreeFiles|text|
 autofix.dailyFixes|int|5
 autofix.dailySweeps|int|1
 autofix.sweepThreshold|int|5
