@@ -389,9 +389,9 @@ fi_af_base_tests() {
   git -C "$AFI_wt" reset -q --hard "${AFI_base_sha:-HEAD}" >/dev/null 2>&1 || true
   git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
   (( rc == 0 )) && return 0
-  # 3.4.2: rc 124 is the watchdog, not a red suite (ledger :341).
-  if (( rc == 124 )); then
-    local secs="${FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS:-$(( $(fi_af_int runTimeoutMin 20) * 60 ))}" took
+  # 3.4.2: the watchdog firing is not a red suite (ledger :341).
+  if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then
+    local secs="$FI_AF_CHILD_TIMEDOUT" took
     took="${secs}s"; (( secs % 60 == 0 )) && took="$(( secs / 60 )) min"
     FI_AF_BASE_WHY="base tests timed out after $took (raise found-issues.autofix.runTimeoutMin)"
     fi_af_log "$id" "$FI_AF_BASE_WHY ($t)"

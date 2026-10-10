@@ -52,7 +52,7 @@ FI_AF_SANDBOX_SETTINGS='{"sandbox":{"enabled":true,"failIfUnavailable":true,"all
 FI_AF_SBWARN=""
 FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_BARGS=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
 FI_AF_RESULT="" FI_AF_RESULT_TEXT="" FI_AF_APPROVE="false" FI_AF_REASON=""
-FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0 FI_AF_VERDICT_OK=0
+FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0 FI_AF_VERDICT_OK=0 FI_AF_CHILD_TIMEDOUT=""
 
 # macOS ships no `timeout`. Poll once a second; on the limit, TERM then KILL.
 # The child gets its own process group (perl setpgrp — bash 3.2 has no
@@ -61,9 +61,12 @@ FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0 FI_AF_VERDICT_OK=0
 # While it runs, the repo lock is refreshed so a long run never looks stale.
 # The child never sees FI_AF_PID: inherited, a test that claims and cancels
 # an item in its own state recorded the real run's pid and TERMed it (3.0.3).
+# FI_AF_CHILD_TIMEDOUT holds the limit in seconds when the watchdog fired,
+# so a command that exits 124 on its own is not mistaken for it (3.4.2).
 fi_af_child() {
   local out="$1" err="$2" cwd="$3" secs cpid waited=0 rc=0
   shift 3
+  FI_AF_CHILD_TIMEDOUT=""
   secs="${FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS:-$(( $(fi_af_int runTimeoutMin 20) * 60 ))}"
   # PATH changes only inside the child's subshell, on purpose.
   # shellcheck disable=SC2030,SC2031
@@ -83,7 +86,7 @@ fi_af_child() {
     if (( waited >= secs )); then
       fi_af_kill_child "$cpid"
       wait "$cpid" 2>/dev/null || true
-      FI_AF_CHILD_PGID=""
+      FI_AF_CHILD_PGID="" FI_AF_CHILD_TIMEDOUT="$secs"
       return 124
     fi
     sleep 1

@@ -62,3 +62,61 @@ merge_and_delete_feat() {
   grep -q "^pr create --repo foo/bar --base feat --head $BR" "$GH_MOCK_TRACE"
   ! grep -q '^pr list .*--state merged' "$GH_MOCK_TRACE" || false
 }
+
+# Review of 3.4.2: ls-remote matches by suffix; a branch that only ends in
+# the landing branch's name must not hide its deletion.
+@test "autofix ship: a deleted landing branch is seen even when another branch ends in its name" {
+  merge_and_delete_feat
+  git push -q origin HEAD:refs/heads/users/x/feat
+  export GH_MOCK_PR_LIST='[{"baseRefName":"main"}]'
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 0 ]
+  grep -q "^pr create --repo foo/bar --base main --head $BR" "$GH_MOCK_TRACE"
+}
+
+# A retarget re-records the approved tree, so a later ship try of the same
+# commits (a sweep's ship retry) still matches it.
+@test "autofix ship: a retarget records the rebased tree as the approved one" {
+  merge_and_delete_feat
+  export GH_MOCK_PR_LIST='[{"baseRefName":"main"}]'
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 0 ]
+  [ "$(sed -n 's/^verdict_tree=//p' "$ST/done/$ID")" = "$(git -C "$TMP/remote.git" rev-parse "$BR~1^{tree}")" ]
+}
+
+@test "autofix ship: tests that fail after the retarget put the branch back and name the reason" {
+  merge_and_delete_feat
+  export GH_MOCK_PR_LIST='[{"baseRefName":"main"}]'
+  before="$(git -C "$WT" rev-parse HEAD)"
+  # Red only once later.txt (main's newer commit) is in the tree.
+  git config found-issues.autofix.testCommand '[ ! -f later.txt ]'
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"tests fail after rebasing onto origin/main"* ]]
+  [ "$(git -C "$WT" rev-parse "$BR~1")" = "$before" ]
+  ! grep -q '^pr create' "$GH_MOCK_TRACE" || false
+}
+
+@test "autofix ship: a fix that is already on the merge target says so and opens no PR" {
+  # main gets the same fix through another route before feat is deleted.
+  git clone -q "$TMP/remote.git" "$TMP/other"
+  (cd "$TMP/other" && git config user.email o@e.com && git config user.name O \
+    && git merge -q --squash origin/feat && git commit -q -m 'feat (#1)' \
+    && sed -i.bak 's/ - / + /' src/calc.sh && rm -f src/calc.sh.bak \
+    && git commit -qam 'same fix' && git push -q origin main && git push -q origin --delete feat)
+  export GH_MOCK_PR_LIST='[{"baseRefName":"main"}]'
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"the fix is already on main"* ]]
+  ! grep -q '^pr create' "$GH_MOCK_TRACE" || false
+}
+
+@test "autofix ship: a gh failure looking up the merge target is named as such" {
+  merge_and_delete_feat
+  mkdir -p "$TMP/ghfail"
+  printf '#!/bin/bash\n[[ "$1 $2" == "pr list" ]] && { echo "HTTP 502" >&2; exit 1; }\nexec %q "$@"\n' "$TEST_REPO_ROOT/tests/bin-shims/gh" > "$TMP/ghfail/gh"
+  chmod +x "$TMP/ghfail/gh"
+  PATH="$TMP/ghfail:$PATH" run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not look up where landing branch feat merged (gh pr list failed)"* ]]
+}

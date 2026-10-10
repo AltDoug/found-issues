@@ -168,3 +168,10 @@ teardown() { fi_teardown_tmp; }
   ! grep -q 'tests fail at base' "$FI_AF_RUNS/$ID.log" || false
   [ ! -d "$ST/lock" ]
 }
+
+@test "autofix claim: a base suite that exits 124 on its own is red, not a watchdog timeout" {
+  git config found-issues.autofix.testCommand 'echo "not ok 1 hung"; exit 124'
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 5 ]
+  grep -q '^result=stale: tests fail at base$' "$ST/done/$ID"
+}

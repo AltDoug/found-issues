@@ -147,7 +147,7 @@ fi_afh_common_dir() {
 # or the item was launched less than FOUND_ISSUES_AUTOFIX_STOP_GRACE seconds
 # ago (default 60; a B fixer may not have claimed yet).
 fi_afh_stop() {
-  local input="$1" engine="$2" bin="$3" st_root f st cwd cwd_git=""
+  local input="$1" engine="$2" bin="$3" st_root f st cwd cwd_git="" root_seen="" root_git=""
   local re_agent='"agent_id"[[:space:]]*:[[:space:]]*"[^"]' re_cwd='"cwd"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
   local -a items=()
   [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]] && return 0
@@ -169,9 +169,16 @@ fi_afh_stop() {
     [[ -n "$AFI_root" ]] || continue
     # Same repo, any checkout (3.4.2): a sibling worktree or the main
     # checkout drains an item queued from a nested worktree, and a separate
-    # repo nested under the root does not.
-    [[ -n "$cwd_git" ]] || cwd_git="$(fi_afh_common_dir "$cwd")" || cwd_git="-"
-    [[ "$cwd_git" != "-" && "$(fi_afh_common_dir "$AFI_root")" == "$cwd_git" ]] || continue
+    # repo nested under the root does not. git forks only when the cwd is
+    # not the root itself, once for the cwd and once per distinct root.
+    if [[ "$cwd" != "$AFI_root" ]]; then
+      [[ -n "$cwd_git" ]] || cwd_git="$(fi_afh_common_dir "$cwd")" || cwd_git="-"
+      [[ "$cwd_git" != "-" ]] || continue
+      if [[ "$AFI_root" != "$root_seen" ]]; then
+        root_seen="$AFI_root"; root_git="$(fi_afh_common_dir "$AFI_root")" || root_git="-"
+      fi
+      [[ "$root_git" == "$cwd_git" ]] || continue
+    fi
     if [[ "$AFI_launched" =~ ^[0-9]+$ ]] \
        && (( FI_AFH_NOW - AFI_launched < ${FOUND_ISSUES_AUTOFIX_STOP_GRACE:-60} )); then
       continue
