@@ -67,8 +67,9 @@ live_fixer_argv() {
   # read-only commands (git status, git log), so the contract is "the test
   # command runs, nothing that writes or commits does".
   live_fixer_argv "Permission test; denials are expected. Run each exact command with the Bash tool, one per call, unmodified, continuing after denials: 'sh test.sh' ; 'touch probe.txt' ; 'git commit --allow-empty -m x' ; 'curl -s example.com'. Then stop."
-  run "${LIVE_ARGV[@]}"
-  printf '%s' "$output" > "$TMP/out.json"
+  # stdout only: bats `run` merges stderr, and a stray claude warning there
+  # broke the JSON parse (2026-10-10).
+  "${LIVE_ARGV[@]}" > "$TMP/out.json" 2> "$TMP/err.txt" || true
   denied="$(jq -r '[.permission_denials[]?.tool_input.command] | join("|")' "$TMP/out.json")"
   printf 'allowlist: denied=%s cost=%s\n' "$denied" "$(jq -r .total_cost_usd "$TMP/out.json")" >> "$REPORT"
   [[ "$denied" == *"touch probe.txt"* ]]

@@ -48,7 +48,10 @@
 # command that fills one (go test, cargo test, uv run, gradle, npm) behaves
 # as it does at baseline; found-issues' own cache stays denied (measured the
 # same day: ~/.cache writable, ~/.cache/found-issues and ~/Documents refused).
-FI_AF_SANDBOX_SETTINGS='{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false,"network":{"allowedDomains":["*"]},"filesystem":{"allowWrite":["~/.cache","~/Library/Caches","~/.npm","~/.cargo/registry","~/.cargo/git","~/go/pkg/mod","~/.gradle/caches","~/.m2/repository"],"denyWrite":["~/.cache/found-issues"]}}}'
+# autoAllowBashIfSandboxed:false keeps the --allowedTools allowlist the gate:
+# left at its default, dontAsk auto-allows every sandboxed Bash command (live
+# probe 2026-10-10: touch, git commit and curl all ran with no denial).
+FI_AF_SANDBOX_SETTINGS='{"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":false,"failIfUnavailable":true,"allowUnsandboxedCommands":false,"network":{"allowedDomains":["*"]},"filesystem":{"allowWrite":["~/.cache","~/Library/Caches","~/.npm","~/.cargo/registry","~/.cargo/git","~/go/pkg/mod","~/.gradle/caches","~/.m2/repository"],"denyWrite":["~/.cache/found-issues"]}}}'
 FI_AF_SBWARN=""
 FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_BARGS=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
 FI_AF_RESULT="" FI_AF_RESULT_TEXT="" FI_AF_APPROVE="false" FI_AF_REASON=""
