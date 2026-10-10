@@ -113,8 +113,15 @@ fi_detect_mode() {
     if [[ "$age" -lt "$ttl" ]]; then
       local cached
       cached="$(<"$cache_file")"
-      printf '%s\n' "$cached"
-      return 0
+      # An empty or half-written cache (a killed writer, a full disk) used to
+      # be returned verbatim for the whole hour: sync then saw no mode at all.
+      # Only a known mode counts; anything else falls through to re-detection.
+      case "$cached" in
+        github-pr|github-direct|git|local)
+          printf '%s\n' "$cached"
+          return 0
+          ;;
+      esac
     fi
   fi
 
@@ -149,7 +156,13 @@ fi_detect_mode() {
     mode="github-direct"
   fi
 
-  printf '%s' "$mode" > "$cache_file" 2>/dev/null || true
+  # Write-then-rename so a concurrent reader never sees a half-written cache.
+  local cache_tmp="$cache_file.$$"
+  if printf '%s' "$mode" > "$cache_tmp" 2>/dev/null; then
+    mv -f "$cache_tmp" "$cache_file" 2>/dev/null || rm -f "$cache_tmp" 2>/dev/null || true
+  else
+    rm -f "$cache_tmp" 2>/dev/null || true
+  fi
   printf '%s' "$mode"
 }
 

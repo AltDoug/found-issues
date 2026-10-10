@@ -67,6 +67,10 @@ COMMANDS
                                         (verified: ...) (fixed: <today>). Use this
                                         instead of editing the ledger by hand.
                                         Refuses entries with an active (PR: ...).
+  unannotate <match> <ref>              Strip one (PR:), (PR-auto:), (commit:) or
+                                        (commit-auto:) marker from one [open] entry.
+                                        <ref> is #N, N, org/repo#N or a commit sha.
+                                        Use this to undo a mis-annotation.
   tag <match> --fix S|M|L | --decide "<q>" | --manual "<why>" | --retry
                                         Set the entry's one fix tag (v3).
                                         Off-limits paths are tagged manual.
