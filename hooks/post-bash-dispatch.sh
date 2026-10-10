@@ -260,19 +260,18 @@ if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+create([[:space:]]
     # URL's owner/repo differs from this repo's origin (case-insensitive).
     # An origin that is not a GitHub URL leaves nothing to compare: annotate
     # as before.
-    origin_url="$(git remote get-url origin 2>/dev/null || true)"
-    if [[ "$origin_url" != *github.com* ]]; then
-      origin_url="$(git config --get remote.origin.url 2>/dev/null || true)"
-    fi
-    while [[ "$origin_url" == */ ]]; do origin_url="${origin_url%/}"; done
-    origin_url="${origin_url%.git}"
-    re_origin='github\.com[:/]([^/]+/[^/]+)$'
-    if [[ "$origin_url" =~ $re_origin ]]; then
-      nocase_was=0
-      shopt -q nocasematch && nocase_was=1
-      shopt -s nocasematch
-      [[ "$pr_slug" == "${BASH_REMATCH[1]}" ]] || pr_num=""
-      (( nocase_was )) || shopt -u nocasematch
+    # fi_repo_id (lib/repo-id.sh) is the CLI's own origin-to-slug rule, so the
+    # check here and the slug written into annotations cannot drift.
+    if [[ -f "$lib_dir/repo-id.sh" ]]; then
+      # shellcheck source=../lib/repo-id.sh
+      source "$lib_dir/repo-id.sh"
+      if origin_slug="$(fi_repo_id 2>/dev/null)"; then
+        nocase_was=0
+        shopt -q nocasematch && nocase_was=1
+        shopt -s nocasematch
+        [[ "$pr_slug" == "$origin_slug" ]] || pr_num=""
+        (( nocase_was )) || shopt -u nocasematch
+      fi
     fi
   elif [[ "$stdout" =~ /pull/([0-9]+) ]]; then
     pr_num="${BASH_REMATCH[1]}"
