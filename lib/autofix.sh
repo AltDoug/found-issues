@@ -34,8 +34,9 @@ Usage: found-issues autofix <command>
   ship <id>                   Test, commit, push, open the PR, annotate, arm auto-merge
   release <id> --already-fixed|--decide|--manual|--failed "<text>"
                               Give a claimed item back with an outcome
-  merge-when-green <N> [--repo owner/name]
+  merge-when-green <N> [--repo owner/name] [--guard]
                               Wait for PR <N>'s checks, then squash-merge it
+                              (--guard: only resolve ledger conflicts, never merge)
 Settings: git config found-issues.autofix true|false (local overrides --global),
 found-issues.autofix.{engine,testCommand,worktreeFiles,dailyFixes,runBudget,runTimeoutMin,
 dailySweeps,sweepThreshold,sweepBatch,sweepBudget,codexModel,codexVerifierModel,
@@ -389,12 +390,13 @@ cmd_autofix() {
         return 1
       fi ;;
     merge-when-green)
-      local mpr="${1:-}" mrepo=""
+      local mpr="${1:-}" mrepo="" mguard=0
       [[ $# -gt 0 ]] && shift
       if [[ "${1:-}" == "--repo" && -n "${2:-}" ]]; then mrepo="$2"; shift 2; fi
-      [[ $# -eq 0 && "$mpr" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number> [--repo owner/name]"; return 2; }
+      if [[ "${1:-}" == "--guard" ]]; then mguard=1; shift; fi
+      [[ $# -eq 0 && "$mpr" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number> [--repo owner/name] [--guard]"; return 2; }
       fi_af_no_prompts
-      fi_af_merge_when_green "$mpr" "$mrepo" ;;
+      fi_af_merge_when_green "$mpr" "$mrepo" "$mguard" ;;
     next)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix next <id>"; return 2; }
       fi_af_context || return 1

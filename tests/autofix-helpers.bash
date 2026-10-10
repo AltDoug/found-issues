@@ -14,6 +14,9 @@ fi_af_fixture() {
   export HOME="$TMP/home"; mkdir -p "$HOME"
   export FOUND_ISSUES_MODE=github-pr
   unset FOUND_ISSUES_AUTOFIX FOUND_ISSUES_AUTOFIX_CHILD CLAUDECODE
+  # Batch 4: a ship that arms auto-merge also spawns a merge-when-green guard;
+  # keep its polling short so no test leaves an hour-long watcher behind.
+  export FOUND_ISSUES_AUTOFIX_MERGE_POLLS=2 FOUND_ISSUES_AUTOFIX_MERGE_SLEEP=0
   # 3.6.0: claim and ship ask gh for open PRs; never reach the real GitHub.
   export PATH="$TEST_REPO_ROOT/tests/bin-shims:$PATH"
   git init -q --bare -b main "$TMP/remote.git"

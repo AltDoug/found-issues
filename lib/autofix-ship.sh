@@ -162,7 +162,9 @@ _fi_af_annotate_ledger_once() {
 fi_af_spawn() {
   local cwd="$1"
   shift
-  ( cd "$cwd" && nohup "$FI_SELF" "$@" </dev/null >>"$FI_AF_RUNS/spawn.log" 2>&1 & )
+  # 3>&-: a watcher that outlives its caller (the merge guard polls for up to
+  # an hour) must not hold the caller's fd 3, which bats waits on for EOF.
+  ( cd "$cwd" && nohup "$FI_SELF" "$@" </dev/null >>"$FI_AF_RUNS/spawn.log" 2>&1 3>&- & )
 }
 
 # 3.3.0: a Codex run's PR body names the model each role ran on.
@@ -340,6 +342,12 @@ _fi_af_publish() {
 
   if ( cd "$wt" && gh pr merge "$FI_AF_PR" --auto --squash --repo "$AFI_slug" ) >>"$runlog" 2>&1; then
     FI_AF_MERGE="auto"
+    # Batch 4 (ledger lib/autofix-ship.sh:329): GitHub never fires an armed
+    # auto-merge on a CONFLICTING PR, so two fix PRs cut from one base leave
+    # the second open for good. A guard watcher resolves a ledger-only
+    # conflict (3.6.1) and leaves once the PR merges; it never merges itself,
+    # so it cannot fight the armed auto-merge.
+    fi_af_spawn "$AFI_root" autofix merge-when-green "$FI_AF_PR" --repo "$AFI_slug" --guard
   else
     fi_af_spawn "$AFI_root" autofix merge-when-green "$FI_AF_PR" --repo "$AFI_slug"
     FI_AF_MERGE="merge-when-green"
@@ -357,8 +365,13 @@ _fi_af_publish() {
 # only in the ledger (fix PRs cut from one base annotate adjacent entries) is
 # brought up to date by _fi_af_mwg_unconflict, then waited on again; it used
 # to give up with "merging PR #N failed" and nothing retried.
+#
+# Batch 4: with guard=1 (merge-when-green <N> --guard) the watch is only a
+# conflict guard for a PR whose auto-merge is armed: it never calls gh pr
+# merge, so it cannot race the armed auto-merge, and it returns 0 as soon as
+# the PR is MERGED or CLOSED.
 fi_af_merge_when_green() {
-  local n="$1" slug="${2:-}" i v st ck mg br hr nones=0 polls="${FOUND_ISSUES_AUTOFIX_MERGE_POLLS:-60}" pause="${FOUND_ISSUES_AUTOFIX_MERGE_SLEEP:-60}"
+  local n="$1" slug="${2:-}" guard="${3:-0}" i v st ck mg br hr nones=0 polls="${FOUND_ISSUES_AUTOFIX_MERGE_POLLS:-60}" pause="${FOUND_ISSUES_AUTOFIX_MERGE_SLEEP:-60}"
   local jqf='[.state, ([.statusCheckRollup[]? | (.conclusion // .state // "")] | if length == 0 then "none" elif any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STARTUP_FAILURE") then "fail" elif all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL") then "green" else "pending" end), (.mergeable // ""), (.baseRefName // ""), (.headRefName // "")] | join("|")'
   [[ -n "$slug" ]] || slug="$(fi_repo_id 2>/dev/null || true)"
   [[ -n "$slug" ]] || { fi_err "autofix: merge-when-green needs a GitHub repo (--repo owner/name)"; return 1; }
@@ -374,12 +387,13 @@ fi_af_merge_when_green() {
       MERGED*|CLOSED*) printf 'PR #%s is already %s\n' "$n" "$st"; return 0 ;;
       "OPEN none")
         nones=$((nones + 1))
-        if (( nones >= 2 )); then
+        if (( nones >= 2 && ! guard )); then
           _fi_af_mwg_merge "$n" "$slug" && return 0
           _fi_af_mwg_refused "$n" "$slug" "$br" "$hr" || return 1
           nones=0
         fi ;;
       "OPEN green")
+        (( guard )) && { sleep "$pause"; continue; }
         _fi_af_mwg_merge "$n" "$slug" && return 0
         _fi_af_mwg_refused "$n" "$slug" "$br" "$hr" || return 1 ;;
       "OPEN fail") fi_err "autofix: PR #$n checks failed — not merging"; return 1 ;;
