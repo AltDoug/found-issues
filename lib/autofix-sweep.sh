@@ -155,6 +155,9 @@ fi_af_sweep_check() {
   fi_af_test_command "$root" >/dev/null 2>&1 || return 0
   fi_af_sweep_pending && return 0
   fi_af_cap_ok sweep "$(fi_af_int dailySweeps 1)" || return 0
+  # A sweep that retired for want of a test command on the landing branch
+  # (the root checkout may have one) is not queued again the same day.
+  fi_af_cap_ok sweep-notest 1 || return 0
   while IFS= read -r entry || [[ -n "$entry" ]]; do
     [[ -n "$entry" ]] || continue
     n=$((n + 1))
@@ -252,6 +255,9 @@ fi_af_sweep_claim() {
   # and before the classifier runs.
   if ! fi_af_test_command "$AFI_wt" >/dev/null 2>&1; then
     FI_AF_WHY="no test command"
+    # Not the sweep slot (nothing ran), but a day marker so fi_af_sweep_check
+    # does not queue the same doomed sweep on every trigger.
+    fi_af_cap_take sweep-notest "$id"
     fi_af_finish "$id" stale "$FI_AF_WHY"; return 5
   fi
   # Red at base: retire before the classifier spends anything. The day's
@@ -296,7 +302,35 @@ fi_af_sweep_claim() {
 
 # Entry number AFI_cur of the sweep, with its base pinned to the last good
 # commit, so diff, reset and the verifier see only this entry's change.
+# rc 1 when the ledger still holds the current entry (AFI_key, any status) and
+# it is no longer fixable now. An entry the ledger no longer lists is not
+# judged: nothing says it was resolved rather than moved.
+_fi_af_sweep_still_fixable() {
+  local entry
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    fi_entry_dedup_key_v "$entry" "$AFI_root" || continue
+    [[ "$FI_KEY" == "$AFI_key" ]] || continue
+    fi_af_fixable_now "$entry"; return
+  done < <(fi_entries "$1" all 2>/dev/null || true)
+  return 0
+}
+
 fi_af_sweep_load() {
+  local file
+  while :; do
+    _fi_af_sweep_load_one "$1" || return 1
+    # Batch 3: the entry may have been retagged, resolved or annotated since
+    # the claim listed it; one that is no longer fixable now is skipped.
+    file="$(fi_find_issues_file "$AFI_root" 2>/dev/null)" || return 0
+    [[ -f "$file" ]] || return 0
+    _fi_af_sweep_still_fixable "$file" && return 0
+    fi_af_sweep_settle "$1" skipped "no longer fixable: the entry changed since the sweep was claimed"
+    [[ "${AFI_more:-}" == 1 ]] && return 1
+  done
+}
+
+_fi_af_sweep_load_one() {
   local f="$FI_AF_ST/sweeps/$1.entries" i=0 line
   [[ "$AFI_cur" =~ ^[0-9]+$ && -f "$f" ]] || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
