@@ -221,7 +221,7 @@ found-issues config autofix.sweepBatch --unset
 | `FOUND_ISSUES_AUTOFIX_SHIP_WAIT` | `900` | Seconds before a requeued sweep retries its ship |
 | `FOUND_ISSUES_AUTOFIX_OUTAGE_MAX` | `3` | Engine outages in a row (a failed turn, a verifier that died) after which a spot item finishes failed with the last outage text instead of being requeued again |
 | `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS` | `runTimeoutMin` × 60 | Per engine-call timeout override |
-| `FOUND_ISSUES_AUTOFIX_MERGE_POLLS` / `_MERGE_SLEEP` | `60` / `60` | How long `autofix merge-when-green` waits for checks |
+| `FOUND_ISSUES_AUTOFIX_MERGE_POLLS` / `_MERGE_SLEEP` | `60` / `60` | How long `autofix merge-when-green` waits for checks. A PR that conflicts with its base only in the ledger gets the base merged in (both sides' annotations kept, at most 3 times) and is waited on again; a conflict anywhere else stops the watch |
 | `FOUND_ISSUES_AUTOFIX_WAIT_RECHECK` | `900` | Seconds before a waiting item (its cited file is not on the landing branch yet, or has uncommitted or unpushed changes) is looked at again |
 | `FOUND_ISSUES_AUTOFIX_WAIT_MAX` | `259200` | Seconds (3 days) a spot item may wait before it retires stale |
 | `FOUND_ISSUES_STATE_DIR` | `~/.claude/found-issues` | Where the queue, locks, caps and the statusline's run counts live |

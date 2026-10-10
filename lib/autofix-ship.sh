@@ -19,6 +19,7 @@
 #   fi_af_ship
 #   _fi_af_publish <title> <body-file> <key-loc-rows-file>
 #   fi_af_merge_when_green <N>
+#   _fi_af_mwg_unconflict <N> <slug> <base> <head>
 
 # shellcheck disable=SC2154  # AFI_*/FE_* come from autofix-queue.sh / parse-entries.sh
 
@@ -339,24 +340,36 @@ _fi_af_publish() {
 # "No checks" must hold on two looks a poll apart: right after a push the
 # new head has no checks YET, and merging then skips CI (spec §5.6 means a
 # repo with no checks at all).
+#
+# 3.6.1 (ledger lib/autofix-ship.sh:231): a PR that conflicts with its base
+# only in the ledger (fix PRs cut from one base annotate adjacent entries) is
+# brought up to date by _fi_af_mwg_unconflict, then waited on again; it used
+# to give up with "merging PR #N failed" and nothing retried.
 fi_af_merge_when_green() {
-  local n="$1" slug="${2:-}" i v nones=0 polls="${FOUND_ISSUES_AUTOFIX_MERGE_POLLS:-60}" pause="${FOUND_ISSUES_AUTOFIX_MERGE_SLEEP:-60}"
-  local jqf='[.state, ([.statusCheckRollup[]? | (.conclusion // .state // "")] | if length == 0 then "none" elif any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STARTUP_FAILURE") then "fail" elif all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL") then "green" else "pending" end)] | join(" ")'
+  local n="$1" slug="${2:-}" i v st ck mg br hr nones=0 polls="${FOUND_ISSUES_AUTOFIX_MERGE_POLLS:-60}" pause="${FOUND_ISSUES_AUTOFIX_MERGE_SLEEP:-60}"
+  local jqf='[.state, ([.statusCheckRollup[]? | (.conclusion // .state // "")] | if length == 0 then "none" elif any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STARTUP_FAILURE") then "fail" elif all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL") then "green" else "pending" end), (.mergeable // ""), (.baseRefName // ""), (.headRefName // "")] | join("|")'
   [[ -n "$slug" ]] || slug="$(fi_repo_id 2>/dev/null || true)"
   [[ -n "$slug" ]] || { fi_err "autofix: merge-when-green needs a GitHub repo (--repo owner/name)"; return 1; }
+  FI_AF_MWG_FIXES=0
   for (( i = 0; i < polls; i++ )); do
-    v="$(gh pr view "$n" --repo "$slug" --json state,statusCheckRollup --jq "$jqf" 2>/dev/null || true)"
-    case "$v" in
-      MERGED*|CLOSED*) printf 'PR #%s is already %s\n' "$n" "${v%% *}"; return 0 ;;
+    v="$(gh pr view "$n" --repo "$slug" --json state,statusCheckRollup,mergeable,baseRefName,headRefName --jq "$jqf" 2>/dev/null || true)"
+    IFS='|' read -r st ck mg br hr <<<"$v" || true
+    if [[ "$st" == OPEN && "$mg" == CONFLICTING ]]; then
+      _fi_af_mwg_unconflict "$n" "$slug" "$br" "$hr" || return 1
+      nones=0; sleep "$pause"; continue
+    fi
+    case "$st $ck" in
+      MERGED*|CLOSED*) printf 'PR #%s is already %s\n' "$n" "$st"; return 0 ;;
       "OPEN none")
         nones=$((nones + 1))
         if (( nones >= 2 )); then
-          gh pr merge "$n" --squash --repo "$slug" && { printf 'merged PR #%s\n' "$n"; return 0; }
-          fi_err "autofix: merging PR #$n failed"; return 1
+          _fi_af_mwg_merge "$n" "$slug" && return 0
+          _fi_af_mwg_refused "$n" "$slug" "$br" "$hr" || return 1
+          nones=0
         fi ;;
       "OPEN green")
-        gh pr merge "$n" --squash --repo "$slug" && { printf 'merged PR #%s\n' "$n"; return 0; }
-        fi_err "autofix: merging PR #$n failed"; return 1 ;;
+        _fi_af_mwg_merge "$n" "$slug" && return 0
+        _fi_af_mwg_refused "$n" "$slug" "$br" "$hr" || return 1 ;;
       "OPEN fail") fi_err "autofix: PR #$n checks failed — not merging"; return 1 ;;
       *) nones=0 ;;
     esac
@@ -364,4 +377,151 @@ fi_af_merge_when_green() {
   done
   fi_err "autofix: PR #$n still pending after $polls checks — not merging"
   return 1
+}
+
+FI_AF_MWG_FIXES=0 FI_AF_MWG_ERR=""
+
+# Squash-merge <N>; a refusal's message is kept in FI_AF_MWG_ERR.
+_fi_af_mwg_merge() {
+  local n="$1" slug="$2"
+  if FI_AF_MWG_ERR="$(gh pr merge "$n" --squash --repo "$slug" 2>&1 >/dev/null)"; then
+    printf 'merged PR #%s\n' "$n"; return 0
+  fi
+  [[ -z "$FI_AF_MWG_ERR" ]] || printf '%s\n' "$FI_AF_MWG_ERR" >&2
+  return 1
+}
+
+# After a refused merge: GitHub computes mergeable lazily, so a PR it called
+# UNKNOWN can still be refused for conflicts — by the API ("Pull Request has
+# merge conflicts") or by gh itself ("is not mergeable: the merge commit
+# cannot be cleanly created"). Those are resolved like a CONFLICTING PR
+# (rc 0 = keep waiting); any other refusal ends the watch.
+_fi_af_mwg_refused() {
+  local n="$1" slug="$2" br="$3" hr="$4"
+  if [[ "$FI_AF_MWG_ERR" == *"merge conflict"* || "$FI_AF_MWG_ERR" == *"cannot be cleanly created"* ]]; then
+    _fi_af_mwg_unconflict "$n" "$slug" "$br" "$hr" && return 0
+    return 1
+  fi
+  fi_err "autofix: merging PR #$n failed"
+  return 1
+}
+
+# Merge origin/<base> into the PR branch <head> in a throwaway worktree of
+# the checkout merge-when-green runs in, and push it (a merge commit, so no
+# force). Only ledger conflicts are resolved: the code then merges exactly as
+# GitHub would have merged a PR that did not conflict, and the PR's checks
+# run again on the new head before it merges. A head that already contains
+# its base is GitHub's stale mergeable value, not a conflict: nothing is
+# done and nothing is counted. At most 3 updates per watch.
+_fi_af_mwg_unconflict() {
+  local n="$1" slug="$2" base="$3" head="$4" root tmp rc=0 own
+  if [[ -z "$base" || -z "$head" ]]; then
+    fi_err "autofix: PR #$n has merge conflicts and gh did not name its branches — not merging"; return 1
+  fi
+  if ! root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    fi_err "autofix: PR #$n has merge conflicts; run merge-when-green inside a checkout of $slug to resolve them"; return 1
+  fi
+  own="$(cd "$root" && fi_repo_id 2>/dev/null || true)"
+  if [[ "$(printf '%s' "$own" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$slug" | tr '[:upper:]' '[:lower:]')" ]]; then
+    fi_err "autofix: PR #$n has merge conflicts, but this checkout's origin is ${own:-not a GitHub repo}, not $slug — not merging"; return 1
+  fi
+  if ! git -C "$root" fetch -q origin "+refs/heads/$head:refs/remotes/origin/$head" "+refs/heads/$base:refs/remotes/origin/$base" >/dev/null 2>&1; then
+    fi_err "autofix: PR #$n has merge conflicts and fetching $head and $base failed — not merging"; return 1
+  fi
+  git -C "$root" merge-base --is-ancestor "refs/remotes/origin/$base" "refs/remotes/origin/$head" 2>/dev/null && return 0
+  FI_AF_MWG_FIXES=$((FI_AF_MWG_FIXES + 1))
+  if (( FI_AF_MWG_FIXES > 3 )); then
+    fi_err "autofix: PR #$n still conflicts with $base after 3 updates — not merging"; return 1
+  fi
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/fi-mwg.XXXXXX")" || { fi_err "autofix: PR #$n: no temp dir — not merging"; return 1; }
+  if git -C "$root" worktree add -q --detach "$tmp/wt" "refs/remotes/origin/$head" >/dev/null 2>&1; then
+    _fi_af_mwg_update "$n" "$slug" "$tmp/wt" "$base" "$head" || rc=$?
+    git -C "$root" worktree remove --force "$tmp/wt" >/dev/null 2>&1 || true
+  else
+    fi_err "autofix: PR #$n has merge conflicts and a worktree of $head could not be made — not merging"; rc=1
+  fi
+  rm -rf "$tmp"
+  return "$rc"
+}
+
+_fi_af_mwg_update() {
+  local n="$1" slug="$2" wt="$3" base="$4" head="$5" files f bad="" mb out lrc=0
+  local ann="(PR: $slug#$n)"
+  if ! out="$(git -C "$wt" merge -q --no-edit "refs/remotes/origin/$base" 2>&1)"; then
+    files="$(git -C "$wt" diff --name-only --diff-filter=U 2>/dev/null || true)"
+    while IFS= read -r f || [[ -n "$f" ]]; do
+      case "$f" in
+        "") ;;
+        docs/found-issues.md|docs/found-issues-archive.md|.found-issues.md) ;;
+        *) bad="${bad:+$bad, }$f" ;;
+      esac
+    done <<<"$files"
+    if [[ -z "$files" ]]; then
+      git -C "$wt" merge --abort >/dev/null 2>&1 || true
+      fi_err "autofix: PR #$n: git could not merge $base into $head: ${out##*$'\n'} — not merging"; return 1
+    fi
+    if [[ -n "$bad" ]]; then
+      git -C "$wt" merge --abort >/dev/null 2>&1 || true
+      fi_err "autofix: PR #$n conflicts with $base outside the ledger ($bad) — not merging"; return 1
+    fi
+    mb="$(git -C "$wt" merge-base HEAD MERGE_HEAD 2>/dev/null || true)"
+    while IFS= read -r f || [[ -n "$f" ]]; do
+      [[ -n "$f" ]] || continue
+      lrc=0; _fi_af_mwg_ledger "$wt" "$f" "$mb" "$ann" || lrc=$?
+      if (( lrc )); then
+        git -C "$wt" merge --abort >/dev/null 2>&1 || true
+        if (( lrc == 2 )); then
+          fi_err "autofix: PR #$n: an entry it annotates in $f changed on $base, so $ann cannot be carried over; its conflict needs a person — not merging"
+        else
+          fi_err "autofix: PR #$n changes $f by more than its own annotation $ann, so its conflict with $base needs a person — not merging"
+        fi
+        return 1
+      fi
+    done <<<"$files"
+    if ! out="$(git -C "$wt" commit -q --no-edit 2>&1)"; then
+      git -C "$wt" merge --abort >/dev/null 2>&1 || true
+      fi_err "autofix: PR #$n: the merge commit of $base was refused: ${out##*$'\n'} — not merging"; return 1
+    fi
+  fi
+  if ! git -C "$wt" push -q origin "HEAD:refs/heads/$head" >/dev/null 2>&1; then
+    fi_err "autofix: PR #$n: pushing $base merged into $head failed — not merging"; return 1
+  fi
+  printf 'PR #%s: merged %s into %s (the only conflict was the ledger; both sides kept), waiting for checks again\n' "$n" "$base" "$head"
+}
+
+# Resolve the conflicted ledger <p>: the base's version, with this PR's
+# annotation re-added to each entry the PR annotated (matched by dedup key).
+# Refused with rc 1 unless the PR's own change to <p> since the merge base is
+# exactly that annotation, the only ledger change an auto-fix PR makes; rc 2
+# when an entry it annotated is no longer on the base under the same key
+# (re-anchored, reworded, archived), so the annotation would be dropped.
+_fi_af_mwg_ledger() {
+  local wt="$1" p="$2" mb="$3" ann="$4" ours line cr keys=$'\n' want=0 got=0 tmpf
+  [[ -n "$mb" ]] || return 1
+  git -C "$wt" cat-file -e "$mb:$p" 2>/dev/null || return 1
+  git -C "$wt" cat-file -e "MERGE_HEAD:$p" 2>/dev/null || return 2
+  ours="$(git -C "$wt" show "HEAD:$p" 2>/dev/null)" || return 1
+  [[ "${ours//" $ann"/}" == "$(git -C "$wt" show "$mb:$p")" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == *" $ann"* ]] || continue
+    line="${line%$'\r'}"
+    fi_entry_dedup_key_v "${line//" $ann"/}" "$wt" || continue
+    keys+="$FI_KEY"$'\n'; want=$((want + 1))
+  done <<<"$ours"
+  # Line by line from git, so the base's bytes (trailing blank lines, a
+  # missing final newline aside) are what the merge commit keeps.
+  tmpf="$wt/$p.fi-mwg.$$"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    cr=""
+    [[ "$line" == *$'\r' ]] && { cr=$'\r'; line="${line%$'\r'}"; }
+    if [[ "$line" == "- ["* ]] && fi_entry_dedup_key_v "${line//" $ann"/}" "$wt" \
+       && [[ "$keys" == *$'\n'"$FI_KEY"$'\n'* ]]; then
+      [[ "$line" == *" $ann"* ]] || line="$line $ann"
+      got=$((got + 1))
+    fi
+    printf '%s%s\n' "$line" "$cr"
+  done < <(git -C "$wt" show "MERGE_HEAD:$p" 2>/dev/null) >"$tmpf"
+  if (( got < want )); then rm -f "$tmpf"; return 2; fi
+  cat "$tmpf" >"$wt/$p" && rm -f "$tmpf"
+  git -C "$wt" add -- "$p"
 }
