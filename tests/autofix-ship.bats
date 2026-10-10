@@ -182,6 +182,50 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   grep -qF '+add() { echo $(( $1 + $2 )); }' "$TMP/diff"
 }
 
+# kh2-midgar on Git for Windows, 2026-10-10: the fixer rewrote an untouched
+# LF test block with CRLF and the verifier rejected an otherwise good fix.
+@test "autofix diff: CRLF the fixer put into an LF file is stripped before tests and verify" {
+  fix_it
+  printf '%s\r\n' "$(cat "$WT/src/calc.sh")" > "$WT/src/calc.sh"
+  awk '{ printf "%s\r\n", $0 }' "$WT/test.sh" > "$WT/test.sh.crlf" && cat "$WT/test.sh.crlf" > "$WT/test.sh" && rm "$WT/test.sh.crlf"
+  grep -q $'\r' "$WT/test.sh"
+  "$FI_BIN" autofix diff "$ID" > "$TMP/diff"
+  ! grep -q $'\r' "$TMP/diff" || false
+  ! grep -q 'test.sh' "$TMP/diff" || false
+  grep -qF '+add() { echo $(( $1 + $2 )); }' "$TMP/diff"
+  ! grep -q $'\r' "$WT/src/calc.sh" "$WT/test.sh" || false
+}
+
+@test "autofix diff: CRLF is kept in files that had it at base, and binary files are untouched" {
+  printf 'a\r\nb\r\n' > crlf.txt
+  printf 'x\000y\n' > blob.bin
+  printf '#!/bin/sh\necho hi\n' > run.sh; chmod +x run.sh
+  git add crlf.txt blob.bin run.sh && git commit -qm fixtures
+  base="$(git rev-parse HEAD)"
+  printf 'a\r\nc\r\n' > crlf.txt
+  printf 'x\000z\r\n' > blob.bin
+  printf '#!/bin/sh\r\necho bye\r\n' > run.sh
+  fi_af_diff "$REPO" "$base" > "$TMP/diff"
+  [ "$(od -An -c crlf.txt | tr -d ' \n')" = 'a\r\nc\r\n' ]
+  [ "$(od -An -c blob.bin | tr -d ' \n')" = 'x\0z\r\n' ]
+  [ "$(cat run.sh)" = $'#!/bin/sh\necho bye' ]
+  [ -x run.sh ]
+}
+
+@test "autofix diff: a checkout git converts to CRLF itself keeps its CRLF" {
+  printf 'one\n' > win.txt; printf 'two\n' > attr.txt
+  printf 'attr.txt eol=crlf\n' > .gitattributes
+  git add win.txt attr.txt .gitattributes && git commit -qm fixtures
+  base="$(git rev-parse HEAD)"
+  printf 'uno\r\n' > attr.txt
+  fi_af_diff "$REPO" "$base" > /dev/null
+  [ "$(od -An -c attr.txt | tr -d ' \n')" = 'uno\r\n' ]
+  git config core.autocrlf true
+  printf 'eins\r\n' > win.txt
+  fi_af_diff "$REPO" "$base" > /dev/null
+  [ "$(od -An -c win.txt | tr -d ' \n')" = 'eins\r\n' ]
+}
+
 @test "autofix ship: every gh call names the origin repo" {
   fix_it
   "$FI_BIN" autofix ship "$ID"
