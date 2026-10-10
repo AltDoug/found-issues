@@ -17,25 +17,43 @@
 FI_AF_CLASSIFY_ENTRY=""
 
 # Numbered work list: U<n> untagged [open] entries (at most 20), W<n>
-# [deferred] entries whose (until:) is free text (at most 10).
+# [deferred] entries whose (until:) is free text (at most 10). Batch 4
+# (ledger lib/autofix-classify.sh:21): entries the classifier has not been
+# shown yet (classify-offered) come first, offered ones fill what is left of
+# the cap, so a backlog past 20 is worked through over several sweeps.
 _fi_af_classify_list() {
-  local file="$1" out="$2" entry u=0 w=0
+  local file="$1" out="$2" entry u=0 w=0 seen="$FI_AF_ST/classify-offered" blob="" wbuf="" i
+  local -a fresh=() offered=()
   : >"$out"
+  [[ -s "$seen" ]] && blob=$'\n'"$(cat "$seen" 2>/dev/null)"$'\n'
   while IFS= read -r entry; do
     [[ -n "$entry" ]] || continue
     fi_parse_entry_vars "$entry" || continue
     if [[ "$FE_status" == "open" ]]; then
       [[ -z "$FE_fixtag$FE_decide$FE_decided$FE_manual$FE_autofix_failed$FE_prs$FE_prs_auto$FE_commits$FE_commits_auto" ]] || continue
-      (( u < 20 )) || continue
-      u=$((u + 1))
-      printf 'U%s\t%s\n' "$u" "$entry" >>"$out"
+      if [[ -n "$blob" ]] && fi_entry_dedup_key_v "$entry" "${AFI_root:-}" && [[ "$blob" == *$'\n'"$FI_KEY"$'\n'* ]]; then
+        offered[${#offered[@]}]="$entry"
+      else
+        fresh[${#fresh[@]}]="$entry"
+      fi
     elif [[ "$FE_status" == "deferred" && -n "$FE_until" ]]; then
       case "$FE_until" in date:*|pr:*) continue ;; esac
       (( w < 10 )) || continue
       w=$((w + 1))
-      printf 'W%s\t%s\n' "$w" "$entry" >>"$out"
+      wbuf="$wbuf"$(printf 'W%s\t%s' "$w" "$entry")$'\n'
     fi
   done < <(fi_entries "$file" all 2>/dev/null || true)
+  for (( i = 0; i < ${#fresh[@]}; i++ )); do
+    (( u < 20 )) || break
+    u=$((u + 1))
+    printf 'U%s\t%s\n' "$u" "${fresh[i]}" >>"$out"
+  done
+  for (( i = 0; i < ${#offered[@]}; i++ )); do
+    (( u < 20 )) || break
+    u=$((u + 1))
+    printf 'U%s\t%s\n' "$u" "${offered[i]}" >>"$out"
+  done
+  printf '%s' "$wbuf" >>"$out"
 }
 
 _fi_af_classify_prompt() {

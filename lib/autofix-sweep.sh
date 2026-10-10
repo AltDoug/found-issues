@@ -181,24 +181,54 @@ fi_af_sweep_check() {
 # Spec section 3: a sweep leaves out entries whose file is not on the landing
 # branch yet or is busy in the sweep's root checkout; they stay eligible.
 # Filters candidate lines on stdin; AFI_base is set by the worktree step.
+# Batch 4 (ledger lib/autofix-sweep.sh:274): the claim holds the repo lock
+# while this runs over up to 1000 candidates, so the git questions are asked
+# once for all of them: one cat-file --batch-check for presence on
+# origin/<base>, one diff and one log for the busy files.
 _fi_af_sweep_ready() {
   local id="$1" entry p keep="${AFI_entry:-}" skip=":${AFI_skip_files:-}:"
+  local i k n=0 line any=0
+  local -a ents=() paths=() gone=() want=() spec=() ans=()
   while IFS= read -r entry || [[ -n "$entry" ]]; do
     [[ -n "$entry" ]] || continue
     AFI_entry="$entry"
-    if p="$(_fi_af_entry_file)"; then
-      fi_entry_loc_v "$entry" || true
+    p="$(_fi_af_entry_file)" || p=""
+    ents[n]="$entry"; paths[n]="$p"; gone[n]=0; want[n]=""
+    # An earlier batch's file is skipped before any git question is asked.
+    if [[ -n "$p" && "$skip" != *":$p:"* ]]; then
+      want[n]="origin/$AFI_base:$p"
+      spec[${#spec[@]}]="${want[n]}"
+    fi
+    n=$((n + 1))
+  done
+  if (( ${#spec[@]} > 0 )); then
+    # Positional: answer line k belongs to the k-th wanted path.
+    while IFS= read -r line || [[ -n "$line" ]]; do ans[${#ans[@]}]="$line"; done \
+      < <(printf '%s\n' "${spec[@]}" | git -C "$AFI_root" -c core.quotepath=off cat-file --batch-check 2>/dev/null || true)
+    k=0
+    for (( i = 0; i < n; i++ )); do
+      [[ -n "${want[i]}" ]] || continue
+      # No answer at all counts as missing, like a failed cat-file -e.
+      if [[ -z "${ans[k]:-}" || "${ans[k]}" == *" missing" || "${ans[k]}" == *" ambiguous" ]]; then gone[i]=1; fi
+      k=$((k + 1))
+    done
+    _fi_af_busy_set
+  fi
+  for (( i = 0; i < n; i++ )); do
+    p="${paths[i]}"
+    if [[ -n "$p" ]]; then
+      fi_entry_loc_v "${ents[i]}" || true
       if [[ "$skip" == *":$p:"* ]]; then
         fi_af_log "$id" "sweep: skip $FE_loc (file in an earlier batch's PR)"; continue
       fi
-      if ! git -C "$AFI_root" cat-file -e "origin/$AFI_base:$p" 2>/dev/null; then
+      if (( gone[i] )); then
         fi_af_log "$id" "sweep: skip $FE_loc (not on origin/$AFI_base)"; continue
       fi
-      if _fi_af_file_busy "$p"; then
+      if _fi_af_in_busy_set "$p"; then
         fi_af_log "$id" "sweep: skip $FE_loc (busy)"; continue
       fi
     fi
-    printf '%s\n' "$entry"
+    printf '%s\n' "${ents[i]}"
   done
   AFI_entry="$keep"
 }
@@ -250,7 +280,13 @@ fi_af_sweep_claim() {
   fi_af_item_set "$r" pid "${FI_AF_PID:-}"
   if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$r" launcher A; else fi_af_item_set "$r" launcher B; fi
   fi_af_seg_write "$AFI_root"
-  if ! fi_af_worktree_add; then fi_af_finish "$id" failed "$FI_AF_WHY"; return 6; fi
+  if ! fi_af_worktree_add; then
+    # Batch 4 (ledger lib/autofix-sweep.sh:246): a failed fetch waits like a
+    # spot item's does, through the same bounded requeue.
+    _fi_af_wt_fail_requeue "$id" && return 8
+    fi_af_finish "$id" failed "$FI_AF_WHY"; return 6
+  fi
+  fi_af_item_set "$r" wt_retries ""
   fi_af_item_set "$r" wt "$AFI_wt"
   fi_af_item_set "$r" branch "$AFI_branch"
   # No test command at origin/<base>: retire before the day's slot is spent

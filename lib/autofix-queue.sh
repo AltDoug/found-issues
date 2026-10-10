@@ -700,9 +700,15 @@ _fi_af_entry_file() {
 # Never a diff against origin/<base> itself: a checkout merely behind origin
 # differs from it without holding any work of its own. rc 0 = busy.
 _fi_af_file_busy() {
-  local p="$1" cur up pushed
+  local p="$1" pushed
   [[ -n "$(git -C "$AFI_root" diff --name-only HEAD -- "$p" 2>/dev/null)" ]] && return 0
-  pushed="origin/$AFI_base"
+  pushed="$(_fi_af_pushed_ref)"
+  [[ -n "$(git -C "$AFI_root" rev-list -1 "$pushed..HEAD" -- "$p" 2>/dev/null)" ]]
+}
+
+# The ref the root checkout's commits count as pushed against (see above).
+_fi_af_pushed_ref() {
+  local cur up pushed="origin/$AFI_base"
   cur="$(git -C "$AFI_root" symbolic-ref -q --short HEAD 2>/dev/null || true)"
   if [[ -n "$cur" ]]; then
     up="$(git -C "$AFI_root" config --get "branch.$cur.merge" 2>/dev/null || true)"
@@ -711,7 +717,25 @@ _fi_af_file_busy() {
       pushed="origin/$up"
     fi
   fi
-  [[ -n "$(git -C "$AFI_root" rev-list -1 "$pushed..HEAD" -- "$p" 2>/dev/null)" ]]
+  printf '%s' "$pushed"
+}
+
+# Batch 4 (ledger lib/autofix-sweep.sh:274): the same test for many files in
+# one pass, for a sweep claim that holds the repo lock. Sets FI_AF_BUSY_SET to
+# a newline-delimited list (leading and trailing newline) of every path with
+# uncommitted changes or unpushed commits; _fi_af_in_busy_set <path> tests it
+# (a directory is busy when anything under it is).
+_fi_af_busy_set() {
+  local pushed
+  pushed="$(_fi_af_pushed_ref)"
+  FI_AF_BUSY_SET=$'\n'"$(git -C "$AFI_root" -c core.quotepath=off diff --name-only --no-renames HEAD 2>/dev/null || true)"
+  FI_AF_BUSY_SET="$FI_AF_BUSY_SET"$'\n'"$(git -C "$AFI_root" -c core.quotepath=off log --no-renames --name-only --format= "$pushed..HEAD" 2>/dev/null || true)"$'\n'
+}
+
+_fi_af_in_busy_set() {
+  local q="${1%/}"
+  [[ -n "$q" ]] || return 1
+  [[ "$FI_AF_BUSY_SET" == *$'\n'"$q"$'\n'* || "$FI_AF_BUSY_SET" == *$'\n'"$q"/* ]]
 }
 
 # Spec section 2: rc 0 = go; rc 8 = wait (item stays queued); rc 5 = waited
@@ -741,6 +765,27 @@ _fi_af_wait_check() {
   fi_af_item_set "$q" wait_next "$(( now + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
   FI_AF_WHY="$why"
   return 8
+}
+
+# A fetch or worktree failure at the cut is usually transient (network, a
+# busy index): give the claimed item back to the queue, at most 3 times in a
+# row, spaced like a wait. rc 0 = requeued (the caller returns 8, FI_AF_WHY
+# says why); rc 1 = out of retries, the caller fails the item as before.
+# Spot and sweep claims share it. A requeue spends no daily slot.
+_fi_af_wt_fail_requeue() {
+  local id="$1" r="$FI_AF_ST/running/$1" tries why="$FI_AF_WHY"
+  tries="$(_fi_af_field "$r" wt_retries)" || tries=0
+  [[ "$tries" =~ ^[0-9]+$ ]] || tries=0
+  (( tries < 3 )) || return 1
+  fi_af_item_set "$r" wt_retries "$(( tries + 1 ))"
+  # Spaced like a wait (the drain and the Stop hook skip it until
+  # wait_next), so three retries outlast a short outage.
+  fi_af_item_set "$r" waiting "$why"
+  fi_af_item_set "$r" wait_next "$(( $(date +%s) + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
+  fi_af_worktree_remove
+  fi_af_requeue "$id" "$why; retry $(( tries + 1 )) of 3"
+  FI_AF_WHY="$why; requeued, retry $(( tries + 1 )) of 3"
+  return 0
 }
 
 # Spec §5.1. Lock first, so of two claimers exactly one sees the queue file.
@@ -784,25 +829,9 @@ fi_af_claim() {
   if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$r" launcher A; else fi_af_item_set "$r" launcher B; fi
   fi_af_seg_write "$AFI_root"
   if ! fi_af_worktree_add; then
-    # A fetch or worktree failure is usually transient (network, a busy
-    # index): give the item back to the queue, at most 3 times in a row, and
-    # fail it as before only after that. A requeue spends no daily slot.
-    local tries
-    tries="$(_fi_af_field "$r" wt_retries)" || tries=0
-    [[ "$tries" =~ ^[0-9]+$ ]] || tries=0
-    if (( tries < 3 )); then
-      local why="$FI_AF_WHY"
-      fi_af_item_set "$r" wt_retries "$(( tries + 1 ))"
-      # Spaced like a wait (the drain and the Stop hook skip it until
-      # wait_next), so three retries outlast a short outage.
-      fi_af_item_set "$r" waiting "$why"
-      fi_af_item_set "$r" wait_next "$(( $(date +%s) + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
-      fi_af_worktree_remove
-      fi_af_requeue "$id" "$why; retry $(( tries + 1 )) of 3"
-      FI_AF_WHY="$why; requeued, retry $(( tries + 1 )) of 3"
-      return 8
-    fi
-    fi_af_cap_take spot "$id"
+    # The daily slot is taken only once a worktree exists (below), so a claim
+    # that never got one spends none, even when it gives up.
+    _fi_af_wt_fail_requeue "$id" && return 8
     fi_af_finish "$id" failed "$FI_AF_WHY"
     return 6
   fi
