@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] - 2026-10-10
+
+### Added
+- `found-issues tag <match> --retry` drops an entry's `(autofix-failed: ...)` tag and keeps its fix tag, so auto-fix tries the entry again. Before this, nothing could clear that tag, and the ledger is never edited by hand. A flaky test that failed a fixable entry (kh2-midgar, 2026-10-10) left it out of auto-fix for good. An entry with no such tag is refused and left unchanged, and `--retry` cannot be combined with another tag.
+
 ## [3.4.3] - 2026-10-10
 
 ### Fixed

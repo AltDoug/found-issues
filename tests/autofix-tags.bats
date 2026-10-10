@@ -332,3 +332,28 @@ EOS
   [ "$FI_TAG_KIND" = autofix-failed ]
   [ "$FI_TAG_VALUE" = 'verifier said [no]' ]
 }
+
+# 3.5.0: nothing could clear an autofix-failed tag, so an entry failed by a
+# flaky test (kh2-midgar 2026-10-10) was never retried. --retry drops it.
+@test "tag --retry: drops the autofix-failed tag, keeps the fix tag and other annotations" {
+  printf -- '- [open] 2026-10-03 src/a.sh:1 — bug one (PR-auto: o/r#1) (fix: small) (autofix-failed: tests fail after 2 attempts)\n' > docs/found-issues.md
+  fi_run tag "bug one" --retry
+  [ "$status" -eq 0 ]
+  grep -qx -- '- \[open\] 2026-10-03 src/a.sh:1 — bug one (PR-auto: o/r#1) (fix: small)' docs/found-issues.md
+}
+
+@test "tag --retry: an entry with no autofix-failed tag is refused and left alone" {
+  printf -- '- [open] 2026-10-03 src/a.sh:1 — bug one (fix: small)\n' > docs/found-issues.md
+  cp docs/found-issues.md "$TMP/before"
+  fi_run tag "bug one" --retry
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"has no autofix-failed tag"* ]]
+  cmp -s docs/found-issues.md "$TMP/before"
+}
+
+@test "tag --retry: takes no value and does not combine with another tag" {
+  printf -- '- [open] 2026-10-03 src/a.sh:1 — bug one (fix: small) (autofix-failed: crashed)\n' > docs/found-issues.md
+  fi_run tag "bug one" --retry --fix small; [ "$status" -eq 2 ]
+  fi_run tag "bug one" --retry=yes;         [ "$status" -eq 2 ]
+  grep -q '(autofix-failed: crashed)' docs/found-issues.md
+}

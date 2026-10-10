@@ -47,7 +47,7 @@ Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract
 | Decision needed | `(decide: QUESTION)` | `(decide: rename or alias?)` | v3. Set by `log --decide` / `tag --decide`. Listed by `found-issues decide` |
 | Decision recorded | `(decided: ANSWER)` | `(decided: alias)` | v3. Written by `found-issues decide --answer`; replaces `(decide: ...)` |
 | Manual only | `(manual: WHY)` | `(manual: off-limits: ci)` | v3. Set by `log --manual` / `tag --manual`, or forced for off-limits paths |
-| Auto-fix failed | `(autofix-failed: REASON)` | `(autofix-failed: tests stayed red)` | v3. Written by the auto-fixer; the entry is never retried automatically |
+| Auto-fix failed | `(autofix-failed: REASON)` | `(autofix-failed: tests stayed red)` | v3. Written by the auto-fixer; the entry is never retried automatically. `found-issues tag <match> --retry` (3.5.0) drops it so auto-fix tries again |
 
 ## Status semantics
 
