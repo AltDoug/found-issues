@@ -43,14 +43,21 @@ _fi_fix_workspace() {
 
 # prompt-10: the detected test command, so allowed-tools needs no runner.
 _fi_fix_test() {
-  local wt="$1" t log rc=0
+  local wt="$1" secs="${2:-}" t log rc=0
   [[ -d "$wt" ]] || { fi_err "fix test: no such worktree: $wt"; return 2; }
   t="$(fi_af_test_command "$wt")" || { fi_err "fix test: no test command found (set found-issues.autofix.testCommand)"; return 2; }
   log="$(mktemp "${TMPDIR:-/tmp}/fi-fix-test.XXXXXX")"
-  fi_af_run_tests "$wt" "$t" "$log" || rc=$?
+  # <secs> (fix ship's own gate limit) replaces the auto-fix watchdog's
+  # runTimeoutMin / FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS for this run only.
+  if [[ -n "$secs" ]]; then
+    FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS="$secs" fi_af_run_tests "$wt" "$t" "$log" || rc=$?
+  else
+    fi_af_run_tests "$wt" "$t" "$log" || rc=$?
+  fi
   fi_af_test_report "$log" 30
   tail -n 5 "$log.err" 2>/dev/null
   rm -f "$log" "$log.err"
+  if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then printf 'tests: timed out after %ss\n' "$FI_AF_CHILD_TIMEDOUT"; fi
   if (( rc == 0 )); then printf 'tests: pass\n'; else printf 'tests: fail (exit %s)\n' "$rc"; fi
   return $rc
 }
@@ -91,15 +98,28 @@ _fi_fix_ship() {
     || { fi_err "fix ship: $br has no commits ahead of origin/$base"; return 1; }
   [[ -z "$(git -C "$wt" status --porcelain 2>/dev/null)" ]] \
     || { fi_err "fix ship: $wt has uncommitted changes — commit each fix first"; return 1; }
-  _fi_fix_test "$wt" >/dev/null || { fi_err "fix ship: tests fail in $wt — not shipping"; return 1; }
+  # The ship gate has its own limit (default 60 min), independent of the
+  # auto-fix runTimeoutMin watchdog, and shows why it failed.
+  local treport
+  if ! treport="$(_fi_fix_test "$wt" "${FOUND_ISSUES_FIX_SHIP_TIMEOUT_SECS:-3600}" 2>&1)"; then
+    printf '%s\n' "$treport" >&2
+    fi_err "fix ship: tests fail in $wt — not shipping"
+    return 1
+  fi
   fi_af_no_prompts
   git -C "$wt" push -q -u origin "$br" 2>/dev/null || { fi_err "fix ship: git push failed"; return 1; }
   url="$(cd "$wt" && gh pr create --repo "$slug" --base "$base" --head "$br" --title "$title" --body-file "$bodyf")" \
     || { fi_err "fix ship: gh pr create failed"; return 1; }
   pr="${url##*/}"
   [[ "$pr" =~ ^[0-9]+$ ]] || { fi_err "fix ship: no PR number in: $url"; return 1; }
-  ( cd "$root" && "$FI_SELF" annotate-pr "$pr" --pick "$picks" >/dev/null ) \
-    || fi_err "fix ship: source ledger annotation failed — run: found-issues annotate-pr $pr --pick $picks"
+  # Strict picks: an unmatched or ambiguous pick fails the ship (the PR is
+  # open by now, so it still prints) and annotate-pr's report names each one.
+  local arep arc=0
+  arep="$( cd "$root" && FOUND_ISSUES_PICK_STRICT=1 "$FI_SELF" annotate-pr "$pr" --pick "$picks" 2>&1 )" || arc=$?
+  if (( arc != 0 )); then
+    printf '%s\n' "$arep" >&2
+    fi_err "fix ship: source ledger annotation incomplete (annotate-pr exit $arc) — fix the picks above and run: found-issues annotate-pr $pr --pick <loc>"
+  fi
   # annotate-pr finds its ledger by walking up from cwd: only run it in the
   # worktree when the worktree has its own ledger, or it would walk up into
   # the source checkout's.
@@ -115,6 +135,7 @@ _fi_fix_ship() {
     fi
   fi
   printf 'PR #%s: %s\n' "$pr" "$url"
+  return $(( arc != 0 ))
 }
 
 cmd_fix() {

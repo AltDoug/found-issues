@@ -281,7 +281,16 @@ done
 if [[ -z "$lib_dir" ]]; then
   # Lib missing — can't compute dedup keys safely. Fail open (allow delete)
   # rather than fall back to line-equality, but say so.
-  echo "found-issues: promote-guard could not find its lib; branch delete NOT checked." >&2
+  # Lib-free on purpose (the lib is what is missing): no jq, no helpers. On
+  # Claude, stderr on a PreToolUse exit 0 reaches nobody, so the fixed line
+  # goes out as hookSpecificOutput.additionalContext JSON; Codex (the same
+  # signals as lib/harness.sh fi_detect_harness) keeps stderr.
+  if [[ "${FOUND_ISSUES_HARNESS:-}" == "codex" ]] \
+      || { [[ "${FOUND_ISSUES_HARNESS:-}" != "claude" && -z "${CLAUDE_CODE_ENTRYPOINT:-}" && -n "${PLUGIN_DATA:-}" ]]; }; then
+    echo "found-issues: promote-guard could not find its lib; branch delete NOT checked." >&2
+  else
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"found-issues: promote-guard could not find its lib; branch delete NOT checked."}}'
+  fi
   exit 0
 fi
 # shellcheck source=../lib/parse-entries.sh
