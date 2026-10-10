@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.1] - 2026-10-10
+
+### Fixed
+- **A fix PR that conflicts only in the ledger now merges.** Fix PRs cut from the same base each annotate an entry in `docs/found-issues.md`. Once one merges, the next one's annotation conflicts with it on an adjacent line. `merge-when-green` then failed with "merging PR #N failed", and nothing tried again (kh2-midgar PR #15, an 8-fix sweep, sat CONFLICTING; fi-v3-e2e PR #3 before it). Now, when the ledger is the only conflicted file, `merge-when-green` merges the base into the PR branch in a throwaway worktree. It keeps the base's ledger, adds the PR's own `(PR: …)` annotation back to each entry it annotated, pushes a normal merge commit (no force-push), and waits for the checks again. A conflict in any other file, or a PR that changed the ledger beyond its own annotation, still stops the watch, now with a message naming the reason. This also covers a merge that GitHub refuses for conflicts while it still reports the PR's mergeability as unknown.
+
 ## [3.6.0] - 2026-10-10
 
 Measured overnight on 131 real auto-fix runs (2026-10-04 to 10-10, $49): about half the spend shipped nothing, and 71 runs ended stale before any fix. This release removes the causes found.
