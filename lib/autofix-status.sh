@@ -10,6 +10,7 @@
 #   fi_af_cancel <id>
 #   fi_af_status
 #   fi_af_seg_write <root> / fi_af_seg_refresh
+#   fi_af_stuck_update <root> <outcome> <text> <id> / fi_af_stuck_line
 #   fi_af_summary [--peek]
 #   fi_af_doctor <pass> <warn> <fail> <gh-user>
 
@@ -219,6 +220,71 @@ fi_af_seg_write() {
   return 0
 }
 
+# 3.7.0 (ledger lib/autofix-queue.sh:345): when every item retires "stale:
+# tests fail at base" day after day, nothing outside `autofix status` said
+# auto-fix was stuck. The streak per repo root (consecutive items retired that
+# way, reset by any other outcome) lives in autofix/stuck/<root>: line 1 the
+# count, line 2 the first failing test names. Written at retire time so the
+# statusline (lib/segment-cache.sh) and SessionStart only read a tiny file.
+FI_AF_STUCK_AFTER="${FI_AF_STUCK_AFTER:-3}"
+fi_af_stuck_update() {
+  local root="$1" outcome="$2" text="$3" id="$4" dir f n=0 names="" fresh="" line p count=0
+  [[ -n "$root" ]] || return 0
+  fi_af_root
+  dir="$FI_AF_ROOT/stuck"
+  f="$dir/${root//[^A-Za-z0-9._-]/_}"
+  if [[ "$outcome" != stale || "$text" != "tests fail at base" ]]; then
+    rm -f "$f" 2>/dev/null
+    return 0
+  fi
+  if [[ -f "$f" ]]; then
+    { IFS= read -r n || true; IFS= read -r names || true; } <"$f"
+  fi
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  n=$((10#$n + 1))
+  # Names come from this item's own base-test log; a base known red from an
+  # earlier item has no new log, so the names already recorded stay.
+  if [[ -n "${FI_AF_RUNS:-}" && -f "$FI_AF_RUNS/$id.base-tests.log" ]] && declare -F fi_af_test_failures >/dev/null; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      case "$line" in
+        "not ok "*) p="${line#not ok }"; p="${p#[0-9]* }" ;;
+        "FAILED "*) p="${line#FAILED }" ;;
+        "--- FAIL: "*) p="${line#--- FAIL: }" ;;
+        "FAIL "*) p="${line#FAIL }" ;;
+        *) continue ;;
+      esac
+      p="${p//[^A-Za-z0-9 ._:\/#()-]/}"
+      p="${p:0:60}"
+      [[ -n "$p" ]] || continue
+      fresh+="${fresh:+, }$p"
+      count=$((count + 1))
+      (( count < 3 )) || break
+    done < <(fi_af_test_failures "$FI_AF_RUNS/$id.base-tests.log" 2>/dev/null)
+    [[ -z "$fresh" ]] || names="$fresh"
+  fi
+  mkdir -p "$dir" 2>/dev/null || return 0
+  if printf '%s\n%s\n' "$n" "$names" >"$f.$$" 2>/dev/null; then
+    mv -f "$f.$$" "$f" 2>/dev/null || rm -f "$f.$$"
+  fi
+  return 0
+}
+
+# The SessionStart line for a repo whose auto-fix is stuck (empty otherwise).
+# Fixed text plus bash-sanitized test names: no model text reaches it.
+fi_af_stuck_line() {
+  local root f n="" names="" s
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  fi_af_root
+  f="$FI_AF_ROOT/stuck/${root//[^A-Za-z0-9._-]/_}"
+  [[ -f "$f" ]] || return 0
+  { IFS= read -r n || true; IFS= read -r names || true; } <"$f"
+  [[ "$n" =~ ^[0-9]+$ ]] && (( 10#$n >= FI_AF_STUCK_AFTER )) || return 0
+  s="Auto-fix is STUCK in this repo: the last $((10#$n)) items all retired with tests failing at base, so nothing is being fixed."
+  [[ -n "$names" ]] && s+=" First failing: $names."
+  s+=" Fix the base suite; if its tests read gitignored local files, list them in git config found-issues.autofix.worktreeFiles. Details: found-issues autofix status."
+  printf '%s\n' "$s"
+}
+
 # Recount this repo's roots: drop their files, rewrite those still running.
 fi_af_seg_refresh() {
   local f root
@@ -245,7 +311,7 @@ fi_af_seg_refresh() {
 # reaches the line.
 fi_af_summary() {
   local peek="${1:-}" seen=0 f fixed=0 failed=0 prs="" reasons="" r cost=0 dec=0 file s newest n
-  local seen_ids="" newest_ids="" id mt="" line m
+  local seen_ids="" newest_ids="" id mt="" line m stuck=""
   local -a files=() scan=()
   # An empty or newline-less stamp makes read return 1: that is not an error.
   [[ -f "$FI_AF_ST/seen" ]] && { IFS= read -r seen <"$FI_AF_ST/seen" || true; }
@@ -303,7 +369,11 @@ fi_af_summary() {
     [[ "$AFI_cost" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
       && cost="$(awk -v a="$cost" -v b="$AFI_cost" 'BEGIN { printf "%.2f", a + b }')"
   done
-  (( fixed + failed > 0 )) || return 0
+  stuck="$(fi_af_stuck_line)"
+  if (( fixed + failed == 0 )); then
+    [[ -n "$stuck" ]] && printf '%s\n' "$stuck"
+    return 0
+  fi
   if [[ "$peek" != --peek ]]; then
     # Still at the old stamp: keep the ids already shown in that second.
     (( newest == seen )) && newest_ids="${seen_ids}${seen_ids:+${newest_ids:+ }}${newest_ids}"
@@ -318,6 +388,7 @@ fi_af_summary() {
   if (( dec == 1 )); then s+=", 1 decision waiting"; elif (( dec > 1 )); then s+=", $dec decisions waiting"; fi
   [[ "$cost" != 0 && "$cost" != 0.00 ]] && s+=" — \$$cost spent"
   printf '%s.\n' "$s"
+  [[ -z "$stuck" ]] || printf '%s\n' "$stuck"
 }
 
 # 3.3.0: the dollar cap doctor reports is the value fi_af_budget accepts, not

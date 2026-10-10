@@ -97,35 +97,54 @@ fi_segment_cache_put() {
 
 # 🔧N: auto-fix runs in progress in the ledger's repo (phase 5 ruling 1),
 # from the state file lib/autofix-status.sh writes per physical repo root.
+# 🔧stuck (3.7.0, ledger lib/autofix-queue.sh:345): the repo's last
+# FI_AF_STUCK_AFTER items all retired "stale: tests fail at base"; the streak
+# lives in autofix/stuck/<root>, written at retire time (fi_af_stuck_update).
 # Read AFTER the cache, never cached. Builtins only: cd -P resolves the
 # root git reports, so a symlinked checkout still finds its file.
+FI_AF_STUCK_AFTER="${FI_AF_STUCK_AFTER:-3}"
 fi_segment_af_suffix() {
-  local file="$1" root saved n="" st
+  local file="$1" root saved n="" base name local_form=""
   FI_SEG_AF="" FI_SEG_AF_N=0
   case "$file" in
     */docs/found-issues.md) root="${file%/docs/found-issues.md}" ;;
-    */.found-issues.md)     root="${file%/.found-issues.md}" ;;
+    */.found-issues.md)     root="${file%/.found-issues.md}"; local_form=1 ;;
     *) return 0 ;;
   esac
   [[ -n "${FOUND_ISSUES_STATE_DIR:-}" || -n "${HOME:-}" ]] || return 0
-  st="${FOUND_ISSUES_STATE_DIR:-$HOME/.claude/found-issues}/autofix/seg"
-  [[ -d "$st" ]] || return 0
+  base="${FOUND_ISSUES_STATE_DIR:-$HOME/.claude/found-issues}/autofix"
+  [[ -d "$base" ]] || return 0
   saved="$PWD"
   cd -P "$root" 2>/dev/null || return 0
   root="$PWD"
-  # The state file is keyed by the git toplevel; a nested (monorepo package)
-  # ledger sits below it, so walk up to the directory holding .git.
-  n="$root"
-  while [[ -n "$n" && "$n" != "/" && ! -e "$n/.git" ]]; do n="${n%/*}"; done
-  [[ -n "$n" && "$n" != "/" ]] && root="$n"
-  n=""
   cd "$saved" 2>/dev/null || return 0
-  root="$st/${root//[^A-Za-z0-9._-]/_}"
-  [[ -f "$root" ]] || return 0
-  IFS= read -r n <"$root" || true
-  if [[ "$n" =~ ^[1-9][0-9]*$ ]]; then
-    FI_SEG_AF_N="$n"
-    FI_SEG_AF=$'\033[35m'"🔧$n"$'\033[0m'
+  # The state file is keyed by the git toplevel; a nested (monorepo package)
+  # ledger sits below it, so walk up to the directory holding .git. Git mode
+  # only (3.7.0): a local-mode ledger (FOUND_ISSUES_MODE=local, or the
+  # .found-issues.md form that only local mode creates below a repo root)
+  # nested under some repo, e.g. a dotfiles repo tracking $HOME, does not
+  # inherit that repo's counts.
+  if [[ ! -e "$root/.git" ]]; then
+    [[ "${FOUND_ISSUES_MODE:-}" == local || -n "$local_form" ]] && return 0
+    n="$root"
+    while [[ -n "$n" && "$n" != "/" && ! -e "$n/.git" ]]; do n="${n%/*}"; done
+    [[ -n "$n" && "$n" != "/" ]] && root="$n"
+  fi
+  n=""
+  name="${root//[^A-Za-z0-9._-]/_}"
+  if [[ -f "$base/seg/$name" ]]; then
+    IFS= read -r n <"$base/seg/$name" || true
+    if [[ "$n" =~ ^[1-9][0-9]*$ ]]; then
+      FI_SEG_AF_N="$n"
+      FI_SEG_AF=$'\033[35m'"🔧$n"$'\033[0m'
+    fi
+  fi
+  n=""
+  if [[ -f "$base/stuck/$name" ]]; then
+    IFS= read -r n <"$base/stuck/$name" || true
+    if [[ "$n" =~ ^[0-9]+$ ]] && (( 10#$n >= FI_AF_STUCK_AFTER )); then
+      FI_SEG_AF+="${FI_SEG_AF:+ }"$'\033[31m'"🔧stuck"$'\033[0m'
+    fi
   fi
   return 0
 }

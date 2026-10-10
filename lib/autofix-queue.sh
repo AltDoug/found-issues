@@ -630,6 +630,7 @@ fi_af_retire() {
   fi_af_item_set "$f" finished "$(date +%s)"
   mv "$f" "$FI_AF_ST/done/$id"
   fi_af_seg_write "$(_fi_af_field "$FI_AF_ST/done/$id" root)"
+  fi_af_stuck_update "$(_fi_af_field "$FI_AF_ST/done/$id" root)" "$outcome" "$text" "$id"
   fi_af_unlock "$id"
   fi_af_log "$id" "$outcome: $text"
 }
