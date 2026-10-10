@@ -249,47 +249,59 @@ fi_af_eligible() {
   if [[ -n "$FE_autofix_failed" ]]; then
     FI_AF_WHY="auto-fix failed before: $FE_autofix_failed"; return 1
   fi
-  if [[ -n "${AFI_loc:-}" ]] && fi_af_open_pr_fixing "$AFI_loc"; then
+  local fixable=""
+  case "$FE_fixtag" in small|medium) fixable=1 ;; esac
+  [[ -n "$FE_decided" && -z "$FE_decide" ]] && fixable=1
+  if [[ -z "$fixable" ]]; then
+    FI_AF_WHY="entry is not fixable now (fix: ${FE_fixtag:-none})"; return 1
+  fi
+  # Last: it is network I/O, and its key compare re-parses FE_*.
+  if fi_af_open_pr_fixing; then
     FI_AF_WHY="fix in flight in PR #$FI_AF_DUP_PR"; return 1
   fi
-  case "$FE_fixtag" in small|medium) return 0 ;; esac
-  [[ -n "$FE_decided" && -z "$FE_decide" ]] && return 0
-  FI_AF_WHY="entry is not fixable now (fix: ${FE_fixtag:-none})"
-  return 1
+  return 0
 }
 
 # 3.6.0: three agent-config auto-fix PRs were closed as duplicates of PRs an
 # interactive session opened for the same entries. An open PR that is not
-# auto-fix's own and whose diff annotates <loc> with (PR: ...) already fixes
-# it. One scan per process; sets FI_AF_DUP_PR.
+# auto-fix's own, touches the ledger, and annotates this item's entry (same
+# dedup key) with (PR: ...) already fixes it. FI_AF_PR_SCANNED="" forces a
+# fresh scan (ship re-checks after a long fixer run). Sets FI_AF_DUP_PR.
 FI_AF_PR_SCAN="" FI_AF_PR_SCANNED="" FI_AF_DUP_PR=""
 fi_af_open_pr_fixing() {
-  local loc="$1" n line
+  local n line
   FI_AF_DUP_PR=""
+  [[ -n "${AFI_loc:-}" && -n "${AFI_key:-}" && -n "${AFI_slug:-}" ]] || return 1
   if [[ -z "$FI_AF_PR_SCANNED" ]]; then
-    FI_AF_PR_SCANNED=1
+    FI_AF_PR_SCANNED=1 FI_AF_PR_SCAN=""
     while IFS= read -r n || [[ -n "$n" ]]; do
       [[ "$n" =~ ^[0-9]+$ ]] || continue
       while IFS= read -r line || [[ -n "$line" ]]; do
         [[ "$line" == "+- ["* && "$line" == *"(PR: "* ]] || continue
-        FI_AF_PR_SCAN+="$n"$'\t'"$line"$'\n'
+        FI_AF_PR_SCAN+="$n"$'\t'"${line#+}"$'\n'
       done < <(gh pr diff "$n" --repo "$AFI_slug" 2>/dev/null || true)
-    done < <(gh pr list --repo "$AFI_slug" --state open --limit 50 --json number,headRefName \
-      --jq '.[] | select(.headRefName | startswith("fi/") | not) | .number' 2>/dev/null || true)
+    done < <(gh pr list --repo "$AFI_slug" --state open --limit 100 --json number,headRefName,files \
+      --jq '.[] | select(.headRefName | startswith("fi/") | not)
+                | select([.files[]?.path] | any(test("found-issues(-archive)?\\.md$")))
+                | .number' 2>/dev/null || true)
   fi
   while IFS=$'\t' read -r n line || [[ -n "$n" ]]; do
-    [[ "$line" == *" $loc "* ]] || continue
+    [[ "$line" == *" $AFI_loc "* ]] || continue
+    fi_entry_dedup_key_v "$line" "$AFI_root" || continue
+    [[ "$FI_KEY" == "$AFI_key" ]] || continue
     FI_AF_DUP_PR="$n"; return 0
   done <<<"$FI_AF_PR_SCAN"
   return 1
 }
 
 # 3.6.0: the entry fixed on origin/<base> while the run worked (agent-config
-# #592 shipped after #587 had already fixed and closed its entry). Sets
-# FI_AF_WHY; rc 0 = fixed elsewhere, ship nothing.
+# #592 shipped after #587 had already fixed and closed its entry). Only a
+# [fixed] line, or an [open] one with a PR/commit reference, counts; a
+# deferral meanwhile does not. Sets FI_AF_WHY; rc 0 = fixed elsewhere.
 fi_af_fixed_elsewhere() {
   local p line
-  if fi_af_open_pr_fixing "$AFI_loc"; then
+  FI_AF_PR_SCANNED=""
+  if fi_af_open_pr_fixing; then
     FI_AF_WHY="fix in flight in PR #$FI_AF_DUP_PR"; return 0
   fi
   git -C "$AFI_root" fetch -q origin "$AFI_base" >/dev/null 2>&1 || return 1
@@ -299,7 +311,7 @@ fi_af_fixed_elsewhere() {
       fi_entry_dedup_key_v "$line" "$AFI_root" || continue
       [[ "$FI_KEY" == "$AFI_key" ]] || continue
       fi_parse_entry_vars "$line" || continue
-      if [[ "$line" != "- [open]"* || -n "$FE_prs$FE_commits" ]]; then
+      if [[ "$line" == "- [fixed]"* || ( "$line" == "- [open]"* && -n "$FE_prs$FE_commits" ) ]]; then
         FI_AF_WHY="fixed on $AFI_base meanwhile"; return 0
       fi
     done < <(git -C "$AFI_root" show "origin/$AFI_base:$p" 2>/dev/null || true)

@@ -161,6 +161,9 @@ teardown() { fi_teardown_tmp; }
   grep -qxF 'Bash(pnpm install --frozen-lockfile)' "$TMP/tools"
   grep -qxF 'Bash(pnpm test)' "$TMP/tools"
   grep -qxF 'Bash(pnpm test *)' "$TMP/tools"
+  # Only the last part takes arguments: an install never takes a package name.
+  ! grep -qxF 'Bash(pnpm install --frozen-lockfile *)' "$TMP/tools" || false
+  ! grep -qxF 'Bash(cd app *)' "$TMP/tools" || false
   fi_af_allowlist 'bats tests/ && uv run pytest -q'
   printf '%s\n' "${FI_AF_TOOLS[@]}" > "$TMP/tools"
   grep -qxF 'Bash(bats *)' "$TMP/tools"

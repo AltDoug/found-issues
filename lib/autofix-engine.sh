@@ -122,10 +122,15 @@ fi_af_allowlist() {
   # 3.6.0: Claude Code checks each part of an && command on its own.
   local rest="$t" part
   [[ "$rest" == *" && "* ]] || return 0
+  # Only the last part takes arguments (a test file): "npm install *" would
+  # let the unattended fixer install any package.
   while [[ -n "$rest" ]]; do
     part="${rest%% && *}"
-    if [[ "$part" == "$rest" ]]; then rest=""; else rest="${rest#* && }"; fi
-    FI_AF_TOOLS+=("Bash($part)" "Bash($part *)")
+    if [[ "$part" == "$rest" ]]; then
+      rest=""; FI_AF_TOOLS+=("Bash($part)" "Bash($part *)")
+    else
+      rest="${rest#* && }"; FI_AF_TOOLS+=("Bash($part)")
+    fi
     case "${part%% *}" in
       bats|pytest) FI_AF_TOOLS+=("Bash(${part%% *} *)") ;;
     esac

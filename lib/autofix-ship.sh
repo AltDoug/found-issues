@@ -179,7 +179,10 @@ fi_af_ship() {
   # shellcheck disable=SC2034  # FI_AF_SHIP_STALE is read by lib/autofix.sh
   FI_AF_PR="" FI_AF_MERGE="none" FI_AF_WHY="" FI_AF_SHIP_STALE=""
   # 3.6.0: rc 3 = fixed elsewhere meanwhile; the caller retires it stale.
-  if fi_af_fixed_elsewhere; then FI_AF_SHIP_STALE=1; return 3; fi
+  # Not on a ship retry: this item's own PR may already annotate the base.
+  if [[ ! "${AFI_ship_tries:-0}" =~ ^[1-9] ]] && fi_af_fixed_elsewhere; then
+    FI_AF_SHIP_STALE=1; return 3
+  fi
   [[ -n "$FI_AF_TESTCMD" ]] || FI_AF_TESTCMD="$(fi_af_test_command "$wt")" || { FI_AF_WHY="no test command"; return 1; }
   fi_af_reset_ledger "$wt" "$ref"
   fi_af_tests_pass "$wt" "$FI_AF_TESTCMD" "$tlog" || { FI_AF_WHY="tests fail at ship"; return 1; }

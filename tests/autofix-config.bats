@@ -127,13 +127,13 @@ src() {
   touch go.mod Cargo.toml pytest.ini
   printf '{\n  "scripts": {\n    "test": "vitest run"\n  }\n}\n' > package.json
   mkdir -p tests && touch tests/x.bats
-  [ "$(fi_af_test_command "$TMP")" = "bats tests/ && npm install && npm test && pytest && go test ./... && cargo test" ]
+  [ "$(fi_af_test_command "$TMP")" = "bats tests/ && npm install --no-package-lock && npm test && pytest && go test ./... && cargo test" ]
 }
 
 @test "autofix config: test command - pytest runs through uv in a uv project" {
   touch conftest.py uv.lock
   src
-  [ "$(fi_af_test_command "$TMP")" = "uv run pytest -q" ]
+  [ "$(fi_af_test_command "$TMP")" = "uv run --frozen pytest -q" ]
 }
 
 @test "autofix config: test command - a pyproject with tests/test_*.py is a pytest suite" {
@@ -142,7 +142,7 @@ src() {
   run fi_af_test_command "$TMP"
   [ "$status" -eq 1 ]
   mkdir -p tests && touch tests/test_runner.py tests/a.bats uv.lock
-  [ "$(fi_af_test_command "$TMP")" = "bats tests/ && uv run pytest -q" ]
+  [ "$(fi_af_test_command "$TMP")" = "bats tests/ && uv run --frozen pytest -q" ]
 }
 
 # 3.6.0: a fresh fix worktree has no node_modules, so a bare npm test failed

@@ -183,12 +183,24 @@ teardown() { fi_teardown_tmp; }
 }
 
 @test "autofix claim: an entry another open PR already fixes retires stale before any fixer" {
-  export GH_MOCK_PR_LIST='[{"number":571,"headRefName":"feat/wanda"}]'
+  export GH_MOCK_PR_LIST='[{"number":571,"headRefName":"feat/wanda","files":[{"path":"docs/found-issues.md"}]}]'
   export GH_MOCK_PR_DIFF='+- [open] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small) (PR: foo/bar#571)'
   run "$FI_BIN" autofix claim "$ID"
   [ "$status" -eq 5 ]
   grep -q '^result=stale: fix in flight in PR #571$' "$ST/done/$ID"
   [ ! -d "$REPO/.claude/worktrees/fi-autofix-$ID" ]
+}
+
+@test "autofix claim: a PR annotating a different entry at the same line does not block" {
+  export GH_MOCK_TRACE="$TMP/gh.trace"
+  export GH_MOCK_PR_LIST='[{"number":571,"headRefName":"feat/wanda","files":[{"path":"docs/found-issues.md"}]},{"number":572,"headRefName":"feat/docs","files":[{"path":"README.md"}]}]'
+  export GH_MOCK_PR_DIFF='+- [open] 2026-10-01 src/calc.sh:1 — a different symptom here (fix: small) (PR: foo/bar#571)'
+  git config found-issues.autofix.testCommand 'true'
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 0 ]
+  [ -f "$ST/running/$ID" ]
+  # PR 572 touches no ledger file, so it is never diffed.
+  ! grep -q '^pr diff 572 ' "$GH_MOCK_TRACE" || false
 }
 
 @test "autofix claim: tests that pass at base run once and the claim proceeds" {

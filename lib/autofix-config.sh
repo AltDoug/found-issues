@@ -169,12 +169,13 @@ _fi_af_make_test() {
 }
 
 # A fresh fix worktree has no node_modules: install with the lockfile's tool.
+# With no lockfile, write none (it would ship as part of the fix).
 _fi_af_node_cmd() {
   if [[ -f "$1/pnpm-lock.yaml" ]]; then printf 'pnpm install --frozen-lockfile && pnpm test'
   elif [[ -f "$1/bun.lock" || -f "$1/bun.lockb" ]]; then printf 'bun install --frozen-lockfile && bun run test'
   elif [[ -f "$1/yarn.lock" ]]; then printf 'yarn install --frozen-lockfile && yarn test'
   elif [[ -f "$1/package-lock.json" ]]; then printf 'npm ci && npm test'
-  else printf 'npm install && npm test'
+  else printf 'npm install --no-package-lock && npm test'
   fi
 }
 
@@ -200,7 +201,7 @@ fi_af_test_command() {
   done
   _fi_af_npm_test "$d/package.json" && out="${out:+$out && }$(_fi_af_node_cmd "$d")"
   if _fi_af_pytest "$d"; then
-    if [[ -f "$d/uv.lock" ]]; then out="${out:+$out && }uv run pytest -q"; else out="${out:+$out && }pytest"; fi
+    if [[ -f "$d/uv.lock" ]]; then out="${out:+$out && }uv run --frozen pytest -q"; else out="${out:+$out && }pytest"; fi
   fi
   [[ -f "$d/go.mod" ]] && out="${out:+$out && }go test ./..."
   [[ -f "$d/Cargo.toml" ]] && out="${out:+$out && }cargo test"

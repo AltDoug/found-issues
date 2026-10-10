@@ -230,7 +230,7 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
 # interactive session opened (or merged) for the same entries.
 @test "autofix ship: an entry another open PR already fixes is retired stale, not shipped" {
   fix_it
-  export GH_MOCK_PR_LIST='[{"number":571,"headRefName":"feat/wanda"},{"number":9,"headRefName":"fi/autofix/x"}]'
+  export GH_MOCK_PR_LIST='[{"number":571,"headRefName":"feat/wanda","files":[{"path":"docs/found-issues.md"}]},{"number":9,"headRefName":"fi/autofix/x"}]'
   export GH_MOCK_PR_DIFF='+- [open] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small) (PR: foo/bar#571)'
   run "$FI_BIN" autofix ship "$ID"
   [ "$status" -eq 0 ]
@@ -251,6 +251,16 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   [ "$status" -eq 0 ]
   grep -q '^result=stale: fixed on main meanwhile$' "$ST/done/$ID"
   ! git -C "$TMP/remote.git" rev-parse --verify -q "refs/heads/$BR" || false
+}
+
+@test "autofix ship: an entry deferred on the base meanwhile still ships" {
+  fix_it
+  sed -i.bak 's/^- \[open\] \(.*add subtracts (fix: small)\)$/- [deferred] \1 (reason: later)/' docs/found-issues.md
+  rm -f docs/found-issues.md.bak
+  git commit -qam "deferred meanwhile" && git push -q origin main
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR #7"* ]]
 }
 
 @test "autofix ship: every gh call names the origin repo" {
