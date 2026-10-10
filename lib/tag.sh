@@ -36,15 +36,22 @@ cmd_tag() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --fix|--decide|--manual)
+        [[ -z "$kind" ]] || { fi_err "tag: give one of --fix / --decide / --manual / --retry"; return 2; }
         fi_need_value tag "$1" $# "${2:-}" || return 2
         kind="${1#--}"; value="$2"; shift 2 ;;
       --fix=*|--decide=*|--manual=*)
+        [[ -z "$kind" ]] || { fi_err "tag: give one of --fix / --decide / --manual / --retry"; return 2; }
         kind="${1%%=*}"; kind="${kind#--}"; value="${1#*=}"; shift ;;
+      --retry)
+        [[ -z "$kind" ]] || { fi_err "tag: give one of --fix / --decide / --manual / --retry"; return 2; }
+        kind="retry"; shift ;;
       -h|--help)
         printf 'Usage: found-issues tag <match> --fix small|medium|large\n'
         printf '       found-issues tag <match> --decide "<question>"\n'
         printf '       found-issues tag <match> --manual "<why>"\n'
+        printf '       found-issues tag <match> --retry\n'
         printf 'Sets the one fix tag of the [open]/[deferred] entry matching <match>.\n'
+        printf -- '--retry drops its (autofix-failed: ...) tag so auto-fix tries it again.\n'
         return 0 ;;
       -*) fi_unknown_arg tag "$1"; return 2 ;;
       *)
@@ -53,7 +60,7 @@ cmd_tag() {
     esac
   done
   if [[ -z "$match" || -z "$kind" ]]; then
-    fi_err "tag: need <match> and one of --fix / --decide / --manual (see: found-issues tag --help)"
+    fi_err "tag: need <match> and one of --fix / --decide / --manual / --retry (see: found-issues tag --help)"
     return 2
   fi
 
@@ -78,17 +85,25 @@ cmd_tag() {
     return 2
   fi
 
-  local target="${matches[0]}"
+  local target="${matches[0]}" rc=0
   fi_parse_entry_vars "$target" || return 1
-  fi_repo_root_cached
-  # An abstract topic has no file: checked as file-less, not as untracked.
-  local tag_path=""
-  [[ "$FE_path" == */* || "$FE_path" == *.* ]] && tag_path="$FE_path"
-  fi_tag_resolve "$kind" "$value" "$tag_path" "$FI_REPO_ROOT" || return 2
-  if [[ "$kind" == "fix" && "$FI_TAG_KIND" == "manual" ]]; then
-    fi_err "tag: $FE_path is off-limits for auto-fix ($FI_TAG_VALUE) — tagged manual instead"
+  # 3.5.0: an autofix-failed tag is never retried automatically, and a flaky
+  # test can put it on a fixable entry; --retry is the one way to clear it.
+  if [[ "$kind" == "retry" ]]; then
+    if [[ -z "${FE_autofix_failed:-}" ]]; then
+      fi_err "tag: the entry has no autofix-failed tag: $target"; return 1
+    fi
+    FI_TAG_KIND=drop-autofix-failed FI_TAG_VALUE=""
+  else
+    fi_repo_root_cached
+    # An abstract topic has no file: checked as file-less, not as untracked.
+    local tag_path=""
+    [[ "$FE_path" == */* || "$FE_path" == *.* ]] && tag_path="$FE_path"
+    fi_tag_resolve "$kind" "$value" "$tag_path" "$FI_REPO_ROOT" || return 2
+    if [[ "$kind" == "fix" && "$FI_TAG_KIND" == "manual" ]]; then
+      fi_err "tag: $FE_path is off-limits for auto-fix ($FI_TAG_VALUE) — tagged manual instead"
+    fi
   fi
-  local rc=0
   fi_tag_apply "$file" "$target" "$FI_TAG_KIND" "$FI_TAG_VALUE" || rc=$?
   case $rc in
     0) fi_af_sweep_check || true; return 0 ;;

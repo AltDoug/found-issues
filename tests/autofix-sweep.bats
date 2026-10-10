@@ -876,3 +876,19 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   run _fi_af_sweep_batch_closes b1
   [ "$status" -eq 0 ]
 }
+
+@test "sweep: an entry cleared with tag --retry is a candidate again" {
+  fi_af_fixture
+  cat > docs/found-issues.md <<'LEDGER'
+# found-issues
+
+- [open] 2026-10-01 src/a.sh:1 — flaky victim (fix: small) (autofix-failed: tests fail after 2 attempts)
+LEDGER
+  source "$FI_BIN"; fi_af_context
+  run fi_af_sweep_candidates docs/found-issues.md "$REPO" 10
+  [ "${#lines[@]}" -eq 0 ]
+  "$FI_BIN" tag "flaky victim" --retry >/dev/null
+  run fi_af_sweep_candidates docs/found-issues.md "$REPO" 10
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "${lines[0]}" == *"flaky victim"* ]]
+}

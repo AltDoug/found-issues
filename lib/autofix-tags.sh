@@ -124,6 +124,7 @@ fi_entry_retag() {
     decided)           drop='decide|decided' ;;
     autofix-failed)    drop='autofix-failed' ;;
     drop-until)        drop='until' ;;
+    drop-autofix-failed) drop='autofix-failed' ;;
     *) return 2 ;;
   esac
   fi_annotation_tail_v "$line"
@@ -141,7 +142,7 @@ fi_entry_retag() {
     fi
   done
   FI_RETAGGED="${head}${kept}"
-  [[ "$kind" == "drop-until" ]] || FI_RETAGGED+=" ($kind: $value)"
+  [[ "$kind" == drop-* ]] || FI_RETAGGED+=" ($kind: $value)"
 }
 
 # fi_until_due <until-spec> <today> — 0 when a mechanically checkable
