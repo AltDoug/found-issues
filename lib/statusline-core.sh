@@ -64,10 +64,15 @@ fi_markers_balanced() {
 # Capture the mode of a file as octal (e.g. "755"). Cross-platform: BSD stat
 # uses -f '%Lp', GNU stat uses -c '%a'. Falls back to 755 if neither works,
 # which is correct for executable scripts (the common case for statusline).
+# GNU `stat -f` is filesystem-status and can exit 0 with garbage, so each
+# result must look like an octal mode before it is believed.
 fi_capture_mode() {
-  stat -f '%Lp' "$1" 2>/dev/null \
-    || stat -c '%a' "$1" 2>/dev/null \
-    || echo 755
+  local m
+  m="$(stat -f '%Lp' "$1" 2>/dev/null || true)"
+  [[ "$m" =~ ^[0-7]{3,4}$ ]] && { printf '%s\n' "$m"; return 0; }
+  m="$(stat -c '%a' "$1" 2>/dev/null || true)"
+  [[ "$m" =~ ^[0-7]{3,4}$ ]] && { printf '%s\n' "$m"; return 0; }
+  echo 755
 }
 
 # Save a timestamped backup of the statusline file before destructive edits

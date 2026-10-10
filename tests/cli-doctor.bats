@@ -18,6 +18,8 @@ teardown() {
   unset FOUND_ISSUES_FORMAT_ENFORCER FOUND_ISSUES_PRE_COMMIT FOUND_ISSUES_AUTO_ARCHIVE
   unset FOUND_ISSUES_DEFER_TOUCH_THRESHOLD FOUND_ISSUES_DEFER_ESCALATION_FACTOR
   unset FOUND_ISSUES_STALE_DAYS
+  unset FOUND_ISSUES_AUTO_ANNOTATE FOUND_ISSUES_POST_PR_STATE FOUND_ISSUES_HOOK_GATES
+  unset FOUND_ISSUES_AUTO_MIGRATE FOUND_ISSUES_AUTOSYNC_CMD
 }
 
 @test "doctor: exits 0 and prints all top-level sections" {
@@ -76,9 +78,32 @@ EOF
 @test "doctor: reports default-active when no opt-outs set" {
   unset FOUND_ISSUES_STOP_REMINDER FOUND_ISSUES_PROMOTE_GUARD
   unset FOUND_ISSUES_FORMAT_ENFORCER FOUND_ISSUES_PRE_COMMIT FOUND_ISSUES_AUTO_ARCHIVE
+  unset FOUND_ISSUES_AUTO_ANNOTATE FOUND_ISSUES_POST_PR_STATE FOUND_ISSUES_HOOK_GATES
+  unset FOUND_ISSUES_AUTO_MIGRATE FOUND_ISSUES_AUTOSYNC_CMD FOUND_ISSUES_SEGMENT_AUTOSYNC
   fi_run doctor
   [ "$status" -eq 0 ]
   [[ "$output" == *"All hooks default-active"* ]]
+}
+
+@test "doctor: names the route-scoped and gate opt-outs, not only the first five" {
+  local v
+  for v in FOUND_ISSUES_AUTO_ANNOTATE FOUND_ISSUES_POST_PR_STATE FOUND_ISSUES_HOOK_GATES FOUND_ISSUES_AUTO_MIGRATE FOUND_ISSUES_SEGMENT_AUTOSYNC; do
+    unset FOUND_ISSUES_AUTO_ANNOTATE FOUND_ISSUES_POST_PR_STATE FOUND_ISSUES_HOOK_GATES FOUND_ISSUES_AUTO_MIGRATE
+    export "$v=off"
+    fi_run doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$v=off"* ]]
+    [[ "$output" != *"All hooks default-active"* ]]
+  done
+}
+
+@test "doctor: a non-empty FOUND_ISSUES_AUTOSYNC_CMD is named as an override" {
+  unset FOUND_ISSUES_SEGMENT_AUTOSYNC
+  export FOUND_ISSUES_AUTOSYNC_CMD="true"
+  fi_run doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FOUND_ISSUES_AUTOSYNC_CMD"* ]]
+  [[ "$output" != *"All hooks default-active"* ]]
 }
 
 @test "doctor: surfaces non-default tunables when env vars are set" {

@@ -161,7 +161,7 @@ cmd_doctor() {
     cmd="$(jq -r '.statusLine.command // ""' "$settings_file" 2>/dev/null || true)"
     if [[ -n "$cmd" ]]; then
       printf '%s settings.json statusLine.command: %s\n' "$section_pass" "$cmd"
-      custom_target="$(printf '%s' "$cmd" | LC_ALL=C awk '{print $NF}' | sed "s|\${HOME}|$HOME|g; s|^~|$HOME|")"
+      custom_target="$(fi_statusline_command_path "$cmd")"
       case "$custom_target" in
         *.js|*.mjs|*.cjs) custom_language=node ;;
         *.py)             custom_language=python ;;
@@ -176,6 +176,11 @@ cmd_doctor() {
     statusline_language="$custom_language"
     printf '   Resolved target: %s (language: %s)\n' "$statusline_target" "$statusline_language"
   else
+    # Only a path-shaped token is a missing file; `npx -y pkg@latest` ends in
+    # a package spec, which is a valid statusline with nothing to probe here.
+    if [[ "$custom_target" == */* ]]; then
+      printf '%s settings.json statusLine.command path is not a file: %s — checking the default statusline instead.\n' "$section_warn" "$custom_target"
+    fi
     statusline_target="$FI_STATUSLINE_FILE"
     statusline_language="bash"
   fi
@@ -299,13 +304,19 @@ cmd_doctor() {
   printf '== Hook opt-outs ==\n'
   local any_off=0
   local v
-  for v in FOUND_ISSUES_STOP_REMINDER FOUND_ISSUES_PROMOTE_GUARD FOUND_ISSUES_FORMAT_ENFORCER FOUND_ISSUES_PRE_COMMIT FOUND_ISSUES_AUTO_ARCHIVE; do
+  for v in FOUND_ISSUES_STOP_REMINDER FOUND_ISSUES_PROMOTE_GUARD FOUND_ISSUES_FORMAT_ENFORCER FOUND_ISSUES_PRE_COMMIT FOUND_ISSUES_AUTO_ARCHIVE \
+           FOUND_ISSUES_AUTO_ANNOTATE FOUND_ISSUES_POST_PR_STATE FOUND_ISSUES_HOOK_GATES FOUND_ISSUES_AUTO_MIGRATE FOUND_ISSUES_SEGMENT_AUTOSYNC; do
     local val="${!v:-}"
     if [[ "$val" == "off" ]]; then
       printf '%s %s=off  (hook disabled)\n' "$section_warn" "$v"
       any_off=1
     fi
   done
+  # Not an off switch: replaces the sync command the hooks and segment run.
+  if [[ -n "${FOUND_ISSUES_AUTOSYNC_CMD:-}" ]]; then
+    printf '%s FOUND_ISSUES_AUTOSYNC_CMD is set  (background sync runs this override instead of found-issues sync)\n' "$section_warn"
+    any_off=1
+  fi
   if (( any_off == 0 )); then
     printf '%s All hooks default-active. See docs/configuration.md for the opt-out list.\n' "$section_pass"
   fi
