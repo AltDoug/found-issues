@@ -398,7 +398,7 @@ EOF
 EOF
   fi_append_touch test.md "- [deferred] 2026-05-10 src/foo.py:42 — bug" "2026-05-21"
   grep -F "(touched: 2026-05-21)" test.md
-  ! grep "src/bar.py" test.md | grep -q "touched:"
+  ! grep "src/bar.py" test.md | grep -q "touched:" || false
   ! grep "src/baz.py" test.md | grep -q "touched:"
 }
 

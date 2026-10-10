@@ -175,7 +175,7 @@ teardown() { fi_teardown_tmp; }
   fi_run promote --apply --from feat/x
   [ "$status" -eq 0 ]
   [ "$(grep -c 'shared bug' docs/found-issues.md)" -eq 1 ]
-  ! grep -q '^- \[open\].*archived bug' docs/found-issues.md
+  ! grep -q '^- \[open\].*archived bug' docs/found-issues.md || false
   grep -q '^- \[open\].*branch only' docs/found-issues.md
 }
 
@@ -211,7 +211,7 @@ teardown() { fi_teardown_tmp; }
   grep -q '__fiSeg(' tmp/sl.js
   fi_run uninstall-statusline --target tmp/sl.js
   [ "$status" -eq 0 ]
-  ! grep -q '__fiSeg' tmp/sl.js
+  ! grep -q '__fiSeg' tmp/sl.js || false
   grep -qx 'console.log("x");' tmp/sl.js
 }
 
@@ -222,7 +222,7 @@ teardown() { fi_teardown_tmp; }
   grep -q '_fi_seg(' tmp/sl.py
   fi_run uninstall-statusline --target tmp/sl.py
   [ "$status" -eq 0 ]
-  ! grep -q '_fi_seg' tmp/sl.py
+  ! grep -q '_fi_seg' tmp/sl.py || false
   grep -qx 'print("x")' tmp/sl.py
 }
 

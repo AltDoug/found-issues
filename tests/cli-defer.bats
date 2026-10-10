@@ -92,7 +92,7 @@ EOF
   fi_run defer "src/foo.py:42" --reason "new reason"
   [ "$status" -eq 0 ]
   grep -F "(reason: new reason)" docs/found-issues.md
-  ! grep -F "(reason: original reason)" docs/found-issues.md
+  ! grep -F "(reason: original reason)" docs/found-issues.md || false
   grep -F "(defer-cycle: 3)" docs/found-issues.md
 }
 

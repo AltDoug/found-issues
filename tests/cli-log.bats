@@ -106,7 +106,7 @@ EOF
   today="$(date +%Y-%m-%d)"
   grep -F "(touched: $today)" docs/found-issues.md
   # No new [open] entry created
-  ! grep -F "[open]" docs/found-issues.md
+  ! grep -F "[open]" docs/found-issues.md || false
   # Single [deferred] entry remains
   [ "$(grep -c '^- \[deferred\]' docs/found-issues.md)" -eq 1 ]
 }

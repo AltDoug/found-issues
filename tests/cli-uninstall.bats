@@ -88,7 +88,7 @@ SL
   fi_run uninstall
   [ "$status" -eq 0 ]
   [[ "$output" == *"statusline segment"* ]]
-  ! grep -Fq "=== found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
+  ! grep -Fq "=== found-issues plugin segment ===" "$HOME/.claude/statusline.sh" || false
   # Original content preserved
   grep -Fq 'LINE1="repo"' "$HOME/.claude/statusline.sh"
   # Executable preserved
@@ -120,8 +120,8 @@ SL
   fi_run uninstall
   [ "$status" -eq 0 ]
   [[ "$output" == *"pre-v0.1.7 handwritten snippet"* ]]
-  ! grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh"
-  ! grep -Fq '$FI_SEG' "$HOME/.claude/statusline.sh"
+  ! grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh" || false
+  ! grep -Fq '$FI_SEG' "$HOME/.claude/statusline.sh" || false
   # Surrounding code preserved
   grep -Fq 'LINE1="repo"' "$HOME/.claude/statusline.sh"
   grep -Fq 'echo "$LINE1"' "$HOME/.claude/statusline.sh"
