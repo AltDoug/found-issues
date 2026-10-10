@@ -129,7 +129,7 @@ fi_af_b_verify() {
   fi
   FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")" || { fi_err "autofix: no test command"; return 2; }
   log="$FI_AF_RUNS/$id.bverify-tests.log"
-  if ! fi_af_run_tests "$AFI_wt" "$FI_AF_TESTCMD" "$log"; then
+  if ! fi_af_tests_pass "$AFI_wt" "$FI_AF_TESTCMD" "$log"; then
     fi_af_test_report "$log" 20
     printf 'tests fail: fix them (found-issues autofix test %s) before verify\n' "$id"; return 3
   fi

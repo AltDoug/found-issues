@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.3] - 2026-10-10
+
+### Fixed
+- A flaky test failed a good auto-fix. When the suite went red once after a fix (on kh2-midgar, three `build.bats` tests that share a build lock), the attempt counted as failed. The next attempt was then told to fix tests that had nothing to do with its change, and after two attempts the entry was tagged `autofix-failed`. Now a red suite after a change is re-run once, and only a second red run counts. This applies to the fix loop, both ship runs, the retarget run and launcher B's verify. A watchdog timeout is never re-run, and the first run's log is kept as `<log>.first.log`. Base tests at claim are unchanged.
+
 ## [3.4.2] - 2026-10-10
 
 ### Fixed

@@ -136,7 +136,7 @@ _fi_af_fix_loop() {
       why="no change"; feedback="The attempt changed no files."; continue
     fi
     tlog="$FI_AF_RUNS/$id.tests$n.log"
-    if ! fi_af_run_tests "$AFI_wt" "$FI_AF_TESTCMD" "$tlog"; then
+    if ! fi_af_tests_pass "$AFI_wt" "$FI_AF_TESTCMD" "$tlog"; then
       why="tests fail"; feedback="The test command failed."$'\n'"$(fi_af_test_report "$tlog" 20)"
       continue
     fi

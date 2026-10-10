@@ -11,6 +11,7 @@
 #   fi_af_reset_ledger <wt> <base>
 #   fi_af_diff <wt> <base>
 #   fi_af_run_tests <wt> <cmd> <log>
+#   fi_af_tests_pass <wt> <cmd> <log>
 #   fi_af_test_failures <log>
 #   fi_af_test_report <log> [n]
 #   fi_af_annotate_ledger <ledger|""> <annotation>
@@ -63,6 +64,22 @@ fi_af_diff() {
 # this repo red, so every auto-fix of found-issues itself failed (3.0.2).
 fi_af_run_tests() {
   fi_af_child "$3" "$3.err" "$1" bash -c "unset FOUND_ISSUES_AUTOFIX_CHILD; $2" || return $?
+}
+
+# 3.4.3: a red suite after a change is re-run once before it counts. A flaky
+# test (kh2-midgar: a shared build lock) failed a good fix, fed the next
+# attempt unrelated failures and tagged the entry autofix-failed. A watchdog
+# kill is not re-run; the first log is kept as <log>.first.log.
+fi_af_tests_pass() {
+  local wt="$1" cmd="$2" log="$3" first rc=0
+  fi_af_run_tests "$wt" "$cmd" "$log" || rc=$?
+  (( rc == 0 )) && return 0
+  [[ -z "${FI_AF_CHILD_TIMEDOUT:-}" ]] || return "$rc"
+  first="$(fi_af_test_failures "$log" | head -n 1)"
+  mv -f "$log" "${log%.log}.first.log" 2>/dev/null || true
+  fi_af_log "$AFI_id" "tests failed (${first:-exit $rc}); re-running once"
+  fi_af_run_tests "$wt" "$cmd" "$log" || return $?
+  fi_af_log "$AFI_id" "tests passed on the re-run: the first failure was flaky"
 }
 
 # The failing tests in a test log, at most 80 lines: TAP "not ok" lines with
@@ -139,7 +156,7 @@ fi_af_ship() {
   FI_AF_PR="" FI_AF_MERGE="none" FI_AF_WHY=""
   [[ -n "$FI_AF_TESTCMD" ]] || FI_AF_TESTCMD="$(fi_af_test_command "$wt")" || { FI_AF_WHY="no test command"; return 1; }
   fi_af_reset_ledger "$wt" "$ref"
-  fi_af_run_tests "$wt" "$FI_AF_TESTCMD" "$tlog" || { FI_AF_WHY="tests fail at ship"; return 1; }
+  fi_af_tests_pass "$wt" "$FI_AF_TESTCMD" "$tlog" || { FI_AF_WHY="tests fail at ship"; return 1; }
   git -C "$wt" add -A
   if git -C "$wt" diff --cached --quiet "$ref"; then FI_AF_WHY="nothing to ship"; return 1; fi
   # Fail closed: an approval with no recorded tree (a write that failed, or
@@ -190,7 +207,7 @@ _fi_af_retarget() {
     git -C "$AFI_wt" reset -q --hard "$was" >/dev/null 2>&1 || true
     FI_AF_WHY="landing branch $old was deleted on origin (merged into $new); the fix is already on $new"; return 1
   fi
-  if ! fi_af_run_tests "$AFI_wt" "$FI_AF_TESTCMD" "$FI_AF_RUNS/$AFI_id.retarget-tests.log"; then
+  if ! fi_af_tests_pass "$AFI_wt" "$FI_AF_TESTCMD" "$FI_AF_RUNS/$AFI_id.retarget-tests.log"; then
     git -C "$AFI_wt" reset -q --hard "$was" >/dev/null 2>&1 || true
     FI_AF_WHY="landing branch $old was deleted on origin (merged into $new); tests fail after rebasing onto origin/$new"; return 1
   fi

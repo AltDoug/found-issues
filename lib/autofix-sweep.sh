@@ -646,7 +646,7 @@ fi_af_sweep_ship() {
   [[ -n "$FI_AF_TESTCMD" ]] || { FI_AF_WHY="no test command"; return 1; }
   git -C "$wt" reset -q --hard "$AFI_head" >/dev/null 2>&1 || true
   git -C "$wt" clean -qfd >/dev/null 2>&1 || true
-  fi_af_run_tests "$wt" "$FI_AF_TESTCMD" "$tlog" || { FI_AF_WHY="tests fail at ship"; return 1; }
+  fi_af_tests_pass "$wt" "$FI_AF_TESTCMD" "$tlog" || { FI_AF_WHY="tests fail at ship"; return 1; }
   fi_af_reset_ledger "$wt" "$AFI_head"
   git -C "$wt" add -A >/dev/null 2>&1 || true
   if [[ -z "$AFI_verdict_tree" || "$(git -C "$wt" write-tree 2>/dev/null)" != "$AFI_verdict_tree" ]]; then
