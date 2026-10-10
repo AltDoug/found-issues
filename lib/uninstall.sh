@@ -85,6 +85,18 @@ cmd_uninstall() {
     removed_count=$((removed_count + 1))
   fi
 
+  # Codex: install-codex-hooks wrote entries into $CODEX_HOME/hooks.json that
+  # nothing else removes. This command is also Claude Code's uninstall path,
+  # so it only points at them: removing them here would break a Codex install
+  # the user is keeping. Same default home resolution as the codex-hooks
+  # subcommands.
+  local codex_hooks_present=0 codex_hooks_file
+  codex_hooks_file="$(fi_codex_home_default)/hooks.json"
+  if [[ -f "$codex_hooks_file" ]] \
+     && grep -Fq "$FI_CODEX_HOOKS_SENTINEL" "$codex_hooks_file" 2>/dev/null; then
+    codex_hooks_present=1
+  fi
+
   if (( removed_count == 0 )); then
     printf 'uninstall: nothing to clean (plugin-private state already empty)\n'
   fi
@@ -102,5 +114,8 @@ Next steps to fully remove the plugin:
 
 The above can only be run from inside Claude Code (slash commands).
 EOF
+  if (( codex_hooks_present )); then
+    printf '\nCodex hook entries are still wired in %s.\nIf you are removing found-issues from Codex too, run:\n\n  found-issues uninstall-codex-hooks\n  codex plugin remove found-issues\n' "$codex_hooks_file"
+  fi
 }
 

@@ -405,16 +405,31 @@ cmd_sync() {
 
       if [[ -n "$closure_kind" ]]; then
         # Flip [open] -> [fixed], append closure_label
-        local fixed_line="${line/\[open\]/[fixed]}"
-        printf '%s %s\n' "$fixed_line" "$closure_label" >>"$tmp"
+        local fixed_line="${line/\[open\]/[fixed]}" fixed_eol=""
+        # CRLF ledger: the label goes before the CR, not after it.
+        if [[ "$fixed_line" == *$'\r' ]]; then
+          fixed_eol=$'\r'
+          fixed_line="${fixed_line%$'\r'}"
+        fi
+        printf '%s %s%s\n' "$fixed_line" "$closure_label" "$fixed_eol" >>"$tmp"
       elif [[ -n "$rename_target" ]]; then
         # C1: auto-correct entry path after detecting git mv
-        local corrected_line="$line"
-        corrected_line="${corrected_line/$rename_source/$rename_target}"
+        local corrected_line="$line" corrected_eol=""
+        if [[ "$corrected_line" == *$'\r' ]]; then
+          corrected_eol=$'\r'
+          corrected_line="${corrected_line%$'\r'}"
+        fi
+        # First occurrence only, matched literally: an unquoted ${x/pat/rep}
+        # treats glob characters in the path as a pattern, and bash 5.2
+        # expands & in the replacement to the match.
+        local rename_pre="${corrected_line%%"$rename_source"*}"
+        if [[ "$rename_pre" != "$corrected_line" ]]; then
+          corrected_line="${rename_pre}${rename_target}${corrected_line#"$rename_pre$rename_source"}"
+        fi
         if [[ "$corrected_line" != *"(renamed-from:"* ]]; then
           corrected_line="$corrected_line (renamed-from: $rename_source)"
         fi
-        printf '%s\n' "$corrected_line" >>"$tmp"
+        printf '%s%s\n' "$corrected_line" "$corrected_eol" >>"$tmp"
         renamed_count=$((renamed_count + 1))
       elif (( ${#demote_pr_refs[@]} > 0 || ${#demote_commit_refs[@]} > 0 )); then
         # A1/B1: demote stale annotations while keeping entry [open]
@@ -533,10 +548,14 @@ cmd_sync() {
   if (( dry_run )); then
     :
   elif [[ "${FOUND_ISSUES_AUTO_ARCHIVE:-on}" != "off" ]]; then
-    local archive_output
-    archive_output="$(cmd_archive 2>&1 || true)"
+    local archive_output archive_rc=0
+    archive_output="$(cmd_archive 2>&1)" || archive_rc=$?
+    # A failed archive used to vanish here; say so on stderr (sync's own exit
+    # code is unchanged: the sync itself succeeded).
+    if (( archive_rc != 0 )); then
+      printf 'sync: auto-archive failed (exit %d):\n%s\n' "$archive_rc" "$archive_output" >&2
     # Surface output only when entries actually moved (not on no-op runs)
-    if [[ "$archive_output" == *"moved"*"entries"* ]]; then
+    elif [[ "$archive_output" == *"moved"*"entries"* ]]; then
       printf '\n%s\n' "$archive_output"
     fi
   else
