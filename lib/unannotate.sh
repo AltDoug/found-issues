@@ -31,6 +31,7 @@
 #   1 no matching [open] entry, or the entry carries no such marker
 #   2 usage error, or an ambiguous <match> / <ref>
 #   3 the match is a [fixed] entry (closures are not reversible)
+#   4 the ledger changed under a concurrent write; nothing was written
 
 fi_unannotate_usage() {
   printf 'Usage: found-issues unannotate <match> <ref>\n'
@@ -193,18 +194,34 @@ cmd_unannotate() {
   fi
   local new_line="$FI_UNANN_LINE" marker="$FI_UNANN_MARKER"
 
-  local tmp replaced=0 line
-  tmp="$(fi_ledger_tmp "$file")"
-  # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" == "$target" ]] && (( replaced == 0 )); then
-      replaced=1
-      printf '%s\n' "$new_line" >>"$tmp"
-    else
-      printf '%s\n' "$line" >>"$tmp"
+  # Snapshot-guarded like fi_tag_apply: a write by another session between
+  # this read and the replace makes fi_ledger_replace refuse (rc 3) instead of
+  # dropping that write; the rewrite is then rebuilt from the new file.
+  local tmp replaced=0 line snapshot try written=0
+  for try in 1 2 3; do
+    replaced=0
+    snapshot="$(fi_ledger_snapshot "$file")"
+    tmp="$(fi_ledger_tmp "$file")"
+    # Final-partial-line guard — see the READ-LOOP GUARD block in bin/found-issues.
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == "$target" ]] && (( replaced == 0 )); then
+        replaced=1
+        printf '%s\n' "$new_line" >>"$tmp"
+      else
+        printf '%s\n' "$line" >>"$tmp"
+      fi
+    done <"$file"
+    if (( ! replaced )); then
+      rm -f "$tmp"
+      fi_err "unannotate: the entry changed while it was being edited; re-run."
+      return 4
     fi
-  done <"$file"
-  fi_ledger_replace "$file" "$tmp"
+    if fi_ledger_replace "$file" "$tmp" "$snapshot"; then written=1; break; fi
+  done
+  if (( ! written )); then
+    fi_err "unannotate: the ledger kept changing under concurrent writes; re-run."
+    return 4
+  fi
 
   printf 'Unannotated 1 entry. Removed %s\n' "$marker"
   cmd_status plain

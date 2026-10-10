@@ -102,13 +102,34 @@ fi_af_item_set() {
   return 0
 }
 
-# Start time of <pid> as one normalised string in FI_AF_PSTART ("" when ps
-# cannot say, e.g. Git Bash: callers then fall back to the pid alone).
+# Start time of <pid> in FI_AF_PSTART: epoch seconds when date can parse ps's
+# lstart (BSD -j -f, else GNU -d), else the lstart text; "" when ps cannot
+# say (Git Bash: callers then fall back to the pid alone). ps runs in the C
+# locale and UTC, so a reader with another TZ or locale reads the same value.
 _fi_af_pstart() {
+  local s e
   FI_AF_PSTART=""
   [[ "$1" =~ ^[1-9][0-9]*$ ]] || return 0
-  FI_AF_PSTART="$(ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//' || true)"
-  FI_AF_PSTART="${FI_AF_PSTART//$'\n'/ }"
+  s="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//' || true)"
+  s="${s//$'\n'/ }"
+  [[ -n "$s" ]] || return 0
+  e="$(LC_ALL=C TZ=UTC0 date -j -f '%a %b %d %T %Y' "$s" +%s 2>/dev/null \
+       || LC_ALL=C TZ=UTC0 date -d "$s" +%s 2>/dev/null || true)"
+  if [[ "$e" =~ ^[0-9]+$ ]]; then FI_AF_PSTART="$e"; else FI_AF_PSTART="$s"; fi
+}
+
+# rc 0 when the start time read now matches <recorded>: unknown on either
+# side counts as a match (the pid alone decides), and two epochs may differ
+# by 2 s (procps that derives boot time from uptime jitters by a second).
+_fi_af_pstart_same() {
+  local now="$1" rec="$2" d
+  [[ -n "$now" && -n "$rec" ]] || return 0
+  if [[ "$now" =~ ^[0-9]+$ && "$rec" =~ ^[0-9]+$ ]]; then
+    d=$(( now - rec )); (( d < 0 )) && d=$(( -d ))
+    (( d <= 2 ))
+  else
+    [[ "$now" == "$rec" ]]
+  fi
 }
 
 # rc 0 when <pid> is alive and, if a start time was recorded and ps can read
@@ -118,7 +139,7 @@ _fi_af_pid_alive() {
   kill -0 "$1" 2>/dev/null || return 1
   [[ -n "${2:-}" ]] || return 0
   _fi_af_pstart "$1"
-  [[ -z "$FI_AF_PSTART" || "$FI_AF_PSTART" == "$2" ]]
+  _fi_af_pstart_same "$FI_AF_PSTART" "$2"
 }
 
 # Sortable by queue time: the drain loop takes the oldest first.
@@ -728,6 +749,10 @@ fi_af_claim() {
     if (( tries < 3 )); then
       local why="$FI_AF_WHY"
       fi_af_item_set "$r" wt_retries "$(( tries + 1 ))"
+      # Spaced like a wait (the drain and the Stop hook skip it until
+      # wait_next), so three retries outlast a short outage.
+      fi_af_item_set "$r" waiting "$why"
+      fi_af_item_set "$r" wait_next "$(( $(date +%s) + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
       fi_af_worktree_remove
       fi_af_requeue "$id" "$why; retry $(( tries + 1 )) of 3"
       FI_AF_WHY="$why; requeued, retry $(( tries + 1 )) of 3"

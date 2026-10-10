@@ -65,6 +65,19 @@ fi_commit_touches_entry() {
   return 1
 }
 
+# fi_path_in_history <sha> <path> [<renamed-from>] — 0 when git tracked
+# <path> (or the pre-rename path) in some commit up to <sha>. A location git
+# never knew (a topic, a typo, a file outside the repo) cannot be compared
+# with what a commit touched.
+fi_path_in_history() {
+  local sha="$1" c
+  for c in "$2" "${3:-}"; do
+    [[ -n "$c" ]] || continue
+    [[ -n "$(git rev-list -1 "$sha" -- "${c%/}" 2>/dev/null)" ]] && return 0
+  done
+  return 1
+}
+
 # fi_sq <text> — single-quote text for a shell command line shown to the operator.
 fi_sq() {
   local t="$1" q="'\\''"
@@ -309,11 +322,14 @@ cmd_sync() {
             if git merge-base --is-ancestor "$sha" "$default_branch" 2>/dev/null \
                || git merge-base --is-ancestor "$sha" "origin/$default_branch" 2>/dev/null; then
               # Close only when the commit touched the cited file. Entries with
-              # no path, or a repo-prefixed path naming another repo's file,
-              # have nothing this repo's history can be compared against.
+              # no path, a topic location ("(host env ...)" parses as "(host"),
+              # or a repo-prefixed path naming another repo's file have nothing
+              # this repo's history can be compared against: only a path git
+              # has ever tracked up to that commit is checked.
               if [[ -n "$e_path" && "$e_path" != *:* ]] \
+                 && fi_path_in_history "$sha" "$e_path" "$e_renamed_from" \
                  && ! fi_commit_touches_entry "$sha" "$e_path" "$e_renamed_from"; then
-                entry_notes+=("commit $sha is on $default_branch but did not touch $e_path — left [open] ($e_loc); if the annotation is wrong: found-issues unannotate $(fi_sq "$e_loc") $sha")
+                entry_notes+=("commit $sha is on $default_branch but did not touch $e_path — left [open] ($e_loc); if the annotation is wrong: found-issues unannotate $(fi_sq "$e_loc") $sha; if the fix landed in another file: found-issues resolve $(fi_sq "$e_loc") --verified human")
                 continue
               fi
               closure_kind="commit"

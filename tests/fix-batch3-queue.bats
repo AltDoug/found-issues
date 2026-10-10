@@ -182,7 +182,7 @@ STUB
 
 _fake_run() { (exec -a "found-issues autofix run $1" sleep 4716) & fpid=$!; }
 
-@test "batch3 cancel: a run-shaped process with no recorded start time is not signalled" {
+@test "batch3 cancel: a run-shaped process with no recorded start time is stopped (the pid decides)" {
   _pstart_works || skip "ps has no lstart here"
   fi_af_queue_fixture; ST="$FI_AF_ST"
   "$FI_BIN" autofix claim "$ID" >/dev/null
@@ -194,8 +194,7 @@ _fake_run() { (exec -a "found-issues autofix run $1" sleep 4716) & fpid=$!; }
   printf '%s\n' "$ID" >"$ST/lock/owner"
   run "$FI_BIN" autofix cancel "$ID"
   [ "$status" -eq 0 ]
-  kill -0 "$fpid"
-  kill "$fpid"
+  ! kill -0 "$fpid" 2>/dev/null || false
 }
 
 @test "batch3 cancel: a run-shaped process with a different start time is not signalled" {
@@ -220,7 +219,8 @@ _fake_run() { (exec -a "found-issues autofix run $1" sleep 4716) & fpid=$!; }
   _fake_run z
   sleep 0.3
   printf 'pid=%s\n' "$fpid" >>"$ST/running/$ID"
-  printf 'pstart=%s\n' "$(ps -o lstart= -p "$fpid" | tr -s ' ' | sed 's/^ //;s/ $//')" >>"$ST/running/$ID"
+  _fi_af_pstart "$fpid"
+  printf 'pstart=%s\n' "$FI_AF_PSTART" >>"$ST/running/$ID"
   printf '%s\n' "$ID" >"$ST/lock/owner"
   run "$FI_BIN" autofix cancel "$ID"
   [ "$status" -eq 0 ]

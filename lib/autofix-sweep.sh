@@ -209,10 +209,12 @@ _fi_af_sweep_ready() {
 # go straight to ship (its cur is past the last entry).
 _fi_af_sweep_claim_ship() {
   local id="$1" q="$FI_AF_ST/queue/$1" r="$FI_AF_ST/running/$1" at
-  fi_af_item_set "$q" pid "${FI_AF_PID:-}"
-  if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
-  fi_af_item_set "$q" wait_next ""
+  # mv first, then stamp running/ (as fi_af_claim): a stamp on queue/ races
+  # a cancel and can recreate the item it retired.
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
+  fi_af_item_set "$r" pid "${FI_AF_PID:-}"
+  if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$r" launcher A; else fi_af_item_set "$r" launcher B; fi
+  fi_af_item_set "$r" wait_next ""
   fi_af_seg_write "$AFI_root"
   [[ -n "$AFI_wt" ]] || AFI_wt="$AFI_root/.claude/worktrees/fi-sweep-$id"
   at="$(git -C "$AFI_root" rev-parse -q --verify "refs/heads/$AFI_branch" 2>/dev/null || true)"
@@ -244,9 +246,9 @@ fi_af_sweep_claim() {
     FI_AF_WHY="today's sweep cap is reached; the next trigger queues a new sweep"
     fi_af_retire "$id" stale "$FI_AF_WHY" || fi_af_unlock "$id"; return 5
   fi
-  fi_af_item_set "$q" pid "${FI_AF_PID:-}"
-  if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
   mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
+  fi_af_item_set "$r" pid "${FI_AF_PID:-}"
+  if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$r" launcher A; else fi_af_item_set "$r" launcher B; fi
   fi_af_seg_write "$AFI_root"
   if ! fi_af_worktree_add; then fi_af_finish "$id" failed "$FI_AF_WHY"; return 6; fi
   fi_af_item_set "$r" wt "$AFI_wt"

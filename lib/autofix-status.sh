@@ -27,7 +27,7 @@ _fi_af_is_run_pid() {
   cmd="$(ps -o command= -p "$1" 2>/dev/null || true)"
   [[ "$cmd" == *found-issues*"autofix run"* ]] || return 1
   _fi_af_pstart "$1"
-  [[ -z "$FI_AF_PSTART" || "$FI_AF_PSTART" == "${2:-}" ]]
+  _fi_af_pstart_same "$FI_AF_PSTART" "${2:-}"
 }
 
 # Phase 5 ruling 6: retire a queued or running item as cancelled, stopping
