@@ -18,6 +18,8 @@
 #   fi_af_queue_spot <entry-line>
 #   fi_af_lock <id> / fi_af_unlock <id>
 #   fi_af_cap_ok <kind> <limit> / fi_af_cap_take <kind> <id>
+#   fi_af_claims_under <day-file> <limit>
+#   fi_af_repo_cfg [<dir>] / fi_af_origin_ok [<dir>]
 #   fi_af_find_entry [<ledger>]
 #   fi_af_eligible
 #   fi_af_worktree_add / fi_af_worktree_remove [drop]
@@ -254,13 +256,54 @@ fi_af_unlock() {
   return 0
 }
 
-# Spec §7: claims per repo per day, one line per claim.
-fi_af_cap_ok() {
-  local f="$FI_AF_ST/day/$(fi_today).$1" n=0 line
-  if [[ -f "$f" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$f"
+# Spec §7: claims per repo per day, one line per claim. <file> holds the
+# claims (the day's .spot or .sweep file); 0 while there are fewer than
+# <limit>. Shared by fi_af_cap_ok and the Stop fallback (fi_afh_stop), so
+# the two count one way; no fork.
+fi_af_claims_under() {
+  local n=0 line
+  if [[ -f "$1" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$1"
   fi
   (( n < $2 ))
+}
+
+fi_af_cap_ok() {
+  fi_af_claims_under "$FI_AF_ST/day/$(fi_today).$1" "$2"
+}
+
+# The per-repo gate of <dir> (default .) in ONE git call: sets FI_AF_RC_ON
+# to true or "" (found-issues.autofix, read the way git config --type=bool
+# does: true/yes/on, a bare key, any nonzero integer) and FI_AF_RC_CAP (the
+# spot cap, found-issues.autofix.dailyFixes; 5 unless a positive integer, as
+# fi_af_int, minus its warning). Shared by fi_af_enabled and the Stop
+# fallback, which would otherwise carry two copies of these reads.
+FI_AF_RC_ON="" FI_AF_RC_CAP=5
+fi_af_repo_cfg() {
+  local line key val on
+  FI_AF_RC_ON="" FI_AF_RC_CAP=5
+  while IFS= read -r line; do
+    key="${line%% *}" val="" on=""
+    [[ "$line" == *" "* ]] && val="${line#* }" || on=true
+    case "$key" in
+      found-issues.autofix)
+        case "$val" in
+          [Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn]) on=true ;;
+        esac
+        [[ "$val" =~ ^[0-9]+$ ]] && (( 10#$val != 0 )) && on=true
+        FI_AF_RC_ON="$on" ;;
+      found-issues.autofix.dailyfixes)
+        if [[ "$val" =~ ^[0-9]+$ ]] && (( 10#$val >= 1 )); then FI_AF_RC_CAP="$((10#$val))"
+        else FI_AF_RC_CAP=5; fi ;;
+    esac
+  done < <(git -C "${1:-.}" config --get-regexp '^found-issues\.autofix(\.dailyfixes)?$' 2>/dev/null || true)
+}
+
+# 0 when origin of <dir> (default .) is a GitHub repo (v3 is GitHub-PR-mode
+# only, spec §2): fi_repo_id's own rule, run in <dir>.
+fi_af_origin_ok() {
+  if [[ -z "${1:-}" || "$1" == "." ]]; then fi_repo_id >/dev/null 2>&1; return; fi
+  ( cd "$1" 2>/dev/null && fi_repo_id >/dev/null 2>&1 )
 }
 
 fi_af_cap_take() {

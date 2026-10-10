@@ -90,6 +90,8 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
 @test "stop: codex uses the codex engine and still gives the marker nudge" {
   export FOUND_ISSUES_HARNESS=codex
   unset FOUND_ISSUES_STOP_REMINDER
+  # b4: an engine recorded on the item wins; the harness fills in only when none is.
+  fi_af_item_set "$ST/queue/$ID" engine ""
   out="$(jq -cn --arg c "$REPO" '{session_id:"s2",hook_event_name:"Stop",cwd:$c,stop_hook_active:false,last_assistant_message:"done",transcript_path:null,permission_mode:"default",turn_id:"t"}' | "$STOP")"
   wait_spawn
   grep -q "autofix run $ID --engine codex$" "$TMP/spawned"

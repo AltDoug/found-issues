@@ -22,6 +22,13 @@
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
+# fi_af_origin_ok (autofix-queue.sh) runs fi_repo_id; the Stop hook sources
+# neither bin/found-issues nor repo-id.sh.
+if ! declare -F fi_repo_id >/dev/null 2>&1 && [[ -f "${BASH_SOURCE[0]%/*}/repo-id.sh" ]]; then
+  # shellcheck source=repo-id.sh
+  source "${BASH_SOURCE[0]%/*}/repo-id.sh"
+fi
+
 FI_AFH_LAUNCHER="" FI_AFH_ITEM="" FI_AFH_NOW="" FI_AFH_DAY="" FI_AFH_ROOT=""
 FI_AFH_IDS=()
 
@@ -118,6 +125,10 @@ fi_afh_root_resolve() {
 fi_afh_launch_a() {
   local item="$1" engine="$2" bin="$3" log
   fi_af_item_read "$item" || return 1
+  # The engine recorded at queue time wins (an explicit
+  # found-issues.autofix.engine=codex); the session harness fills in only
+  # when the item names none (empty, auto, anything else).
+  case "$AFI_engine" in claude|codex) engine="$AFI_engine" ;; esac
   fi_afh_root_resolve "$AFI_root" "${4:-$PWD}" "$item" || return 1
   log="${item%/queue/*}/spawn.log"
   ( cd "$FI_AFH_ROOT" && nohup "$bin" autofix run "$AFI_id" --engine "$engine" \
@@ -188,7 +199,7 @@ fi_afh_common_dir() {
 # or the item was launched less than FOUND_ISSUES_AUTOFIX_STOP_GRACE seconds
 # ago (default 60; a B fixer may not have claimed yet).
 fi_afh_stop() {
-  local input="$1" engine="$2" bin="$3" st_root f st cwd cwd_git="" root_seen="" root_git="" eff v cap n line
+  local input="$1" engine="$2" bin="$3" st_root f st cwd cwd_git="" root_seen="" root_git="" eff
   local re_agent='"agent_id"[[:space:]]*:[[:space:]]*"[^"]' re_cwd='"cwd"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
   local -a items=()
   [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]] && return 0
@@ -229,21 +240,17 @@ fi_afh_stop() {
        && (( FI_AFH_NOW - AFI_launched < ${FOUND_ISSUES_AUTOFIX_STOP_GRACE:-60} )); then
       continue
     fi
-    # Per-repo switch: found-issues.autofix=false there means every run exits
-    # 1 at once, so do not spawn one at every Stop.
-    v="$(git -C "$eff" config --type=bool --get found-issues.autofix 2>/dev/null || true)"
-    [[ "$v" == "true" ]] || continue
-    # Today's spot cap, read the way fi_af_cap_ok does: a B claim that hits it
-    # (claim rc 3) writes no capped marker, so count the claims here.
+    # Per-repo switch and today's spot cap, through the helpers fi_af_enabled
+    # and fi_af_cap_ok use (one git call). found-issues.autofix=false there
+    # means every run exits 1 at once, so do not spawn one at every Stop. A B
+    # claim that hits the cap (claim rc 3) writes no capped marker, so count
+    # the claims. The origin check forks, so it comes last.
+    fi_af_repo_cfg "$eff"
+    [[ "$FI_AF_RC_ON" == "true" ]] || continue
     if [[ "$AFI_kind" != "sweep" ]]; then
-      cap="$(git -C "$eff" config --get found-issues.autofix.dailyFixes 2>/dev/null || true)"
-      [[ "$cap" =~ ^[0-9]+$ ]] && (( 10#$cap >= 1 )) || cap=5
-      n=0
-      if [[ -f "$st/day/$FI_AFH_DAY.spot" ]]; then
-        while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$st/day/$FI_AFH_DAY.spot"
-      fi
-      (( n < 10#$cap )) || continue
+      fi_af_claims_under "$st/day/$FI_AFH_DAY.spot" "$FI_AF_RC_CAP" || continue
     fi
+    fi_af_origin_ok "$eff" || continue
     fi_afh_mark "$f" A "$FI_AFH_NOW"
     fi_afh_launch_a "$f" "$engine" "$bin" "$cwd"
     return 0
