@@ -251,7 +251,30 @@ ctx=""
 if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$) ]]; then
   stdout="$(get_field '.tool_response.stdout')"
   pr_num=""
-  if [[ "$stdout" =~ /pull/([0-9]+) ]]; then
+  re_pr_url='github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([0-9]+)'
+  if [[ "$stdout" =~ $re_pr_url ]]; then
+    pr_num="${BASH_REMATCH[2]}"
+    pr_slug="${BASH_REMATCH[1]}"
+    # `cd elsewhere && gh pr create` opens a PR in ANOTHER repo; its number
+    # would be matched against this repo's unrelated entries. Skip when the
+    # URL's owner/repo differs from this repo's origin (case-insensitive).
+    # An origin that is not a GitHub URL leaves nothing to compare: annotate
+    # as before.
+    origin_url="$(git remote get-url origin 2>/dev/null || true)"
+    if [[ "$origin_url" != *github.com* ]]; then
+      origin_url="$(git config --get remote.origin.url 2>/dev/null || true)"
+    fi
+    while [[ "$origin_url" == */ ]]; do origin_url="${origin_url%/}"; done
+    origin_url="${origin_url%.git}"
+    re_origin='github\.com[:/]([^/]+/[^/]+)$'
+    if [[ "$origin_url" =~ $re_origin ]]; then
+      nocase_was=0
+      shopt -q nocasematch && nocase_was=1
+      shopt -s nocasematch
+      [[ "$pr_slug" == "${BASH_REMATCH[1]}" ]] || pr_num=""
+      (( nocase_was )) || shopt -u nocasematch
+    fi
+  elif [[ "$stdout" =~ /pull/([0-9]+) ]]; then
     pr_num="${BASH_REMATCH[1]}"
   fi
 

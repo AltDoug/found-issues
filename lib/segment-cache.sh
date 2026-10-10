@@ -113,6 +113,12 @@ fi_segment_af_suffix() {
   saved="$PWD"
   cd -P "$root" 2>/dev/null || return 0
   root="$PWD"
+  # The state file is keyed by the git toplevel; a nested (monorepo package)
+  # ledger sits below it, so walk up to the directory holding .git.
+  n="$root"
+  while [[ -n "$n" && "$n" != "/" && ! -e "$n/.git" ]]; do n="${n%/*}"; done
+  [[ -n "$n" && "$n" != "/" ]] && root="$n"
+  n=""
   cd "$saved" 2>/dev/null || return 0
   root="$st/${root//[^A-Za-z0-9._-]/_}"
   [[ -f "$root" ]] || return 0
@@ -159,6 +165,7 @@ fi_segment_fast_path() {
   while [[ -n "$dir" && "$dir" != "/" ]]; do
     if [[ -f "$dir/docs/found-issues.md" ]]; then file="$dir/docs/found-issues.md"; break; fi
     if [[ -f "$dir/.found-issues.md" ]]; then file="$dir/.found-issues.md"; break; fi
+    [[ -e "$dir/.git" ]] && break
     dir="${dir%/*}"
     [[ -z "$dir" ]] && dir="/"
   done
