@@ -151,6 +151,22 @@ teardown() { fi_teardown_tmp; }
   ! printf '%s\n' "${FI_AF_TOOLS[@]}" | grep -qx 'Bash(npm \*)' || false
 }
 
+# 3.6.0: detection joins suites with &&, and Claude Code checks each part of
+# a compound command on its own, so each part needs its own rule.
+@test "autofix engine: each part of an && test command is allowed on its own" {
+  fi_af_allowlist 'cd app && pnpm install --frozen-lockfile && pnpm test'
+  printf '%s\n' "${FI_AF_TOOLS[@]}" > "$TMP/tools"
+  grep -qxF 'Bash(cd app && pnpm install --frozen-lockfile && pnpm test)' "$TMP/tools"
+  grep -qxF 'Bash(cd app)' "$TMP/tools"
+  grep -qxF 'Bash(pnpm install --frozen-lockfile)' "$TMP/tools"
+  grep -qxF 'Bash(pnpm test)' "$TMP/tools"
+  grep -qxF 'Bash(pnpm test *)' "$TMP/tools"
+  fi_af_allowlist 'bats tests/ && uv run pytest -q'
+  printf '%s\n' "${FI_AF_TOOLS[@]}" > "$TMP/tools"
+  grep -qxF 'Bash(bats *)' "$TMP/tools"
+  grep -qxF 'Bash(uv run pytest -q *)' "$TMP/tools"
+}
+
 @test "autofix engine: the fixer allowlist adds the item's search, and nothing without an id" {
   fi_af_allowlist 'sh test.sh' t1
   printf '%s\n' "${FI_AF_TOOLS[@]}" | grep -qx 'Bash(found-issues autofix search t1 \*)'

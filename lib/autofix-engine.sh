@@ -119,6 +119,17 @@ fi_af_allowlist() {
   case "$first" in
     bats|pytest) FI_AF_TOOLS+=("Bash($first *)") ;;
   esac
+  # 3.6.0: Claude Code checks each part of an && command on its own.
+  local rest="$t" part
+  [[ "$rest" == *" && "* ]] || return 0
+  while [[ -n "$rest" ]]; do
+    part="${rest%% && *}"
+    if [[ "$part" == "$rest" ]]; then rest=""; else rest="${rest#* && }"; fi
+    FI_AF_TOOLS+=("Bash($part)" "Bash($part *)")
+    case "${part%% *}" in
+      bats|pytest) FI_AF_TOOLS+=("Bash(${part%% *} *)") ;;
+    esac
+  done
 }
 
 fi_af_fixer_prompt() {

@@ -168,24 +168,51 @@ _fi_af_make_test() {
   return 1
 }
 
-# Spec §5 step 3: the setting, else the first marker that matches.
+# A fresh fix worktree has no node_modules: install with the lockfile's tool.
+_fi_af_node_cmd() {
+  if [[ -f "$1/pnpm-lock.yaml" ]]; then printf 'pnpm install --frozen-lockfile && pnpm test'
+  elif [[ -f "$1/bun.lock" || -f "$1/bun.lockb" ]]; then printf 'bun install --frozen-lockfile && bun run test'
+  elif [[ -f "$1/yarn.lock" ]]; then printf 'yarn install --frozen-lockfile && yarn test'
+  elif [[ -f "$1/package-lock.json" ]]; then printf 'npm ci && npm test'
+  else printf 'npm install && npm test'
+  fi
+}
+
+_fi_af_pytest() {
+  local f
+  [[ -f "$1/pytest.ini" || -f "$1/conftest.py" ]] && return 0
+  _fi_af_has "$1/pyproject.toml" '[tool.pytest' && return 0
+  _fi_af_has "$1/setup.cfg" '[tool:pytest]' && return 0
+  [[ -f "$1/pyproject.toml" ]] || return 1
+  for f in "$1"/tests/test_*.py; do [[ -f "$f" ]] && return 0; done
+  return 1
+}
+
+# Spec §5 step 3: the setting, else every suite whose marker matches, joined
+# with && (3.6.0: the first match alone skipped kh2-midgar's pytest suite).
+# make test, often a wrapper around the rest, only when nothing else matches.
 fi_af_test_command() {
-  local d="$1" cmd f
+  local d="$1" cmd f out=""
   cmd="$(git -C "$d" config --get found-issues.autofix.testCommand 2>/dev/null || true)"
   if [[ -n "$cmd" ]]; then printf '%s' "$cmd"; return 0; fi
   for f in "$d"/tests/*.bats; do
-    [[ -f "$f" ]] && { printf 'bats tests/'; return 0; }
+    [[ -f "$f" ]] && { out="bats tests/"; break; }
   done
-  _fi_af_npm_test "$d/package.json" && { printf 'npm test'; return 0; }
-  if [[ -f "$d/pytest.ini" || -f "$d/conftest.py" ]] \
-     || _fi_af_has "$d/pyproject.toml" '[tool.pytest' \
-     || _fi_af_has "$d/setup.cfg" '[tool:pytest]'; then
-    printf 'pytest'; return 0
+  _fi_af_npm_test "$d/package.json" && out="${out:+$out && }$(_fi_af_node_cmd "$d")"
+  if _fi_af_pytest "$d"; then
+    if [[ -f "$d/uv.lock" ]]; then out="${out:+$out && }uv run pytest -q"; else out="${out:+$out && }pytest"; fi
   fi
-  [[ -f "$d/go.mod" ]] && { printf 'go test ./...'; return 0; }
-  [[ -f "$d/Cargo.toml" ]] && { printf 'cargo test'; return 0; }
-  _fi_af_make_test "$d/Makefile" && { printf 'make test'; return 0; }
-  return 1
+  [[ -f "$d/go.mod" ]] && out="${out:+$out && }go test ./..."
+  [[ -f "$d/Cargo.toml" ]] && out="${out:+$out && }cargo test"
+  if [[ -f "$d/gradlew" ]]; then out="${out:+$out && }./gradlew test --no-daemon -q"
+  elif [[ -f "$d/build.gradle" || -f "$d/build.gradle.kts" ]]; then out="${out:+$out && }gradle test -q"
+  fi
+  if [[ -f "$d/mvnw" ]]; then out="${out:+$out && }./mvnw -q test"
+  elif [[ -f "$d/pom.xml" ]]; then out="${out:+$out && }mvn -q test"
+  fi
+  [[ -n "$out" ]] || { _fi_af_make_test "$d/Makefile" && out="make test"; }
+  [[ -n "$out" ]] || return 1
+  printf '%s' "$out"
 }
 
 # Spec §9: engine=auto follows the calling harness. Phase 3's hook passes
