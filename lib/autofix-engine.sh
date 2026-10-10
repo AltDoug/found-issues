@@ -87,6 +87,7 @@ fi_af_child() {
       fi_af_kill_child "$cpid"
       wait "$cpid" 2>/dev/null || true
       FI_AF_CHILD_PGID="" FI_AF_CHILD_TIMEDOUT="$secs"
+      _fi_af_clear_cpgid
       return 124
     fi
     sleep 1
@@ -97,7 +98,16 @@ fi_af_child() {
   done
   wait "$cpid" || rc=$?
   FI_AF_CHILD_PGID=""
+  _fi_af_clear_cpgid
   return $rc
+}
+
+# The item's cpgid names a live group only while the child runs: a later
+# cancel would TERM a dead or reused group.
+_fi_af_clear_cpgid() {
+  if [[ -n "${AFI_id:-}" && -f "$FI_AF_ST/running/$AFI_id" ]]; then
+    fi_af_item_set "$FI_AF_ST/running/$AFI_id" cpgid "" 2>/dev/null || true
+  fi
 }
 
 # TERM then KILL the child's process group (or just the child without perl).

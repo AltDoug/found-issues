@@ -167,3 +167,13 @@ AUTOFIX-SWEEP-DUE $SWID")"
   [[ "$ctx" == *"Fix found-issues auto-fix item $ID."* ]]
   [[ "$ctx" == *"Run found-issues auto-fix sweep $SWID."* ]]
 }
+
+@test "hook stop: an empty queue costs no fork (fi_afh_state is not called)" {
+  rm -f "$FOUND_ISSUES_STATE_DIR"/autofix/*/queue/*
+  source "$TEST_REPO_ROOT/lib/autofix-queue.sh"
+  source "$TEST_REPO_ROOT/lib/autofix-hook.sh"
+  fi_afh_state() { : >"$TMP/state-called"; printf '%s' "$FOUND_ISSUES_STATE_DIR/autofix"; }
+  fi_afh_stop '{}' claude "$FOUND_ISSUES_BIN"
+  [ ! -e "$TMP/state-called" ]
+  [ ! -e "$TMP/spawned" ]
+}

@@ -251,7 +251,8 @@ fi_af_sweep_claim() {
   # No test command at origin/<base>: retire before the day's slot is spent
   # and before the classifier runs.
   if ! fi_af_test_command "$AFI_wt" >/dev/null 2>&1; then
-    fi_af_finish "$id" stale "no test command"; return 5
+    FI_AF_WHY="no test command"
+    fi_af_finish "$id" stale "$FI_AF_WHY"; return 5
   fi
   # Red at base: retire before the classifier spends anything. The day's
   # slot is spent, or every Stop would queue a new sweep and re-run the suite.
@@ -280,7 +281,10 @@ fi_af_sweep_claim() {
   fi
   : >"$FI_AF_ST/sweeps/$id.outcomes"
   while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/sweeps/$id.entries"
-  if (( n == 0 )); then fi_af_finish "$id" stale "nothing fixable now"; return 5; fi
+  if (( n == 0 )); then
+    FI_AF_WHY="nothing fixable now"
+    fi_af_finish "$id" stale "$FI_AF_WHY"; return 5
+  fi
   # Spend the day's slot only now that the sweep has something to fix, like
   # the no-test-command retire above.
   if (( ! capped )); then

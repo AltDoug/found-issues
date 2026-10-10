@@ -226,6 +226,22 @@ teardown() { fi_teardown_tmp; }
   [ "$status" -eq 124 ]
 }
 
+@test "autofix engine: the running item's cpgid is empty once the child exits" {
+  mkdir -p "$FI_AF_ST/running"
+  printf 'id=t1\ncpgid=\n' > "$FI_AF_ST/running/t1"
+  run fi_af_child "$TMP/o" "$TMP/e" "$TMP" true
+  [ "$status" -eq 0 ]
+  [ -z "$(sed -n 's/^cpgid=//p' "$FI_AF_ST/running/t1")" ]
+}
+
+@test "autofix engine: the running item's cpgid is empty after a watchdog kill" {
+  mkdir -p "$FI_AF_ST/running"
+  printf 'id=t1\ncpgid=\n' > "$FI_AF_ST/running/t1"
+  FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS=1 run fi_af_child "$TMP/o" "$TMP/e" "$TMP" sleep 30
+  [ "$status" -eq 124 ]
+  [ -z "$(sed -n 's/^cpgid=//p' "$FI_AF_ST/running/t1")" ]
+}
+
 @test "autofix engine: result line - last FI-RESULT wins, markdown tolerated" {
   fi_af_parse_result $'thinking\nFI-RESULT: fixed\nmore\n**FI-RESULT: decide plus or table?**'
   [ "$FI_AF_RESULT" = decide ]
