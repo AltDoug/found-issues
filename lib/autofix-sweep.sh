@@ -372,7 +372,7 @@ _fi_af_sweep_skip_hit() {
   _fi_af_sweep_is_cont && [[ -n "${AFI_skip_files:-}" ]] || return 1
   while IFS= read -r p || [[ -n "$p" ]]; do
     if [[ -n "$p" && ":$AFI_skip_files:" == *":$p:"* ]]; then printf '%s' "$p"; return 0; fi
-  done < <(git -C "$1" -c core.quotepath=off diff --cached --name-only "$2" 2>/dev/null)
+  done < <(git -C "$1" -c core.quotepath=off diff --cached --name-only --no-renames "$2" 2>/dev/null)
   return 1
 }
 
@@ -610,7 +610,9 @@ _fi_af_sweep_queue_next() {
   local id="$1" nxt skip="${AFI_skip_files:-}" loc out key text p
   nxt=$(( $(_fi_af_sweep_batch_no) + 1 ))
   while IFS=$'\t' read -r loc out key text || [[ -n "$loc" ]]; do
-    [[ "$out" == "fixed" ]] || continue
+    # An entry dropped for touching a chain file stays [open]: its own file
+    # joins the set so later batches skip it before paying a fixer for it.
+    [[ "$out" == "fixed" || ( "$out" == "skipped" && "$text" == "touches "*"(file in an earlier batch's PR)" ) ]] || continue
     p="${loc%%:*}"
     [[ -n "$p" && ":$skip:" != *":$p:"* ]] && skip+="${skip:+:}$p"
   done <"$FI_AF_ST/sweeps/$id.outcomes"
@@ -619,7 +621,7 @@ _fi_af_sweep_queue_next() {
   if [[ -n "${AFI_base_sha:-}" && -n "${AFI_head:-}" ]]; then
     while IFS= read -r p || [[ -n "$p" ]]; do
       [[ -n "$p" && ":$skip:" != *":$p:"* ]] && skip+="${skip:+:}$p"
-    done < <(git -C "$AFI_root" -c core.quotepath=off diff --name-only "$AFI_base_sha" "$AFI_head" 2>/dev/null)
+    done < <(git -C "$AFI_root" -c core.quotepath=off diff --name-only --no-renames "$AFI_base_sha" "$AFI_head" 2>/dev/null)
   fi
   fi_af_new_id
   fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID" "id=$FI_AF_ID" "kind=sweep" \
