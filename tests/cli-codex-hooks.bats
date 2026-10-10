@@ -108,6 +108,19 @@ teardown() { fi_teardown_tmp; }
   before="$(cat "$CODEX_HOME/hooks.json")"
   fi_run install-codex-hooks --codex-home "$CODEX_HOME"
   [ "$status" -eq 5 ]
+  [[ "$output" == *"leaving it untouched"* ]]
+  after="$(cat "$CODEX_HOME/hooks.json")"
+  [ "$before" = "$after" ]
+}
+
+@test "uninstall-codex-hooks: corrupt-JSON hooks.json errors rc 5 with the untouched message and keeps the file" {
+  CODEX_HOME="$TMP/codex-home"
+  mkdir -p "$CODEX_HOME"
+  printf '{not valid json' > "$CODEX_HOME/hooks.json"
+  before="$(cat "$CODEX_HOME/hooks.json")"
+  fi_run uninstall-codex-hooks --codex-home "$CODEX_HOME"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"leaving it untouched"* ]]
   after="$(cat "$CODEX_HOME/hooks.json")"
   [ "$before" = "$after" ]
 }

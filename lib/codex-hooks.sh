@@ -286,7 +286,7 @@ cmd_install_codex_hooks() {
     | .hooks.PreToolUse   = ((.hooks.PreToolUse   // []) + (\$new.PreToolUse   // []))
     | .hooks.PostToolUse  = ((.hooks.PostToolUse  // []) + (\$new.PostToolUse  // []))
     | .hooks.Stop         = ((.hooks.Stop         // []) + (\$new.Stop         // []))
-  " "$hooks_file")"
+  " "$hooks_file")" || merged=""
 
   # Belt-and-braces: never write unless $merged is confirmed non-empty,
   # well-formed JSON. The target file is left completely untouched on
@@ -345,7 +345,7 @@ cmd_uninstall_codex_hooks() {
   fi
 
   local stripped
-  stripped="$(jq --arg sentinel "$FI_CODEX_HOOKS_SENTINEL" "$FI_CODEX_HOOKS_STRIP_JQ" "$hooks_file")"
+  stripped="$(jq --arg sentinel "$FI_CODEX_HOOKS_SENTINEL" "$FI_CODEX_HOOKS_STRIP_JQ" "$hooks_file")" || stripped=""
 
   if ! fi_codex_hooks_is_valid_json "$stripped"; then
     fi_err "uninstall-codex-hooks: failed to produce valid JSON for $hooks_file — leaving it untouched."
