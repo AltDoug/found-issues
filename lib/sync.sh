@@ -35,6 +35,42 @@ entry. Use --dry-run first when in doubt.
 EOF
 }
 
+# fi_commit_touches_entry <sha> <path> [<renamed-from>] — 0 when the commit
+# changed the entry's cited location, 1 when it did not. An annotation on its
+# own only says "this commit is the fix" because somebody wrote it; the closer
+# checks that the commit is at least ABOUT the file the entry cites (a stray
+# --pick or a bare annotate-commit on the wrong HEAD used to close an entry
+# for any commit on the default branch). A cited directory matches any file
+# under it, a glob location matches by pattern, and the pre-rename path counts.
+# Merge commits are diffed against each parent (-m), root commits against the
+# empty tree (--root).
+fi_commit_touches_entry() {
+  local sha="$1" cited="$2" renamed_from="${3:-}"
+  local files f c
+  files="$(git -c core.quotepath=off diff-tree --no-commit-id --name-only -r -m --root "$sha" 2>/dev/null)" || return 1
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    for c in "$cited" "$renamed_from"; do
+      [[ -n "$c" ]] || continue
+      c="${c%/}"
+      if [[ "$f" == "$c" || "$f" == "$c"/* ]]; then
+        return 0
+      fi
+      if [[ "$c" == *[\*\?]* || "$c" == *\[*\]* ]]; then
+        # shellcheck disable=SC2053
+        [[ "$f" == $c ]] && return 0
+      fi
+    done
+  done <<<"$files"
+  return 1
+}
+
+# fi_sq <text> — single-quote text for a shell command line shown to the operator.
+fi_sq() {
+  local t="$1" q="'\\''"
+  printf "'%s'" "${t//\'/$q}"
+}
+
 cmd_sync() {
   # Unknown flags used to be ignored entirely: `sync --help` parsed nothing and
   # ran a full mutating pass, so reaching for help performed irreversible
@@ -92,6 +128,11 @@ cmd_sync() {
   # that is silently ignored forever is as useless as one that silently
   # closes work.
   local -a awaiting_confirm=()
+  # Parallel to awaiting_confirm: "kind<US>ref<US>loc" for the printed commands.
+  local -a awaiting_cmds=()
+  # Landed annotated commits that did not touch the entry's cited file.
+  local -a unrelated_notes=()
+  local pr_unresolved=0
   local demoted_pr=0
   local demoted_commit=0
   local renamed_count=0
@@ -169,8 +210,12 @@ cmd_sync() {
       e_prs="$FE_prs"
       e_commits="$FE_commits"
       local e_prs_auto="$FE_prs_auto" e_commits_auto="$FE_commits_auto"
+      local e_renamed_from="$FE_renamed_from"
+      local e_loc
+      e_loc="$(fi_entry_loc "$line" 2>/dev/null || printf '%s' "$e_path")"
 
       local closure_kind="" closure_label=""
+      local -a entry_notes=()
 
       # Pending suggestions: report only, never close. A suggestion whose ref
       # has landed is exactly the case that needs a human/model to compare the
@@ -184,7 +229,8 @@ cmd_sync() {
           if git rev-parse --verify "$sha" >/dev/null 2>&1 \
              && { git merge-base --is-ancestor "$sha" "$default_branch" 2>/dev/null \
                   || git merge-base --is-ancestor "$sha" "origin/$default_branch" 2>/dev/null; }; then
-            awaiting_confirm+=("$(fi_entry_loc "$line" 2>/dev/null || printf '%s' "$e_path") — suggested (commit-auto: $sha) has landed")
+            awaiting_confirm+=("$e_loc — suggested (commit-auto: $sha) has landed")
+            awaiting_cmds+=("commit"$'\x1f'"$sha"$'\x1f'"$e_loc")
           fi
         done
         IFS="$IFS_old"
@@ -196,10 +242,18 @@ cmd_sync() {
           IFS="$IFS_old"
           _fi_pr_info "$pr_ref"
           if [[ "${_fi_pr_ans%%$'\x1f'*}" == "MERGED" ]]; then
-            awaiting_confirm+=("$(fi_entry_loc "$line" 2>/dev/null || printf '%s' "$e_path") — suggested (PR-auto: $pr_ref) has merged")
+            awaiting_confirm+=("$e_loc — suggested (PR-auto: $pr_ref) has merged")
+            awaiting_cmds+=("pr"$'\x1f'"$pr_ref"$'\x1f'"$e_loc")
           fi
         done
         IFS="$IFS_old"
+      fi
+
+      # PR annotations can only close an entry when sync resolves the GitHub
+      # repo; in 'git' mode (no github.com remote, or gh not authenticated)
+      # they silently never do. Counted here, warned once at the end.
+      if [[ -n "$e_prs" && -z "$repo_id" ]]; then
+        pr_unresolved=$((pr_unresolved + 1))
       fi
 
       # Check PR annotations (single gh call per PR returning all needed fields)
@@ -254,6 +308,14 @@ cmd_sync() {
           if git rev-parse --verify "$sha" >/dev/null 2>&1; then
             if git merge-base --is-ancestor "$sha" "$default_branch" 2>/dev/null \
                || git merge-base --is-ancestor "$sha" "origin/$default_branch" 2>/dev/null; then
+              # Close only when the commit touched the cited file. Entries with
+              # no path, or a repo-prefixed path naming another repo's file,
+              # have nothing this repo's history can be compared against.
+              if [[ -n "$e_path" && "$e_path" != *:* ]] \
+                 && ! fi_commit_touches_entry "$sha" "$e_path" "$e_renamed_from"; then
+                entry_notes+=("commit $sha is on $default_branch but did not touch $e_path — left [open] ($e_loc); if the annotation is wrong: found-issues unannotate $(fi_sq "$e_loc") $sha")
+                continue
+              fi
               closure_kind="commit"
               closure_label="(fixed: $today)"
               closed_commit=$((closed_commit + 1))
@@ -270,6 +332,12 @@ cmd_sync() {
           fi
         done
         IFS="$IFS_old"
+      fi
+
+      # Notes for annotated commits that landed but never touched the cited
+      # file: only worth saying when nothing else closed the entry.
+      if [[ -z "$closure_kind" && ${#entry_notes[@]} -gt 0 ]]; then
+        unrelated_notes+=("${entry_notes[@]}")
       fi
 
       # Tombstone check (only if no annotations resolved AND path looks like a file)
@@ -518,13 +586,42 @@ cmd_sync() {
   # never gets made.
   if (( ${#awaiting_confirm[@]} > 0 )); then
     printf '\n%d hook-suggested annotation(s) awaiting confirmation (NOT closed):\n' "${#awaiting_confirm[@]}"
-    local ac
-    for ac in "${awaiting_confirm[@]}"; do
+    local ac i ck cr cl
+    for (( i = 0; i < ${#awaiting_confirm[@]}; i++ )); do
+      ac="${awaiting_confirm[$i]}"
       printf '  - %s\n' "$ac"
+      IFS=$'\x1f' read -r ck cr cl <<<"${awaiting_cmds[$i]}"
+      if [[ "$ck" == "pr" ]]; then
+        # A PR of this repo is confirmed by number; another repo's by org/repo#N.
+        local pr_arg="$cr"
+        [[ -n "$repo_id" && "$cr" == "$repo_id#"* ]] && pr_arg="${cr##*#}"
+        printf '      confirm: found-issues annotate-pr %s --pick %s\n' "$pr_arg" "$(fi_sq "$cl")"
+      else
+        # --force: the commit is already on the default branch, which
+        # annotate-commit refuses from a feature branch without it.
+        printf '      confirm: found-issues annotate-commit %s --force --pick %s\n' "$cr" "$(fi_sq "$cl")"
+      fi
+      printf '      reject:  found-issues unannotate %s %s\n' "$(fi_sq "$cl")" "$cr"
     done
-    printf 'Compare each entry against what the change actually did, then either:\n'
-    printf '  confirm  — found-issues annotate-commit <sha> --pick "<path:line>"   (rewrites to the closing form)\n'
-    printf '  reject   — delete the (commit-auto:/PR-auto:) token from the entry by hand\n'
+    printf 'Compare each entry against what the change actually did, then run its confirm or reject line.\n'
+  fi
+
+  # Landed annotated commits that never touched the file their entry cites.
+  # The entry stays [open]; say so, once per entry and commit, with the undo.
+  if (( ${#unrelated_notes[@]} > 0 )); then
+    local un
+    for un in "${unrelated_notes[@]}"; do
+      printf 'sync: %s\n' "$un"
+    done
+  fi
+
+  # (PR: ...) annotations that sync could not check because the GitHub repo
+  # did not resolve. Without this the entries just never close.
+  if (( pr_unresolved > 0 )); then
+    local pr_noun="entries carry"
+    (( pr_unresolved == 1 )) && pr_noun="entry carries"
+    printf 'Warning: %d %s (PR: ...) annotations but the GitHub repo cannot be resolved (mode: %s) — PR merges will not close them. Check the origin remote and `gh auth status`, or set FOUND_ISSUES_MODE.\n' \
+      "$pr_unresolved" "$pr_noun" "$mode" >&2
   fi
 
   # Surface gh-empty warnings: PRs that couldn't be fetched.

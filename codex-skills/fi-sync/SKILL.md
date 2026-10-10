@@ -22,7 +22,7 @@ when unsure; closures are not reversible.)
 This handles three closure mechanisms automatically:
 
 - **PR merge** — `[open]` entries with `(PR: org/repo#N)` get checked via `gh pr view`. A PR merged into the default branch flips the entry to `[fixed]`. A PR merged into another branch (a release branch, a stacked PR) flips it once a later merged PR brings that branch into the default branch.
-- **Commit on default branch** — entries with `(commit: <sha>)` get checked via `git merge-base --is-ancestor`. Commits on main flip the entry to `[fixed]`.
+- **Commit on default branch** — entries with `(commit: <sha>)` get checked via `git merge-base --is-ancestor`. A commit on main flips the entry to `[fixed]` only when that commit touched the file the entry cites (a cited directory matches any file under it; the pre-rename path counts; entries with no usable path keep the old behaviour). A landed commit that never touched the cited file leaves the entry `[open]` and sync prints one line naming the entry and the sha, with the undo command: `found-issues unannotate '<loc>' <sha>`.
 - **Tombstone** — the entry auto-flips with `(closure: tombstone)` only when **git confirms the file was removed**: absent from the current `HEAD` tree AND present somewhere in git history. Everything else stays `[open]`, and you must not close those yourself in Phase 2 either:
   - a file that merely got **SHORTER** than the cited line — that is line drift, not a fix;
   - a path git **never tracked** — an abstract location (`workflow/release-process`), a typo, or a gitignored path;
@@ -38,10 +38,34 @@ The CLI output, section by section, and what each one asks of you:
   `Dry run — nothing written.` — report it.
 - The status line (`3 issues · 1 in PR`) — pass it through.
 - `N hook-suggested annotation(s) awaiting confirmation (NOT closed)` — a
-  `(PR-auto:)`/`(commit-auto:)` suggestion whose ref has landed. Compare each
-  listed entry against what that change did; confirm the ones it fixed with
-  the printed `annotate-commit <sha> --pick` (or `annotate-pr <N> --pick`)
-  command, leave the rest open. Never confirm on the suggestion alone.
+  `(PR-auto:)`/`(commit-auto:)` suggestion whose ref has landed. Each item is
+  followed by two ready-to-run lines with the real number, sha and location
+  filled in:
+
+  ```
+  - src/foo.py:1 — suggested (commit-auto: ab12cd3) has landed
+      confirm: found-issues annotate-commit ab12cd3 --force --pick 'src/foo.py:1'
+      reject:  found-issues unannotate 'src/foo.py:1' ab12cd3
+  ```
+
+  A PR suggestion prints `found-issues annotate-pr <N> --pick '<loc>'` (an
+  `org/repo#N` ref when the PR lives in another repo); a landed commit prints
+  `annotate-commit <sha> --force --pick '<loc>'` (`--force` because a commit
+  already on the default branch is otherwise refused from a feature branch).
+  Compare each entry against what that change did; run **confirm** for the
+  ones it fixed (it rewrites the suggestion to the closing form, which the next
+  sync acts on), run **reject** for the ones it did not (it strips that one
+  marker), and leave the rest alone. Never confirm on the suggestion alone, and
+  never edit the ledger by hand to remove a suggestion.
+- `sync: commit <sha> is on <branch> but did not touch <path> — left [open] …`
+  — an annotated commit landed but is unrelated to the file the entry cites, so
+  it did not close the entry. If the annotation is wrong, run the printed
+  `found-issues unannotate '<loc>' <sha>`; if the commit really is the fix,
+  leave it and verify the entry in Phase 2.
+- `Warning: N entry(ies) carry (PR: ...) annotations but the GitHub repo cannot
+  be resolved (mode: git)` (stderr) — the remote is not github.com or `gh` is
+  not authenticated, so PR merges cannot close those entries. Fix the remote or
+  `gh auth status`; nothing was changed.
 - `archive: moved N entries …` — old `[fixed]` entries moved to
   `found-issues-archive.md`; both files changed and need committing.
 - `Warning: N PR annotation(s) could not be fetched via gh` — check

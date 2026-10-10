@@ -139,7 +139,7 @@ cmd_resolve() {
     local pr_match="${BASH_REMATCH[0]}"
     fi_err "resolve: entry has an active PR annotation $pr_match."
     fi_err "It will flip to [fixed] on its own when that PR merges (via /found-issues:sync)."
-    fi_err "If the PR was abandoned, remove the annotation first, then re-run resolve."
+    fi_err "If the PR was abandoned, remove the annotation first with \`found-issues unannotate <match> <PR ref>\`, then re-run resolve."
     return 4
   fi
 

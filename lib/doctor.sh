@@ -257,7 +257,20 @@ cmd_doctor() {
   printf '== Mode detection ==\n'
   local mode
   mode="$(fi_detect_mode)"
-  printf '%s Detected mode: %s\n' "$section_pass" "$mode"
+  # 'git' mode means (PR: ...) annotations never close entries (sync cannot
+  # resolve the repo). With a remote present that is a degraded state, not a
+  # pass: say why (non-github.com host, gh missing, or gh not authenticated).
+  local mode_remote=""
+  if [[ "$mode" == "git" && -z "${FOUND_ISSUES_MODE:-}" ]]; then
+    mode_remote="$(git remote get-url origin 2>/dev/null || true)"
+    [[ -n "$mode_remote" ]] || mode_remote="$(git remote get-url "$(git remote 2>/dev/null | head -1)" 2>/dev/null || true)"
+  fi
+  if [[ -n "$mode_remote" ]]; then
+    printf '%s Detected mode: git — a remote exists but PR annotations will not close entries (%s). Fix the remote host or run `gh auth status`.\n' \
+      "$section_warn" "$([[ "$mode_remote" == *github.com* ]] && printf 'gh missing or not authenticated' || printf 'remote host is not github.com')"
+  else
+    printf '%s Detected mode: %s\n' "$section_pass" "$mode"
+  fi
   if [[ -n "${FOUND_ISSUES_MODE:-}" ]]; then
     printf '   (env override active: FOUND_ISSUES_MODE=%s)\n' "$FOUND_ISSUES_MODE"
   fi

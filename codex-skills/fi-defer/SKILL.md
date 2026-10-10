@@ -20,12 +20,12 @@ found-issues defer <match> [--reason "<text>"] [--mute-until YYYY-MM-DD] [--unti
 - **1**: No match. The CLI prints the match string; suggest the user check `docs/found-issues.md` or run `$fi-status` for the current entry list.
 - **2**: Ambiguous match. The CLI lists all matches; ask the user for a more specific substring (e.g., line number, distinctive part of the symptom).
 - **3**: Already `[deferred]`. The CLI explains the re-defer-after-promote workflow. If the user actually wanted to promote it back, suggest `$fi-promote-deferred`.
-- **4**: Entry has an active `(PR: ...)` annotation. Deferring would silently drop the entry from both the `issues` and `in PR` counters. The CLI prints the two-option recovery (wait for merge OR manually clear the annotation); surface it to the user verbatim.
+- **4**: Entry has an active `(PR: ...)` annotation. Deferring would silently drop the entry from both the `issues` and `in PR` counters. The CLI prints the two-option recovery (wait for merge OR clear the annotation with `found-issues unannotate <match> <PR ref>`); surface it to the user verbatim. Never edit `docs/found-issues.md` by hand to remove an annotation.
 
 ## When to use defer
 
 - **Out-of-scope but real**: a logged issue is genuine but you've decided not to address it in the current cycle (e.g., behind another work stream, blocked on external dep, low-priority cleanup).
-- **NOT for "this isn't a real issue"**: those should be removed from the file entirely, not deferred.
+- **NOT for "this isn't a real issue"**: do not defer those. Close them through the CLI (`found-issues resolve <match> --verified human`) instead of editing the file by hand. A wrong `(PR: ...)` or `(commit: ...)` annotation is undone with `found-issues unannotate <match> <ref>`, never by hand.
 - **NOT for in-flight PRs**: the plugin auto-flips entries to `[fixed]` when the referenced PR merges via `$fi-sync`. Defer would interfere.
 
 ## Re-defer behavior
