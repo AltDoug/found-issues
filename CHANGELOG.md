@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.2] - 2026-10-10
+
+### Fixed
+- An auto-fix item queued from one checkout of a repo only started from a session whose folder was inside that exact checkout, so an item queued in a short-lived worktree (for example `.claude/worktrees/<name>`) waited forever; a live sweep sat queued for three days. The Stop-hook launcher now matches any session in the same repository (same git common dir): a sibling worktree or the main checkout drains it, and a separate repo nested under the item's folder no longer does.
+- A base test run that the `runTimeoutMin` watchdog killed was reported as "tests fail at base", which hid the real cause when a suite is slower than the watchdog. It now retires as "base tests timed out after N min (raise found-issues.autofix.runTimeoutMin)".
+- An auto-fix item whose landing branch was deleted on origin after its claim (the session's branch merged mid-run) could never ship: the PR was opened against the missing branch on every retry. Ship now finds the branch it merged into, replays only the item's own commits onto it, re-runs the tests there, and opens the PR against it; with no known merge target it stops with that reason.
+
 ## [3.4.1] - 2026-10-09
 
 ### Fixed

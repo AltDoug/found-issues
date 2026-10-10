@@ -126,3 +126,30 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
   run stop "$REPO"
   wait_spawn
 }
+
+@test "stop: a session in a sibling worktree of the same repo launches the item" {
+  git -C "$REPO" worktree add -q "$TMP/sib" -b sib
+  run stop "$TMP/sib"
+  [ "$status" -eq 0 ]
+  wait_spawn
+  grep -q "^$REPO|autofix run $ID --engine claude$" "$TMP/spawned"
+}
+
+@test "stop: an item queued inside a nested worktree launches from the main checkout" {
+  git -C "$REPO" worktree add -q "$REPO/.claude/worktrees/x" -b wx
+  rm -f "$QITEM"
+  WID=20261004-000000-00077
+  fi_af_item_write "$ST/queue/$WID" "id=$WID" kind=spot "root=$REPO/.claude/worktrees/x" slug=foo/bar loc=src/calc.sh:1 engine=claude crashes=0
+  run stop "$REPO"
+  [ "$status" -eq 0 ]
+  wait_spawn
+  grep -q "^$REPO/.claude/worktrees/x|autofix run $WID --engine claude$" "$TMP/spawned"
+}
+
+@test "stop: an unrelated repo nested under the root does not match" {
+  mkdir -p "$REPO/vendor/other"
+  git -C "$REPO/vendor/other" init -q
+  run stop "$REPO/vendor/other"
+  [ "$status" -eq 0 ]
+  no_spawn
+}

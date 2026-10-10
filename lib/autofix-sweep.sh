@@ -256,7 +256,7 @@ fi_af_sweep_claim() {
   # slot is spent, or every Stop would queue a new sweep and re-run the suite.
   if ! fi_af_base_tests "$id"; then
     (( capped )) || fi_af_cap_take sweep "$id"
-    FI_AF_WHY="tests fail at base"
+    FI_AF_WHY="${FI_AF_BASE_WHY:-tests fail at base}"
     fi_af_finish "$id" stale "$FI_AF_WHY"; return 5
   fi
   fi_af_item_set "$r" base "$AFI_base"

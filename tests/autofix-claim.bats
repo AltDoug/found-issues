@@ -157,3 +157,14 @@ teardown() { fi_teardown_tmp; }
   [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 1 ]
   [ -f "$ST/running/$ID" ]
 }
+
+# 3.4.2 (ledger lib/autofix-queue.sh:341): a suite slower than the watchdog is
+# not red; the result names the timeout and the setting that raises it.
+@test "autofix claim: a base suite the watchdog kills retires as timed out, not red" {
+  git config found-issues.autofix.testCommand 'echo "ok 1 slow"; sleep 30'
+  FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS=2 run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 5 ]
+  grep -q '^result=stale: base tests timed out after 2s (raise found-issues.autofix.runTimeoutMin)$' "$ST/done/$ID"
+  ! grep -q 'tests fail at base' "$FI_AF_RUNS/$ID.log" || false
+  [ ! -d "$ST/lock" ]
+}

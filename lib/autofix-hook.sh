@@ -131,6 +131,15 @@ fi_afh_lock_fresh() {
   (( FI_AFH_NOW - m < ${FOUND_ISSUES_AUTOFIX_LOCK_STALE:-3600} ))
 }
 
+# The physical path of <dir>'s git common dir: every worktree of one repo
+# shares it. Fails outside a git checkout.
+fi_afh_common_dir() {
+  local d
+  d="$(cd "$1" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null)" || return 1
+  [[ -n "$d" ]] || return 1
+  (cd "$1" && cd "$d" 2>/dev/null && pwd -P)
+}
+
 # Spec §4.3: an item still queued when the session stops gets launcher A, so
 # a skipped launcher B nudge (or an item queued inside a fixer) never
 # strands. Zero forks while the queue is empty: one glob, then return.
@@ -138,7 +147,7 @@ fi_afh_lock_fresh() {
 # or the item was launched less than FOUND_ISSUES_AUTOFIX_STOP_GRACE seconds
 # ago (default 60; a B fixer may not have claimed yet).
 fi_afh_stop() {
-  local input="$1" engine="$2" bin="$3" st_root f st cwd
+  local input="$1" engine="$2" bin="$3" st_root f st cwd cwd_git=""
   local re_agent='"agent_id"[[:space:]]*:[[:space:]]*"[^"]' re_cwd='"cwd"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
   local -a items=()
   [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]] && return 0
@@ -157,7 +166,12 @@ fi_afh_stop() {
     [[ -d "$st/lock" ]] && fi_afh_lock_fresh "$st/lock" && continue
     fi_af_item_read "$f" || continue
     [[ "$AFI_wait_next" =~ ^[0-9]+$ ]] && (( AFI_wait_next > FI_AFH_NOW )) && continue
-    [[ -n "$AFI_root" && ( "$cwd" == "$AFI_root" || "$cwd" == "$AFI_root"/* ) ]] || continue
+    [[ -n "$AFI_root" ]] || continue
+    # Same repo, any checkout (3.4.2): a sibling worktree or the main
+    # checkout drains an item queued from a nested worktree, and a separate
+    # repo nested under the root does not.
+    [[ -n "$cwd_git" ]] || cwd_git="$(fi_afh_common_dir "$cwd")" || cwd_git="-"
+    [[ "$cwd_git" != "-" && "$(fi_afh_common_dir "$AFI_root")" == "$cwd_git" ]] || continue
     if [[ "$AFI_launched" =~ ^[0-9]+$ ]] \
        && (( FI_AFH_NOW - AFI_launched < ${FOUND_ISSUES_AUTOFIX_STOP_GRACE:-60} )); then
       continue
