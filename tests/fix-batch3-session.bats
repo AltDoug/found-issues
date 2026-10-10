@@ -13,6 +13,7 @@ make_ledger() {
   longsym="$(printf 'x%.0s' $(seq 1 200))"
   { printf '# found-issues\n\n'
     printf -- '- [open] 2026-10-05 src/a.sh:2 — PATHBUG real code bug\n'
+    printf -- '- [open] 2026-10-06 tests/cli-annotate.bats — NOLINEPATH whole-file bug\n'
     printf -- '- [open] 2026-09-28 (host env, not repo code) — TOPICENV node missing from PATH\n'
     printf -- '- [open] 2026-10-10 (machine, Git Bash PATH) — TOPICLONG %s\n' "$longsym"
     printf -- '- [open] [!] 2026-10-01 (machine, critical) — TOPICCRIT keep loud\n'
@@ -42,6 +43,8 @@ check_split() {
   [[ "$notes" == *"(logged 12d ago)"* ]]
   [[ "$notes" == *"(logged 0d ago)"* ]]
   [[ "$notes" != *"PATHBUG"* ]] || false
+  [[ "$list" == *"NOLINEPATH"* ]]
+  [[ "$notes" != *"NOLINEPATH"* ]] || false
 }
 
 @test "topic notes: full mode splits topics into an age-stamped environment block" {

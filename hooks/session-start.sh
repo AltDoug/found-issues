@@ -561,7 +561,7 @@ else
   display_path="$fname"
 fi
 
-# Topic entries (location is not path:line, e.g. "(host env, not repo code)")
+# Topic entries (location is not a file path, e.g. "(host env, not repo code)")
 # are environment facts that go stale once the host is fixed, yet injected
 # with the same weight as code entries they kept steering new sessions. They
 # leave the normal list and get a separate, shorter block showing their age
@@ -585,9 +585,13 @@ if declare -F fi_parse_entry_vars >/dev/null 2>&1; then
   __fi_topic_max=5; [[ "$fi_ss_mode" == full ]] || __fi_topic_max=3
   list_entries=""
   __fi_topics=()
+  # A path cited without a line (tests/cli-annotate.bats) is still code: it
+  # has a slash or an extension and does not open with "(".
+  __fi_re_path='^[^(][^[:space:]]*[./]'
   while IFS= read -r __fi_line; do
     [[ -z "$__fi_line" ]] && continue
-    if fi_parse_entry_vars "$__fi_line" && [[ "$FE_critical" != yes && -z "${FE_line:-}" ]]; then
+    if fi_parse_entry_vars "$__fi_line" && [[ "$FE_critical" != yes && -z "${FE_line:-}" ]] \
+       && ! [[ "${FE_path:-}" =~ $__fi_re_path ]]; then
       __fi_topics+=("$__fi_line")
     else
       list_entries+="${list_entries:+$'\n'}$__fi_line"
