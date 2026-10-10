@@ -48,3 +48,19 @@ again rises geometrically. Both knobs are tunable — see
 [`docs/configuration.md`](configuration.md) for
 `FOUND_ISSUES_DEFER_TOUCH_THRESHOLD` (base, default 3) and
 `FOUND_ISSUES_DEFER_ESCALATION_FACTOR` (factor, default 2).
+
+## Deferred review in sync
+
+A deferred entry with no `(until: ...)` has nothing that brings it back,
+so without a review the parking lot only grows. `/found-issues:sync`
+Phase 3 (3.6.0) re-checks up to 20 such entries per run, oldest first,
+once they are more than 30 days old and any `(mute-until: ...)` date has
+passed:
+
+- **Gone** (the symptom is fixed, or the file, feature, tool or machine it
+  describes no longer exists): closed with
+  `found-issues resolve "<match>" --deferred --verified ai`. The defer
+  trail stays on the line.
+- **Ready** (still present, and the reason for deferring no longer holds):
+  promoted back to `[open]` with `found-issues promote-deferred "<match>"`.
+- **Still parked** or unclear: left as it is.

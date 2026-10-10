@@ -13,6 +13,7 @@ setup() {
   mkdir -p src docs
   printf 'a\nb\nc\n' > src/a.py
   git add -A && git commit -q -m init
+  git config found-issues.autofix.testCommand 'true'
   QDIR="$TMP/state/autofix/foo__bar/queue"
 }
 teardown() { fi_teardown_tmp; }
@@ -85,6 +86,18 @@ teardown() { fi_teardown_tmp; }
   run "$FI_BIN" log --fix small '.github/workflows/ci.yml:1 — bad step'
   [[ "$output" != *"AUTOFIX-QUEUED"* ]]
   grep -q '(manual: off-limits: ci)' docs/found-issues.md
+}
+
+# 3.6.0: 36 bruhsailer-helper items were queued, claimed and retired stale
+# with "no test command" before any fix could run.
+@test "autofix queue: a repo with no test command queues nothing and says why" {
+  git config found-issues.autofix true
+  git config --unset found-issues.autofix.testCommand
+  run "$FI_BIN" log --fix small 'src/a.py:2 — off by one'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"AUTOFIX-QUEUED"* ]]
+  [[ "$output" == *"no test command"* ]]
+  [ -z "$(ls -A "$QDIR" 2>/dev/null)" ]
 }
 
 @test "autofix queue: no GitHub origin logs normally and queues nothing" {

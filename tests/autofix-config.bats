@@ -110,7 +110,7 @@ src() {
   [ "$(fi_af_test_command "$TMP")" = "make check" ]
 }
 
-@test "autofix config: test command detection order bats npm pytest go cargo make" {
+@test "autofix config: test command - make test only when no other suite is found" {
   src
   run fi_af_test_command "$TMP"
   [ "$status" -eq 1 ]
@@ -118,14 +118,61 @@ src() {
   [ "$(fi_af_test_command "$TMP")" = "make test" ]
   touch Cargo.toml
   [ "$(fi_af_test_command "$TMP")" = "cargo test" ]
-  touch go.mod
-  [ "$(fi_af_test_command "$TMP")" = "go test ./..." ]
-  touch pytest.ini
-  [ "$(fi_af_test_command "$TMP")" = "pytest" ]
+}
+
+# 3.6.0: auto-fix stopped at the first suite it found, so kh2-midgar's fixes
+# ran only bats tests/ and never its 73 pytest files.
+@test "autofix config: test command - every suite found runs, in a fixed order" {
+  src
+  touch go.mod Cargo.toml pytest.ini
   printf '{\n  "scripts": {\n    "test": "vitest run"\n  }\n}\n' > package.json
-  [ "$(fi_af_test_command "$TMP")" = "npm test" ]
   mkdir -p tests && touch tests/x.bats
-  [ "$(fi_af_test_command "$TMP")" = "bats tests/" ]
+  [ "$(fi_af_test_command "$TMP")" = "bats tests/ && npm install --no-package-lock && npm test && pytest && go test ./... && cargo test" ]
+}
+
+@test "autofix config: test command - pytest runs through uv in a uv project" {
+  touch conftest.py uv.lock
+  src
+  [ "$(fi_af_test_command "$TMP")" = "uv run --frozen pytest -q" ]
+}
+
+@test "autofix config: test command - a pyproject with tests/test_*.py is a pytest suite" {
+  printf '[project]\nname = "x"\n' > pyproject.toml
+  src
+  run fi_af_test_command "$TMP"
+  [ "$status" -eq 1 ]
+  mkdir -p tests && touch tests/test_runner.py tests/a.bats uv.lock
+  [ "$(fi_af_test_command "$TMP")" = "bats tests/ && uv run --frozen pytest -q" ]
+}
+
+# 3.6.0: a fresh fix worktree has no node_modules, so a bare npm test failed
+# at base in every Node repo.
+@test "autofix config: test command - a Node suite installs with its lockfile's tool first" {
+  printf '{ "scripts": { "test": "vitest run" } }\n' > package.json
+  src
+  touch package-lock.json
+  [ "$(fi_af_test_command "$TMP")" = "npm ci && npm test" ]
+  touch yarn.lock
+  [ "$(fi_af_test_command "$TMP")" = "yarn install --frozen-lockfile && yarn test" ]
+  touch bun.lockb
+  [ "$(fi_af_test_command "$TMP")" = "bun install --frozen-lockfile && bun run test" ]
+  touch pnpm-lock.yaml
+  [ "$(fi_af_test_command "$TMP")" = "pnpm install --frozen-lockfile && pnpm test" ]
+}
+
+# 3.6.0: bruhsailer-helper (Gradle) had no test command, and 36 of its
+# auto-fix items ended stale.
+@test "autofix config: test command - Gradle and Maven, wrapper first" {
+  src
+  touch build.gradle
+  [ "$(fi_af_test_command "$TMP")" = "gradle test -q" ]
+  touch gradlew
+  [ "$(fi_af_test_command "$TMP")" = "./gradlew test --no-daemon -q" ]
+  rm build.gradle gradlew
+  touch pom.xml
+  [ "$(fi_af_test_command "$TMP")" = "mvn -q test" ]
+  touch mvnw
+  [ "$(fi_af_test_command "$TMP")" = "./mvnw -q test" ]
 }
 
 @test "autofix config: npm's placeholder test script is not a test command" {

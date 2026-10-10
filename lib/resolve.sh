@@ -33,9 +33,14 @@
 #   2 usage error, bad --verified value, or ambiguous match
 #   3 entry is already [fixed]
 #   4 entry has an active (PR: ...) annotation
+#
+# --deferred (3.6.0) targets [deferred] entries instead: sync's deferred
+# review closes the ones whose symptom is gone or whose subject no longer
+# exists. The defer trail (reason, touches, defer-cycle) stays on the line.
 cmd_resolve() {
   local match=""
   local verified="ai"
+  local status="open"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -47,9 +52,11 @@ cmd_resolve() {
         fi_need_value resolve --verified $# "${2:-}" || return 2
         verified="$2"; shift 2 ;;
       --verified=*) verified="${1#--verified=}"; shift ;;
+      --deferred) status="deferred"; shift ;;
       -h|--help)
         printf 'Usage: found-issues resolve <match>   OR   --match <match>\n'
         printf '       [--verified ai|human]   (default: ai)\n'
+        printf '       [--deferred]   close a [deferred] entry instead of an [open] one\n'
         return 0
         ;;
       # `--verifed human` used to become the match-less default (verified:
@@ -89,7 +96,7 @@ cmd_resolve() {
     if [[ "$lower_entry" == *"$lower_match"* ]]; then
       matches+=("$entry")
     fi
-  done < <(fi_entries "$file" open 2>/dev/null || true)
+  done < <(fi_entries "$file" "$status" 2>/dev/null || true)
 
   if (( ${#matches[@]} == 0 )); then
     # Distinguish "already closed" from "never existed" — re-running sync over
@@ -108,12 +115,12 @@ cmd_resolve() {
       return 3
     fi
 
-    fi_err "resolve: no [open] entries match \"$match\""
+    fi_err "resolve: no [$status] entries match \"$match\""
     return 1
   fi
 
   if (( ${#matches[@]} > 1 )); then
-    fi_err "resolve: ambiguous match — ${#matches[@]} [open] entries match \"$match\":"
+    fi_err "resolve: ambiguous match — ${#matches[@]} [$status] entries match \"$match\":"
     local m
     for m in "${matches[@]}"; do
       fi_err "  $m"
@@ -147,7 +154,7 @@ cmd_resolve() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "$target" ]] && (( found == 0 )); then
       found=1
-      local new_line="${line/- \[open\]/- [fixed]}"
+      local new_line="${line/"- [$status]"/- [fixed]}"
       new_line="${new_line} (verified: ${verified}) (fixed: ${today})"
       printf '%s\n' "$new_line" >> "$tmp"
     else

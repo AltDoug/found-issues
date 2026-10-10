@@ -114,6 +114,11 @@ fi_af_queue_spot() {
   fi_entry_loc_v "$entry" || return 0
   fi_af_dirs "$slug" || return 0
   fi_af_inflight_check "$key" && return 0
+  # 3.6.0: an item with no test command can only end stale after its claim.
+  if ! fi_af_test_command "$root" >/dev/null 2>&1; then
+    printf 'Auto-fix: not queued, no test command (set found-issues.autofix.testCommand)\n'
+    return 0
+  fi
   for f in "$FI_AF_ST"/queue/* "$FI_AF_ST"/running/*; do
     [[ -f "$f" ]] || continue
     fi_af_item_read "$f" || true
@@ -244,9 +249,73 @@ fi_af_eligible() {
   if [[ -n "$FE_autofix_failed" ]]; then
     FI_AF_WHY="auto-fix failed before: $FE_autofix_failed"; return 1
   fi
-  case "$FE_fixtag" in small|medium) return 0 ;; esac
-  [[ -n "$FE_decided" && -z "$FE_decide" ]] && return 0
-  FI_AF_WHY="entry is not fixable now (fix: ${FE_fixtag:-none})"
+  local fixable=""
+  case "$FE_fixtag" in small|medium) fixable=1 ;; esac
+  [[ -n "$FE_decided" && -z "$FE_decide" ]] && fixable=1
+  if [[ -z "$fixable" ]]; then
+    FI_AF_WHY="entry is not fixable now (fix: ${FE_fixtag:-none})"; return 1
+  fi
+  # Last: it is network I/O, and its key compare re-parses FE_*.
+  if fi_af_open_pr_fixing; then
+    FI_AF_WHY="fix in flight in PR #$FI_AF_DUP_PR"; return 1
+  fi
+  return 0
+}
+
+# 3.6.0: three agent-config auto-fix PRs were closed as duplicates of PRs an
+# interactive session opened for the same entries. An open PR that is not
+# auto-fix's own, touches the ledger, and annotates this item's entry (same
+# dedup key) with (PR: ...) already fixes it. FI_AF_PR_SCANNED="" forces a
+# fresh scan (ship re-checks after a long fixer run). Sets FI_AF_DUP_PR.
+FI_AF_PR_SCAN="" FI_AF_PR_SCANNED="" FI_AF_DUP_PR=""
+fi_af_open_pr_fixing() {
+  local n line
+  FI_AF_DUP_PR=""
+  [[ -n "${AFI_loc:-}" && -n "${AFI_key:-}" && -n "${AFI_slug:-}" ]] || return 1
+  if [[ -z "$FI_AF_PR_SCANNED" ]]; then
+    FI_AF_PR_SCANNED=1 FI_AF_PR_SCAN=""
+    while IFS= read -r n || [[ -n "$n" ]]; do
+      [[ "$n" =~ ^[0-9]+$ ]] || continue
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" == "+- ["* && "$line" == *"(PR: "* ]] || continue
+        FI_AF_PR_SCAN+="$n"$'\t'"${line#+}"$'\n'
+      done < <(gh pr diff "$n" --repo "$AFI_slug" 2>/dev/null || true)
+    done < <(gh pr list --repo "$AFI_slug" --state open --limit 100 --json number,headRefName,files \
+      --jq '.[] | select(.headRefName | startswith("fi/") | not)
+                | select([.files[]?.path] | any(test("found-issues(-archive)?\\.md$")))
+                | .number' 2>/dev/null || true)
+  fi
+  while IFS=$'\t' read -r n line || [[ -n "$n" ]]; do
+    [[ "$line" == *" $AFI_loc "* ]] || continue
+    fi_entry_dedup_key_v "$line" "$AFI_root" || continue
+    [[ "$FI_KEY" == "$AFI_key" ]] || continue
+    FI_AF_DUP_PR="$n"; return 0
+  done <<<"$FI_AF_PR_SCAN"
+  return 1
+}
+
+# 3.6.0: the entry fixed on origin/<base> while the run worked (agent-config
+# #592 shipped after #587 had already fixed and closed its entry). Only a
+# [fixed] line, or an [open] one with a PR/commit reference, counts; a
+# deferral meanwhile does not. Sets FI_AF_WHY; rc 0 = fixed elsewhere.
+fi_af_fixed_elsewhere() {
+  local p line
+  FI_AF_PR_SCANNED=""
+  if fi_af_open_pr_fixing; then
+    FI_AF_WHY="fix in flight in PR #$FI_AF_DUP_PR"; return 0
+  fi
+  git -C "$AFI_root" fetch -q origin "$AFI_base" >/dev/null 2>&1 || return 1
+  for p in docs/found-issues.md docs/found-issues-archive.md .found-issues.md; do
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" == "- ["* && "$line" == *" $AFI_loc "* ]] || continue
+      fi_entry_dedup_key_v "$line" "$AFI_root" || continue
+      [[ "$FI_KEY" == "$AFI_key" ]] || continue
+      fi_parse_entry_vars "$line" || continue
+      if [[ "$line" == "- [fixed]"* || ( "$line" == "- [open]"* && -n "$FE_prs$FE_commits" ) ]]; then
+        FI_AF_WHY="fixed on $AFI_base meanwhile"; return 0
+      fi
+    done < <(git -C "$AFI_root" show "origin/$AFI_base:$p" 2>/dev/null || true)
+  done
   return 1
 }
 
@@ -382,13 +451,22 @@ fi_af_worktree_remove() {
 # base; rc 0 = green, or no test command (the run reports that itself). The
 # worktree is reset after, so nothing the tests left reaches a fixer's diff.
 fi_af_base_tests() {
-  local id="$1" t rc=0 log="$FI_AF_RUNS/$1.base-tests.log"
+  local id="$1" t rc=0 log="$FI_AF_RUNS/$1.base-tests.log" red="$FI_AF_ST/base-red" key=""
   FI_AF_BASE_WHY=""
   t="$(fi_af_test_command "$AFI_wt" 2>/dev/null)" || return 0
-  fi_af_run_tests "$AFI_wt" "$t" "$log" || rc=$?
+  # 3.6.0: a base found red is remembered by commit and test command, so the
+  # next item on the same base retires without running the suite again.
+  [[ -n "${AFI_base_sha:-}" ]] && key="$AFI_base_sha $t"
+  if [[ -n "$key" && -f "$red" && "$(cat "$red" 2>/dev/null)" == "$key" ]]; then
+    FI_AF_BASE_WHY="tests fail at base"
+    fi_af_log "$id" "tests fail at base: known red at ${AFI_base_sha:0:7} ($t), not re-run"
+    return 1
+  fi
+  # A red base is re-run once (fi_af_tests_pass): a flake is not red.
+  fi_af_tests_pass "$AFI_wt" "$t" "$log" || rc=$?
   git -C "$AFI_wt" reset -q --hard "${AFI_base_sha:-HEAD}" >/dev/null 2>&1 || true
   git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
-  (( rc == 0 )) && return 0
+  if (( rc == 0 )); then rm -f "$red"; return 0; fi
   # 3.4.2: the watchdog firing is not a red suite (ledger :341).
   if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then
     local secs="$FI_AF_CHILD_TIMEDOUT" took
@@ -398,6 +476,7 @@ fi_af_base_tests() {
     return 1
   fi
   FI_AF_BASE_WHY="tests fail at base"
+  [[ -z "$key" ]] || printf '%s' "$key" >"$red" 2>/dev/null || true
   fi_af_log "$id" "tests fail at base (exit $rc, $t):"
   fi_af_test_report "$log" 20 >>"$FI_AF_RUNS/$id.log" 2>/dev/null || true
   return 1
