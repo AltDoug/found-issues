@@ -164,7 +164,7 @@ cmd_defer() {
     fi_err "defer: entry has an active PR annotation $pr_match."
     fi_err "Deferring an in-flight PR creates a confusing state. Either:"
     fi_err "  1. Wait for the PR to merge (entry will auto-flip to [fixed] via /found-issues:sync)."
-    fi_err "  2. Manually remove the (PR: ...) annotation if the PR was abandoned, then re-run defer."
+    fi_err "  2. If the PR was abandoned, remove the annotation with \`found-issues unannotate <match> <PR ref>\`, then re-run defer."
     return 4
   fi
 
