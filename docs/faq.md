@@ -89,9 +89,11 @@ See [`docs/modes.md`](modes.md) for details.
 
 No — found-issues is dual-harness: the same plugin installs into both
 Claude Code and OpenAI Codex. Claude Code gets slash commands
-(`/found-issues:<name>`) plus the auto-loaded rules skill; Codex gets
-generated skills (`$fi-<name>`) plus SessionStart rules injection. Both
-run the same hooks and CLI underneath.
+(`/found-issues:<name>`) plus a SessionStart injection of the rules and a
+short entry summary (the full rules text by default, the ~1 KB core in
+`lean` mode, nothing on a resumed session); Codex gets generated skills
+(`$fi-<name>`) plus the same SessionStart rules injection. Both run the
+same hooks and CLI underneath.
 
 The markdown format itself (`docs/found-issues.md` with the canonical
 entry shape) is portable beyond both. You could adopt the convention

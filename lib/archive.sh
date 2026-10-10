@@ -182,7 +182,7 @@ cmd_archive() {
 
   # Create archive file with header on first write
   if [[ ! -f "$archive_file" ]]; then
-    cat >"$archive_file" <<HEADER
+    cat >"$archive_file" <<HEADER || { rm -f "$tmp"; fi_err "archive: could not create $archive_file — nothing was moved"; return 1; }
 # found-issues archive
 
 Closed entries moved out of \`$(basename "$file")\` to keep the active file
@@ -191,7 +191,13 @@ lean. Append-only — the plugin never modifies this file after writing.
 HEADER
   fi
 
-  printf '%s' "$to_archive_lines" >>"$archive_file"
+  # Checked: under sync's auto-archive this runs with errexit off, and an
+  # unchecked failed write would still drop the entries from the active file.
+  if ! { printf '%s' "$to_archive_lines" >>"$archive_file"; } 2>/dev/null; then
+    rm -f "$tmp"
+    fi_err "archive: could not write $archive_file — nothing was moved"
+    return 1
+  fi
 
   local replace_rc=0
   fi_ledger_replace "$file" "$tmp" "$snapshot" || replace_rc=$?

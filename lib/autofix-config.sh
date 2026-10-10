@@ -403,6 +403,11 @@ cmd_config() {
   _fi_cfg_valid || return 2
   git config "$scope" "found-issues.$FI_CFG_KEY" "$FI_CFG_VAL" || return 1
   printf 'Set found-issues.%s = %s (%s)\n' "$FI_CFG_KEY" "$FI_CFG_VAL" "${scope#--}"
+  if [[ "$scope" == --global ]]; then
+    local local_val
+    local_val="$(git config --local --get "found-issues.$FI_CFG_KEY" 2>/dev/null || true)"
+    [[ -z "$local_val" ]] || printf 'Note: this repo has its own value (%s), which overrides the global one here. Remove it with: found-issues config %s --unset\n' "$local_val" "$FI_CFG_KEY"
+  fi
   if [[ "$FI_CFG_KEY" == autofix && "$FI_CFG_VAL" == true ]]; then
     printf 'Fix PRs merge themselves once their checks pass, and runs bill your Claude or Codex account, including in the background.\n'
     printf 'Stop it any time: found-issues autofix off (every repo) or found-issues config autofix false.\n'

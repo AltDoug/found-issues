@@ -76,7 +76,7 @@ COMMANDS
   config [<key> [<value>|--unset]] [--global]
                                         Auto-fix settings (found-issues.autofix.*):
                                         list with sources, get, set, unset.
-  autofix on|off|status                v3 auto-fix: kill switch and what is queued,
+  autofix on|off|status                 v3 auto-fix: kill switch and what is queued,
                                         running and done today.
   autofix summary [--peek]              What finished since the last interactive
                                         session (the SessionStart line).

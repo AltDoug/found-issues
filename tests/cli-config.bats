@@ -28,6 +28,17 @@ teardown() { fi_teardown_tmp; }
   [ "$output" = 2 ]
 }
 
+@test "config: --global warns when this repo has a local value that overrides it" {
+  run "$FI_BIN" config autofix.testCommand "make test" --global
+  [ "$status" -eq 0 ]
+  [ "$(git config --global --get found-issues.autofix.testCommand)" = "make test" ]
+  [[ "$output" == *"Note:"* ]]
+  [[ "$output" == *"sh test.sh"* ]]
+  run "$FI_BIN" config autofix.dailyFixes 2 --global
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Note:"* ]]
+}
+
 @test "config: --global writes the global file and local overrides it" {
   "$FI_BIN" config autofix.sweepBatch 4 --global
   [ "$(git config --global --get found-issues.autofix.sweepBatch)" = 4 ]

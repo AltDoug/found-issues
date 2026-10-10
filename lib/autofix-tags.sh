@@ -87,6 +87,11 @@ fi_tag_text() {
   t="${t//(/[}"
   t="${t//)/]}"
   t="${t//$'\t'/ }"
+  # hooks/pre-commit.sh rejects a bare "PR #N" in the ledger.
+  local re_pr='PR[[:space:]]+#([0-9]+)'
+  while [[ "$t" =~ $re_pr ]]; do
+    t="${t/"${BASH_REMATCH[0]}"/PR ${BASH_REMATCH[1]}}"
+  done
   while [[ "$t" == *"  "* ]]; do t="${t//  / }"; done
   t="${t#"${t%%[![:space:]]*}"}"
   t="${t%"${t##*[![:space:]]}"}"
@@ -152,7 +157,11 @@ fi_until_due() {
   local spec="$1" today="$2"
   case "$spec" in
     date:*)
-      local d="${spec#date:}"
+      local d="${spec#date:}" re_ymd='^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})$'
+      # A hand-edited 2026-9-1 would compare wrong lexically; pad it. A value
+      # that is no date at all is due, so the bad edit surfaces.
+      [[ "$d" =~ $re_ymd ]] || return 0
+      d="$(printf '%04d-%02d-%02d' "$((10#${BASH_REMATCH[1]}))" "$((10#${BASH_REMATCH[2]}))" "$((10#${BASH_REMATCH[3]}))")"
       [[ ! "$d" > "$today" ]] ;;
     pr:*)
       declare -F _fi_pr_info >/dev/null 2>&1 || return 1

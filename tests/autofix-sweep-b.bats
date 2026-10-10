@@ -28,8 +28,8 @@ fix_current() { # fix the entry `next` names (an fN entry), with a test
 @test "sweep b: brief lists next, test, verify, release and ship" {
   run "$FI_BIN" autofix brief "$SID"
   [ "$status" -eq 0 ]
-  for c in next test verify release ship; do [[ "$output" == *"found-issues autofix $c $SID"* ]]; done
-  [[ "$output" == *"$WT"* ]]
+  for c in next test verify release ship; do [[ "$output" == *"found-issues autofix $c $SID"* ]] || false; done
+  [[ "$output" == *"$WT"* ]] || false
   [[ "$output" == *"Entries:  5"* ]]
 }
 

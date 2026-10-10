@@ -195,14 +195,17 @@ teardown() { fi_teardown_tmp; }
 }
 
 @test "autofix run: a TERM to the run kills the engine child too" {
-  export FI_STANDIN_SLEEP=4712
+  # A sleep value unique to this test process: a machine-wide pgrep on a
+  # fixed value matched another suite run's child (or any sleep with that argv).
+  sl="4712.$$"
+  export FI_STANDIN_SLEEP="$sl"
   "$FI_BIN" autofix run "$ID" --engine claude >/dev/null 2>&1 &
   rpid=$!
-  for _ in $(seq 1 40); do pgrep -f 'sleep 4712' >/dev/null && break; sleep 0.25; done
-  pgrep -f 'sleep 4712' >/dev/null
+  for _ in $(seq 1 40); do pgrep -f "sleep $sl" >/dev/null && break; sleep 0.25; done
+  pgrep -f "sleep $sl" >/dev/null
   kill -TERM "$rpid"; wait "$rpid" || true
   sleep 1
-  ! pgrep -f 'sleep 4712' >/dev/null || false
+  ! pgrep -f "sleep $sl" >/dev/null || false
 }
 
 @test "autofix run: a test run that leaves a new file after approval is not shipped" {

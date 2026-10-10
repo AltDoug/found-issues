@@ -238,6 +238,22 @@ sweep_queue() { # queue a sweep for the fixture; sets SID and ST
   grep -q '^result=stale: nothing fixable now$' "$ST/done/$SID"
 }
 
+@test "sweep claim: nothing fixable retires with the reason in the claim message" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  sed -i.bak 's/(fix: medium)/(fix: large)/' docs/found-issues.md; rm -f docs/found-issues.md.bak
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"retired — nothing fixable now"* ]]
+}
+
+@test "sweep claim: no test command retires with the reason in the claim message" {
+  fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
+  git config --unset found-issues.autofix.testCommand
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"retired — no test command"* ]]
+}
+
 @test "sweep claim: no test command retires stale without taking the day's sweep slot or classifying" {
   fi_af_sweep_fixture 4; fi_use_standins; sweep_queue
   git config --unset found-issues.autofix.testCommand

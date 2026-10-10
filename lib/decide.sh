@@ -60,12 +60,29 @@ cmd_decide() {
   fi
 
   [[ -n "$answer" ]] || { fi_err "decide: missing --answer \"<text>\""; return 2; }
-  local -a matches=()
+  # An exact location match wins over substring hits, so "a.py:3" never
+  # lands on a.py:30 (whichever of the two carries the question). With no
+  # exact hit every substring match competes, as before.
+  local -a hits=() exact=() matches=()
+  local untagged=0 lmatch e
+  lmatch="$(printf '%s' "$match" | tr '[:upper:]' '[:lower:]')"
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue
-    fi_icontains "$entry" "$match" && matches+=("$entry")
+    fi_icontains "$entry" "$match" || continue
+    hits+=("$entry")
+    fi_entry_loc_v "$entry" 2>/dev/null || continue
+    [[ "$(printf '%s' "$FE_loc" | tr '[:upper:]' '[:lower:]')" == "$lmatch" ]] && exact+=("$entry")
   done < <(fi_entries "$file" open 2>/dev/null || true)
-  (( ${#matches[@]} > 0 )) || { fi_err "decide: no [open] entry matches \"$match\""; return 1; }
+  (( ${#exact[@]} > 0 )) && hits=("${exact[@]}")
+  # Within that set only entries carrying an open question compete.
+  for e in ${hits[@]+"${hits[@]}"}; do
+    fi_parse_entry_vars "$e" || continue
+    if [[ -n "$FE_decide" ]]; then matches+=("$e"); else untagged=$((untagged + 1)); fi
+  done
+  if (( ${#matches[@]} == 0 )); then
+    (( untagged > 0 )) && { fi_err "decide: that entry has no open question"; return 3; }
+    fi_err "decide: no [open] entry matches \"$match\""; return 1
+  fi
   if (( ${#matches[@]} > 1 )); then
     fi_err "decide: ambiguous — ${#matches[@]} entries match \"$match\":"
     local m

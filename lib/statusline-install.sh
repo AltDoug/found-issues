@@ -223,6 +223,31 @@ cmd_install_statusline() {
   fi
 }
 
+# fi_statusline_command_path <command-string>
+# Resolve the statusline script path out of settings.json statusLine.command.
+# Takes the final argument (a trailing quoted argument may contain spaces),
+# strips its surrounding quotes, and expands ${HOME}, $HOME and a leading ~.
+# Prints the path; prints nothing for an empty command. Shared by the
+# runtime probe and `doctor`.
+fi_statusline_command_path() {
+  local cmd="$1" tok q h="$HOME"
+  cmd="${cmd%"${cmd##*[![:space:]]}"}"
+  [[ -n "$cmd" ]] || return 0
+  q="${cmd: -1}"
+  if [[ "$q" == '"' || "$q" == "'" ]]; then
+    tok="${cmd%?}"
+    tok="${tok##*"$q"}"
+  else
+    tok="${cmd##*[[:space:]]}"
+  fi
+  tok=${tok//'${HOME}'/$h}
+  tok=${tok//'$HOME'/$h}
+  if [[ "$tok" == "~" || "$tok" == "~/"* ]]; then
+    tok="$h${tok#\~}"
+  fi
+  printf '%s' "$tok"
+}
+
 # Diagnostic dry-run: print the current state of the statusline integration
 # and the recommended action. No file modifications.
 # fi_run_statusline_runtime_probe: reusable runtime probe body.
@@ -238,7 +263,7 @@ fi_run_statusline_runtime_probe() {
     local cmd
     cmd="$(jq -r '.statusLine.command // ""' "$settings_file" 2>/dev/null || true)"
     if [[ -n "$cmd" ]]; then
-      custom_target="$(printf '%s' "$cmd" | LC_ALL=C awk '{print $NF}' | sed "s|\${HOME}|$HOME|g; s|^~|$HOME|")"
+      custom_target="$(fi_statusline_command_path "$cmd")"
       case "$custom_target" in
         *.js|*.mjs|*.cjs) custom_language=node ;;
         *.py)             custom_language=python ;;
@@ -257,6 +282,10 @@ fi_run_statusline_runtime_probe() {
   fi
 
   printf '== Runtime probe ==\n'
+  # Path-shaped tokens only: `npx -y pkg@latest` ends in a package spec.
+  if [[ "$custom_target" == */* && ! -f "$custom_target" ]]; then
+    printf '%s settings.json statusLine.command path is not a file: %s — probing the default statusline instead.\n' "$section_warn" "$custom_target"
+  fi
   if [[ -z "$statusline_target" || ! -f "$statusline_target" ]]; then
     printf '%s Skipped — no statusline target file to probe.\n' "$section_warn"
   elif [[ -n "${custom_target}" && -z "$custom_language" ]]; then
@@ -299,9 +328,29 @@ fi_run_statusline_runtime_probe() {
       printf '%s' "$probe_stderr" | LC_ALL=C grep -qiE '(error|exception|traceback|undefined|cannot|not found)' && probe_has_error=1 || true
     fi
 
-    if [[ -n "$probe_output" && "$probe_has_error" -eq 0 ]]; then
+    # The found-issues segment the CLI would print for the probe cwd. When it
+    # is non-empty the statusline output must show it: any other output is a
+    # statusline that runs but never shows the counter. Colors are stripped on
+    # both sides, and the first "<count> <bucket>" pair is enough, because the
+    # statusline's own shim may run another found-issues version, or restyle it.
+    local expected_seg seg_plain out_plain seg_key="" seg_found=0
+    expected_seg="$("${FI_BIN_DIR}/found-issues" status --format=segment --cwd "$probe_cwd" 2>/dev/null || true)"
+    if [[ -n "$expected_seg" ]]; then
+      seg_plain="$(printf '%s' "$expected_seg" | LC_ALL=C sed $'s/\x1b\\[[0-9;]*m//g')"
+      out_plain="$(printf '%s' "$probe_output" | LC_ALL=C sed $'s/\x1b\\[[0-9;]*m//g')"
+      seg_plain="${seg_plain#"${seg_plain%%[![:space:]|]*}"}"
+      [[ "$seg_plain" =~ [0-9]+\ [A-Za-z]+ ]] && seg_key="${BASH_REMATCH[0]}"
+      if [[ -n "$seg_plain" && "$out_plain" == *"$seg_plain"* ]] \
+         || [[ -n "$seg_key" && "$out_plain" == *"$seg_key"* ]]; then
+        seg_found=1
+      fi
+    fi
+
+    if [[ -n "$probe_output" && "$probe_has_error" -eq 0 && ( -z "$expected_seg" || "$seg_found" -eq 1 ) ]]; then
       if fi_has_conflict_markers "${issues_file_health:-}" 2>/dev/null; then
         printf '%s INCONCLUSIVE — segment rendered, but source file has conflict markers.\n' "$section_warn"
+      elif [[ -z "$expected_seg" ]]; then
+        printf '%s Ledger is clean — no segment expected; statusline ran without errors: %s\n' "$section_pass" "$(echo "$probe_output" | head -1)"
       else
         printf '%s Segment rendered: %s\n' "$section_pass" "$(echo "$probe_output" | head -1)"
       fi
@@ -474,11 +523,20 @@ cmd_install_statusline_inline() {
 # Append the block at end-of-file. Segment renders as its own standalone line.
 # Used when no LINE1 pattern is detected (simple printf-based statuslines).
 cmd_install_statusline_append() {
-  if [[ -n "$(tail -c 1 "$FI_STATUSLINE_FILE")" ]]; then
-    printf '\n' >>"$FI_STATUSLINE_FILE"
+  # A script whose last command is an unindented `exit` / `exec` never reaches
+  # a block appended after it, so the block goes immediately above that line.
+  local last_cmd_line="" last_cmd_text insert_at=""
+  last_cmd_line="$(LC_ALL=C awk '!/^[[:space:]]*(#|$)/ { n = NR } END { if (n) print n }' "$FI_STATUSLINE_FILE")"
+  if [[ -n "$last_cmd_line" ]]; then
+    last_cmd_text="$(sed -n "${last_cmd_line}p" "$FI_STATUSLINE_FILE")"
+    if [[ "$last_cmd_text" =~ ^(exit|exec)([[:space:]]|\;|$) ]]; then
+      insert_at="$last_cmd_line"
+    fi
   fi
 
-  cat >>"$FI_STATUSLINE_FILE" <<EOF
+  local block_file
+  block_file="$(mktemp -t fi-sl-block.XXXXXX)"
+  cat >"$block_file" <<EOF
 $FI_STATUSLINE_START_MARKER
 # Appended by \`found-issues install-statusline\`. Remove this entire block
 # to disable. Robust against PATH variability — statusline runs in a raw
@@ -516,6 +574,24 @@ fi
 if [[ -n "\$__FI_SEG" ]]; then echo "\$__FI_SEG"; fi
 $FI_STATUSLINE_END_MARKER
 EOF
+
+  if [[ -n "$insert_at" ]]; then
+    local merged_file
+    merged_file="$(mktemp -t fi-sl-merged.XXXXXX)"
+    {
+      head -n "$((insert_at - 1))" "$FI_STATUSLINE_FILE"
+      cat "$block_file"
+      tail -n "+${insert_at}" "$FI_STATUSLINE_FILE"
+    } >"$merged_file"
+    cat "$merged_file" >"$FI_STATUSLINE_FILE"
+    rm -f "${merged_file:?}"
+  else
+    if [[ -n "$(tail -c 1 "$FI_STATUSLINE_FILE")" ]]; then
+      printf '\n' >>"$FI_STATUSLINE_FILE"
+    fi
+    cat "$block_file" >>"$FI_STATUSLINE_FILE"
+  fi
+  rm -f "${block_file:?}"
 
   printf 'install-statusline: appended standalone segment to %s\n' "$FI_STATUSLINE_FILE"
   printf 'Restart your Claude Code session to see the segment render.\n'

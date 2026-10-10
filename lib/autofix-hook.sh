@@ -152,7 +152,8 @@ fi_afh_stop() {
   local -a items=()
   [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]] && return 0
   case "${FOUND_ISSUES_AUTOFIX:-}" in off|0|false|no) return 0 ;; esac
-  st_root="$(fi_afh_state)"
+  # fi_afh_state inlined: its $( ) would fork on every Stop.
+  st_root="${FOUND_ISSUES_STATE_DIR:-$HOME/.claude/found-issues}/autofix"
   [[ -e "$st_root/disabled" ]] && return 0
   for f in "$st_root"/*/queue/*; do [[ -f "$f" ]] && items+=("$f"); done
   (( ${#items[@]} > 0 )) || return 0

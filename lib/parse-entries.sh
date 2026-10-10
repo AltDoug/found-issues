@@ -20,6 +20,11 @@
 
 # Walk up from start_dir looking for the issues file.
 # Prefers <dir>/docs/found-issues.md, falls back to <dir>/.found-issues.md.
+# Inside a git repo the walk stops at the repo root (a directory holding a
+# `.git` dir or file, so worktrees and submodules count too), the same bound
+# log/resolve/defer use: a repo with no ledger must not annotate an ancestor
+# directory's. Outside git the walk stays unbounded (local mode). Builtin
+# test per directory, no git fork (statusline hot path).
 fi_find_issues_file() {
   local start="${1:-$PWD}"
   local dir
@@ -34,6 +39,7 @@ fi_find_issues_file() {
       printf '%s' "$dir/.found-issues.md"
       return 0
     fi
+    [[ -e "$dir/.git" ]] && return 1
     dir="${dir%/*}"
     [[ -z "$dir" ]] && dir="/"
   done
@@ -388,6 +394,37 @@ fi_count() {
   printf '%s' "${count:-0}"
 }
 
+# Count piped entry lines by their annotation TAIL only (the same trailing run
+# fi_annotation_tail_v trusts), so a symptom or suggestion that merely mentions
+# "(PR: o/r#9)" or "(decide: x)" mid-line is not counted. One awk pass; reads
+# stdin. The tag list in tailof() must match re_tail_group in
+# fi_annotation_tail_v. $1 selects the question:
+#   in_pr    - tail holds an active (PR: o/r#N)
+#   residual - not critical ([!]) and no active (PR: ...) in the tail
+#   decide   - tail holds a (decide: ...) tag
+#   demoted  - tail holds (PR-closed: ...) or (commit-stale: ...)
+_fi_count_tail() {
+  LC_ALL=C awk -v mode="$1" '
+    function tailof(l,   t) {
+      t = ""
+      while (match(l, /\((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested|decide|decided|manual|until|autofix-failed): [^)]*\)[[:space:]]*$|\(fix: (small|medium|large)\)[[:space:]]*$/)) {
+        t = substr(l, RSTART) t
+        l = substr(l, 1, RSTART - 1)
+      }
+      return t
+    }
+    {
+      t = tailof($0)
+      inpr = (t ~ /\(PR: [A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[0-9]+\)/)
+      if (mode == "in_pr") { if (inpr) n++ }
+      else if (mode == "residual") { if ($0 !~ /^- \[open\] \[!\]/ && !inpr) n++ }
+      else if (mode == "decide") { if (t ~ /\(decide: [^)]*\)/) n++ }
+      else if (mode == "demoted") { if (t ~ /\((PR-closed|commit-stale): /) n++ }
+    }
+    END { printf "%d", n + 0 }
+  '
+}
+
 # Count [open] entries with at least one ACTIVE (PR: ...) annotation.
 # Excludes (PR-closed: ...) demoted forms: the literal colon-space in
 # '(PR: ' cannot match '(PR-closed:' (hyphen-c), so the regex naturally
@@ -403,8 +440,7 @@ fi_count_in_pr() {
   fi
 
   local count
-  count="$(fi_entries "$file" open 2>/dev/null \
-    | grep -cE '\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' || true)"
+  count="$(fi_entries "$file" open 2>/dev/null | _fi_count_tail in_pr || true)"
   printf '%s' "${count:-0}"
 }
 
@@ -428,7 +464,7 @@ fi_count_critical() {
 fi_count_decide() {
   local file="$1" count
   if [[ ! -f "$file" ]]; then printf '0'; return; fi
-  count="$(fi_entries "$file" open 2>/dev/null | grep -cE '\(decide: [^)]*\)' || true)"
+  count="$(fi_entries "$file" open 2>/dev/null | _fi_count_tail decide || true)"
   printf '%s' "${count:-0}"
 }
 
@@ -447,9 +483,7 @@ fi_count_residual() {
   fi
 
   local count
-  count="$(fi_entries "$file" open 2>/dev/null \
-    | grep -vE '^- \[open\] \[!\]' \
-    | grep -cvE '\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' || true)"
+  count="$(fi_entries "$file" open 2>/dev/null | _fi_count_tail residual || true)"
   printf '%s' "${count:-0}"
 }
 
@@ -495,7 +529,8 @@ fi_count_stale() {
       if [[ "$entry_date" < "$cutoff" ]]; then
         date_stale=$((date_stale + 1))
         # |A ∩ B| — entries that are BOTH date-stale AND demoted.
-        if [[ "$line" =~ $re_demoted ]]; then
+        fi_annotation_tail_v "$line"
+        if [[ "$FI_ANN_TAIL" =~ $re_demoted ]]; then
           overlap=$((overlap + 1))
         fi
       fi
@@ -505,8 +540,7 @@ fi_count_stale() {
   # |B| — entries with a demoted annotation, regardless of date.
   # Conflict-aware via fi_entries, like the |A| loop above.
   local demoted
-  demoted="$(fi_entries "$file" open 2>/dev/null \
-    | grep -cE '\((PR-closed|commit-stale): ' || true)"
+  demoted="$(fi_entries "$file" open 2>/dev/null | _fi_count_tail demoted || true)"
   demoted="${demoted:-0}"
 
   printf '%d' "$((date_stale + demoted - overlap))"

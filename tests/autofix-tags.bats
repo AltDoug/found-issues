@@ -127,6 +127,26 @@ teardown() { fi_teardown_tmp; }
   [ "$FI_RETAGGED" = "- [open] 2026-10-03 src/a.sh:1 — bug (fix: none known)" ]
 }
 
+@test "tag_text: rewrites a bare PR #N so the pre-commit hook accepts the ledger" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  fi_tag_text "see PR #12 and PR   #345 first"
+  [ "$FI_TAG_TEXT" = "see PR 12 and PR 345 first" ]
+  fi_tag_text "issue #7 stays"
+  [ "$FI_TAG_TEXT" = "issue #7 stays" ]
+}
+
+@test "until_due: unpadded dates compare as dates and a non-date value is due" {
+  fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
+  fi_until_due "date:2026-9-1" "2026-10-10"
+  fi_until_due "date:2026-10-9" "2026-10-10"
+  fi_until_due "date:2026-10-10" "2026-10-10"
+  run fi_until_due "date:2026-10-11" "2026-10-10"; [ "$status" -ne 0 ]
+  run fi_until_due "date:2026-11-1" "2026-10-10"; [ "$status" -ne 0 ]
+  run fi_until_due "date:2026-9-30" "2026-09-05"; [ "$status" -ne 0 ]
+  fi_until_due "date:soon" "2026-10-10"
+  fi_until_due "date:" "2026-10-10"
+}
+
 @test "tag_resolve: --fix on an off-limits path becomes manual off-limits" {
   fi_source_lib canonicalize; fi_source_lib parse-entries; fi_source_lib autofix-tags
   fi_tag_resolve fix small .github/workflows/ci.yml "$TMP"
@@ -217,14 +237,30 @@ teardown() { fi_teardown_tmp; }
   [ "${lines[1]}" = "2. src/a.sh:1 — rename or alias?" ]
   fi_run decide --count
   [ "$output" = "2" ]
+  fi_run decide "src/a.sh" --answer x
+  [ "$status" -eq 2 ]
   fi_run decide "src/a.sh:1" --answer "alias (keep old name)"
   [ "$status" -eq 0 ]
   grep -q 'naming (decided: alias \[keep old name\])' docs/found-issues.md
   ! grep -q 'rename or alias' docs/found-issues.md
   fi_run decide "plain bug" --answer x
   [ "$status" -eq 3 ]
-  fi_run decide "src/a.sh" --answer x
-  [ "$status" -eq 2 ]
+}
+
+@test "decide: an untagged entry at a longer location does not make the match ambiguous" {
+  printf -- '- [open] 2026-10-01 src/a.sh:3 — naming (decide: rename or alias?)\n- [open] 2026-10-02 src/a.sh:30 — plain bug (fix: small)\n' > docs/found-issues.md
+  fi_run decide "src/a.sh:3" --answer "alias"
+  [ "$status" -eq 0 ]
+  grep -q 'src/a.sh:3 — naming (decided: alias)' docs/found-issues.md
+  grep -q 'src/a.sh:30 — plain bug (fix: small)$' docs/found-issues.md
+}
+
+@test "decide: an exact location naming an untagged entry never answers a longer-location question" {
+  printf -- '- [open] 2026-10-01 src/a.sh:3 — plain bug (fix: small)\n- [open] 2026-10-02 src/a.sh:30 — naming (decide: rename or alias?)\n' > docs/found-issues.md
+  fi_run decide "src/a.sh:3" --answer "alias"
+  [ "$status" -eq 3 ]
+  grep -q 'src/a.sh:30 — naming (decide: rename or alias?)$' docs/found-issues.md
+  ! grep -q 'decided' docs/found-issues.md || false
 }
 
 @test "decide: empty queue" {
