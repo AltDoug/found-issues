@@ -383,11 +383,21 @@ fi_af_worktree_remove() {
 # worktree is reset after, so nothing the tests left reaches a fixer's diff.
 fi_af_base_tests() {
   local id="$1" t rc=0 log="$FI_AF_RUNS/$1.base-tests.log"
+  FI_AF_BASE_WHY=""
   t="$(fi_af_test_command "$AFI_wt" 2>/dev/null)" || return 0
   fi_af_run_tests "$AFI_wt" "$t" "$log" || rc=$?
   git -C "$AFI_wt" reset -q --hard "${AFI_base_sha:-HEAD}" >/dev/null 2>&1 || true
   git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
   (( rc == 0 )) && return 0
+  # 3.4.2: the watchdog firing is not a red suite (ledger :341).
+  if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then
+    local secs="$FI_AF_CHILD_TIMEDOUT" took
+    took="${secs}s"; (( secs % 60 == 0 )) && took="$(( secs / 60 )) min"
+    FI_AF_BASE_WHY="base tests timed out after $took (raise found-issues.autofix.runTimeoutMin)"
+    fi_af_log "$id" "$FI_AF_BASE_WHY ($t)"
+    return 1
+  fi
+  FI_AF_BASE_WHY="tests fail at base"
   fi_af_log "$id" "tests fail at base (exit $rc, $t):"
   fi_af_test_report "$log" 20 >>"$FI_AF_RUNS/$id.log" 2>/dev/null || true
   return 1
@@ -549,7 +559,7 @@ fi_af_claim() {
   fi_af_item_set "$r" base_sha "$AFI_base_sha"
   fi_af_log "$id" "claimed: $AFI_wt ($AFI_branch from origin/$AFI_base: $AFI_base_why)"
   if ! fi_af_base_tests "$id"; then
-    FI_AF_WHY="tests fail at base"
+    FI_AF_WHY="${FI_AF_BASE_WHY:-tests fail at base}"
     fi_af_finish "$id" stale "$FI_AF_WHY"
     return 5
   fi

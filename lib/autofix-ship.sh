@@ -158,15 +158,69 @@ fi_af_ship() {
   _fi_af_publish "fix: $frag" "$bodyf" "$FI_AF_RUNS/$AFI_id.publish"
 }
 
+# 3.4.2 (ledger lib/autofix-ship.sh:179): the landing branch can be deleted
+# after the claim (the session's branch merged mid-run). Then the item's own
+# commits (cut point = the item's recorded base_sha) are replayed onto the
+# branch it merged into, the tests re-run there, and the item records the new
+# base and the rebased tree as the approved one (the verifier's diff on the
+# new base; a ship retry compares against it). Exit 2 from ls-remote is "no
+# such branch"; any other failure leaves the base alone for push and pr
+# create to report. A failed retarget leaves the branch where it was.
+_fi_af_retarget() {
+  local old="$AFI_base" runlog="$FI_AF_RUNS/$AFI_id.log" rc=0 new cut was r="$FI_AF_ST/running/$AFI_id"
+  FI_AF_RETARGETED=""
+  git -C "$AFI_wt" ls-remote --exit-code origin "refs/heads/$old" >/dev/null 2>&1 || rc=$?
+  (( rc == 2 )) || return 0
+  if ! new="$(cd "$AFI_wt" && gh pr list --repo "$AFI_slug" --head "$old" --state merged --limit 1 \
+    --json baseRefName --jq '.[0].baseRefName // ""' 2>>"$runlog")"; then
+    FI_AF_WHY="landing branch $old was deleted on origin; could not look up where landing branch $old merged (gh pr list failed)"; return 1
+  fi
+  if [[ -z "$new" || "$new" == "$old" ]] \
+     || ! git -C "$AFI_wt" fetch -q origin "+refs/heads/$new:refs/remotes/origin/$new" >>"$runlog" 2>&1; then
+    FI_AF_WHY="landing branch $old was deleted on origin and its merge target is unknown"; return 1
+  fi
+  cut="${AFI_base_sha:-}"
+  [[ -n "$cut" ]] || { FI_AF_WHY="landing branch $old was deleted on origin (merged into $new); no recorded cut point to rebase from"; return 1; }
+  was="$(git -C "$AFI_wt" rev-parse HEAD)"
+  if ! git -C "$AFI_wt" rebase -q --onto "origin/$new" "$cut" "$AFI_branch" >>"$runlog" 2>&1; then
+    git -C "$AFI_wt" rebase --abort >/dev/null 2>&1 || true
+    FI_AF_WHY="landing branch $old was deleted on origin (merged into $new) and the fix does not rebase onto origin/$new"; return 1
+  fi
+  if [[ "$(git -C "$AFI_wt" rev-parse HEAD)" == "$(git -C "$AFI_wt" rev-parse "origin/$new")" ]]; then
+    git -C "$AFI_wt" reset -q --hard "$was" >/dev/null 2>&1 || true
+    FI_AF_WHY="landing branch $old was deleted on origin (merged into $new); the fix is already on $new"; return 1
+  fi
+  if ! fi_af_run_tests "$AFI_wt" "$FI_AF_TESTCMD" "$FI_AF_RUNS/$AFI_id.retarget-tests.log"; then
+    git -C "$AFI_wt" reset -q --hard "$was" >/dev/null 2>&1 || true
+    FI_AF_WHY="landing branch $old was deleted on origin (merged into $new); tests fail after rebasing onto origin/$new"; return 1
+  fi
+  git -C "$AFI_wt" reset -q --hard HEAD >/dev/null 2>&1 || true
+  git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
+  AFI_base="$new" AFI_base_why="$old merged into $new"
+  AFI_base_sha="$(git -C "$AFI_wt" rev-parse "origin/$new")"
+  AFI_head="$(git -C "$AFI_wt" rev-parse HEAD)"
+  AFI_verdict_tree="$(git -C "$AFI_wt" rev-parse 'HEAD^{tree}')"
+  fi_af_item_set "$r" base "$AFI_base"
+  fi_af_item_set "$r" base_why "$AFI_base_why"
+  fi_af_item_set "$r" base_sha "$AFI_base_sha"
+  fi_af_item_set "$r" verdict_tree "$AFI_verdict_tree"
+  [[ "${AFI_kind:-}" == sweep ]] && fi_af_item_set "$r" head "$AFI_head"
+  FI_AF_RETARGETED=1
+  fi_af_log "$AFI_id" "landing branch $old is gone on origin (merged into $new): rebased onto origin/$new"
+}
+
 # Shared by a spot ship and a sweep ship: push the branch, open the PR,
 # annotate every <key>\t<loc> row on the PR branch's ledger (one commit, so
 # the annotation reaches the default branch, prompt-9) and in the source
 # ledger (where sync closes it on merge), then arm auto-merge.
 _fi_af_publish() {
-  local title="$1" bodyf="$2" rows="$3" wt="$AFI_wt" br="$AFI_branch" base="$AFI_base"
-  local runlog="$FI_AF_RUNS/$AFI_id.log" url="" p wl="" ann key loc n=0 msg
+  local title="$1" bodyf="$2" rows="$3" wt="$AFI_wt" br="$AFI_branch" base
+  local runlog="$FI_AF_RUNS/$AFI_id.log" url="" p wl="" ann key loc n=0 msg force=""
   local keep_key="$AFI_key" keep_loc="$AFI_loc"
-  git -C "$wt" push -q -u origin "$br" >>"$runlog" 2>&1 || { FI_AF_WHY="git push failed"; return 1; }
+  _fi_af_retarget || return 1
+  base="$AFI_base"
+  [[ "$FI_AF_RETARGETED" == 1 ]] && force="--force-with-lease"
+  git -C "$wt" push -q $force -u origin "$br" >>"$runlog" 2>&1 || { FI_AF_WHY="git push failed"; return 1; }
   # A ship retry (3.2.1) may follow a try whose PR was opened after all.
   if [[ "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then
     p="$(cd "$wt" && gh pr list --repo "$AFI_slug" --head "$br" --state open --json number --jq '.[0].number // ""' 2>>"$runlog" || true)"
