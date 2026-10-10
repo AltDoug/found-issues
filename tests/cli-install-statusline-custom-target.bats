@@ -355,7 +355,7 @@ EOF
   fi_run install-statusline --target tmp/sl.js --apply
   [ "$status" -eq 0 ]
   # New shim: no process.env.HOME; uses os.homedir.
-  ! grep -q "process.env.HOME" tmp/sl.js
+  ! grep -q "process.env.HOME" tmp/sl.js || false
   grep -q "os.homedir" tmp/sl.js
   # Platform-gated: shim has process.platform check.
   grep -q "process.platform" tmp/sl.js
@@ -420,7 +420,7 @@ print(f"repo | main")
 EOF
   fi_run install-statusline --target tmp/sl.py --apply
   [ "$status" -eq 0 ]
-  ! grep -q "environ.get('HOME'" tmp/sl.py
+  ! grep -q "environ.get('HOME'" tmp/sl.py || false
   grep -q "pathlib" tmp/sl.py
   grep -q "platform.system" tmp/sl.py
   grep -q "def _fi_seg" tmp/sl.py
@@ -487,7 +487,7 @@ EOF
   fi_run install-statusline --target tmp/sl.py --apply
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "migrating v1.4.x"
-  ! grep -q "environ.get('HOME'" tmp/sl.py
+  ! grep -q "environ.get('HOME'" tmp/sl.py || false
   grep -q "pathlib" tmp/sl.py
 }
 

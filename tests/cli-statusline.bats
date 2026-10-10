@@ -219,7 +219,7 @@ SL
   fi_run uninstall-statusline
   [ "$status" -eq 0 ]
   [[ "$output" == *"removed found-issues segment"* ]]
-  ! grep -Fq "found-issues plugin segment" "$HOME/.claude/statusline.sh"
+  ! grep -Fq "found-issues plugin segment" "$HOME/.claude/statusline.sh" || false
   grep -Fq 'echo "BEFORE"' "$HOME/.claude/statusline.sh"
 }
 
@@ -502,7 +502,7 @@ SL
   fi_run install-statusline
   [ "$status" -eq 0 ]
   # Migration happened — legacy lines stripped, canonical block added.
-  ! grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh"
+  ! grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh" || false
   grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
   grep -Fq 'cd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
   # Backup file was saved next to the statusline (pattern: statusline.sh.fi-bak-<ts>).
@@ -527,7 +527,7 @@ SL
   [ "$status" -ne 0 ]
   [[ "$output" == *"--no-migrate"* ]]
   # Original file unchanged (no markers added, no migration)
-  ! grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
+  ! grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh" || false
   grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh"
   # No backup file should exist (we bailed before touching anything)
   ! ls "$HOME/.claude/statusline.sh".fi-bak-* >/dev/null 2>&1
@@ -548,8 +548,8 @@ SL
   [ "$status" -eq 0 ]
   [[ "$output" == *"migrating pre-v0.1.7 handwritten"* ]]
   # Legacy lines gone
-  ! grep -Fq 'FI_SEG=$(found-issues status --format=segment' "$HOME/.claude/statusline.sh"
-  ! grep -Fq '$FI_SEG' "$HOME/.claude/statusline.sh"
+  ! grep -Fq 'FI_SEG=$(found-issues status --format=segment' "$HOME/.claude/statusline.sh" || false
+  ! grep -Fq '$FI_SEG' "$HOME/.claude/statusline.sh" || false
   # Canonical block present, with cwd handling
   grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
   grep -Fq 'cd "$__FI_DIR"' "$HOME/.claude/statusline.sh"
@@ -606,7 +606,7 @@ SL
   # Default behavior (no flag): cleans up both, saves backup.
   fi_run install-statusline
   [ "$status" -eq 0 ]
-  ! grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh"
+  ! grep -Fq 'FI_SEG=$(found-issues status' "$HOME/.claude/statusline.sh" || false
   # Exactly one marker block remains
   local count
   count=$(grep -cF "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh")
