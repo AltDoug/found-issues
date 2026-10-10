@@ -4,6 +4,40 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.2] - 2026-10-10
+
+A ledger fix batch: 33 open entries (each re-checked against the current code first) plus one found while fixing them, each fixed with a regression test.
+
+### Fixed
+- **Auto-archive can no longer lose entries.** A failed write to `found-issues-archive.md` (an unwritable file, a full disk) was not checked. Under `sync`'s auto-archive, the closed entries were still removed from the active ledger. Archive now stops before touching the ledger, and `sync` reports a failed auto-archive on stderr instead of hiding it.
+- **Ledger lookups stop at the repo root.** A repo or submodule with no ledger used to find, and annotate, a ledger in a parent directory. Outside git, the search still walks up.
+- **Status counts read only the annotation tail.** An entry whose text merely mentions `(PR: o/r#9)`, `(decide: …)` or `(PR-closed: …)` is no longer counted as in a PR, as a decision, or as stale. The auto-fix wrench count now also shows for a ledger nested in a package directory.
+- **`gh pr create` in another repo** no longer annotates this repo's entries with that PR's number.
+- **Sync:** a rename whose new path contains `&` is applied literally, and closing or renaming an entry in a CRLF ledger no longer leaves a stray CR in the middle of the line.
+- **Statusline:** `install-statusline` puts its block above a trailing `exit` or `exec` line instead of after it, where it would never run. The doctor runtime probe now checks that the found-issues segment itself is in the output, not just that some output appeared. Both `doctor` and the probe read a quoted or `$HOME`-based statusline path correctly, and warn when that path is not a file instead of silently checking the default script. The file mode is read only when it looks like an octal mode, since GNU `stat -f` can succeed with garbage.
+- **Codex:** `uninstall` now names the hooks that `install-codex-hooks` wrote and the two commands that remove them from Codex. It leaves them wired, since this is also the Claude Code uninstall path and a Codex install may be staying. A corrupt `hooks.json` now gets the "leaving it untouched" message instead of a raw jq error.
+- **Auto-fix queue:**
+  - A crashed or requeued item starts its fix attempts over, so its first verifier reject no longer fails it at once. A ship retry keeps its approved tree.
+  - A failed `git ls-remote` (network, auth) no longer counts as "branch gone", which resolved the landing branch to the default branch.
+  - A lock whose age can't be read is retried instead of broken.
+  - The engine child's process group is cleared once the child exits, so a later cancel can't signal a reused group.
+  - A sweep retired as "nothing fixable now" or "no test command" says why.
+- **Auto-fix summary:**
+  - An empty stamp file no longer aborts the session-start summary.
+  - An item finishing during the scan is shown at the next session, once, even when it finished in the same second as the last one shown.
+  - Old `done/` items are skipped without being read, using one `stat` call for the whole directory.
+  - A sweep that fixed several entries counts each of them.
+  - A repo auto-fix has never touched gets no state directories.
+- **Smaller fixes:**
+  - `decide <location>` matches only entries that carry a question, and an exact location wins, so `a.py:3` never answers the question on `a.py:30`.
+  - A `PR #N` inside tag text is written as `PR N`, so the pre-commit hook accepts it.
+  - A hand-edited unpadded `until: date:2026-9-1` compares as a date.
+  - `config <key> <value> --global` notes when this repo's own value overrides it.
+  - `doctor` lists every hook opt-out variable.
+  - The `help` columns line up.
+  - The FAQ describes what SessionStart actually injects.
+- **Tests:** the TERM test no longer flakes when another suite runs, and two `sweep-b` assertions now fail on bash 3.2 when they should.
+
 ## [3.6.1] - 2026-10-10
 
 ### Fixed
