@@ -52,14 +52,17 @@ _fi_af_fix_attempt() {
   fi_af_fixer_cmd "$engine" "$(fi_af_fixer_prompt "$FI_AF_TESTCMD" "$feedback" "$engine")" "$base.last"
   [[ -z "$FI_AF_SBWARN" ]] || fi_af_log "$AFI_id" "warning: $FI_AF_SBWARN"
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
+  # The watchdog is told by FI_AF_CHILD_TIMEDOUT, never by a bare exit 124
+  # (3.4.2): a fixer that exits 124 on its own is an engine error.
+  local timedout="${FI_AF_CHILD_TIMEDOUT:-}"
   fi_af_collect "$engine" "$base.out" "$base.last"
   if [[ "$engine" == codex ]]; then fi_af_codex_note "$AFI_id" fixer; fi
   fi_af_parse_result "$FI_AF_TEXT"
   FI_AF_FIX_RC=$rc
-  if [[ -z "$FI_AF_ENGINE_ERR" ]] && (( rc != 0 && rc != 124 )) && [[ "$FI_AF_RESULT" == "none" ]]; then
+  if [[ -z "$FI_AF_ENGINE_ERR" && -z "$timedout" ]] && (( rc != 0 )) && [[ "$FI_AF_RESULT" == "none" ]]; then
     FI_AF_ENGINE_ERR="$engine exited $rc: $(tail -n 1 "$base.err" 2>/dev/null)"
   fi
-  (( rc == 124 )) && fi_af_log "$AFI_id" "attempt $n: fixer timed out"
+  [[ -n "$timedout" ]] && fi_af_log "$AFI_id" "attempt $n: fixer timed out"
   fi_af_log "$AFI_id" "attempt $n: fixer rc=$rc result=$FI_AF_RESULT"
 }
 
