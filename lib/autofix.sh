@@ -74,11 +74,23 @@ _fi_af_verify() {
   fi_af_collect "$engine" "$base.out" "$base.last"
   if [[ "$engine" == codex ]]; then fi_af_codex_note "$AFI_id" verifier; fi
   fi_af_parse_verdict "$FI_AF_TEXT"
-  # A verifier that exited non-zero and left no parseable verdict (a crash,
-  # a lost login, the watchdog's timeout) never ran: an outage, not a reject.
-  # A verdict it did leave stands whatever its exit code.
+  # A verifier that exited non-zero and left no parseable verdict never ran
+  # to a conclusion. Two different things look like that:
+  #  - it hit a run limit this run set (claude error_max_turns,
+  #    error_max_budget_usd, any error_max_*): the verifier ran and could not
+  #    decide, so the fix is REJECTED through the normal reject path (no
+  #    outage, no free re-run of the paid fixer, a sweep carries on);
+  #  - the watchdog's timeout (rc 124), a crash, a lost login: an OUTAGE.
+  # A verdict it did leave stands whatever its exit code. Codex has no
+  # turn/budget limit result, so for it every non-zero exit is an outage.
   if [[ -z "$FI_AF_ENGINE_ERR" ]] && (( rc != 0 )) && (( FI_AF_VERDICT_OK != 1 )); then
-    FI_AF_ENGINE_ERR="$engine verifier exited $rc"
+    if (( rc == 124 )); then
+      FI_AF_ENGINE_ERR="$engine verifier exited 124 (timed out)"
+    elif [[ -n "$FI_AF_LIMIT" ]]; then
+      FI_AF_APPROVE="false" FI_AF_REASON="verifier hit its run limit ($FI_AF_LIMIT) before a verdict"
+    else
+      FI_AF_ENGINE_ERR="$engine verifier exited $rc"
+    fi
   fi
   fi_af_log "$AFI_id" "attempt $n: verifier rc=$rc approve=$FI_AF_APPROVE reason=$FI_AF_REASON"
 }

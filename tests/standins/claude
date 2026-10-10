@@ -11,6 +11,9 @@
 #   FI_STANDIN_CLASSIFY the sweep classifier's JSON reply (default no tags)
 #   FI_STANDIN_VERIFIER_CRASH exit code of a verifier that dies with no output
 #   FI_STANDIN_VERIFIER_RC    exit code of a verifier that answers and still exits non-zero
+#   FI_STANDIN_VERIFIER_LIMIT result subtype of a verifier that hit a run limit
+#                      (error_max_turns, error_max_budget_usd): is_error, no
+#                      result text, exit 1 (or FI_STANDIN_VERIFIER_RC)
 # FI_STANDIN_EDIT sees the prompt (the last argument) as $FI_STANDIN_PROMPT.
 set -euo pipefail
 if [[ -n "${FI_STANDIN_TRACE:-}" ]]; then
@@ -35,6 +38,11 @@ for a in "$@"; do
 done
 if (( verifier )); then
   [[ -n "${FI_STANDIN_VERIFIER_CRASH:-}" ]] && exit "$FI_STANDIN_VERIFIER_CRASH"
+  if [[ -n "${FI_STANDIN_VERIFIER_LIMIT:-}" ]]; then
+    jq -n --arg s "$FI_STANDIN_VERIFIER_LIMIT" --argjson c "${FI_STANDIN_COST:-0.25}" \
+      '{type:"result",subtype:$s,is_error:true,total_cost_usd:$c,permission_denials:[]}'
+    exit "${FI_STANDIN_VERIFIER_RC:-1}"
+  fi
   text='{"approve":true,"reason":"ok"}'
   if [[ -n "${FI_STANDIN_VERDICTS:-}" && -s "$FI_STANDIN_VERDICTS" ]]; then
     IFS= read -r text <"$FI_STANDIN_VERDICTS"
