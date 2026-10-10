@@ -147,7 +147,7 @@ FI_AF_ENTRY="" FI_AF_LEDGER=""
 # lock whose owner is a running A item with a dead pid (SIGKILL, sleep): it
 # would otherwise block the reap for the full hour.
 fi_af_lock() {
-  local id="$1" lock="$FI_AF_ST/lock" now age owner="" opid=""
+  local id="$1" lock="$FI_AF_ST/lock" now age mt owner="" opid=""
   if mkdir "$lock" 2>/dev/null; then
     printf '%s\n' "$id" >"$lock/owner"; return 0
   fi
@@ -156,8 +156,15 @@ fi_af_lock() {
     opid="$(_fi_af_field "$FI_AF_ST/running/$owner" pid)" || opid=""
   fi
   if [[ ! "$opid" =~ ^[1-9][0-9]*$ ]] || kill -0 "$opid" 2>/dev/null; then
+    mt="$(fi_file_mtime "$lock")"
+    if (( mt == 0 )); then
+      # stat failed (the lock vanished since the mkdir): not evidence of age.
+      # Retake it if it is gone, else leave whoever holds it alone.
+      mkdir "$lock" 2>/dev/null || return 1
+      printf '%s\n' "$id" >"$lock/owner"; return 0
+    fi
     now="$(date +%s)"
-    age=$(( now - $(fi_file_mtime "$lock") ))
+    age=$(( now - mt ))
     (( age >= ${FOUND_ISSUES_AUTOFIX_LOCK_STALE:-3600} )) || return 1
   fi
   mv "$lock" "$lock.stale.$$" 2>/dev/null || return 1
@@ -323,7 +330,7 @@ fi_af_fixed_elsewhere() {
 # one the session works on, never assumed to be the default branch. Sets
 # AFI_base and AFI_base_why; every fallback is the default branch.
 fi_af_landing_branch() {
-  local def cur up b n best="" bestn="" base
+  local def cur up b n best="" bestn="" base rc
   def="$(cd "$AFI_root" && fi_resolve_default_branch)"
   AFI_base="$def"
   cur="$(git -C "$AFI_root" symbolic-ref -q --short HEAD 2>/dev/null || true)"
@@ -334,13 +341,25 @@ fi_af_landing_branch() {
   if [[ -n "$up" ]]; then
     # ls-remote, not origin/<up>: a branch deleted on GitHub keeps its stale
     # remote-tracking ref until someone prunes.
-    if git -C "$AFI_root" ls-remote --exit-code --heads origin "$up" >/dev/null 2>&1; then
+    # Only exit 2 is "no such branch"; any other failure (network, auth) says
+    # nothing about the branch, so the tracked one stays the base.
+    rc=0
+    git -C "$AFI_root" ls-remote --exit-code --heads origin "$up" >/dev/null 2>&1 || rc=$?
+    if (( rc == 0 )); then
       AFI_base="$up" AFI_base_why="tracks origin/$up"; return 0
+    elif (( rc != 2 )); then
+      AFI_base="$up" AFI_base_why="tracks origin/$up (ls-remote failed)"; return 0
     fi
     base="$(cd "$AFI_root" && gh pr list --repo "${AFI_slug:-$(fi_repo_id 2>/dev/null)}" --head "$up" --state merged --limit 1 \
       --json baseRefName --jq '.[0].baseRefName // ""' 2>/dev/null || true)"
-    if [[ -n "$base" ]] && git -C "$AFI_root" ls-remote --exit-code --heads origin "$base" >/dev/null 2>&1; then
-      AFI_base="$base" AFI_base_why="$up merged into $base"; return 0
+    if [[ -n "$base" ]]; then
+      rc=0
+      git -C "$AFI_root" ls-remote --exit-code --heads origin "$base" >/dev/null 2>&1 || rc=$?
+      if (( rc == 0 )); then
+        AFI_base="$base" AFI_base_why="$up merged into $base"; return 0
+      elif (( rc != 2 )); then
+        AFI_base="$base" AFI_base_why="$up merged into $base (ls-remote failed)"; return 0
+      fi
     fi
     AFI_base_why="$up gone, base unknown"; return 0
   fi
@@ -348,7 +367,10 @@ fi_af_landing_branch() {
   while IFS= read -r b || [[ -n "$b" ]]; do
     b="${b#origin/}"
     [[ -n "$b" && "$b" != HEAD && "$b" != fi/* ]] || continue
-    git -C "$AFI_root" ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1 || continue
+    # A failed ls-remote (not exit 2) keeps the candidate: the local ref decides.
+    rc=0
+    git -C "$AFI_root" ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1 || rc=$?
+    (( rc == 2 )) && continue
     git -C "$AFI_root" merge-base "origin/$b" HEAD >/dev/null 2>&1 || continue
     n="$(git -C "$AFI_root" rev-list --count "origin/$b..HEAD" 2>/dev/null)" || continue
     if [[ -z "$bestn" ]] || (( n < bestn )) || { (( n == bestn )) && [[ "$b" == "$def" ]]; }; then
@@ -495,6 +517,15 @@ fi_af_retire() {
   fi_af_log "$id" "$outcome: $text"
 }
 
+# A re-queued item re-claims as a fresh run: the dead run's attempts and
+# verdict must not count against the next one.
+_fi_af_clear_attempts() {
+  fi_af_item_set "$1" attempts 0
+  fi_af_item_set "$1" verdict ""
+  fi_af_item_set "$1" verdict_reason ""
+  fi_af_item_set "$1" verdict_tree ""
+}
+
 # Spec §8: a running item whose process is gone crashed. Requeue it once;
 # the second crash fails it.
 fi_af_reap() {
@@ -515,11 +546,14 @@ fi_af_reap() {
       fi_af_item_set "$f" pid ""
       # The dead run's PR number would make cancel refuse the re-run.
       fi_af_item_set "$f" pr ""
-      # Back in the queue: the landing branch resolves fresh at re-claim,
-      # except for a ship retry, whose kept branch was cut from this base.
+      # Back in the queue: the landing branch resolves fresh at re-claim and
+      # B's attempt count and verdict start over, except for a ship retry,
+      # whose kept branch was cut from this base and whose approved tree the
+      # ship re-checks.
       if [[ ! "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then
         fi_af_item_set "$f" base ""
         fi_af_item_set "$f" base_why ""
+        _fi_af_clear_attempts "$f"
       fi
       fi_af_unlock "$AFI_id"
       mv "$f" "$FI_AF_ST/queue/$AFI_id"
@@ -652,11 +686,13 @@ fi_af_requeue() {
   fi_af_worktree_remove
   fi_af_item_set "$r" pid ""
   fi_af_item_set "$r" pr ""
-  # A queued item resolves its landing branch fresh at its next claim; a
-  # ship retry keeps the base its kept branch was cut from.
+  # A queued item resolves its landing branch fresh at its next claim and
+  # starts B's attempt count and verdict over; a ship retry keeps the base
+  # its kept branch was cut from and the approved tree the ship re-checks.
   if [[ ! "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then
     fi_af_item_set "$r" base ""
     fi_af_item_set "$r" base_why ""
+    _fi_af_clear_attempts "$r"
   fi
   mv "$r" "$FI_AF_ST/queue/$id"
   fi_af_seg_write "$AFI_root"
