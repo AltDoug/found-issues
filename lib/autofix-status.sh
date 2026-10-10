@@ -229,20 +229,51 @@ fi_af_seg_refresh() {
 
 # Phase 5 rulings 3-4: what finished since the last interactive session, for
 # SessionStart. The stamp moves BEFORE printing, so two sessions starting
-# together show it once. Failure reasons keep only the bash-authored prefix
-# (text before the first ':' or '('): model text never reaches the line.
+# together show it once. The stamp is the newest `finished` value seen, plus
+# the ids shown in that second (seen.ids), so an item finishing mid-scan still
+# shows next time, once. A done file whose mtime is over 60 s older than the
+# stamp is skipped unread (an item's file is written at or after its finished
+# time, and done/ only grows); one stat call covers every file. Failure reasons keep only the
+# bash-authored prefix (text before the first ':' or '('): model text never
+# reaches the line.
 fi_af_summary() {
-  local peek="${1:-}" seen=0 f fixed=0 failed=0 prs="" reasons="" r cost=0 dec=0 file s
-  [[ -f "$FI_AF_ST/seen" ]] && IFS= read -r seen <"$FI_AF_ST/seen"
+  local peek="${1:-}" seen=0 f fixed=0 failed=0 prs="" reasons="" r cost=0 dec=0 file s newest n
+  local seen_ids="" newest_ids="" id mt="" line m
+  local -a files=() scan=()
+  # An empty or newline-less stamp makes read return 1: that is not an error.
+  [[ -f "$FI_AF_ST/seen" ]] && { IFS= read -r seen <"$FI_AF_ST/seen" || true; }
   [[ "$seen" =~ ^[0-9]+$ ]] || seen=0
-  for f in "$FI_AF_ST"/done/*; do
+  # Ids already shown whose finished second equals the stamp: an item stamped
+  # in that same second but moved to done/ after the scan still shows once.
+  [[ -f "$FI_AF_ST/seen.ids" ]] && { IFS= read -r seen_ids <"$FI_AF_ST/seen.ids" || true; }
+  newest="$seen"
+  for f in "$FI_AF_ST"/done/*; do [[ -f "$f" ]] && files+=("$f"); done
+  (( ${#files[@]} > 0 )) || return 0
+  # One stat for every file (GNU form first, BSD second); without a usable
+  # answer every file is read, as before.
+  mt="$(stat -c '%Y %n' -- "${files[@]}" 2>/dev/null || true)"
+  [[ "$mt" =~ ^[0-9]+\  ]] || mt="$(stat -f '%m %N' -- "${files[@]}" 2>/dev/null || true)"
+  if [[ "$mt" =~ ^[0-9]+\  ]]; then
+    while IFS= read -r line; do
+      m="${line%% *}"
+      [[ "$m" =~ ^[0-9]+$ ]] && (( m + 60 >= seen )) && scan+=("${line#* }")
+    done <<< "$mt"
+  else
+    scan=("${files[@]}")
+  fi
+  for f in ${scan[@]+"${scan[@]}"}; do
     [[ -f "$f" ]] || continue
     fi_af_item_read "$f" || true
     [[ "$AFI_finished" =~ ^[0-9]+$ ]] || continue
-    (( AFI_finished > seen )) || continue
+    id="${f##*/}"
+    (( AFI_finished >= seen )) || continue
+    (( AFI_finished == seen )) && [[ " $seen_ids " == *" $id "* ]] && continue
     case "$AFI_result" in
       shipped:*)
-        fixed=$((fixed + 1)); _fi_af_pr_num
+        n=1
+        # A sweep ships several fixes in one PR; AFI_fixed holds its count.
+        if [[ "$AFI_kind" == sweep && "$AFI_fixed" =~ ^[0-9]+$ ]] && (( AFI_fixed > 0 )); then n="$AFI_fixed"; fi
+        fixed=$((fixed + n)); _fi_af_pr_num
         [[ -n "$FI_AF_PRNUM" ]] && prs+="${prs:+, }#$FI_AF_PRNUM" ;;
       failed:*)
         failed=$((failed + 1))
@@ -260,11 +291,18 @@ fi_af_summary() {
         [[ -n "$r" && "; $reasons; " != *"; $r; "* ]] && reasons+="${reasons:+; }$r" ;;
       *) continue ;;
     esac
+    if (( AFI_finished > newest )); then newest="$AFI_finished"; newest_ids="$id"
+    elif (( AFI_finished == newest )); then newest_ids+="${newest_ids:+ }$id"; fi
     [[ "$AFI_cost" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
       && cost="$(awk -v a="$cost" -v b="$AFI_cost" 'BEGIN { printf "%.2f", a + b }')"
   done
   (( fixed + failed > 0 )) || return 0
-  [[ "$peek" == --peek ]] || printf '%s\n' "$(date +%s)" >"$FI_AF_ST/seen" 2>/dev/null || true
+  if [[ "$peek" != --peek ]]; then
+    # Still at the old stamp: keep the ids already shown in that second.
+    (( newest == seen )) && newest_ids="${seen_ids}${seen_ids:+${newest_ids:+ }}${newest_ids}"
+    printf '%s\n' "$newest" >"$FI_AF_ST/seen" 2>/dev/null || true
+    printf '%s\n' "$newest_ids" >"$FI_AF_ST/seen.ids" 2>/dev/null || true
+  fi
   file="$(fi_find_issues_file "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" 2>/dev/null || true)"
   [[ -n "$file" ]] && dec="$(fi_count_decide "$file")"
   s="Since last session: fixed $fixed"

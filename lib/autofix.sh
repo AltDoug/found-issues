@@ -433,6 +433,12 @@ cmd_autofix() {
       fi_af_no_prompts
       _fi_af_run "$rid" "$eng" ;;
     summary)
+      # fi_af_context creates the state dirs: a repo auto-fix never touched
+      # has nothing to summarize and must not get any.
+      local sslug
+      sslug="$(fi_repo_id 2>/dev/null)" || return 0
+      fi_af_root
+      [[ -d "$FI_AF_ROOT/${sslug//\//__}" ]] || return 0
       fi_af_context >/dev/null 2>&1 || return 0
       fi_af_summary "${1:-}" ;;
     cancel)

@@ -64,6 +64,95 @@ done_item() { # id result finished [pr] [cost]
   [[ "$output" != *deploy* ]]
 }
 
+@test "summary: an empty seen stamp does not abort the summary" {
+  : > "$ST/seen"
+  done_item a "shipped: PR #9" "$(date +%s)" 9
+  run "$FI_BIN" autofix summary
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fixed 1 (PR #9)"* ]]
+}
+
+@test "summary: a seen stamp without a newline does not abort the summary" {
+  printf '1000' > "$ST/seen"
+  done_item a "shipped: PR #9" "$(date +%s)" 9
+  run "$FI_BIN" autofix summary
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fixed 1 (PR #9)"* ]]
+}
+
+@test "summary: the stamp is the newest finished time seen, not the clock" {
+  done_item a "shipped: PR #9" 4000000000 9
+  "$FI_BIN" autofix summary >/dev/null
+  [ "$(cat "$ST/seen")" = 4000000000 ]
+}
+
+@test "summary: an item finishing after the scan began is still shown next time" {
+  # The stamp is the newest finished value seen, so a later item shows even
+  # when its finish time is below the wall clock at the first summary.
+  now="$(date +%s)"
+  done_item a "shipped: PR #9" "$((now - 100))" 9
+  "$FI_BIN" autofix summary >/dev/null
+  done_item b "shipped: PR #10" "$((now - 50))" 10
+  run "$FI_BIN" autofix summary
+  [[ "$output" == *"fixed 1 (PR #10)"* ]]
+}
+
+@test "summary: an item stamped in the stamp's own second but moved in later shows once" {
+  now="$(date +%s)"
+  done_item a "shipped: PR #9" "$now" 9
+  "$FI_BIN" autofix summary >/dev/null
+  [ "$(cat "$ST/seen")" = "$now" ]
+  done_item b "shipped: PR #10" "$now" 10
+  run "$FI_BIN" autofix summary
+  [[ "$output" == *"fixed 1 (PR #10)"* ]]
+  run "$FI_BIN" autofix summary
+  [ -z "$output" ]
+}
+
+@test "summary: a done file older than the stamp is not read" {
+  now="$(date +%s)"
+  printf '%s\n' "$now" > "$ST/seen"
+  done_item old "shipped: PR #9" 1000 9
+  touch -t 200001010000 "$ST/done/old"
+  done_item new "shipped: PR #10" "$((now + 5))" 10
+  fi_af_item_read() { printf '%s\n' "$1" >> "$TMP/reads"; AFI_finished=""; [[ "$1" == */new ]] && { AFI_finished=$((now + 5)); AFI_result="shipped: PR #10"; AFI_kind=spot; }; return 0; }
+  run fi_af_summary --peek
+  [ "$status" -eq 0 ]
+  grep -q '/new$' "$TMP/reads"
+  ! grep -q '/old$' "$TMP/reads" || false
+  [[ "$output" == *"fixed 1"* ]]
+}
+
+@test "summary: a recent done file newer than the stamp is shown" {
+  now="$(date +%s)"
+  printf '%s\n' "$((now - 1000))" > "$ST/seen"
+  done_item a "shipped: PR #9" "$((now - 10))" 9
+  run "$FI_BIN" autofix summary
+  [[ "$output" == *"fixed 1 (PR #9)"* ]]
+}
+
+@test "summary: a sweep that fixed two entries counts two" {
+  printf 'id=s1\nkind=sweep\nslug=foo/bar\nresult=shipped: PR #11, 2 fixed, merge auto, $1.00\nfinished=%s\npr=11\nfixed=2\ncost=1.00\n' "$(date +%s)" > "$ST/done/s1"
+  run "$FI_BIN" autofix summary
+  [[ "$output" == "Since last session: fixed 2 (PR #11)"* ]]
+}
+
+@test "summary: a spot item and a two-fix sweep add up" {
+  now="$(date +%s)"
+  done_item a "shipped: PR #9" "$now" 9
+  printf 'id=s1\nkind=sweep\nslug=foo/bar\nresult=shipped: PR #11, 2 fixed, merge auto\nfinished=%s\npr=11\nfixed=2\n' "$now" > "$ST/done/s1"
+  run "$FI_BIN" autofix summary
+  [[ "$output" == "Since last session: fixed 3 (PR #"* ]]
+}
+
+@test "summary: a repo with no auto-fix state creates nothing" {
+  rm -rf "$TMP/state"
+  run "$FI_BIN" autofix summary
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$TMP/state/autofix" ]
+}
+
 # The hook, run as Claude Code would, with this checkout's CLI.
 hook() {
   run env CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" FOUND_ISSUES_BIN="$TEST_REPO_ROOT/bin/found-issues" \
