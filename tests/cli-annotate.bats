@@ -184,7 +184,7 @@ _setup_pr_repo() {
   fi_run log "src/hot.py:2 — second bug"
   fi_run annotate-pr 9
   [ "$status" -eq 3 ]
-  ! grep -q '(PR: org/repo#9)' docs/found-issues.md
+  ! grep -q '(PR: org/repo#9)' docs/found-issues.md || false
   [[ "$output" == *"src/hot.py:1"* ]]
   [[ "$output" == *"src/hot.py:2"* ]]
   [[ "$output" == *"--pick"* ]]
@@ -200,7 +200,7 @@ _setup_pr_repo() {
   fi_run annotate-pr 9 --pick src/hot.py:2
   [ "$status" -eq 0 ]
   grep -q 'src/hot.py:2 — second bug (PR: org/repo#9)' docs/found-issues.md
-  ! grep -q 'src/hot.py:1 — first bug (PR:' docs/found-issues.md
+  ! grep -q 'src/hot.py:1 — first bug (PR:' docs/found-issues.md || false
   unset GH_MOCK_PR_VIEW
 }
 
@@ -214,7 +214,7 @@ _setup_pr_repo() {
   fi_run annotate-pr 9 --pick src/hot.py:1,src/hot.py:3
   [ "$status" -eq 0 ]
   grep -q 'first bug (PR: org/repo#9)' docs/found-issues.md
-  ! grep -q 'second bug (PR:' docs/found-issues.md
+  ! grep -q 'second bug (PR:' docs/found-issues.md || false
   grep -q 'third bug (PR: org/repo#9)' docs/found-issues.md
   unset GH_MOCK_PR_VIEW
 }
@@ -241,7 +241,7 @@ _setup_pr_repo() {
   fi_run annotate-pr 9
   [ "$status" -eq 3 ]
   grep -q 'lone bug (PR-auto: org/repo#9)' docs/found-issues.md
-  ! grep -q 'first bug (PR:' docs/found-issues.md
+  ! grep -q 'first bug (PR:' docs/found-issues.md || false
   [[ "$output" == *"src/hot.py:1"* ]]
   [[ "$output" == *"--pick"* ]]
   unset GH_MOCK_PR_VIEW
@@ -294,7 +294,7 @@ _setup_pr_repo() {
   fi_run annotate-pr 9
   [ "$status" -eq 3 ]
   # Both entries suffix-share src/util.py — neither may auto-annotate
-  ! grep -q '(PR: org/repo#9)' docs/found-issues.md
+  ! grep -q '(PR: org/repo#9)' docs/found-issues.md || false
   [[ "$output" == *"util.py:5"* ]]
   [[ "$output" == *"src/util.py:9"* ]]
   unset GH_MOCK_PR_VIEW
@@ -310,7 +310,7 @@ _setup_pr_repo() {
   fi_run annotate-pr 9
   [ "$status" -eq 3 ]
   # The deliberately-unpicked entry must stay un-annotated (listed, not tagged)
-  ! grep -q 'second bug (PR:' docs/found-issues.md
+  ! grep -q 'second bug (PR:' docs/found-issues.md || false
   [[ "$output" == *"src/hot.py:2"* ]]
   unset GH_MOCK_PR_VIEW
 }
@@ -323,7 +323,7 @@ _setup_pr_repo() {
   fi_run log "src/hot.py:2 — race condition on write"
   fi_run annotate-pr 9 --pick src/hot.py:2
   [ "$status" -ne 0 ]
-  ! grep -q '(PR: org/repo#9)' docs/found-issues.md
+  ! grep -q '(PR: org/repo#9)' docs/found-issues.md || false
   [[ "$output" == *"null deref crash"* ]]
   [[ "$output" == *"race condition on write"* ]]
   unset GH_MOCK_PR_VIEW
@@ -338,7 +338,7 @@ _setup_pr_repo() {
   fi_run annotate-pr 9 --pick "src/hot.py:2 — null deref"
   [ "$status" -eq 0 ]
   grep -q 'null deref crash (PR: org/repo#9)' docs/found-issues.md
-  ! grep -q 'race condition on write (PR:' docs/found-issues.md
+  ! grep -q 'race condition on write (PR:' docs/found-issues.md || false
   unset GH_MOCK_PR_VIEW
 }
 
@@ -491,7 +491,7 @@ EOF
   git commit -q -m "touch hot"
   fi_run annotate-commit HEAD
   [ "$status" -eq 3 ]
-  ! grep -q '(commit:' docs/found-issues.md
+  ! grep -q '(commit:' docs/found-issues.md || false
   [[ "$output" == *"src/hot.py:1"* ]]
   [[ "$output" == *"--pick"* ]]
 }
@@ -670,7 +670,7 @@ EOF
   fi_run annotate-pr 9 --pick src/hot.py:23-49
   [ "$status" -eq 0 ]
   grep -q 'src/hot.py:23-49 — range bug (PR: org/repo#9)' docs/found-issues.md
-  ! grep -q 'single line bug (PR:' docs/found-issues.md
+  ! grep -q 'single line bug (PR:' docs/found-issues.md || false
   unset GH_MOCK_PR_VIEW
 }
 

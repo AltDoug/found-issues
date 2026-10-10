@@ -57,7 +57,7 @@ HEADER
 
   [ -f docs/found-issues-archive.md ]
   grep -Fq "$old" docs/found-issues-archive.md
-  ! grep -Fq "$old" docs/found-issues.md
+  ! grep -Fq "$old" docs/found-issues.md || false
   grep -Fq "$recent" docs/found-issues.md
 }
 
@@ -106,7 +106,7 @@ HEADER
   grep -Fq "2026-05-06" docs/found-issues.md
   grep -Fq "2026-05-10" docs/found-issues.md
   # Check we don't double-count
-  ! grep -Fq "2026-05-01" docs/found-issues.md
+  ! grep -Fq "2026-05-01" docs/found-issues.md || false
   ! grep -Fq "2026-05-10" docs/found-issues-archive.md
 }
 
@@ -128,7 +128,7 @@ EOF
   grep -Fq "src/a.py:1" docs/found-issues.md
   grep -Fq "src/b.py:1" docs/found-issues.md
   # Fixed moved
-  ! grep -Fq "src/c.py:1" docs/found-issues.md
+  ! grep -Fq "src/c.py:1" docs/found-issues.md || false
   grep -Fq "src/c.py:1" docs/found-issues-archive.md
 }
 
