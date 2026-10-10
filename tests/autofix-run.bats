@@ -330,3 +330,31 @@ teardown() { fi_teardown_tmp; }
   grep -q 'codex verifier: model gpt-6-astra (high), 1500 tokens, run total 3000$' "$FI_AF_RUNS/$ID.log"
   grep -q 'Run cost: .*codex models: fixer gpt-6.1-sol (medium), verifier gpt-6-astra (high)' "$FI_AF_RUNS/$ID.pr-body.md"
 }
+
+# 3.4.3: a flaky test (kh2-midgar build.bats 55-57, a shared build lock) used
+# to fail a good fix, feed attempt 2 unrelated failures and tag the entry
+# autofix-failed. A red suite after a fix is re-run once before it counts.
+@test "autofix run: a suite that fails once after the fix and passes on the re-run ships on attempt 1" {
+  git config found-issues.autofix.testCommand "[ -z \"\$(git status --porcelain -- src)\" ] && exit 0; n=\$(cat '$TMP/runs' 2>/dev/null || echo 0); echo \$((n+1)) > '$TMP/runs'; [ \$n -ge 1 ] && exec sh test.sh; echo 'not ok 55 shared lock busy'; exit 1"
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  [ "$status" -eq 0 ]
+  grep -q '^result=shipped: PR #7' "$ST/done/$ID"
+  [ "$(grep -c '^claude' "$FI_STANDIN_TRACE")" = 2 ]
+  grep -q 'tests failed (not ok 55 shared lock busy); re-running once' "$FI_AF_RUNS/$ID.log"
+  grep -q 'tests passed on the re-run: the first failure was flaky' "$FI_AF_RUNS/$ID.log"
+  grep -q 'not ok 55' "$FI_AF_RUNS/$ID.tests1.first.log"
+}
+
+@test "autofix run: a fix that is red twice in a row still fails the attempt, one re-run each" {
+  git config found-issues.autofix.testCommand "[ -z \"\$(git status --porcelain -- src)\" ] && exit 0; echo x >> '$TMP/runs'; echo 'not ok 1 broken'; exit 1"
+  run "$FI_BIN" autofix run "$ID" --engine claude
+  grep -q '(autofix-failed: tests fail after 2 attempts)$' "$REPO/docs/found-issues.md"
+  [ "$(wc -l < "$TMP/runs" | tr -d ' ')" = 4 ]
+}
+
+@test "autofix run: a suite the watchdog kills after the fix is not re-run" {
+  git config found-issues.autofix.testCommand "[ -z \"\$(git status --porcelain -- src)\" ] && exit 0; echo x >> '$TMP/runs'; sleep 30"
+  FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS=3 run "$FI_BIN" autofix run "$ID" --engine claude
+  grep -q '^result=failed: tests fail after 2 attempts' "$ST/done/$ID"
+  [ "$(wc -l < "$TMP/runs" | tr -d ' ')" = 2 ]
+}
