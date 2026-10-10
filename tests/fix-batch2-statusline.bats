@@ -12,6 +12,9 @@ setup() {
   # Fake $HOME so the append tests never touch the real ~/.claude/statusline.sh
   export HOME="$TMP/home"
   mkdir -p "$HOME/.claude"
+  # The installed statusline block resolves found-issues from PATH; CI has
+  # none, and the probe now requires the segment itself to render.
+  export PATH="${TEST_REPO_ROOT}/bin:$PATH"
 }
 
 teardown() {
