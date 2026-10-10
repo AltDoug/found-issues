@@ -47,7 +47,7 @@ AUTOFIX-QUEUED $ID")"
 @test "hook: claude auto and bypassPermissions nudge the main agent (launcher B)" {
   local m
   for m in auto bypassPermissions; do
-    rm -f "$TMP/spawned"
+    rm -f "$TMP/spawned"; fi_af_item_set "$QITEM" launched ""
     run hook "$(payload "$m" "AUTOFIX-QUEUED $ID")"
     [ "$status" -eq 0 ]
     printf '%s' "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"'
@@ -118,12 +118,17 @@ AUTOFIX-QUEUED $id2")"
   wait_spawn
 }
 
-@test "hook: commit route plus marker emit one JSON object" {
+@test "hook: commit route plus marker emit one JSON object carrying both contexts" {
   export FOUND_ISSUES_BIN="$FI_BIN"
   printf 'x\n' >f.txt; git add f.txt; git commit -q -m x
+  # An open entry citing the committed line, so the commit route has text too.
+  printf -- '- [open] 2026-10-02 f.txt:1 — f is wrong\n' >>docs/found-issues.md
   run hook "$(payload auto "AUTOFIX-QUEUED $ID" "" "git commit -m x && found-issues log --fix small y")"
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -s 'length')" = 1 ]
+  ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+  [[ "$ctx" == *"commit needs annotation judgment"* ]]
+  [[ "$ctx" == *"Fix found-issues auto-fix item $ID."* ]]
 }
 
 @test "hook: a queued item whose repo root is gone still exits 0" {
