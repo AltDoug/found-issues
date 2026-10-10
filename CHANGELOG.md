@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.0] - 2026-10-10
+
+Measured overnight on 131 real auto-fix runs (2026-10-04 to 10-10, $49): about half the spend shipped nothing, and 71 runs ended stale before any fix. This release removes the causes found.
+
+### Added
+- **Every test suite runs.** Detection used to stop at the first suite it found, so kh2-midgar's auto-fixes ran `bats tests/` and never its 73 pytest files. Now every suite found runs, joined with `&&`: bats, Node, pytest, go, cargo, Gradle and Maven. `make test` (often a wrapper around the rest) is used only when nothing else is found.
+- **Gradle and Maven.** `./gradlew test` (or `gradle test`) and `./mvnw test` (or `mvn test`). bruhsailer-helper (Gradle) had no test command and 36 of its items ended `stale: no test command`.
+- **Node installs first.** A fresh fix worktree has no `node_modules`, so a bare `npm test` failed at base. Detection now installs with the lockfile's tool first (`pnpm install --frozen-lockfile`, `bun install --frozen-lockfile`, `yarn install --frozen-lockfile`, `npm ci`). pytest runs through `uv run` in a uv project. A `pyproject.toml` with `tests/test_*.py` counts as a pytest suite.
+- **`found-issues resolve <match> --deferred`** closes a `[deferred]` entry and keeps its defer trail.
+- **Deferred review in `/found-issues:sync` (Phase 3).** A deferred entry with no `(until:)` never came back, and 194 sat across five ledgers, some for a machine that no longer exists. Sync now re-checks up to 20 of them per run once they are 30 days old. Gone ones close, ones whose blocker cleared go back to `[open]`, and the rest stay parked.
+
+### Fixed
+- **A repo with no test command queues nothing.** Before, such items were queued, claimed and retired stale. `log` now says why and points at `found-issues.autofix.testCommand`.
+- **A red base is remembered.** kh2-midgar ran its whole suite at base for 21 items in a row on the same red base. A red base is re-run once (a flake is not red), then remembered by commit and test command, and the next item on that base retires without running the suite again.
+- **No duplicate PRs.** Three agent-config auto-fix PRs were closed as duplicates of fixes an interactive session made for the same entries. A claim now skips an entry that another open PR (not auto-fix's own) annotates. A ship re-checks first, and an entry fixed on the base meanwhile, or by another open PR, retires stale instead of opening a second PR.
+- **The fixer may run a compound test command.** Claude Code checks each part of an `&&` command on its own, so the allowlist now has a rule for each part.
+
 ## [3.5.1] - 2026-10-10
 
 ### Fixed

@@ -226,6 +226,33 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   [ "$(od -An -c win.txt | tr -d ' \n')" = 'eins\r\n' ]
 }
 
+# 3.6.0: agent-config #572, #576 and #592 were closed as duplicates of PRs an
+# interactive session opened (or merged) for the same entries.
+@test "autofix ship: an entry another open PR already fixes is retired stale, not shipped" {
+  fix_it
+  export GH_MOCK_PR_LIST='[{"number":571,"headRefName":"feat/wanda"},{"number":9,"headRefName":"fi/autofix/x"}]'
+  export GH_MOCK_PR_DIFF='+- [open] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small) (PR: foo/bar#571)'
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Not shipped"*"fix in flight in PR #571"* ]]
+  grep -q '^result=stale: fix in flight in PR #571$' "$ST/done/$ID"
+  ! git -C "$TMP/remote.git" rev-parse --verify -q "refs/heads/$BR" || false
+  ! grep -q '^pr create' "$GH_MOCK_TRACE" || false
+  ! grep -q '^pr diff 9 ' "$GH_MOCK_TRACE" || false
+}
+
+@test "autofix ship: an entry fixed on the base meanwhile is retired stale, not shipped" {
+  fix_it
+  sed -i.bak 's/^- \[open\] \(.*add subtracts (fix: small)\)$/- [fixed] \1 (PR: foo\/bar#587) (fixed: 2026-10-10)/' docs/found-issues.md
+  rm -f docs/found-issues.md.bak
+  grep -q '^- \[fixed\].*foo/bar#587' docs/found-issues.md
+  git commit -qam "fixed by another session" && git push -q origin main
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 0 ]
+  grep -q '^result=stale: fixed on main meanwhile$' "$ST/done/$ID"
+  ! git -C "$TMP/remote.git" rev-parse --verify -q "refs/heads/$BR" || false
+}
+
 @test "autofix ship: every gh call names the origin repo" {
   fix_it
   "$FI_BIN" autofix ship "$ID"

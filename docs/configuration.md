@@ -201,7 +201,7 @@ found-issues config autofix.sweepBatch --unset
 | `autofix.codexVerifierModel` | `gpt-6-astra` | Codex verifier model (effort high), or `inherit` |
 | `autofix.codexRunTokens` | unset (no cap) | Codex tokens per spot run, e.g. `800000` (about 3x a measured spot run); checked before each child, so one child can overshoot |
 | `autofix.codexSweepTokens` | unset (no cap) | Codex tokens per sweep (all batches), e.g. `2400000` |
-| `autofix.testCommand` | detected | The command that proves a fix (bats, npm test, pytest, go, cargo, make) |
+| `autofix.testCommand` | detected | The command that proves a fix. Detected: every suite found, joined with `&&` — bats, Node (installed with its lockfile's tool first), pytest (through `uv run` in a uv project), go, cargo, Gradle, Maven; `make test` only when nothing else is found. No command found = nothing is queued. Set it for a suite in a subfolder or one that needs setup |
 | `autofix.worktreeFiles` | unset | Gitignored files your tests need (e.g. `tools/config.local.toml`), repo-relative, separated by spaces and/or commas. Auto-fix copies each into every fix worktree before the base test run, from the checkout it runs in or, for a linked worktree, from the main worktree. Only a path the repo ignores is copied, so it can never land in a fix commit; names with spaces are not supported |
 | `autofix.dailyFixes` | `5` | Spot fixes per repo per day |
 | `autofix.dailySweeps` | `1` | Sweeps per repo per day |

@@ -84,6 +84,43 @@ For each eligible entry:
      yours to close; leave it.
    - If **unclear** — leave as `[open]`. Don't guess.
 
+## Phase 3 — Deferred review
+
+A `[deferred]` entry with no `(until: ...)` never comes back on its own,
+so the parking lot only grows. Review it here.
+
+Eligible: every `[deferred]` entry with no `(until: ...)`, whose
+`(mute-until: ...)` date (if any) has passed, and whose own date is more
+than 30 days old. Work through at most 20 per run, oldest first.
+
+For each eligible entry:
+
+1. Read the code or file at its location, and the entry's `(reason: ...)`.
+2. Decide which case it is:
+   - **Gone** — the symptom is no longer present (the same evidence bar as
+     Phase 2), or what the entry is about no longer exists: the file,
+     feature, service, tool or machine it describes was removed or
+     replaced. Close it:
+
+     ```bash
+     found-issues resolve "<distinctive text from the entry>" --deferred --verified ai
+     ```
+
+   - **Ready** — the issue is still present, and the reason it was
+     deferred no longer holds: the blocker merged, the phase it waited for
+     shipped, the dependency it needed is in place. Bring it back:
+
+     ```bash
+     found-issues promote-deferred "<distinctive text from the entry>"
+     ```
+
+   - **Still parked** — still present and still blocked, or unclear. Leave
+     it as it is.
+
+The Phase 2 conservative bias applies to the "Gone" case: close only on
+clear evidence. "Ready" only puts the entry back in the open list, where it
+is fixed, deferred again, or auto-fixed like any other.
+
 ## Conservative bias is mandatory
 
 False-positive closures (marking a real bug as fixed) are worse than
@@ -130,6 +167,8 @@ After both phases, report concisely:
 - Phase 2 closures: which entries you flipped and why (one sentence each)
 - Phase 2 deferred: count of entries you left as `[open]` because the
   judgment was unclear (don't list them all — just the count)
+- Phase 3: how many deferred entries you closed, brought back, and left
+  parked, plus how many eligible ones remain for the next run
 - Final status: run `found-issues status --format=plain` and pass it
   through
 

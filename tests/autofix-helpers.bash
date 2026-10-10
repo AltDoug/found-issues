@@ -14,6 +14,8 @@ fi_af_fixture() {
   export HOME="$TMP/home"; mkdir -p "$HOME"
   export FOUND_ISSUES_MODE=github-pr
   unset FOUND_ISSUES_AUTOFIX FOUND_ISSUES_AUTOFIX_CHILD CLAUDECODE
+  # 3.6.0: claim and ship ask gh for open PRs; never reach the real GitHub.
+  export PATH="$TEST_REPO_ROOT/tests/bin-shims:$PATH"
   git init -q --bare -b main "$TMP/remote.git"
   mkdir -p "$TMP/repo" && cd "$TMP/repo"
   fi_init_git

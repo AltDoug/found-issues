@@ -171,3 +171,36 @@ teardown() {
   [ "$(grep -c '^- \[' docs/found-issues.md)" -eq 2 ]
   grep -q 'final entry with no trailing newline' docs/found-issues.md
 }
+
+# 3.6.0: [deferred] entries with no (until:) never came back: 194 sat across
+# five ledgers, some for a machine that no longer exists. sync's deferred
+# review closes the dead ones through resolve --deferred.
+@test "resolve --deferred: flips a [deferred] entry to [fixed] and keeps its trail" {
+  mkdir -p src
+  printf 'a\nb\nc\n' > src/foo.py
+  fi_run log "src/foo.py:2 — null deref"
+  fi_run defer "null deref" --reason "waiting on the refactor"
+  grep -q '^- \[deferred\] .*null deref' docs/found-issues.md
+  today="$(date +%Y-%m-%d)"
+  fi_run resolve "null deref" --deferred
+  [ "$status" -eq 0 ]
+  grep -q "^- \[fixed\] .*null deref.*(reason: waiting on the refactor).*(verified: ai) (fixed: $today)$" docs/found-issues.md
+  ! grep -q '^- \[deferred\]' docs/found-issues.md || false
+}
+
+@test "resolve --deferred: never touches an [open] entry, and resolve alone never touches a [deferred] one" {
+  mkdir -p src
+  printf 'a\nb\nc\n' > src/foo.py
+  fi_run log "src/foo.py:2 — null deref"
+  fi_run log "src/foo.py:3 — null deref again"
+  fi_run defer "deref again"
+  fi_run resolve "null deref" --deferred
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] .*src/foo.py:2 ' docs/found-issues.md
+  grep -q '^- \[fixed\] .*deref again' docs/found-issues.md
+  fi_run log "src/foo.py:1 — parked one"
+  fi_run defer "parked one"
+  fi_run resolve "parked one"
+  [ "$status" -eq 1 ]
+  grep -q '^- \[deferred\] .*parked one' docs/found-issues.md
+}

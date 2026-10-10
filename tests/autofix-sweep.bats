@@ -53,6 +53,16 @@ LEDGER
   grep -q '^loc=sweep$' "$f"
 }
 
+@test "sweep: a repo with no test command queues no sweep" {
+  fi_af_sweep_fixture 4
+  git config --unset found-issues.autofix.testCommand
+  rm -f test.sh
+  run "$FI_BIN" log --fix medium 'src/calc.sh:1 — add subtracts'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"AUTOFIX-SWEEP-DUE"* ]]
+  [ -z "$(ls -A "$FOUND_ISSUES_STATE_DIR/autofix/foo__bar/queue" 2>/dev/null)" ]
+}
+
 @test "sweep: four fixable entries do not queue a sweep" {
   fi_af_sweep_fixture 3
   run "$FI_BIN" log --fix medium 'src/calc.sh:1 — add subtracts'

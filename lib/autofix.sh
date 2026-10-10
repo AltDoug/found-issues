@@ -215,6 +215,8 @@ _fi_af_run_one() {
       if fi_af_ship; then
         fi_af_item_set "$FI_AF_ST/running/$id" pr "$FI_AF_PR"
         _fi_af_end "$id" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE, \$$FI_AF_COST"
+      elif [[ -n "$FI_AF_SHIP_STALE" ]]; then
+        _fi_af_end "$id" stale "$FI_AF_WHY"
       else
         _fi_af_end "$id" failed "ship: $FI_AF_WHY"
       fi ;;
@@ -373,6 +375,9 @@ cmd_autofix() {
       if fi_af_ship; then
         printf 'Shipped %s as PR #%s (merge: %s)\n' "$1" "$FI_AF_PR" "$FI_AF_MERGE"
         fi_af_finish "$1" shipped "PR #$FI_AF_PR, merge $FI_AF_MERGE"
+      elif [[ -n "$FI_AF_SHIP_STALE" ]]; then
+        printf 'Not shipped %s: %s (retired stale)\n' "$1" "$FI_AF_WHY"
+        fi_af_finish "$1" stale "$FI_AF_WHY"
       else
         fi_err "autofix: ship refused — $FI_AF_WHY"
         return 1

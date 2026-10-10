@@ -150,6 +150,47 @@ teardown() { fi_teardown_tmp; }
   grep -q 'not ok 1 needs donor files' "$FI_AF_RUNS/$ID.log"
 }
 
+# 3.6.0: kh2-midgar ran its whole suite at base for 21 items in a row on the
+# same red base. A red base is re-run once (a flake is not red), then
+# remembered by commit and test command until either changes.
+@test "autofix claim: a base already red at the same commit is not re-run for the next item" {
+  git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; echo 'not ok 1 red'; exit 1"
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 5 ]
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 2 ]
+  "$FI_BIN" log --fix small 'test.sh:2 — second entry' >/dev/null
+  ID2="$(ls "$ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$ID2"
+  [ "$status" -eq 5 ]
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 2 ]
+  grep -q '^result=stale: tests fail at base$' "$ST/done/$ID2"
+  grep -q 'known red at' "$FI_AF_RUNS/$ID2.log"
+  # A new commit on the base is tested again.
+  echo more >> README.md && git add README.md && git commit -qm more && git push -q origin main
+  "$FI_BIN" log --fix small 'test.sh:3 — third entry' >/dev/null
+  ID3="$(ls "$ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$ID3"
+  [ "$status" -eq 5 ]
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 4 ]
+}
+
+@test "autofix claim: a flaky base that passes on its re-run is not red" {
+  git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; [ \$(wc -l < '$TMP/base-runs') -ge 2 ]"
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 2 ]
+  [ -f "$ST/running/$ID" ]
+}
+
+@test "autofix claim: an entry another open PR already fixes retires stale before any fixer" {
+  export GH_MOCK_PR_LIST='[{"number":571,"headRefName":"feat/wanda"}]'
+  export GH_MOCK_PR_DIFF='+- [open] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small) (PR: foo/bar#571)'
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 5 ]
+  grep -q '^result=stale: fix in flight in PR #571$' "$ST/done/$ID"
+  [ ! -d "$REPO/.claude/worktrees/fi-autofix-$ID" ]
+}
+
 @test "autofix claim: tests that pass at base run once and the claim proceeds" {
   git config found-issues.autofix.testCommand "echo base >> '$TMP/base-runs'"
   run "$FI_BIN" autofix claim "$ID"
