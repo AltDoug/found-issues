@@ -102,6 +102,7 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
   [ "$status" -eq 0 ]
   wait_spawn
   grep -q "^$REPO|autofix run $WID --engine claude$" "$TMP/spawned"
+  grep -qx "root=$REPO" "$ST/queue/$WID"
 }
 
 @test "b37 stop: a removed worktree whose prefix is a different repo is still refused" {
@@ -126,4 +127,20 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
   [ "$status" -eq 0 ]
   wait_spawn
   grep -q "^$REPO|autofix run $ID --engine claude$" "$TMP/spawned"
+  grep -qx "root=$REPO" "$QITEM"
+}
+
+@test "b37 stop: the fallback root is written back and a dead wt is dropped, so the item reads" {
+  WID=20261010-000000-00079
+  fi_af_item_write "$ST/queue/$WID" "id=$WID" kind=spot "root=$REPO/.claude/worktrees/gone" slug=foo/bar loc=src/calc.sh:1 engine=claude crashes=0 \
+    "wt=$REPO/.claude/worktrees/gone/.claude/worktrees/fi-autofix-$WID"
+  rm -f "$QITEM"
+  run stop "$REPO"
+  [ "$status" -eq 0 ]
+  wait_spawn
+  grep -qx "root=$REPO" "$ST/queue/$WID"
+  grep -qx "wt=" "$ST/queue/$WID"
+  fi_af_item_read "$ST/queue/$WID"
+  [ "$AFI_root" = "$REPO" ]
+  [ -z "$AFI_wt" ]
 }

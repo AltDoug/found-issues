@@ -14,7 +14,7 @@
 #   fi_afh_item <id> [<cwd>]
 #   fi_afh_now
 #   fi_afh_mark <item> <A|B> <epoch>
-#   fi_afh_root_resolve <root> <ref-cwd>
+#   fi_afh_root_resolve <root> <ref-cwd> [<item>]
 #   fi_afh_launch_a <item> <engine> <fi-bin> [<cwd>]
 #   fi_afh_context_b <id> [<item>]
 #   fi_afh_lock_fresh <lock-dir>
@@ -69,7 +69,7 @@ fi_afh_item() {
       continue
     fi
     if [[ "$ref" != "$AFI_root" ]]; then
-      fi_afh_root_resolve "$AFI_root" "$ref" || continue
+      fi_afh_root_resolve "$AFI_root" "$ref" "$f" || continue
       [[ "$ref" == "$FI_AFH_ROOT" ]] || [[ "$(fi_afh_common_dir "$FI_AFH_ROOT")" == "$(fi_afh_common_dir "$ref")" ]] || continue
     fi
     FI_AFH_ITEM="$f"; return 0
@@ -92,9 +92,12 @@ fi_afh_mark() {
 # when it exists. An item queued from a .claude/worktrees/<name> checkout that
 # was removed since (reaper, session end) falls back to the main checkout, the
 # prefix before the FIRST /.claude/worktrees/, when that is a git checkout of
-# the same repo as <ref-cwd>. Anything else is refused.
+# the same repo as <ref-cwd>. Anything else is refused. With <item>, a
+# fallback is written back to it: the run reads root= for its worktree, ledger
+# and git calls, and the dead path would fail every one of them; a wt= under
+# the dead root went with it.
 fi_afh_root_resolve() {
-  local root="$1" ref="$2" main ref_git main_git
+  local root="$1" ref="$2" item="${3:-}" main ref_git main_git
   FI_AFH_ROOT=""
   if [[ -d "$root" ]]; then FI_AFH_ROOT="$root"; return 0; fi
   [[ "$root" == */.claude/worktrees/* ]] || return 1
@@ -104,6 +107,10 @@ fi_afh_root_resolve() {
   main_git="$(fi_afh_common_dir "$main")" || return 1
   [[ "$ref_git" == "$main_git" ]] || return 1
   FI_AFH_ROOT="$main"
+  [[ -n "$item" ]] || return 0
+  fi_af_item_set "$item" root "$main" || return 1
+  [[ -z "$AFI_wt" ]] || fi_af_item_set "$item" wt "" || return 1
+  AFI_root="$main" AFI_wt=""
 }
 
 # Detached and fd-clean: the session never waits on it and bats never hangs
@@ -111,7 +118,7 @@ fi_afh_root_resolve() {
 fi_afh_launch_a() {
   local item="$1" engine="$2" bin="$3" log
   fi_af_item_read "$item" || return 1
-  fi_afh_root_resolve "$AFI_root" "${4:-$PWD}" || return 1
+  fi_afh_root_resolve "$AFI_root" "${4:-$PWD}" "$item" || return 1
   log="${item%/queue/*}/spawn.log"
   ( cd "$FI_AFH_ROOT" && nohup "$bin" autofix run "$AFI_id" --engine "$engine" \
       </dev/null >>"$log" 2>&1 3>&- & ) >/dev/null 2>&1
