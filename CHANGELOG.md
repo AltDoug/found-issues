@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.1] - 2026-10-10
+
+### Fixed
+- On Git for Windows, an auto-fix could rewrite lines it never meant to change with CRLF line endings, and the verifier rejected the fix because its diff touched unrelated code. In one overnight kh2-midgar sweep this happened three times. A correct fix to `nw-wm-unlocked.yml:137` was thrown away on both attempts only because an untouched test block went from LF to CRLF. Now, before the tests and the verifier run, CR is stripped from every changed text file that had none at base. Files that had CRLF at base, new files and binary files keep their bytes. So does a checkout where git converts line endings itself (`core.autocrlf=true` or `eol=crlf`).
+
 ## [3.5.0] - 2026-10-10
 
 ### Added

@@ -51,9 +51,32 @@ fi_af_reset_ledger() {
   done
 }
 
+# 3.5.1: a fixer on Git for Windows can rewrite lines it never meant to touch
+# with CRLF; kh2-midgar's verifier rejected otherwise good fixes three times
+# for an LF->CRLF rewrite of an unrelated test block. Strip CR from each
+# changed text file whose <ref> blob has none. Files that had CR at <ref>,
+# new files and binary files are left as they are, and so is a checkout git
+# itself converts to CRLF (core.autocrlf=true, eol=crlf): its add normalizes.
+fi_af_restore_eol() {
+  local wt="$1" ref="$2" add _ f tmp
+  [[ "$(git -C "$wt" config --get core.autocrlf 2>/dev/null)" != true ]] || return 0
+  while IFS=$'\t' read -r add _ f || [[ -n "$f" ]]; do
+    [[ "$add" != "-" && -f "$wt/$f" ]] || continue
+    git -C "$wt" cat-file -e "$ref:$f" 2>/dev/null || continue
+    [[ "$(git -C "$wt" check-attr eol -- "$f" 2>/dev/null)" != *": eol: crlf" ]] || continue
+    grep -q $'\r' "$wt/$f" || continue
+    git -C "$wt" cat-file -p "$ref:$f" | grep -q $'\r' && continue
+    tmp="$wt/$f.fi-eol.$$"
+    # cat > keeps the file's mode (an executable stays executable).
+    tr -d '\r' < "$wt/$f" > "$tmp" && cat "$tmp" > "$wt/$f"
+    rm -f "$tmp"
+  done < <(git -C "$wt" diff --numstat "$ref" 2>/dev/null)
+}
+
 # <ref> is the claim-time commit (base_sha), never the moving origin/<base>.
 fi_af_diff() {
   fi_af_reset_ledger "$1" "$2"
+  fi_af_restore_eol "$1" "$2"
   git -C "$1" add -A >/dev/null 2>&1 || true
   git -C "$1" diff --cached "$2"
 }
