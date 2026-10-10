@@ -1,4 +1,9 @@
-# found-issues
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo-lockup-dark.png">
+    <img src="assets/brand/logo-lockup-light.png" alt="found-issues" width="300">
+  </picture>
+</h1>
 
 > Your AI agent has a blind spot. **found-issues** is the Claude Code
 > plugin that makes it log, track, and auto-close the bugs it would
