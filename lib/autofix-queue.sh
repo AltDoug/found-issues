@@ -40,7 +40,7 @@ AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
 AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
+AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -55,14 +55,14 @@ fi_af_item_read() {
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
   AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
+  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|held_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -605,7 +605,9 @@ fi_af_base_tests() {
   fi_af_tests_pass "$AFI_wt" "$t" "$log" || rc=$?
   git -C "$AFI_wt" reset -q --hard "${AFI_base_sha:-HEAD}" >/dev/null 2>&1 || true
   git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
-  if (( rc == 0 )); then rm -f "$red"; return 0; fi
+  # A green base ends a STUCK streak at once, not only when another item
+  # retires with a different outcome (a marker for a repo that is no longer red).
+  if (( rc == 0 )); then rm -f "$red"; fi_af_stuck_clear "$AFI_root"; return 0; fi
   # 3.4.2: the watchdog firing is not a red suite (ledger :341).
   if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then
     local secs="$FI_AF_CHILD_TIMEDOUT" took
@@ -723,18 +725,40 @@ _fi_af_pushed_ref() {
 # Batch 4 (ledger lib/autofix-sweep.sh:274): the same test for many files in
 # one pass, for a sweep claim that holds the repo lock. Sets FI_AF_BUSY_SET to
 # a newline-delimited list (leading and trailing newline) of every path with
-# uncommitted changes or unpushed commits; _fi_af_in_busy_set <path> tests it
-# (a directory is busy when anything under it is).
+# uncommitted changes or unpushed work; _fi_af_in_busy_set <path> tests it
+# (a directory is busy when anything under it is). Names are read NUL-
+# terminated, so no path is C-quoted. Unpushed work is every path an unpushed
+# commit touched (merge commits against each parent, -m) plus the net change
+# since the merge base (pushed...HEAD), so a merge's own result is covered.
+# In a checkout with core.ignorecase the set is lowercased and so are queries.
 _fi_af_busy_set() {
-  local pushed
+  local pushed name acc=$'\n' lc=""
   pushed="$(_fi_af_pushed_ref)"
-  FI_AF_BUSY_SET=$'\n'"$(git -C "$AFI_root" -c core.quotepath=off diff --name-only --no-renames HEAD 2>/dev/null || true)"
-  FI_AF_BUSY_SET="$FI_AF_BUSY_SET"$'\n'"$(git -C "$AFI_root" -c core.quotepath=off log --no-renames --name-only --format= "$pushed..HEAD" 2>/dev/null || true)"$'\n'
+  [[ "$(git -C "$AFI_root" config --bool --get core.ignorecase 2>/dev/null || true)" == true ]] && lc=1
+  while IFS= read -r -d '' name; do
+    [[ -n "$name" ]] && acc+="$name"$'\n'
+  done < <(
+    git -C "$AFI_root" diff --name-only -z --no-renames HEAD 2>/dev/null || true
+    git -C "$AFI_root" log -m --no-renames --name-only -z --format= "$pushed..HEAD" 2>/dev/null || true
+    git -C "$AFI_root" diff --name-only -z --no-renames "$pushed...HEAD" 2>/dev/null || true
+  )
+  [[ -z "$lc" ]] || acc="$(printf '%s' "$acc" | tr '[:upper:]' '[:lower:]')"$'\n'
+  FI_AF_BUSY_SET="$acc"
+  FI_AF_BUSY_LC="$lc"
 }
 
+# rc 0 = busy. A path with a leading ./ is normalized; one that still is not
+# a plain relative path (absolute, .. or empty components, a trailing dot
+# component) is asked of git as a pathspec, per file, as before the set.
 _fi_af_in_busy_set() {
-  local q="${1%/}"
+  local q="$1"
+  while [[ "$q" == ./* ]]; do q="${q#./}"; done
+  q="${q%/}"
   [[ -n "$q" ]] || return 1
+  case "/$q/" in
+    //*|*//*|*/./*|*/../*) _fi_af_file_busy "$1"; return ;;
+  esac
+  [[ -z "${FI_AF_BUSY_LC:-}" ]] || q="$(printf '%s' "$q" | tr '[:upper:]' '[:lower:]')"
   [[ "$FI_AF_BUSY_SET" == *$'\n'"$q"$'\n'* || "$FI_AF_BUSY_SET" == *$'\n'"$q"/* ]]
 }
 
@@ -782,7 +806,7 @@ _fi_af_wt_fail_requeue() {
   # wait_next), so three retries outlast a short outage.
   fi_af_item_set "$r" waiting "$why"
   fi_af_item_set "$r" wait_next "$(( $(date +%s) + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
-  fi_af_worktree_remove
+  # fi_af_requeue removes the worktree itself.
   fi_af_requeue "$id" "$why; retry $(( tries + 1 )) of 3"
   FI_AF_WHY="$why; requeued, retry $(( tries + 1 )) of 3"
   return 0

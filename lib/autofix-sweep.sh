@@ -186,7 +186,7 @@ fi_af_sweep_check() {
 # once for all of them: one cat-file --batch-check for presence on
 # origin/<base>, one diff and one log for the busy files.
 _fi_af_sweep_ready() {
-  local id="$1" entry p keep="${AFI_entry:-}" skip=":${AFI_skip_files:-}:"
+  local id="$1" entry p keep="${AFI_entry:-}" skip=":${AFI_skip_files:-}:" held=":${AFI_held_files:-}:"
   local i k n=0 line any=0
   local -a ents=() paths=() gone=() want=() spec=() ans=()
   while IFS= read -r entry || [[ -n "$entry" ]]; do
@@ -218,6 +218,9 @@ _fi_af_sweep_ready() {
     p="${paths[i]}"
     if [[ -n "$p" ]]; then
       fi_entry_loc_v "${ents[i]}" || true
+      if [[ "$held" == *":$p:"* ]]; then
+        fi_af_log "$id" "sweep: skip $FE_loc (held back: an earlier batch skipped an entry on this file)"; continue
+      fi
       if [[ "$skip" == *":$p:"* ]]; then
         fi_af_log "$id" "sweep: skip $FE_loc (file in an earlier batch's PR)"; continue
       fi
@@ -286,7 +289,11 @@ fi_af_sweep_claim() {
     _fi_af_wt_fail_requeue "$id" && return 8
     fi_af_finish "$id" failed "$FI_AF_WHY"; return 6
   fi
+  # The cut worked: a fetch-failure requeue's retry count and wait clock end
+  # here (the spot claim clears them the same way, lib/autofix-queue.sh).
   fi_af_item_set "$r" wt_retries ""
+  fi_af_item_set "$r" waiting ""
+  fi_af_item_set "$r" wait_next ""
   fi_af_item_set "$r" wt "$AFI_wt"
   fi_af_item_set "$r" branch "$AFI_branch"
   # No test command at origin/<base>: retire before the day's slot is spent
@@ -324,6 +331,7 @@ fi_af_sweep_claim() {
     : >"$FI_AF_ST/sweeps/$id.entries"
   fi
   : >"$FI_AF_ST/sweeps/$id.outcomes"
+  : >"$FI_AF_ST/sweeps/$id.held"
   while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$FI_AF_ST/sweeps/$id.entries"
   if (( n == 0 )); then
     FI_AF_WHY="nothing fixable now"
@@ -429,7 +437,7 @@ fi_af_sweep_commit() {
   # eligible for the next sweep once those PRs have merged.
   if p="$(_fi_af_sweep_skip_hit "$AFI_wt" "$AFI_head")"; then
     FI_AF_WHY="touches $p (file in an earlier batch's PR)"
-    fi_af_sweep_settle "$id" skipped "$FI_AF_WHY"
+    fi_af_sweep_settle "$id" skipped-chain "$FI_AF_WHY"
     return 2
   fi
   fi_parse_entry_vars "$AFI_entry" || true
@@ -451,7 +459,11 @@ fi_af_sweep_commit() {
 # Any outcome but fixed: drop this entry's change, record the outcome on the
 # source ledger, move on (plan Review Focus 2).
 fi_af_sweep_settle() {
-  local id="$1" outcome="$2" text="$3" rc=0
+  local id="$1" outcome="$2" text="$3" rc=0 chain=0
+  # skipped-chain = skipped for touching a file of an earlier batch's PR. It is
+  # recorded as plain "skipped"; its entry's file goes to the chain's held list
+  # (a marker of its own, so the 160-char display text is never parsed).
+  if [[ "$outcome" == skipped-chain ]]; then outcome=skipped chain=1; fi
   text="${text//$'\n'/ }"
   text="${text:0:160}"
   git -C "$AFI_wt" reset -q --hard "$AFI_head" >/dev/null 2>&1 || true
@@ -459,6 +471,7 @@ fi_af_sweep_settle() {
   _fi_af_ledger_outcome "$outcome" "$text" || rc=$?
   (( rc == 0 )) || fi_af_log "$id" "ledger not updated for $AFI_loc $outcome (rc $rc)"
   _fi_af_sweep_record "$outcome" "$text"
+  (( ! chain )) || printf '%s\n' "${AFI_loc%%:*}" >>"$FI_AF_ST/sweeps/$AFI_id.held"
   fi_af_log "$id" "sweep: $AFI_loc $outcome: $text"
   _fi_af_sweep_advance
   # Whatever the last outcome was, a full batch closes at the first file
@@ -643,15 +656,22 @@ fi_af_sweep_finish() {
 # paths its entries cite plus its whole diff): their PRs may not be merged
 # yet, so a later batch cut from origin/<base> must not touch them. The item keeps this batch's base and resolved engine.
 _fi_af_sweep_queue_next() {
-  local id="$1" nxt skip="${AFI_skip_files:-}" loc out key text p
+  local id="$1" nxt skip="${AFI_skip_files:-}" held="${AFI_held_files:-}" loc out key text p
   nxt=$(( $(_fi_af_sweep_batch_no) + 1 ))
   while IFS=$'\t' read -r loc out key text || [[ -n "$loc" ]]; do
-    # An entry dropped for touching a chain file stays [open]: its own file
-    # joins the set so later batches skip it before paying a fixer for it.
-    [[ "$out" == "fixed" || ( "$out" == "skipped" && "$text" == "touches "*"(file in an earlier batch's PR)" ) ]] || continue
+    [[ "$out" == "fixed" ]] || continue
     p="${loc%%:*}"
     [[ -n "$p" && ":$skip:" != *":$p:"* ]] && skip+="${skip:+:}$p"
   done <"$FI_AF_ST/sweeps/$id.outcomes"
+  # An entry dropped for touching a chain file stays [open]: its own file
+  # joins the skip set (so later batches skip its entries before paying a
+  # fixer for them) and the held list (so the log says why).
+  if [[ -f "$FI_AF_ST/sweeps/$id.held" ]]; then
+    while IFS= read -r p || [[ -n "$p" ]]; do
+      [[ -n "$p" && ":$held:" != *":$p:"* ]] && held+="${held:+:}$p"
+      [[ -n "$p" && ":$skip:" != *":$p:"* ]] && skip+="${skip:+:}$p"
+    done <"$FI_AF_ST/sweeps/$id.held"
+  fi
   # Every file this batch changed, not just the ones its entries cite: a
   # fixer's test file or a shared helper conflicts with the batch's PR too.
   if [[ -n "${AFI_base_sha:-}" && -n "${AFI_head:-}" ]]; then
@@ -664,7 +684,7 @@ _fi_af_sweep_queue_next() {
     "root=$AFI_root" "slug=$AFI_slug" "loc=sweep" "engine=$AFI_engine" \
     "queued=$(date +%Y-%m-%dT%H:%M:%S)" "crashes=0" \
     "cont=$nxt" "cap_day=$(fi_today)" "chain_cost=${FI_AF_COST:-0}" "chain_tokens=${FI_AF_TOKENS:-0}" \
-    "base=$AFI_base" "base_why=$AFI_base_why" "skip_files=$skip"
+    "base=$AFI_base" "base_why=$AFI_base_why" "skip_files=$skip" "held_files=$held"
   fi_af_log "$id" "sweep: queued batch $nxt as $FI_AF_ID"
 }
 

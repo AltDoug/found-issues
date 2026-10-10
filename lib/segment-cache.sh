@@ -102,7 +102,49 @@ fi_segment_cache_put() {
 # lives in autofix/stuck/<root>, written at retire time (fi_af_stuck_update).
 # Read AFTER the cache, never cached. Builtins only: cd -P resolves the
 # root git reports, so a symlinked checkout still finds its file.
+#
+# The stuck-file helpers below are shared with lib/autofix-status.sh (which
+# writes the file and prints the SessionStart line), so the threshold, the
+# root-to-filename key and the reader exist once. The file: line 1 the streak
+# count, line 2 the first failing test names, line 3 the epoch of the last
+# base failure; a streak whose last failure is older than FI_AF_STUCK_MAX_AGE
+# (7 days) no longer counts, so a repo nobody touches does not stay red.
 FI_AF_STUCK_AFTER="${FI_AF_STUCK_AFTER:-3}"
+FI_AF_STUCK_MAX_AGE="${FI_AF_STUCK_MAX_AGE:-604800}"
+
+# Sets FI_AF_KEY, the state-file name (seg/, stuck/) of a repo root.
+fi_af_root_key() { FI_AF_KEY="${1//[^A-Za-z0-9._-]/_}"; }
+
+# Sets FI_AF_NOW (epoch seconds): a builtin where bash has one, date otherwise
+# (only a bash older than 4.2 gets here, and never on the statusline fast path).
+fi_af_now() {
+  if fi_segment_clock_ok; then printf -v FI_AF_NOW '%(%s)T' -1
+  else FI_AF_NOW="$(date +%s)"; fi
+}
+
+# Reads a stuck file: sets FI_AF_STUCK_N / _NAMES / _TS (empty when unset).
+# rc 1 when there is no such file.
+# shellcheck disable=SC2034  # _NAMES is read by lib/autofix-status.sh
+fi_af_stuck_read() {
+  FI_AF_STUCK_N="" FI_AF_STUCK_NAMES="" FI_AF_STUCK_TS=""
+  [[ -f "$1" ]] || return 1
+  { IFS= read -r FI_AF_STUCK_N || true; IFS= read -r FI_AF_STUCK_NAMES || true; IFS= read -r FI_AF_STUCK_TS || true; } <"$1"
+  return 0
+}
+
+# rc 0 when the file holds a live streak: the count reached
+# FI_AF_STUCK_AFTER and its last base failure is within FI_AF_STUCK_MAX_AGE
+# (a file without a timestamp counts as fresh). Leaves the fields set.
+fi_af_stuck_active() {
+  fi_af_stuck_read "$1" || return 1
+  [[ "$FI_AF_STUCK_N" =~ ^[0-9]+$ ]] && (( 10#$FI_AF_STUCK_N >= FI_AF_STUCK_AFTER )) || return 1
+  if [[ "$FI_AF_STUCK_TS" =~ ^[0-9]+$ ]]; then
+    fi_af_now
+    (( FI_AF_NOW - 10#$FI_AF_STUCK_TS <= FI_AF_STUCK_MAX_AGE )) || return 1
+  fi
+  return 0
+}
+
 fi_segment_af_suffix() {
   local file="$1" root saved n="" base name local_form=""
   FI_SEG_AF="" FI_SEG_AF_N=0
@@ -131,7 +173,7 @@ fi_segment_af_suffix() {
     [[ -n "$n" && "$n" != "/" ]] && root="$n"
   fi
   n=""
-  name="${root//[^A-Za-z0-9._-]/_}"
+  fi_af_root_key "$root"; name="$FI_AF_KEY"
   if [[ -f "$base/seg/$name" ]]; then
     IFS= read -r n <"$base/seg/$name" || true
     if [[ "$n" =~ ^[1-9][0-9]*$ ]]; then
@@ -139,12 +181,8 @@ fi_segment_af_suffix() {
       FI_SEG_AF=$'\033[35m'"🔧$n"$'\033[0m'
     fi
   fi
-  n=""
-  if [[ -f "$base/stuck/$name" ]]; then
-    IFS= read -r n <"$base/stuck/$name" || true
-    if [[ "$n" =~ ^[0-9]+$ ]] && (( 10#$n >= FI_AF_STUCK_AFTER )); then
-      FI_SEG_AF+="${FI_SEG_AF:+ }"$'\033[31m'"🔧stuck"$'\033[0m'
-    fi
+  if fi_af_stuck_active "$base/stuck/$name"; then
+    FI_SEG_AF+="${FI_SEG_AF:+ }"$'\033[31m'"🔧stuck"$'\033[0m'
   fi
   return 0
 }

@@ -210,7 +210,7 @@ fi_af_seg_write() {
     [[ -f "$f" ]] || continue
     [[ "$(_fi_af_field "$f" root 2>/dev/null)" == "$root" ]] && n=$((n + 1))
   done
-  name="${root//[^A-Za-z0-9._-]/_}"
+  fi_af_root_key "$root"; name="$FI_AF_KEY"
   dir="$FI_AF_ROOT/seg"
   if (( n == 0 )); then rm -f "$dir/$name" 2>/dev/null; return 0; fi
   mkdir -p "$dir" 2>/dev/null || return 0
@@ -224,21 +224,29 @@ fi_af_seg_write() {
 # tests fail at base" day after day, nothing outside `autofix status` said
 # auto-fix was stuck. The streak per repo root (consecutive items retired that
 # way, reset by any other outcome) lives in autofix/stuck/<root>: line 1 the
-# count, line 2 the first failing test names. Written at retire time so the
-# statusline (lib/segment-cache.sh) and SessionStart only read a tiny file.
-FI_AF_STUCK_AFTER="${FI_AF_STUCK_AFTER:-3}"
+# count, line 2 the first failing test names, line 3 the epoch of the last
+# base failure. Written at retire time so the statusline (lib/segment-cache.sh,
+# which owns FI_AF_STUCK_AFTER, the key and the reader) and SessionStart only
+# read a tiny file. It also clears when the base is found green, when
+# auto-fix is switched off, and once its last failure is a week old.
 fi_af_stuck_update() {
   local root="$1" outcome="$2" text="$3" id="$4" dir f n=0 names="" fresh="" line p count=0
   [[ -n "$root" ]] || return 0
   fi_af_root
   dir="$FI_AF_ROOT/stuck"
-  f="$dir/${root//[^A-Za-z0-9._-]/_}"
+  fi_af_root_key "$root"
+  f="$dir/$FI_AF_KEY"
   if [[ "$outcome" != stale || "$text" != "tests fail at base" ]]; then
     rm -f "$f" 2>/dev/null
     return 0
   fi
-  if [[ -f "$f" ]]; then
-    { IFS= read -r n || true; IFS= read -r names || true; } <"$f"
+  if fi_af_stuck_read "$f"; then
+    n="$FI_AF_STUCK_N" names="$FI_AF_STUCK_NAMES"
+    # A streak whose last failure is over a week old has aged out: start again.
+    if [[ "$FI_AF_STUCK_TS" =~ ^[0-9]+$ ]]; then
+      fi_af_now
+      (( FI_AF_NOW - 10#$FI_AF_STUCK_TS <= FI_AF_STUCK_MAX_AGE )) || { n=0; names=""; }
+    fi
   fi
   [[ "$n" =~ ^[0-9]+$ ]] || n=0
   n=$((10#$n + 1))
@@ -263,8 +271,21 @@ fi_af_stuck_update() {
     [[ -z "$fresh" ]] || names="$fresh"
   fi
   mkdir -p "$dir" 2>/dev/null || return 0
-  if printf '%s\n%s\n' "$n" "$names" >"$f.$$" 2>/dev/null; then
+  fi_af_now
+  if printf '%s\n%s\n%s\n' "$n" "$names" "$FI_AF_NOW" >"$f.$$" 2>/dev/null; then
     mv -f "$f.$$" "$f" 2>/dev/null || rm -f "$f.$$"
+  fi
+  return 0
+}
+
+# Drop the stuck marker of one repo root, or of every repo (no argument).
+fi_af_stuck_clear() {
+  fi_af_root
+  if [[ -n "${1:-}" ]]; then
+    fi_af_root_key "$1"
+    rm -f "$FI_AF_ROOT/stuck/$FI_AF_KEY" 2>/dev/null
+  else
+    rm -f "$FI_AF_ROOT"/stuck/* 2>/dev/null
   fi
   return 0
 }
@@ -272,15 +293,13 @@ fi_af_stuck_update() {
 # The SessionStart line for a repo whose auto-fix is stuck (empty otherwise).
 # Fixed text plus bash-sanitized test names: no model text reaches it.
 fi_af_stuck_line() {
-  local root f n="" names="" s
+  local root s
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
   fi_af_root
-  f="$FI_AF_ROOT/stuck/${root//[^A-Za-z0-9._-]/_}"
-  [[ -f "$f" ]] || return 0
-  { IFS= read -r n || true; IFS= read -r names || true; } <"$f"
-  [[ "$n" =~ ^[0-9]+$ ]] && (( 10#$n >= FI_AF_STUCK_AFTER )) || return 0
-  s="Auto-fix is STUCK in this repo: the last $((10#$n)) items all retired with tests failing at base, so nothing is being fixed."
-  [[ -n "$names" ]] && s+=" First failing: $names."
+  fi_af_root_key "$root"
+  fi_af_stuck_active "$FI_AF_ROOT/stuck/$FI_AF_KEY" || return 0
+  s="Auto-fix is STUCK in this repo: the last $((10#$FI_AF_STUCK_N)) items all retired with tests failing at base, so nothing is being fixed."
+  [[ -n "$FI_AF_STUCK_NAMES" ]] && s+=" First failing: $FI_AF_STUCK_NAMES."
   s+=" Fix the base suite; if its tests read gitignored local files, list them in git config found-issues.autofix.worktreeFiles. Details: found-issues autofix status."
   printf '%s\n' "$s"
 }
@@ -292,7 +311,7 @@ fi_af_seg_refresh() {
   for f in "$FI_AF_ST"/done/* "$FI_AF_ST"/queue/* "$FI_AF_ST"/running/*; do
     [[ -f "$f" ]] || continue
     root="$(_fi_af_field "$f" root 2>/dev/null || true)"
-    [[ -n "$root" ]] && rm -f "$FI_AF_ROOT/seg/${root//[^A-Za-z0-9._-]/_}" 2>/dev/null
+    if [[ -n "$root" ]]; then fi_af_root_key "$root"; rm -f "$FI_AF_ROOT/seg/$FI_AF_KEY" 2>/dev/null; fi
   done
   for f in "$FI_AF_ST"/running/*; do
     [[ -f "$f" ]] && fi_af_seg_write "$(_fi_af_field "$f" root 2>/dev/null || true)"

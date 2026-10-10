@@ -115,7 +115,8 @@ _fi_af_end() {
 # Spec §5 steps 2-5 for the loaded entry (AFI_entry, AFI_wt, AFI_base_sha):
 # up to 2 attempts of fix -> bash tests -> verifier. Shared by a spot run
 # and by each entry of a sweep. Sets FI_AF_OUTCOME (approved | already-fixed
-# | decide | manual | failed | outage) and FI_AF_OUTCOME_TEXT; on approved
+# | decide | manual | failed | outage | skipped-chain: a sweep entry that
+# touches a file of an earlier batch's PR) and FI_AF_OUTCOME_TEXT; on approved
 # the worktree holds the verified change and FI_AF_TREE its staged tree.
 _fi_af_fix_loop() {
   local id="$1" engine="$2" n feedback="" why="" tlog ref p
@@ -151,7 +152,7 @@ _fi_af_fix_loop() {
     # A continuation fix that edits a file of an earlier batch's PR is
     # dropped now, before the tests and the paid verifier run.
     if declare -F _fi_af_sweep_skip_hit >/dev/null && p="$(_fi_af_sweep_skip_hit "$AFI_wt" "${AFI_head:-$ref}")"; then
-      FI_AF_OUTCOME=skipped FI_AF_OUTCOME_TEXT="touches $p (file in an earlier batch's PR)"
+      FI_AF_OUTCOME=skipped-chain FI_AF_OUTCOME_TEXT="touches $p (file in an earlier batch's PR)"
       return 0
     fi
     tlog="$FI_AF_RUNS/$id.tests$n.log"
@@ -313,6 +314,8 @@ cmd_autofix() {
       fi_af_root
       mkdir -p "$FI_AF_ROOT"
       : >"$FI_AF_ROOT/disabled"
+      # Nothing runs now, so no repo is stuck: a marker would outlive the switch.
+      fi_af_stuck_clear
       printf 'Auto-fix switched off in every repo (undo: found-issues autofix on).\n' ;;
     claim)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix claim <id>"; return 2; }

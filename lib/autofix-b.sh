@@ -130,7 +130,7 @@ fi_af_b_verify() {
   # Before the tests and the paid verifier: see _fi_af_fix_loop.
   if (( sweep )) && p="$(_fi_af_sweep_skip_hit "$AFI_wt" "${AFI_head:-${AFI_base_sha:-origin/$AFI_base}}")"; then
     FI_AF_WHY="touches $p (file in an earlier batch's PR)"
-    fi_af_sweep_settle "$id" skipped "$FI_AF_WHY"
+    fi_af_sweep_settle "$id" skipped-chain "$FI_AF_WHY"
     printf 'not verified (%s): entry skipped.\nNext: found-issues autofix next %s\n' "$FI_AF_WHY" "$id"; return 5
   fi
   FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")" || { fi_err "autofix: no test command"; return 2; }

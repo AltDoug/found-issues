@@ -404,6 +404,11 @@ cmd_config() {
   _fi_cfg_valid || return 2
   git config "$scope" "found-issues.$FI_CFG_KEY" "$FI_CFG_VAL" || return 1
   printf 'Set found-issues.%s = %s (%s)\n' "$FI_CFG_KEY" "$FI_CFG_VAL" "${scope#--}"
+  # Switched off here (or everywhere): its STUCK marker would outlive the switch.
+  if [[ "$FI_CFG_KEY" == autofix && "$FI_CFG_VAL" == false ]]; then
+    if [[ "$scope" == --global ]]; then fi_af_stuck_clear
+    else fi_af_stuck_clear "$(git rev-parse --show-toplevel 2>/dev/null || true)"; fi
+  fi
   if [[ "$scope" == --global ]]; then
     local local_val
     local_val="$(git config --local --get "found-issues.$FI_CFG_KEY" 2>/dev/null || true)"
