@@ -36,7 +36,8 @@ Usage: found-issues autofix <command>
                               Give a claimed item back with an outcome
   merge-when-green <N> [--repo owner/name] [--guard]
                               Wait for PR <N>'s checks, then squash-merge it
-                              (--guard: only resolve ledger conflicts, never merge)
+                              (--guard: only resolve ledger conflicts, never merge; one per PR, up to
+                              FOUND_ISSUES_AUTOFIX_GUARD_POLLS checks, default 1440)
 Settings: git config found-issues.autofix true|false (local overrides --global),
 found-issues.autofix.{engine,testCommand,worktreeFiles,dailyFixes,runBudget,runTimeoutMin,
 dailySweeps,sweepThreshold,sweepBatch,sweepBudget,codexModel,codexVerifierModel,
@@ -80,11 +81,13 @@ _fi_af_verify() {
   #    error_max_budget_usd, any error_max_*): the verifier ran and could not
   #    decide, so the fix is REJECTED through the normal reject path (no
   #    outage, no free re-run of the paid fixer, a sweep carries on);
-  #  - the watchdog's timeout (rc 124), a crash, a lost login: an OUTAGE.
+  #  - the watchdog's timeout, a crash, a lost login: an OUTAGE. The watchdog
+  #    is told by FI_AF_CHILD_TIMEDOUT, never by a bare exit 124 (3.4.2): a
+  #    verifier that exits 124 on its own is an ordinary crash.
   # A verdict it did leave stands whatever its exit code. Codex has no
   # turn/budget limit result, so for it every non-zero exit is an outage.
   if [[ -z "$FI_AF_ENGINE_ERR" ]] && (( rc != 0 )) && (( FI_AF_VERDICT_OK != 1 )); then
-    if (( rc == 124 )); then
+    if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then
       FI_AF_ENGINE_ERR="$engine verifier exited 124 (timed out)"
     elif [[ -n "$FI_AF_LIMIT" ]]; then
       FI_AF_APPROVE="false" FI_AF_REASON="verifier hit its run limit ($FI_AF_LIMIT) before a verdict"
@@ -411,7 +414,14 @@ cmd_autofix() {
       if [[ "${1:-}" == "--guard" ]]; then mguard=1; shift; fi
       [[ $# -eq 0 && "$mpr" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number> [--repo owner/name] [--guard]"; return 2; }
       fi_af_no_prompts
-      fi_af_merge_when_green "$mpr" "$mrepo" "$mguard" ;;
+      if (( mguard )); then
+        local mrc=0
+        _fi_af_guard_lock "$mpr" "$mrepo" || return 0
+        fi_af_merge_when_green "$mpr" "$mrepo" 1 || mrc=$?
+        _fi_af_guard_unlock
+        return "$mrc"
+      fi
+      fi_af_merge_when_green "$mpr" "$mrepo" 0 ;;
     next)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix next <id>"; return 2; }
       fi_af_context || return 1

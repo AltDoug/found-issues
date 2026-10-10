@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # Ledger batch 4 (lib/autofix.sh:77): a verifier that hits its own run limit
 # (error_max_turns, error_max_budget_usd, any error_max_*) is a REJECT, not an
-# outage; only the watchdog timeout (rc 124) and a real crash/login/network
+# outage; only the watchdog timeout (FI_AF_CHILD_TIMEDOUT, not a bare exit 124) and a real crash/login/network
 # failure are outages. The carve-out in fi_af_collect (error_max_* is not an
 # engine error) must hold even when claude -p exits non-zero.
 
@@ -67,8 +67,8 @@ teardown() { fi_teardown_tmp; }
   [ ! -f "$ST/queue/$ID" ]
 }
 
-@test "batch4 verifier: the watchdog timeout (rc 124) is an outage, named explicitly" {
-  export FI_STANDIN_VERIFIER_CRASH=124
+@test "batch4 verifier: the watchdog timeout is an outage, named explicitly" {
+  export FI_STANDIN_VERIFIER_HANG=30 FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS=1
   run "$FI_BIN" autofix run "$ID" --engine claude
   [ "$status" -eq 7 ]
   [ -f "$ST/queue/$ID" ]
@@ -76,8 +76,8 @@ teardown() { fi_teardown_tmp; }
   grep -q '^outages=1$' "$ST/queue/$ID"
 }
 
-@test "batch4 verifier: a codex verifier timeout (rc 124) is an outage, named explicitly" {
-  export FI_STANDIN_VERIFIER_CRASH=124
+@test "batch4 verifier: a codex verifier watchdog timeout is an outage, named explicitly" {
+  export FI_STANDIN_VERIFIER_HANG=30 FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS=1
   run "$FI_BIN" autofix run "$ID" --engine codex
   [ "$status" -eq 7 ]
   [ -f "$ST/queue/$ID" ]

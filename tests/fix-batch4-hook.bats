@@ -81,9 +81,22 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
 
 # ---- lib/autofix-hook.sh:231 ----
 
-@test "b4 stop: a repo whose origin is not on GitHub spawns nothing (same gate as fi_af_enabled)" {
+# The GitHub origin is checked when an item is queued (fi_af_queue_spot needs
+# fi_repo_id), so Stop does not fork for it again; an item with no slug is the
+# cheap skip.
+@test "b4 stop: a repo whose origin is not on GitHub never gets an item queued" {
   git config --unset url."$TMP/remote.git".insteadOf
   git remote set-url origin "$TMP/remote.git"
+  rm -f "$QITEM"
+  fi_af_queue_spot "$(grep -m1 '^- \[open\]' docs/found-issues.md)"
+  [ -z "$(ls "$ST/queue")" ]
+  run stop "$REPO"
+  [ "$status" -eq 0 ]
+  no_spawn
+}
+
+@test "b4 stop: an item with no recorded slug spawns nothing" {
+  fi_af_item_set "$QITEM" slug ""
   run stop "$REPO"
   [ "$status" -eq 0 ]
   no_spawn

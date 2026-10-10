@@ -100,8 +100,14 @@ _fi_fix_ship() {
     || { fi_err "fix ship: $wt has uncommitted changes — commit each fix first"; return 1; }
   # The ship gate has its own limit (default 60 min), independent of the
   # auto-fix runTimeoutMin watchdog, and shows why it failed.
-  local treport
-  if ! treport="$(_fi_fix_test "$wt" "${FOUND_ISSUES_FIX_SHIP_TIMEOUT_SECS:-3600}" 2>&1)"; then
+  # A value that is not a positive integer ('60m', 'abc', 0) would kill the
+  # suite at once, so it is replaced by the default with one warning.
+  local treport tsecs="${FOUND_ISSUES_FIX_SHIP_TIMEOUT_SECS:-3600}"
+  if ! [[ "$tsecs" =~ ^[0-9]+$ ]] || (( 10#$tsecs < 1 )); then
+    fi_err "fix ship: FOUND_ISSUES_FIX_SHIP_TIMEOUT_SECS='$tsecs' is not a positive integer — using 3600"
+    tsecs=3600
+  fi
+  if ! treport="$(_fi_fix_test "$wt" "$((10#$tsecs))" 2>&1)"; then
     printf '%s\n' "$treport" >&2
     fi_err "fix ship: tests fail in $wt — not shipping"
     return 1

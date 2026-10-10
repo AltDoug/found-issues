@@ -163,7 +163,7 @@ fi_af_spawn() {
   local cwd="$1"
   shift
   # 3>&-: a watcher that outlives its caller (the merge guard polls for up to
-  # an hour) must not hold the caller's fd 3, which bats waits on for EOF.
+  # a day) must not hold the caller's fd 3, which bats waits on for EOF.
   ( cd "$cwd" && nohup "$FI_SELF" "$@" </dev/null >>"$FI_AF_RUNS/spawn.log" 2>&1 3>&- & )
 }
 
@@ -370,8 +370,18 @@ _fi_af_publish() {
 # conflict guard for a PR whose auto-merge is armed: it never calls gh pr
 # merge, so it cannot race the armed auto-merge, and it returns 0 as soon as
 # the PR is MERGED or CLOSED.
+#
+# A guard outlives the wait for checks: the conflict it exists for appears
+# when ANOTHER fix PR merges, which can be hours after this one was armed
+# (that PR's CI may run long). It therefore polls for
+# FOUND_ISSUES_AUTOFIX_GUARD_POLLS (default 1440 = 24 h at the default
+# 60 s sleep), not for the merge-when-green window of ..._MERGE_POLLS.
 fi_af_merge_when_green() {
   local n="$1" slug="${2:-}" guard="${3:-0}" i v st ck mg br hr nones=0 polls="${FOUND_ISSUES_AUTOFIX_MERGE_POLLS:-60}" pause="${FOUND_ISSUES_AUTOFIX_MERGE_SLEEP:-60}"
+  if (( guard )); then
+    polls="${FOUND_ISSUES_AUTOFIX_GUARD_POLLS:-1440}"
+    [[ "$polls" =~ ^[0-9]+$ ]] && (( 10#$polls >= 1 )) || polls=1440
+  fi
   local jqf='[.state, ([.statusCheckRollup[]? | (.conclusion // .state // "")] | if length == 0 then "none" elif any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STARTUP_FAILURE") then "fail" elif all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL") then "green" else "pending" end), (.mergeable // ""), (.baseRefName // ""), (.headRefName // "")] | join("|")'
   [[ -n "$slug" ]] || slug="$(fi_repo_id 2>/dev/null || true)"
   [[ -n "$slug" ]] || { fi_err "autofix: merge-when-green needs a GitHub repo (--repo owner/name)"; return 1; }
@@ -405,7 +415,46 @@ fi_af_merge_when_green() {
   return 1
 }
 
-FI_AF_MWG_FIXES=0 FI_AF_MWG_ERR=""
+FI_AF_MWG_FIXES=0 FI_AF_MWG_ERR="" FI_AF_GUARD_LOCK=""
+
+# One guard per repo+PR. A ship retry that re-arms auto-merge spawns another
+# guard, and two guards racing _fi_af_mwg_unconflict make one push fail. The
+# lock is a symlink whose target is the guard's pid (ln -s is atomic, so no
+# window with a lock and no pid). A lock whose pid is dead, or alive but not a
+# merge-when-green process (pid reuse), is stale and replaced.
+# rc 0 = this process holds the lock; rc 1 = a live guard already holds it.
+_fi_af_guard_lock() {
+  local n="$1" slug="${2:-}" dir pid cmd try
+  [[ -n "$slug" ]] || slug="$(fi_repo_id 2>/dev/null || true)"
+  FI_AF_GUARD_LOCK=""
+  [[ -n "$slug" ]] || return 0   # merge-when-green names the missing repo
+  fi_af_root
+  dir="$FI_AF_ROOT/guards"
+  mkdir -p "$dir" 2>/dev/null || return 0
+  slug="$(printf '%s' "$slug" | tr '[:upper:]' '[:lower:]')"
+  FI_AF_GUARD_LOCK="$dir/${slug//\//__}#$n.lock"
+  for try in 1 2; do
+    ln -s "$$" "$FI_AF_GUARD_LOCK" 2>/dev/null && return 0
+    pid="$(readlink "$FI_AF_GUARD_LOCK" 2>/dev/null || true)"
+    if [[ "$pid" =~ ^[0-9]+$ && "$pid" != "$$" ]] && kill -0 "$pid" 2>/dev/null; then
+      cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+      if [[ "$cmd" == *merge-when-green* ]]; then
+        FI_AF_GUARD_LOCK=""
+        printf 'PR #%s is already guarded by pid %s\n' "$n" "$pid"
+        return 1
+      fi
+    fi
+    rm -f "$FI_AF_GUARD_LOCK"
+  done
+  FI_AF_GUARD_LOCK=""
+  return 0
+}
+
+_fi_af_guard_unlock() {
+  [[ -n "$FI_AF_GUARD_LOCK" && "$(readlink "$FI_AF_GUARD_LOCK" 2>/dev/null || true)" == "$$" ]] && rm -f "$FI_AF_GUARD_LOCK"
+  FI_AF_GUARD_LOCK=""
+  return 0
+}
 
 # Squash-merge <N>; a refusal's message is kept in FI_AF_MWG_ERR.
 _fi_af_mwg_merge() {

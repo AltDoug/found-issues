@@ -22,13 +22,6 @@
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
-# fi_af_origin_ok (autofix-queue.sh) runs fi_repo_id; the Stop hook sources
-# neither bin/found-issues nor repo-id.sh.
-if ! declare -F fi_repo_id >/dev/null 2>&1 && [[ -f "${BASH_SOURCE[0]%/*}/repo-id.sh" ]]; then
-  # shellcheck source=repo-id.sh
-  source "${BASH_SOURCE[0]%/*}/repo-id.sh"
-fi
-
 FI_AFH_LAUNCHER="" FI_AFH_ITEM="" FI_AFH_NOW="" FI_AFH_DAY="" FI_AFH_ROOT=""
 FI_AFH_IDS=()
 
@@ -219,7 +212,7 @@ fi_afh_stop() {
     [[ -d "$st/lock" ]] && fi_afh_lock_fresh "$st/lock" && continue
     fi_af_item_read "$f" || continue
     [[ "$AFI_wait_next" =~ ^[0-9]+$ ]] && (( AFI_wait_next > FI_AFH_NOW )) && continue
-    [[ -n "$AFI_root" ]] || continue
+    [[ -n "$AFI_root" && -n "$AFI_slug" ]] || continue
     # Same repo, any checkout (3.4.2): a sibling worktree or the main
     # checkout drains an item queued from a nested worktree, and a separate
     # repo nested under the root does not. A nested worktree that was removed
@@ -244,13 +237,14 @@ fi_afh_stop() {
     # and fi_af_cap_ok use (one git call). found-issues.autofix=false there
     # means every run exits 1 at once, so do not spawn one at every Stop. A B
     # claim that hits the cap (claim rc 3) writes no capped marker, so count
-    # the claims. The origin check forks, so it comes last.
+    # the claims. No origin check here: an item is only queued after
+    # fi_repo_id resolved a GitHub slug, so it records one (an empty slug is
+    # a cheap no-fork skip) and a per-Stop check would only cost forks.
     fi_af_repo_cfg "$eff"
     [[ "$FI_AF_RC_ON" == "true" ]] || continue
     if [[ "$AFI_kind" != "sweep" ]]; then
       fi_af_claims_under "$st/day/$FI_AFH_DAY.spot" "$FI_AF_RC_CAP" || continue
     fi
-    fi_af_origin_ok "$eff" || continue
     fi_afh_mark "$f" A "$FI_AFH_NOW"
     fi_afh_launch_a "$f" "$engine" "$bin" "$cwd"
     return 0

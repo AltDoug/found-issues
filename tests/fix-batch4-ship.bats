@@ -11,7 +11,7 @@ setup() {
   fi_setup_tmp; fi_af_fixture; fi_use_standins
   # The CLI under test, never a plugin-cache copy that may be on PATH.
   export PATH="$TEST_REPO_ROOT/bin:$PATH"
-  export GH_MOCK_TRACE="$TMP/gh.trace" FOUND_ISSUES_AUTOFIX_MERGE_SLEEP=0 FOUND_ISSUES_AUTOFIX_MERGE_POLLS=3
+  export GH_MOCK_TRACE="$TMP/gh.trace" FOUND_ISSUES_AUTOFIX_MERGE_SLEEP=0 FOUND_ISSUES_AUTOFIX_MERGE_POLLS=3 FOUND_ISSUES_AUTOFIX_GUARD_POLLS=3
   export GH_MOCK_PR_VIEW=$'7\t{"number":7,"state":"OPEN","statusCheckRollup":[]}'
 }
 teardown() { fi_teardown_tmp; }
@@ -74,7 +74,7 @@ SH
 
 @test "guard: --guard exits 0 as soon as the PR merges underneath it" {
   seq_gh 2
-  export FOUND_ISSUES_AUTOFIX_MERGE_POLLS=10
+  export FOUND_ISSUES_AUTOFIX_GUARD_POLLS=10
   run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar --guard
   [ "$status" -eq 0 ]
   [[ "$output" == *"PR #7 is already MERGED"* ]]
