@@ -23,7 +23,7 @@ fake_version() {
   cp "$TEST_REPO_ROOT/bin/found-issues" "$root/bin/"
   cp "$TEST_REPO_ROOT"/lib/*.sh "$root/lib/"
   local h
-  for h in session-start format-enforcer pre-branch-delete post-bash-dispatch stop-reminder; do
+  for h in session-start format-enforcer pre-branch-delete post-bash-dispatch first-touch stop-reminder; do
     printf '#!/usr/bin/env bash\ncat >/dev/null\necho "%s %s harness=$FOUND_ISSUES_HARNESS"\n' "$v" "$h" > "$root/hooks/$h.sh"
   done
   printf '%s' "$root"
