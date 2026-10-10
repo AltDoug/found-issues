@@ -97,7 +97,7 @@ fi_segment_cache_put() {
 
 # 🔧N: auto-fix runs in progress in the ledger's repo (phase 5 ruling 1),
 # from the state file lib/autofix-status.sh writes per physical repo root.
-# 🔧stuck (3.7.0, ledger lib/autofix-queue.sh:345): the repo's last
+# 🔧stuck (3.8.0, ledger lib/autofix-queue.sh:345): the repo's last
 # FI_AF_STUCK_AFTER items all retired "stale: tests fail at base"; the streak
 # lives in autofix/stuck/<root>, written at retire time (fi_af_stuck_update).
 # Read AFTER the cache, never cached. Builtins only: cd -P resolves the
@@ -120,7 +120,7 @@ fi_segment_af_suffix() {
   cd "$saved" 2>/dev/null || return 0
   # The state file is keyed by the git toplevel; a nested (monorepo package)
   # ledger sits below it, so walk up to the directory holding .git. Git mode
-  # only (3.7.0): a local-mode ledger (FOUND_ISSUES_MODE=local, or the
+  # only (3.8.0): a local-mode ledger (FOUND_ISSUES_MODE=local, or the
   # .found-issues.md form that only local mode creates below a repo root)
   # nested under some repo, e.g. a dotfiles repo tracking $HOME, does not
   # inherit that repo's counts.

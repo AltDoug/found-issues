@@ -220,7 +220,7 @@ fi_af_seg_write() {
   return 0
 }
 
-# 3.7.0 (ledger lib/autofix-queue.sh:345): when every item retires "stale:
+# 3.8.0 (ledger lib/autofix-queue.sh:345): when every item retires "stale:
 # tests fail at base" day after day, nothing outside `autofix status` said
 # auto-fix was stuck. The streak per repo root (consecutive items retired that
 # way, reset by any other outcome) lives in autofix/stuck/<root>: line 1 the
