@@ -105,7 +105,7 @@ _fi_af_end() {
 # | decide | manual | failed | outage) and FI_AF_OUTCOME_TEXT; on approved
 # the worktree holds the verified change and FI_AF_TREE its staged tree.
 _fi_af_fix_loop() {
-  local id="$1" engine="$2" n feedback="" why="" tlog ref
+  local id="$1" engine="$2" n feedback="" why="" tlog ref p
   ref="${AFI_base_sha:-origin/$AFI_base}"
   FI_AF_OUTCOME="" FI_AF_OUTCOME_TEXT=""
   for n in 1 2; do
@@ -134,6 +134,12 @@ _fi_af_fix_loop() {
     esac
     if [[ -z "$(fi_af_diff "$AFI_wt" "$ref")" ]]; then
       why="no change"; feedback="The attempt changed no files."; continue
+    fi
+    # A continuation fix that edits a file of an earlier batch's PR is
+    # dropped now, before the tests and the paid verifier run.
+    if declare -F _fi_af_sweep_skip_hit >/dev/null && p="$(_fi_af_sweep_skip_hit "$AFI_wt" "${AFI_head:-$ref}")"; then
+      FI_AF_OUTCOME=skipped FI_AF_OUTCOME_TEXT="touches $p (file in an earlier batch's PR)"
+      return 0
     fi
     tlog="$FI_AF_RUNS/$id.tests$n.log"
     if ! fi_af_tests_pass "$AFI_wt" "$FI_AF_TESTCMD" "$tlog"; then
