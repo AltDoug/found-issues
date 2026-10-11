@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.4] - 2026-10-11
+
+Ledger fix batch 8: `autofix cancel` keeps a stopped run's unshipped commits, and a deeply nested repo root no longer wedges auto-fix.
+
+### Fixed
+- **`autofix cancel` no longer deletes a running item's verified commits.** Cancelling a claimed or running item used to remove its worktree and `branch -D` its `fi/autofix` or `fi/sweep` branch, so a sweep's paid, verified fixes were lost. A branch that holds commits past its base is now renamed to `fi/rescued/<id>`, the same rule the 3.8.2 reap uses for a crashed run. The branch is recorded on the item, `autofix status` shows it, and the cancel output names it. A branch with no commits of its own is still dropped (operator decision 2026-10-11).
+
+- **A repo root longer than a file name no longer wedges auto-fix.** The statusline segment and stuck-marker files were named after the whole sanitized root path, so a deep worktree chain (over ~255 bytes) made the segment write fail with "File name too long"; under `set -e` that aborted the retire before the lock was released, `autofix cancel` exited 1, and every later claim said another run held the repo. A name over 200 bytes is now its first 150 characters plus a hash of the whole name; shorter roots keep their names.
+
 ## [3.8.3] - 2026-10-11
 
 Ledger fix batch 7: `--pick` reaches entries cited by a name instead of a line number, and a timing test stops failing on hosted macOS.

@@ -113,8 +113,23 @@ fi_segment_cache_put() {
 FI_AF_STUCK_AFTER="${FI_AF_STUCK_AFTER:-3}"
 FI_AF_STUCK_MAX_AGE="${FI_AF_STUCK_MAX_AGE:-604800}"
 
-# Sets FI_AF_KEY, the state-file name (seg/, stuck/) of a repo root.
-fi_af_root_key() { FI_AF_KEY="${1//[^A-Za-z0-9._-]/_}"; }
+# Sets FI_AF_KEY, the state-file name (seg/, stuck/) of a repo root. A name
+# past 200 bytes (a deep worktree chain) becomes its first 150 characters
+# plus an FNV-1a hash of the whole name: a file name over ~255 bytes fails
+# with ENAMETOOLONG and, under set -e, aborted a retire before its unlock
+# (ledger lib/autofix-status.sh:231). Builtins only (statusline); the
+# sanitized name is ASCII, so each character is one byte.
+fi_af_root_key() {
+  local k="${1//[^A-Za-z0-9._-]/_}" i c h=2166136261
+  if (( ${#k} > 200 )); then
+    for (( i = 0; i < ${#k}; i++ )); do
+      printf -v c '%d' "'${k:i:1}"
+      h=$(( ((h ^ c) * 16777619) & 0xFFFFFFFF ))
+    done
+    printf -v k '%s_%08x' "${k:0:150}" "$h"
+  fi
+  FI_AF_KEY="$k"
+}
 
 # Sets FI_AF_KEY for a stuck/ file, and FI_AF_STUCK_ROOT to the main
 # worktree it is keyed by. A red base is a repo-wide state, so every
