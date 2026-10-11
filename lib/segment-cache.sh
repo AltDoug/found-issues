@@ -107,7 +107,8 @@ fi_segment_cache_put() {
 # writes the file and prints the SessionStart line), so the threshold, the
 # root-to-filename key and the reader exist once. The file: line 1 the streak
 # count, line 2 the first failing test names, line 3 the epoch of the last
-# base failure; a streak whose last failure is older than FI_AF_STUCK_MAX_AGE
+# base failure (line 4, the repo root, is read only by fi_af_stuck_clear);
+# a streak whose last failure is older than FI_AF_STUCK_MAX_AGE
 # (7 days) no longer counts, so a repo nobody touches does not stay red.
 FI_AF_STUCK_AFTER="${FI_AF_STUCK_AFTER:-3}"
 FI_AF_STUCK_MAX_AGE="${FI_AF_STUCK_MAX_AGE:-604800}"
@@ -115,16 +116,20 @@ FI_AF_STUCK_MAX_AGE="${FI_AF_STUCK_MAX_AGE:-604800}"
 # Sets FI_AF_KEY, the state-file name (seg/, stuck/) of a repo root.
 fi_af_root_key() { FI_AF_KEY="${1//[^A-Za-z0-9._-]/_}"; }
 
-# Sets FI_AF_KEY for a stuck/ file. A red base is a repo-wide state, so every
+# Sets FI_AF_KEY for a stuck/ file, and FI_AF_STUCK_ROOT to the main
+# worktree it is keyed by. A red base is a repo-wide state, so every
 # linked worktree shares its main worktree's streak: a linked worktree's .git
 # is a file "gitdir: <main>/.git/worktrees/<name>". Builtins only (statusline).
 fi_af_stuck_key() {
   local root="$1" line=""
+  FI_AF_STUCK_ROOT=""
   if [[ -f "$root/.git" ]]; then
     IFS= read -r line <"$root/.git" || true
     line="${line#gitdir: }"
     [[ "$line" == /*/.git/worktrees/* ]] && root="${line%/.git/worktrees/*}"
   fi
+  # shellcheck disable=SC2034  # read by lib/autofix-status.sh
+  FI_AF_STUCK_ROOT="$root"
   fi_af_root_key "$root"
 }
 

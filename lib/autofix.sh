@@ -216,7 +216,7 @@ _fi_af_run_one() {
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
     _fi_af_end "$id" manual "no test command"; return 0
   fi
-  if ! engine="$(fi_af_engine "${engine_opt:-$AFI_engine}")" || ! command -v "$engine" >/dev/null 2>&1; then
+  if ! engine="$(fi_af_engine "${engine_opt:-$(fi_af_item_engine 2>/dev/null || true)}")" || ! command -v "$engine" >/dev/null 2>&1; then
     _fi_af_end "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
   fi
   AFI_engine="$engine"

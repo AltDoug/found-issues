@@ -16,7 +16,7 @@
 #   fi_af_dirs <owner/repo>
 #   fi_af_context
 #   fi_af_test_command <dir>
-#   fi_af_engine [<explicit>]
+#   fi_af_engine [<explicit>] / fi_af_engine_setting / fi_af_item_engine
 #   fi_af_no_prompts
 #   fi_cfg_show_line <key>
 #   cmd_config [<key> [<value>|--unset]] [--global]
@@ -218,8 +218,8 @@ fi_af_test_command() {
 }
 
 # Spec §9: engine=auto follows the calling harness. Phase 3's hook passes
-# the harness explicitly; this fallback serves log-time queueing and a
-# hand-run `autofix run`.
+# the harness explicitly; this fallback serves launcher B and a hand-run
+# `autofix run` (queueing records the setting: fi_af_engine_setting).
 fi_af_engine() {
   local e="${1:-}"
   [[ -n "$e" ]] || e="$(fi_af_cfg engine auto)"
@@ -233,6 +233,32 @@ fi_af_engine() {
   command -v claude >/dev/null 2>&1 && { printf 'claude'; return 0; }
   command -v codex >/dev/null 2>&1 && { printf 'codex'; return 0; }
   return 1
+}
+
+# The engine an item records when it is queued: an explicit claude or codex
+# setting, else auto, which the harness that launches it resolves (ledger
+# lib/autofix-hook.sh:124: resolving at queue time pinned an item logged in
+# Claude Code to claude even when a Codex Stop hook drained it).
+fi_af_engine_setting() {
+  local e
+  e="$(fi_af_cfg engine auto)"
+  case "$e" in
+    claude|codex) printf '%s' "$e" ;;
+    auto) printf 'auto' ;;
+    *) fi_err "found-issues: found-issues.autofix.engine=$e (want auto, claude or codex) — using auto"; printf 'auto' ;;
+  esac
+}
+
+# The engine a loaded item (AFI_*) runs on when its launcher names none: an
+# explicit claude or codex recorded at queue time (or a continuation's chain
+# engine); for an item queued as auto, what fi_af_engine detects here
+# (launcher B only runs inside Claude Code). A resolved engine an earlier run
+# wrote back never pins an auto item to that harness.
+fi_af_item_engine() {
+  if [[ "${AFI_engine_q:-}" != auto ]]; then
+    case "${AFI_engine:-}" in claude|codex) printf '%s' "$AFI_engine"; return 0 ;; esac
+  fi
+  fi_af_engine auto
 }
 
 # Spec §1: nothing auto-fix launches may prompt. Unattended git/gh must
@@ -406,7 +432,7 @@ cmd_config() {
   printf 'Set found-issues.%s = %s (%s)\n' "$FI_CFG_KEY" "$FI_CFG_VAL" "${scope#--}"
   # Switched off here (or everywhere): its STUCK marker would outlive the switch.
   if [[ "$FI_CFG_KEY" == autofix && "$FI_CFG_VAL" == false ]]; then
-    if [[ "$scope" == --global ]]; then fi_af_stuck_clear
+    if [[ "$scope" == --global ]]; then fi_af_stuck_clear --global
     else fi_af_stuck_clear "$(git rev-parse --show-toplevel 2>/dev/null || true)"; fi
   fi
   if [[ "$scope" == --global ]]; then

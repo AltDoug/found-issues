@@ -170,10 +170,10 @@ fi_af_sweep_check() {
   n=$((n + $(_fi_af_untagged_count "$file" "$root")))
   (( n > 0 )) || return 0
   (( crit || n >= $(fi_af_int sweepThreshold 5) )) || return 0
-  engine="$(fi_af_engine 2>/dev/null || true)"
+  engine="$(fi_af_engine_setting)"
   fi_af_new_id
   fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID" "id=$FI_AF_ID" "kind=sweep" \
-    "root=$root" "slug=$slug" "loc=sweep" "engine=$engine" \
+    "root=$root" "slug=$slug" "loc=sweep" "engine=$engine" "engine_q=$engine" \
     "queued=$(date +%Y-%m-%dT%H:%M:%S)" "crashes=0"
   printf 'AUTOFIX-SWEEP-DUE %s\n' "$FI_AF_ID"
 }
@@ -568,7 +568,7 @@ _fi_af_run_sweep() {
     # A chain never switches engines (spec section 9): a continuation keeps
     # the engine its first batch resolved, whatever launcher or harness runs
     # it; --engine only decides for a fresh sweep.
-    want="${engine_opt:-$AFI_engine}"
+    want="${engine_opt:-$(fi_af_item_engine 2>/dev/null || true)}"
     if _fi_af_sweep_is_cont && [[ -n "$AFI_engine" ]]; then want="$AFI_engine"; fi
     if ! engine="$(fi_af_engine "$want")" || ! command -v "$engine" >/dev/null 2>&1; then
       fi_af_finish "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
@@ -679,9 +679,14 @@ _fi_af_sweep_queue_next() {
       [[ -n "$p" && ":$skip:" != *":$p:"* ]] && skip+="${skip:+:}$p"
     done < <(git -C "$AFI_root" -c core.quotepath=off diff --name-only --no-renames "$AFI_base_sha" "$AFI_head" 2>/dev/null)
   fi
+  # A chain never switches engines: a batch that closed before any engine
+  # call (launcher B, every entry settled) still names the one its harness
+  # would run, never auto.
+  local ce="$AFI_engine"
+  case "$ce" in claude|codex) ;; *) ce="$(fi_af_item_engine 2>/dev/null || true)" ;; esac
   fi_af_new_id
   fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID" "id=$FI_AF_ID" "kind=sweep" \
-    "root=$AFI_root" "slug=$AFI_slug" "loc=sweep" "engine=$AFI_engine" \
+    "root=$AFI_root" "slug=$AFI_slug" "loc=sweep" "engine=$ce" \
     "queued=$(date +%Y-%m-%dT%H:%M:%S)" "crashes=0" \
     "cont=$nxt" "cap_day=$(fi_today)" "chain_cost=${FI_AF_COST:-0}" "chain_tokens=${FI_AF_TOKENS:-0}" \
     "base=$AFI_base" "base_why=$AFI_base_why" "skip_files=$skip" "held_files=$held"

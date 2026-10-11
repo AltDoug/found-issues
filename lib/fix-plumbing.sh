@@ -16,9 +16,9 @@ Usage: found-issues fix workspace
          A fresh worktree from origin/<default> on its own fix branch
        found-issues fix test <worktree>
          Run the repo's test command there (any stack)
-       found-issues fix ship <worktree> [--source <root>] --title "<title>" --body-file <file> --pick <loc>[,<loc>...]
+       found-issues fix ship <worktree> [--source <root>] --title "<title>" --body-file <file> --pick <loc>[,<loc>...] [--pick <loc> — <fragment>]...
          Push, open the PR, annotate the picked entries (source ledger and PR
-         branch). --source is fix workspace's source= (default: the checkout
+         branch). --pick repeats; a "<loc> — <fragment>" pick takes its own. --source is fix workspace's source= (default: the checkout
          the worktree was made under). Never merges.
 EOF
 }
@@ -66,18 +66,22 @@ _fi_fix_test() {
 # reaches the default branch on merge, and the run leaves no ledger diff
 # behind in the worktree.
 _fi_fix_ship() {
-  local wt="" title="" bodyf="" picks="" root="" base br slug url pr p
+  local wt="" title="" bodyf="" root="" base br slug url pr p
+  # Each --pick is passed on as its own --pick: a "<loc> — <fragment>" value
+  # is never comma-split, so one value holding a list of them annotated
+  # nothing (ledger lib/fix-plumbing.sh:75).
+  local -a pargs=()
   [[ $# -gt 0 ]] && { wt="$1"; shift; }
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --title) fi_need_value "fix ship" --title $# "${2:-}" || return 2; title="$2"; shift 2 ;;
       --body-file) fi_need_value "fix ship" --body-file $# "${2:-}" || return 2; bodyf="$2"; shift 2 ;;
-      --pick) fi_need_value "fix ship" --pick $# "${2:-}" || return 2; picks="$2"; shift 2 ;;
+      --pick) fi_need_value "fix ship" --pick $# "${2:-}" || return 2; pargs+=(--pick "$2"); shift 2 ;;
       --source) fi_need_value "fix ship" --source $# "${2:-}" || return 2; root="$2"; shift 2 ;;
       *) fi_unknown_arg "fix ship" "$1"; return 2 ;;
     esac
   done
-  [[ -d "$wt" && -n "$title" && -f "$bodyf" && -n "$picks" ]] || { _fi_fix_usage >&2; return 2; }
+  if [[ ! -d "$wt" || -z "$title" || ! -f "$bodyf" ]] || (( ${#pargs[@]} == 0 )); then _fi_fix_usage >&2; return 2; fi
   git -C "$wt" rev-parse --git-dir >/dev/null 2>&1 || { fi_err "fix ship: $wt is not a git worktree"; return 1; }
   # The source ledger is the checkout the session works in (fix workspace's
   # source=), which is a linked worktree as often as the main checkout:
@@ -121,7 +125,7 @@ _fi_fix_ship() {
   # Strict picks: an unmatched or ambiguous pick fails the ship (the PR is
   # open by now, so it still prints) and annotate-pr's report names each one.
   local arep arc=0
-  arep="$( cd "$root" && FOUND_ISSUES_PICK_STRICT=1 "$FI_SELF" annotate-pr "$pr" --pick "$picks" 2>&1 )" || arc=$?
+  arep="$( cd "$root" && FOUND_ISSUES_PICK_STRICT=1 "$FI_SELF" annotate-pr "$pr" "${pargs[@]}" 2>&1 )" || arc=$?
   if (( arc != 0 )); then
     printf '%s\n' "$arep" >&2
     fi_err "fix ship: source ledger annotation incomplete (annotate-pr exit $arc) — fix the picks above and run: found-issues annotate-pr $pr --pick <loc>"
@@ -130,7 +134,7 @@ _fi_fix_ship() {
   # worktree when the worktree has its own ledger, or it would walk up into
   # the source checkout's.
   if [[ -f "$wt/docs/found-issues.md" || -f "$wt/.found-issues.md" ]]; then
-    ( cd "$wt" && "$FI_SELF" annotate-pr "$pr" --pick "$picks" >/dev/null 2>&1 ) || true
+    ( cd "$wt" && "$FI_SELF" annotate-pr "$pr" "${pargs[@]}" >/dev/null 2>&1 ) || true
     if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
       for p in docs/found-issues.md .found-issues.md; do
         [[ -f "$wt/$p" ]] && git -C "$wt" add -- "$p"

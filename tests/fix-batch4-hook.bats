@@ -37,7 +37,7 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
 # ---- lib/autofix-hook.sh:82 ----
 
 @test "b4 engine: a Stop launch passes the item's recorded codex engine, not the claude harness" {
-  fi_af_item_set "$QITEM" engine codex
+  fi_af_item_set "$QITEM" engine codex; fi_af_item_set "$QITEM" engine_q codex   # an explicit setting (3.8.1: engine_q)
   run stop "$REPO"
   [ "$status" -eq 0 ]
   wait_spawn
@@ -45,7 +45,7 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
 }
 
 @test "b4 engine: a marker launch passes the item's recorded codex engine, not the claude harness" {
-  fi_af_item_set "$QITEM" engine codex
+  fi_af_item_set "$QITEM" engine codex; fi_af_item_set "$QITEM" engine_q codex   # an explicit setting (3.8.1: engine_q)
   run hook "$(payload default "AUTOFIX-QUEUED $ID")"
   [ "$status" -eq 0 ]
   wait_spawn
@@ -54,7 +54,7 @@ no_spawn() { sleep 0.5; [ ! -e "$TMP/spawned" ]; }
 
 @test "b4 engine: a recorded claude engine wins over a codex harness" {
   export FOUND_ISSUES_HARNESS=codex
-  fi_af_item_set "$QITEM" engine claude
+  fi_af_item_set "$QITEM" engine claude; fi_af_item_set "$QITEM" engine_q claude   # an explicit setting (3.8.1: engine_q)
   run hook "$(payload default "AUTOFIX-QUEUED $ID")"
   [ "$status" -eq 0 ]
   wait_spawn

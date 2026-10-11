@@ -36,7 +36,7 @@
 # shellcheck disable=SC2034  # AFI_* are read by the other autofix libs
 
 AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
-AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
+AFI_engine="" AFI_engine_q="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
 AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
@@ -51,7 +51,7 @@ fi_af_item_write() {
 
 fi_af_item_read() {
   AFI_id="" AFI_kind="" AFI_root="" AFI_slug="" AFI_loc="" AFI_key="" AFI_entry=""
-  AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
+  AFI_engine="" AFI_engine_q="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
   AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
@@ -62,7 +62,7 @@ fi_af_item_read() {
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|held_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries)
+      id|kind|root|slug|loc|key|entry|engine|engine_q|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|held_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -180,11 +180,11 @@ fi_af_queue_spot() {
       return 0
     fi
   done
-  engine="$(fi_af_engine 2>/dev/null || true)"
+  engine="$(fi_af_engine_setting)"
   fi_af_new_id
   fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID" "id=$FI_AF_ID" "kind=spot" \
     "root=$root" "slug=$slug" "loc=$FE_loc" "key=$key" "entry=$entry" \
-    "engine=$engine" "queued=$(date +%Y-%m-%dT%H:%M:%S)" "crashes=0"
+    "engine=$engine" "engine_q=$engine" "queued=$(date +%Y-%m-%dT%H:%M:%S)" "crashes=0"
   if [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]]; then
     printf 'Auto-fix: queued %s (inside a fixer; the main session launches it)\n' "$FI_AF_ID"
   else
@@ -895,6 +895,9 @@ fi_af_requeue() {
     if [[ ! "${AFI_cont:-}" =~ ^[0-9]+$ ]] || (( 10#$AFI_cont < 2 )); then
       fi_af_item_set "$r" base ""
       fi_af_item_set "$r" base_why ""
+      # An item queued as engine=auto runs on whichever harness drains it
+      # next, not the one that drained it this time.
+      [[ "${AFI_engine_q:-}" != auto ]] || fi_af_item_set "$r" engine auto
     fi
     _fi_af_clear_attempts "$r"
   fi
