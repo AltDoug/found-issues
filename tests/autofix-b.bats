@@ -301,6 +301,7 @@ tap_fail_cmd() {
 @test "autofix verify (launcher B): a codex item past its token cap fails without a verifier" {
   claim; fix_it
   fi_af_item_set "$ST/running/$ID" engine codex
+  fi_af_item_set "$ST/running/$ID" engine_q codex   # an explicit setting (3.8.1: engine_q)
   fi_af_item_set "$ST/running/$ID" tokens 700000
   git config found-issues.autofix.codexRunTokens 600000
   : > "$FI_STANDIN_TRACE"
