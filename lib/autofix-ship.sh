@@ -374,13 +374,19 @@ _fi_af_publish() {
 # A guard outlives the wait for checks: the conflict it exists for appears
 # when ANOTHER fix PR merges, which can be hours after this one was armed
 # (that PR's CI may run long). It therefore polls for
-# FOUND_ISSUES_AUTOFIX_GUARD_POLLS (default 1440 = 24 h at the default
-# 60 s sleep), not for the merge-when-green window of ..._MERGE_POLLS.
+# FOUND_ISSUES_AUTOFIX_GUARD_POLLS (default 288 = 24 h at the default
+# 300 s guard sleep), not for the merge-when-green window of ..._MERGE_POLLS.
+# A guard sleeps FOUND_ISSUES_AUTOFIX_GUARD_SLEEP (default five merge sleeps,
+# 300 s): one per armed PR polls gh all day, so a slower look keeps 20-30
+# open fix PRs at about 12 calls an hour each, not 60.
 fi_af_merge_when_green() {
   local n="$1" slug="${2:-}" guard="${3:-0}" i v st ck mg br hr nones=0 polls="${FOUND_ISSUES_AUTOFIX_MERGE_POLLS:-60}" pause="${FOUND_ISSUES_AUTOFIX_MERGE_SLEEP:-60}"
   if (( guard )); then
-    polls="${FOUND_ISSUES_AUTOFIX_GUARD_POLLS:-1440}"
-    [[ "$polls" =~ ^[0-9]+$ ]] && (( 10#$polls >= 1 )) || polls=1440
+    polls="${FOUND_ISSUES_AUTOFIX_GUARD_POLLS:-288}"
+    [[ "$polls" =~ ^[0-9]+$ ]] && (( 10#$polls >= 1 )) || polls=288
+    [[ "$pause" =~ ^[0-9]+$ ]] || pause=60
+    pause="${FOUND_ISSUES_AUTOFIX_GUARD_SLEEP:-$(( 5 * 10#$pause ))}"
+    [[ "$pause" =~ ^[0-9]+$ ]] || pause=300
   fi
   local jqf='[.state, ([.statusCheckRollup[]? | (.conclusion // .state // "")] | if length == 0 then "none" elif any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STARTUP_FAILURE") then "fail" elif all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL") then "green" else "pending" end), (.mergeable // ""), (.baseRefName // ""), (.headRefName // "")] | join("|")'
   [[ -n "$slug" ]] || slug="$(fi_repo_id 2>/dev/null || true)"
@@ -406,7 +412,11 @@ fi_af_merge_when_green() {
         (( guard )) && { sleep "$pause"; continue; }
         _fi_af_mwg_merge "$n" "$slug" && return 0
         _fi_af_mwg_refused "$n" "$slug" "$br" "$hr" || return 1 ;;
-      "OPEN fail") fi_err "autofix: PR #$n checks failed — not merging"; return 1 ;;
+      "OPEN fail")
+        # The armed auto-merge outlives a failed check (a re-run can still
+        # turn it green), so the guard keeps watching for a conflict.
+        (( guard )) && { sleep "$pause"; continue; }
+        fi_err "autofix: PR #$n checks failed — not merging"; return 1 ;;
       *) nones=0 ;;
     esac
     sleep "$pause"

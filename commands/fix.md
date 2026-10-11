@@ -103,7 +103,12 @@ number. With `--auto`: print the report and proceed with bucket 2 only.
    entries that later needed manual de-annotation). It refuses a dirty
    worktree or red tests, then pushes, opens the PR, annotates the
    entries in the source ledger and commits the same annotation onto the
-   PR branch, so it reaches the default branch on merge.
+   PR branch, so it reaches the default branch on merge. A non-zero
+   exit AFTER its `PR #N:` line means the PR is open and only the
+   annotation is incomplete (each unmatched or ambiguous pick is named
+   above it): never re-run `fix ship`; fix the pick with
+   `found-issues annotate-pr <N> --pick <location>`. A non-zero exit with
+   no `PR #N:` line means nothing shipped.
 3. `fix ship` never merges: merge according to the repo's own policy.
 4. NEVER flip `[open]` → `[fixed]` by hand. Entries fixed by this run
    close via annotate-pr + merge + sync; already-fixed entries close via

@@ -37,7 +37,7 @@ Usage: found-issues autofix <command>
   merge-when-green <N> [--repo owner/name] [--guard]
                               Wait for PR <N>'s checks, then squash-merge it
                               (--guard: only resolve ledger conflicts, never merge; one per PR, up to
-                              FOUND_ISSUES_AUTOFIX_GUARD_POLLS checks, default 1440)
+                              FOUND_ISSUES_AUTOFIX_GUARD_POLLS checks, default 288, 300 s apart)
 Settings: git config found-issues.autofix true|false (local overrides --global),
 found-issues.autofix.{engine,testCommand,worktreeFiles,dailyFixes,runBudget,runTimeoutMin,
 dailySweeps,sweepThreshold,sweepBatch,sweepBudget,codexModel,codexVerifierModel,
@@ -59,7 +59,9 @@ _fi_af_fix_attempt() {
   if [[ "$engine" == codex ]]; then fi_af_codex_note "$AFI_id" fixer; fi
   fi_af_parse_result "$FI_AF_TEXT"
   FI_AF_FIX_RC=$rc
-  if [[ -z "$FI_AF_ENGINE_ERR" && -z "$timedout" ]] && (( rc != 0 )) && [[ "$FI_AF_RESULT" == "none" ]]; then
+  # A fixer that hit a run limit this run set (claude error_max_*) ran and
+  # gave up: a counted no-change attempt, never an outage that re-runs it free.
+  if [[ -z "$FI_AF_ENGINE_ERR" && -z "$timedout" && -z "$FI_AF_LIMIT" ]] && (( rc != 0 )) && [[ "$FI_AF_RESULT" == "none" ]]; then
     FI_AF_ENGINE_ERR="$engine exited $rc: $(tail -n 1 "$base.err" 2>/dev/null)"
   fi
   [[ -n "$timedout" ]] && fi_af_log "$AFI_id" "attempt $n: fixer timed out"

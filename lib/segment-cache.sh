@@ -115,6 +115,19 @@ FI_AF_STUCK_MAX_AGE="${FI_AF_STUCK_MAX_AGE:-604800}"
 # Sets FI_AF_KEY, the state-file name (seg/, stuck/) of a repo root.
 fi_af_root_key() { FI_AF_KEY="${1//[^A-Za-z0-9._-]/_}"; }
 
+# Sets FI_AF_KEY for a stuck/ file. A red base is a repo-wide state, so every
+# linked worktree shares its main worktree's streak: a linked worktree's .git
+# is a file "gitdir: <main>/.git/worktrees/<name>". Builtins only (statusline).
+fi_af_stuck_key() {
+  local root="$1" line=""
+  if [[ -f "$root/.git" ]]; then
+    IFS= read -r line <"$root/.git" || true
+    line="${line#gitdir: }"
+    [[ "$line" == /*/.git/worktrees/* ]] && root="${line%/.git/worktrees/*}"
+  fi
+  fi_af_root_key "$root"
+}
+
 # Sets FI_AF_NOW (epoch seconds): a builtin where bash has one, date otherwise
 # (only a bash older than 4.2 gets here, and never on the statusline fast path).
 fi_af_now() {
@@ -181,7 +194,8 @@ fi_segment_af_suffix() {
       FI_SEG_AF=$'\033[35m'"🔧$n"$'\033[0m'
     fi
   fi
-  if fi_af_stuck_active "$base/stuck/$name"; then
+  fi_af_stuck_key "$root"
+  if fi_af_stuck_active "$base/stuck/$FI_AF_KEY"; then
     FI_SEG_AF+="${FI_SEG_AF:+ }"$'\033[31m'"🔧stuck"$'\033[0m'
   fi
   return 0

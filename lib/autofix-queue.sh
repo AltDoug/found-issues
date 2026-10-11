@@ -605,8 +605,8 @@ fi_af_base_tests() {
   fi_af_tests_pass "$AFI_wt" "$t" "$log" || rc=$?
   git -C "$AFI_wt" reset -q --hard "${AFI_base_sha:-HEAD}" >/dev/null 2>&1 || true
   git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
-  # A green base ends a STUCK streak at once, not only when another item
-  # retires with a different outcome (a marker for a repo that is no longer red).
+  # A green base is what ends a STUCK streak (besides switch-off and the
+  # week's age-out): other retires say nothing about the base.
   if (( rc == 0 )); then rm -f "$red"; fi_af_stuck_clear "$AFI_root"; return 0; fi
   # 3.4.2: the watchdog firing is not a red suite (ledger :341).
   if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then
@@ -806,7 +806,11 @@ _fi_af_wt_fail_requeue() {
   # wait_next), so three retries outlast a short outage.
   fi_af_item_set "$r" waiting "$why"
   fi_af_item_set "$r" wait_next "$(( $(date +%s) + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
-  # fi_af_requeue removes the worktree itself.
+  # The failed cut's debris goes now, from the AFI_wt/AFI_branch the cut set:
+  # fi_af_requeue re-reads the item, which records neither until a cut
+  # succeeds, so its own remove finds nothing and every retry would hit the
+  # same leftover branch or directory.
+  fi_af_worktree_remove
   fi_af_requeue "$id" "$why; retry $(( tries + 1 )) of 3"
   FI_AF_WHY="$why; requeued, retry $(( tries + 1 )) of 3"
   return 0
@@ -885,9 +889,13 @@ fi_af_requeue() {
   # A queued item resolves its landing branch fresh at its next claim and
   # starts B's attempt count and verdict over; a ship retry keeps the base
   # its kept branch was cut from and the approved tree the ship re-checks.
+  # A sweep continuation (cont >= 2) keeps its chain's base too: its
+  # skip_files were computed against that branch, and batch 1's PR targets it.
   if [[ ! "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then
-    fi_af_item_set "$r" base ""
-    fi_af_item_set "$r" base_why ""
+    if [[ ! "${AFI_cont:-}" =~ ^[0-9]+$ ]] || (( 10#$AFI_cont < 2 )); then
+      fi_af_item_set "$r" base ""
+      fi_af_item_set "$r" base_why ""
+    fi
     _fi_af_clear_attempts "$r"
   fi
   mv "$r" "$FI_AF_ST/queue/$id"

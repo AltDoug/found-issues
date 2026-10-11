@@ -222,8 +222,9 @@ fi_af_seg_write() {
 
 # 3.8.0 (ledger lib/autofix-queue.sh:345): when every item retires "stale:
 # tests fail at base" day after day, nothing outside `autofix status` said
-# auto-fix was stuck. The streak per repo root (consecutive items retired that
-# way, reset by any other outcome) lives in autofix/stuck/<root>: line 1 the
+# auto-fix was stuck. The streak per repo (keyed by its main worktree, so
+# linked worktrees share it; consecutive items retired that
+# way; only a green base resets it) lives in autofix/stuck/<root>: line 1 the
 # count, line 2 the first failing test names, line 3 the epoch of the last
 # base failure. Written at retire time so the statusline (lib/segment-cache.sh,
 # which owns FI_AF_STUCK_AFTER, the key and the reader) and SessionStart only
@@ -234,12 +235,12 @@ fi_af_stuck_update() {
   [[ -n "$root" ]] || return 0
   fi_af_root
   dir="$FI_AF_ROOT/stuck"
-  fi_af_root_key "$root"
+  fi_af_stuck_key "$root"
   f="$dir/$FI_AF_KEY"
-  if [[ "$outcome" != stale || "$text" != "tests fail at base" ]]; then
-    rm -f "$f" 2>/dev/null
-    return 0
-  fi
+  # Only a base found green ends the streak (fi_af_base_tests clears it):
+  # a cancel, a prune or a no-longer-eligible retire says nothing about the
+  # base, so it neither counts nor resets.
+  [[ "$outcome" == stale && "$text" == "tests fail at base" ]] || return 0
   if fi_af_stuck_read "$f"; then
     n="$FI_AF_STUCK_N" names="$FI_AF_STUCK_NAMES"
     # A streak whose last failure is over a week old has aged out: start again.
@@ -282,7 +283,7 @@ fi_af_stuck_update() {
 fi_af_stuck_clear() {
   fi_af_root
   if [[ -n "${1:-}" ]]; then
-    fi_af_root_key "$1"
+    fi_af_stuck_key "$1"
     rm -f "$FI_AF_ROOT/stuck/$FI_AF_KEY" 2>/dev/null
   else
     rm -f "$FI_AF_ROOT"/stuck/* 2>/dev/null
@@ -296,7 +297,7 @@ fi_af_stuck_line() {
   local root s
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
   fi_af_root
-  fi_af_root_key "$root"
+  fi_af_stuck_key "$root"
   fi_af_stuck_active "$FI_AF_ROOT/stuck/$FI_AF_KEY" || return 0
   s="Auto-fix is STUCK in this repo: the last $((10#$FI_AF_STUCK_N)) items all retired with tests failing at base, so nothing is being fixed."
   [[ -n "$FI_AF_STUCK_NAMES" ]] && s+=" First failing: $FI_AF_STUCK_NAMES."
