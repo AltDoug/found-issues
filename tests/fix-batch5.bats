@@ -195,3 +195,101 @@ ship_setup() {
   run "$FI_BIN" fix
   [[ "$output" == *"--pick <loc>[,<loc>...] [--pick <loc> — <fragment>]..."* ]]
 }
+
+# ===== review of batch 5 ===================================================
+
+@test "b5 review engine: a Codex launch of an auto item an earlier Claude run wrote back still runs codex" {
+  fi_af_fixture
+  export CLAUDECODE=1
+  fi_af_queue_fixture
+  unset CLAUDECODE
+  fi_af_item_set "$QITEM" engine claude   # what a first run on Claude wrote back
+  source "$TEST_REPO_ROOT/lib/autofix-hook.sh"
+  mkdir -p "$TMP/fake"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s/spawned"\n' "$TMP" >"$TMP/fake/found-issues"
+  chmod +x "$TMP/fake/found-issues"
+  fi_afh_launch_a "$QITEM" codex "$TMP/fake/found-issues" "$REPO"
+  local i; for i in 1 2 3 4 5 6 7 8 9 10; do [ -s "$TMP/spawned" ] && break; sleep 0.3; done
+  grep -q "autofix run $ID --engine codex$" "$TMP/spawned"
+}
+
+@test "b5 review engine: an explicit engine recorded at queue time still wins at launch" {
+  fi_af_fixture
+  git config found-issues.autofix.engine claude
+  fi_af_queue_fixture
+  source "$TEST_REPO_ROOT/lib/autofix-hook.sh"
+  mkdir -p "$TMP/fake"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s/spawned"\n' "$TMP" >"$TMP/fake/found-issues"
+  chmod +x "$TMP/fake/found-issues"
+  fi_afh_launch_a "$QITEM" codex "$TMP/fake/found-issues" "$REPO"
+  local i; for i in 1 2 3 4 5 6 7 8 9 10; do [ -s "$TMP/spawned" ] && break; sleep 0.3; done
+  grep -q "autofix run $ID --engine claude$" "$TMP/spawned"
+}
+
+@test "b5 review engine: a requeued auto item goes back to the queue as engine=auto" {
+  fi_af_fixture
+  export CLAUDECODE=1
+  fi_af_queue_fixture
+  mv "$QITEM" "$FI_AF_ST/running/$ID"
+  fi_af_item_set "$FI_AF_ST/running/$ID" engine claude
+  fi_af_requeue "$ID" "verifier unavailable"
+  [ "$(queued_engine "$FI_AF_ST/queue/$ID")" = auto ]
+}
+
+@test "b5 review engine: a requeued explicit item keeps its engine" {
+  fi_af_fixture
+  git config found-issues.autofix.engine codex
+  fi_af_queue_fixture
+  mv "$QITEM" "$FI_AF_ST/running/$ID"
+  fi_af_requeue "$ID" "verifier unavailable"
+  [ "$(queued_engine "$FI_AF_ST/queue/$ID")" = codex ]
+}
+
+@test "b5 review engine: an auto item a run wrote back as codex resolves fresh in a Claude shell" {
+  fi_af_fixture
+  source "$FI_BIN"; fi_af_context
+  fi_af_item_write "$TMP/item" id=x kind=spot engine=codex engine_q=auto
+  fi_af_item_read "$TMP/item"
+  CLAUDECODE=1 run fi_af_item_engine
+  [ "$output" = claude ]
+}
+
+@test "b5 review engine: a continuation of a batch that never resolved its engine is not queued as auto" {
+  fi_af_sweep_fixture 4
+  source "$FI_BIN"; fi_af_context
+  QID=20991231-000000-00009
+  fi_af_item_write "$FI_AF_ST/running/$QID" "id=$QID" kind=sweep "root=$REPO" slug=foo/bar loc=sweep \
+    engine=auto engine_q=auto "queued=$(date +%Y-%m-%dT%H:%M:%S)" crashes=0 base=main
+  mkdir -p "$FI_AF_ST/sweeps"; : >"$FI_AF_ST/sweeps/$QID.outcomes"
+  fi_af_item_read "$FI_AF_ST/running/$QID"
+  unset CLAUDECODE; export CODEX_HOME="$TMP/codex"
+  _fi_af_sweep_queue_next "$QID"
+  c="$(grep -l '^cont=2' "$FI_AF_ST"/queue/* 2>/dev/null | head -1)"
+  [ -n "$c" ]
+  [ "$(queued_engine "$c")" = codex ]
+}
+
+@test "b5 review engine: an invalid engine setting warns at log time and records auto" {
+  fi_af_fixture
+  git config found-issues.autofix.engine Codex
+  run "$FI_BIN" log --fix small 'src/calc.sh:9 — add drops carries'
+  [[ "$output" == *"found-issues.autofix.engine=Codex"* ]]
+  item="$(ls "$FOUND_ISSUES_STATE_DIR"/autofix/foo__bar/queue/* | head -1)"
+  [ "$(queued_engine "$item")" = auto ]
+}
+
+@test "b5 review stuck: line 4 is the main worktree even when the item ran in a linked one" {
+  stuck_setup
+  git worktree add -q "$REPO/.claude/worktrees/lw" -b lw
+  fi_af_stuck_update "$REPO/.claude/worktrees/lw" stale "tests fail at base" x
+  [ "$(sed -n 4p "$STUCK_FILE")" = "$REPO" ]
+}
+
+@test "b5 review stuck: a --global off keeps the marker of a repo whose config git cannot read" {
+  stuck_setup; make_stuck
+  mv "$REPO/.git" "$REPO/.git-moved"
+  mkdir -p "$REPO/.git"   # a .git git refuses
+  run "$FI_BIN" config autofix false --global
+  rm -rf "$REPO/.git"; mv "$REPO/.git-moved" "$REPO/.git"
+  [ -f "$STUCK_FILE" ]
+}

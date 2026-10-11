@@ -122,7 +122,9 @@ fi_afh_launch_a() {
   # (found-issues.autofix.engine=codex or claude); an item queued under
   # engine=auto records auto, so the harness draining it runs it, whichever
   # harness queued it (ledger lib/autofix-hook.sh:124).
-  case "$AFI_engine" in claude|codex) engine="$AFI_engine" ;; esac
+  if [[ "${AFI_engine_q:-}" != auto ]]; then
+    case "$AFI_engine" in claude|codex) engine="$AFI_engine" ;; esac
+  fi
   fi_afh_root_resolve "$AFI_root" "${4:-$PWD}" "$item" || return 1
   log="${item%/queue/*}/spawn.log"
   ( cd "$FI_AFH_ROOT" && nohup "$bin" autofix run "$AFI_id" --engine "$engine" \

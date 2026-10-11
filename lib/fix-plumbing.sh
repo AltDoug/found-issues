@@ -66,7 +66,7 @@ _fi_fix_test() {
 # reaches the default branch on merge, and the run leaves no ledger diff
 # behind in the worktree.
 _fi_fix_ship() {
-  local wt="" title="" bodyf="" root="" base br slug url pr p np=0
+  local wt="" title="" bodyf="" root="" base br slug url pr p
   # Each --pick is passed on as its own --pick: a "<loc> — <fragment>" value
   # is never comma-split, so one value holding a list of them annotated
   # nothing (ledger lib/fix-plumbing.sh:75).
@@ -76,12 +76,12 @@ _fi_fix_ship() {
     case "$1" in
       --title) fi_need_value "fix ship" --title $# "${2:-}" || return 2; title="$2"; shift 2 ;;
       --body-file) fi_need_value "fix ship" --body-file $# "${2:-}" || return 2; bodyf="$2"; shift 2 ;;
-      --pick) fi_need_value "fix ship" --pick $# "${2:-}" || return 2; pargs+=(--pick "$2"); np=$((np + 1)); shift 2 ;;
+      --pick) fi_need_value "fix ship" --pick $# "${2:-}" || return 2; pargs+=(--pick "$2"); shift 2 ;;
       --source) fi_need_value "fix ship" --source $# "${2:-}" || return 2; root="$2"; shift 2 ;;
       *) fi_unknown_arg "fix ship" "$1"; return 2 ;;
     esac
   done
-  if [[ ! -d "$wt" || -z "$title" || ! -f "$bodyf" ]] || (( np == 0 )); then _fi_fix_usage >&2; return 2; fi
+  if [[ ! -d "$wt" || -z "$title" || ! -f "$bodyf" ]] || (( ${#pargs[@]} == 0 )); then _fi_fix_usage >&2; return 2; fi
   git -C "$wt" rev-parse --git-dir >/dev/null 2>&1 || { fi_err "fix ship: $wt is not a git worktree"; return 1; }
   # The source ledger is the checkout the session works in (fix workspace's
   # source=), which is a linked worktree as often as the main checkout:

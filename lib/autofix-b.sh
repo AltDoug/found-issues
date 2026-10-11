@@ -139,7 +139,7 @@ fi_af_b_verify() {
     fi_af_test_report "$log" 20
     printf 'tests fail: fix them (found-issues autofix test %s) before verify\n' "$id"; return 3
   fi
-  engine="$(fi_af_engine "${AFI_engine:-claude}")" || engine=claude
+  engine="$(fi_af_item_engine)" || engine=claude
   # An item queued as engine=auto keeps what it resolved to, so its PR body,
   # status row and a sweep continuation name the engine that really ran.
   if [[ "${AFI_engine:-}" != "$engine" ]]; then

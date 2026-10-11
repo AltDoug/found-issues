@@ -273,7 +273,7 @@ fi_af_stuck_update() {
   fi
   mkdir -p "$dir" 2>/dev/null || return 0
   fi_af_now
-  if printf '%s\n%s\n%s\n%s\n' "$n" "$names" "$FI_AF_NOW" "$root" >"$f.$$" 2>/dev/null; then
+  if printf '%s\n%s\n%s\n%s\n' "$n" "$names" "$FI_AF_NOW" "${FI_AF_STUCK_ROOT:-$root}" >"$f.$$" 2>/dev/null; then
     mv -f "$f.$$" "$f" 2>/dev/null || rm -f "$f.$$"
   fi
   return 0
@@ -281,8 +281,9 @@ fi_af_stuck_update() {
 
 # Drop the stuck marker of one repo root, or of every repo (no argument).
 # --global (config autofix false --global) keeps the marker of a repo whose
-# own setting still turns auto-fix on there (ledger lib/autofix-config.sh:409);
-# a file from before 3.8.1 names no root and is dropped.
+# own setting still turns auto-fix on there (ledger lib/autofix-config.sh:409),
+# or whose config git cannot read; a file whose repo is gone, or from before
+# 3.8.1 (no root line), is dropped.
 fi_af_stuck_clear() {
   local f r
   fi_af_root
@@ -292,6 +293,8 @@ fi_af_stuck_clear() {
       r=""
       { IFS= read -r _; IFS= read -r _; IFS= read -r _; IFS= read -r r; } <"$f" 2>/dev/null || true
       if [[ -n "$r" && -d "$r" ]]; then
+        # Config that cannot be read (safe.directory, a moved .git) keeps it.
+        git -C "$r" rev-parse --git-dir >/dev/null 2>&1 || continue
         fi_af_repo_cfg "$r"
         [[ "$FI_AF_RC_ON" == true ]] && continue
       fi
