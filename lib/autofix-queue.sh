@@ -649,7 +649,7 @@ _fi_af_clear_attempts() {
 # Spec §8: a running item whose process is gone crashed. Requeue it once;
 # the second crash fails it.
 fi_af_reap() {
-  local f
+  local f kept
   for f in "$FI_AF_ST"/running/*; do
     [[ -f "$f" ]] || continue
     if ! fi_af_item_read "$f"; then
@@ -660,6 +660,11 @@ fi_af_reap() {
       continue
     fi
     if [[ -n "$AFI_pid" ]] && _fi_af_pid_alive "$AFI_pid" "$AFI_pstart"; then continue; fi
+    kept=""
+    if kept="$(_fi_af_rescue_branch)"; then
+      fi_af_log "$AFI_id" "the dead run's commits are kept on $kept"
+      AFI_branch=""
+    fi
     fi_af_worktree_remove
     if (( ${AFI_crashes:-0} < 1 )); then
       fi_af_item_set "$f" crashes 1
@@ -680,9 +685,25 @@ fi_af_reap() {
       fi_af_seg_write "$AFI_root"
       fi_af_log "$AFI_id" "requeued after a crash"
     else
-      fi_af_finish "$AFI_id" failed "crashed"
+      fi_af_finish "$AFI_id" failed "crashed${kept:+; commits kept on $kept}"
     fi
   done
+}
+
+# A dead run's branch holding commits past its base (a sweep's verified
+# fixes, never pushed) is renamed to fi/rescued/<id> instead of deleted, so
+# the paid work survives the reap (ledger lib/autofix-queue.sh:583). Prints
+# the new name; rc 1 = nothing to keep. A ship retry keeps its branch anyway.
+_fi_af_rescue_branch() {
+  local new
+  [[ -n "$AFI_branch" && -n "$AFI_root" && -n "${AFI_base_sha:-}" ]] || return 1
+  [[ "${AFI_ship_tries:-0}" =~ ^[1-9] ]] && return 1
+  git -C "$AFI_root" rev-parse -q --verify "refs/heads/$AFI_branch" >/dev/null 2>&1 || return 1
+  [[ -n "$(git -C "$AFI_root" rev-list "$AFI_base_sha..refs/heads/$AFI_branch" 2>/dev/null)" ]] || return 1
+  new="fi/rescued/$AFI_id"
+  git -C "$AFI_root" rev-parse -q --verify "refs/heads/$new" >/dev/null 2>&1 && new="$new-$(date +%s)"
+  git -C "$AFI_root" branch -m "$AFI_branch" "$new" >/dev/null 2>&1 || return 1
+  printf '%s' "$new"
 }
 
 # The file an entry cites, relative to the root; rc 1 when the entry cites no

@@ -47,3 +47,50 @@ ship_setup() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"tests: fail (exit 1) — 1..2, 1 ok, 1 not ok"* ]]
 }
+
+# ===== lib/autofix-queue.sh:583 — a crashed run's commits survive the reap ===
+
+crash_setup() {
+  fi_af_fixture
+  fi_af_queue_fixture
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  WT="$(sed -n 's/^wt=//p' "$FI_AF_ST/running/$ID")"
+  BR="$(sed -n 's/^branch=//p' "$FI_AF_ST/running/$ID")"
+  fi_af_item_set "$FI_AF_ST/running/$ID" pid 999999
+}
+
+@test "b6 reap: a dead run with commits past its base keeps them on fi/rescued/<id>" {
+  crash_setup
+  sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"
+  git -C "$WT" commit -qam "fix: add subtracts"
+  sha="$(git -C "$WT" rev-parse HEAD)"
+  fi_af_reap
+  [ -f "$FI_AF_ST/queue/$ID" ]
+  [ "$(git rev-parse "refs/heads/fi/rescued/$ID")" = "$sha" ]
+  [ -z "$(git branch --list "$BR")" ]
+  [ ! -d "$WT" ]
+  grep -q "fi/rescued/$ID" "$FI_AF_RUNS/$ID.log"
+}
+
+@test "b6 reap: a dead run with no commits still drops its branch" {
+  crash_setup
+  fi_af_reap
+  [ -f "$FI_AF_ST/queue/$ID" ]
+  [ -z "$(git branch --list "$BR")" ]
+  [ -z "$(git branch --list "fi/rescued/*")" ]
+}
+
+@test "b6 reap: the second crash keeps its commits too and names the branch in the result" {
+  crash_setup
+  fi_af_reap
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  WT="$(sed -n 's/^wt=//p' "$FI_AF_ST/running/$ID")"
+  fi_af_item_set "$FI_AF_ST/running/$ID" pid 999999
+  sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"
+  git -C "$WT" commit -qam "fix: add subtracts"
+  sha="$(git -C "$WT" rev-parse HEAD)"
+  fi_af_reap
+  [ -f "$FI_AF_ST/done/$ID" ]
+  [ "$(git rev-parse "refs/heads/fi/rescued/$ID")" = "$sha" ]
+  grep -q "^result=failed: crashed; commits kept on fi/rescued/$ID$" "$FI_AF_ST/done/$ID"
+}
