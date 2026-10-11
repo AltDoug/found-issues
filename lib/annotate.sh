@@ -255,8 +255,10 @@ fi_annotate_apply_picks() {
   # reports "no [open] entry matches" for an entry that is plainly there.
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ ^-\ \[open\] ]] || continue
-    fi_entry_loc_v "$line" || continue
-    loc="$FE_loc"
+    # A location the parser does not split (path:name, `foo.lua:wm_check`)
+    # has no FE_loc; an explicit pick still selects it by raw_loc below.
+    loc=""
+    fi_entry_loc_v "$line" && loc="$FE_loc"
     # The location text exactly as written (between the date and the ' — '
     # separator), so a pick copied from the ledger matches even when the
     # parser keeps only its first token as the path.

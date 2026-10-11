@@ -580,6 +580,26 @@ EOF
   grep -q "LendMatrix-svc:src/services/foo.ts:42.*(commit: $short_sha)" docs/found-issues.md
 }
 
+@test "annotate-commit: --pick selects an entry whose location is path:name, plain and extended" {
+  mkdir -p src docs
+  echo x > src/m.lua
+  printf '# found-issues\n\n' > docs/found-issues.md
+  printf -- '- [open] 2026-10-11 src/m.lua:wm_check — NAME-BUG one\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-10-11 src/m.lua:cut_live — NAME-BUG two\n' >> docs/found-issues.md
+  printf -- '- [open] 2026-10-11 src/m.lua:1 — LINE-BUG\n' >> docs/found-issues.md
+  git add -A
+  git commit -q -m "fix"
+  short_sha="$(git rev-parse --short=7 HEAD)"
+
+  fi_run annotate-commit HEAD --pick "src/m.lua:wm_check"
+  [ "$status" -eq 0 ]
+  grep -q "src/m.lua:wm_check — NAME-BUG one (commit: $short_sha)" docs/found-issues.md
+  fi_run annotate-commit HEAD --pick "src/m.lua:cut_live — two"
+  [ "$status" -eq 0 ]
+  grep -q "src/m.lua:cut_live — NAME-BUG two (commit: $short_sha)" docs/found-issues.md
+  ! grep -q 'LINE-BUG (commit:' docs/found-issues.md || false
+}
+
 # Auto-match compares entry paths to touched files with glob suffix tolerance
 # (`"$e_path" == */"$tf"`). A repo-prefixed path is NOT a path in this repo,
 # so it must be excluded from auto-matching outright. Without the exclusion a

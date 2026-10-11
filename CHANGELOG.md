@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.3] - 2026-10-11
+
+Ledger fix batch 7: `--pick` reaches entries cited by a name instead of a line number, and a timing test stops failing on hosted macOS.
+
+### Fixed
+- **`--pick` selects an entry whose location is `path:name`.** `annotate-commit` and `annotate-pr` (and so `fix ship`) could not pick an entry cited like `src/units/dev-telemetry/midgar_dev.lua:wm_check`: the parser keeps no path for a non-numeric suffix, so the entry was skipped before the pick was compared, and both the plain and the `<loc> — <fragment>` form reported "no [open] entry matches pick". The exact location text now matches such an entry, and sync closes it once the annotated commit or PR lands.
+- **The first-touch slow-path timing test no longer times a `jq` spawn per call.** It built each hook payload inside the timed loop, so it measured jq plus the hook and failed the 50 ms bound on hosted macOS (post-merge run 38111232480). The payloads are now built before the clock starts, as in the two sibling timing tests, and the test prints its per-call time.
+
 ## [3.8.2] - 2026-10-11
 
 Ledger fix batch 6: an old CLI on PATH no longer silences the annotation hook, a crashed run's unshipped fixes survive, and `fix ship` records what its test gate ran.
