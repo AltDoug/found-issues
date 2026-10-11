@@ -56,9 +56,11 @@ _fi_fix_test() {
   fi
   fi_af_test_report "$log" 30
   tail -n 5 "$log.err" 2>/dev/null
+  local sum
+  sum="$(fi_af_tap_summary "$log")"
   rm -f "$log" "$log.err"
   if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then printf 'tests: timed out after %ss\n' "$FI_AF_CHILD_TIMEDOUT"; fi
-  if (( rc == 0 )); then printf 'tests: pass\n'; else printf 'tests: fail (exit %s)\n' "$rc"; fi
+  if (( rc == 0 )); then printf 'tests: pass%s\n' "${sum:+ — $sum}"; else printf 'tests: fail (exit %s)%s\n' "$rc" "${sum:+ — $sum}"; fi
   return $rc
 }
 
@@ -116,10 +118,17 @@ _fi_fix_ship() {
     fi_err "fix ship: tests fail in $wt — not shipping"
     return 1
   fi
+  # The gate's verdict line is printed and appended to (a copy of) the PR
+  # body, so the PR records what ran (ledger lib/fix-plumbing.sh:113).
+  local verdict="${treport##*$'\n'}" bodyc
+  printf '%s\n' "$verdict"
+  bodyc="$(mktemp "${TMPDIR:-/tmp}/fi-fix-body.XXXXXX")" || { fi_err "fix ship: mktemp failed"; return 1; }
+  { cat "$bodyf"; printf '\nTest gate (`fix ship`): %s\n' "$verdict"; } >"$bodyc"
   fi_af_no_prompts
-  git -C "$wt" push -q -u origin "$br" 2>/dev/null || { fi_err "fix ship: git push failed"; return 1; }
-  url="$(cd "$wt" && gh pr create --repo "$slug" --base "$base" --head "$br" --title "$title" --body-file "$bodyf")" \
-    || { fi_err "fix ship: gh pr create failed"; return 1; }
+  git -C "$wt" push -q -u origin "$br" 2>/dev/null || { rm -f "$bodyc"; fi_err "fix ship: git push failed"; return 1; }
+  url="$(cd "$wt" && gh pr create --repo "$slug" --base "$base" --head "$br" --title "$title" --body-file "$bodyc")" \
+    || { rm -f "$bodyc"; fi_err "fix ship: gh pr create failed"; return 1; }
+  rm -f "$bodyc"
   pr="${url##*/}"
   [[ "$pr" =~ ^[0-9]+$ ]] || { fi_err "fix ship: no PR number in: $url"; return 1; }
   # Strict picks: an unmatched or ambiguous pick fails the ship (the PR is

@@ -15,6 +15,7 @@
 #   GH_MOCK_AUTH          "ok" (default) or "fail" — controls `gh auth status` exit
 #   GH_MOCK_TRACE         path to write each invocation (for assertions)
 #   GH_MOCK_PR_CREATE_URL URL printed by `gh pr create` (default https://github.com/foo/bar/pull/7)
+#   GH_MOCK_PR_BODY_COPY  path `gh pr create` copies its --body-file to (for assertions)
 #   GH_MOCK_PR_MERGE      "ok" (default) or "fail" — exit of `gh pr merge`
 #
 # Behavior: print matching JSON to stdout and exit 0; exit 1 if no match.
@@ -129,6 +130,13 @@ case "$cmd $sub" in
     exit 1
     ;;
   "pr create")
+    if [[ -n "${GH_MOCK_PR_BODY_COPY:-}" ]]; then
+      prev=""
+      for a in "$@"; do
+        [[ "$prev" == "--body-file" ]] && cp "$a" "$GH_MOCK_PR_BODY_COPY"
+        prev="$a"
+      done
+    fi
     printf '%s\n' "${GH_MOCK_PR_CREATE_URL:-https://github.com/foo/bar/pull/7}"
     exit 0
     ;;
