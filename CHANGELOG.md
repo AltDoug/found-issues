@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.4] - 2026-10-11
+
+Ledger fix batch 8: `autofix cancel` keeps a stopped run's unshipped commits.
+
+### Fixed
+- **`autofix cancel` no longer deletes a running item's verified commits.** Cancelling a claimed or running item used to remove its worktree and `branch -D` its `fi/autofix` or `fi/sweep` branch, so a sweep's paid, verified fixes were lost. A branch that holds commits past its base is now renamed to `fi/rescued/<id>`, the same rule the 3.8.2 reap uses for a crashed run. The branch is recorded on the item, `autofix status` shows it, and the cancel output names it. A branch with no commits of its own is still dropped (operator decision 2026-10-11).
+
 ## [3.8.3] - 2026-10-11
 
 Ledger fix batch 7: `--pick` reaches entries cited by a name instead of a line number, and a timing test stops failing on hosted macOS.
