@@ -38,7 +38,7 @@ AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
 AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0"
+AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -53,14 +53,14 @@ fi_af_item_read() {
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
   AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0"
+  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|more|chain_cost|chain_tokens|outages)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -88,7 +88,58 @@ fi_af_item_set() {
   done <"$path" || { rm -f "$tmp"; return 1; }
   (( found )) || printf '%s=%s\n' "$key" "$val" >>"$tmp"
   [[ -f "$path" ]] || { rm -f "$tmp"; return 1; }
-  mv "$tmp" "$path"
+  mv "$tmp" "$path" || return 1
+  # A pid is only an identity together with its start time: the OS reuses
+  # pids, and an unrelated process must not look like the run that died.
+  if [[ "$key" == pid ]]; then
+    if [[ "$val" =~ ^[1-9][0-9]*$ ]]; then
+      _fi_af_pstart "$val"
+      fi_af_item_set "$path" pstart "$FI_AF_PSTART"
+    else
+      fi_af_item_set "$path" pstart ""
+    fi
+  fi
+  return 0
+}
+
+# Start time of <pid> in FI_AF_PSTART: epoch seconds when date can parse ps's
+# lstart (BSD -j -f, else GNU -d), else the lstart text; "" when ps cannot
+# say (Git Bash: callers then fall back to the pid alone). ps runs in the C
+# locale and UTC, so a reader with another TZ or locale reads the same value.
+_fi_af_pstart() {
+  local s e
+  FI_AF_PSTART=""
+  [[ "$1" =~ ^[1-9][0-9]*$ ]] || return 0
+  s="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//' || true)"
+  s="${s//$'\n'/ }"
+  [[ -n "$s" ]] || return 0
+  e="$(LC_ALL=C TZ=UTC0 date -j -f '%a %b %d %T %Y' "$s" +%s 2>/dev/null \
+       || LC_ALL=C TZ=UTC0 date -d "$s" +%s 2>/dev/null || true)"
+  if [[ "$e" =~ ^[0-9]+$ ]]; then FI_AF_PSTART="$e"; else FI_AF_PSTART="$s"; fi
+}
+
+# rc 0 when the start time read now matches <recorded>: unknown on either
+# side counts as a match (the pid alone decides), and two epochs may differ
+# by 2 s (procps that derives boot time from uptime jitters by a second).
+_fi_af_pstart_same() {
+  local now="$1" rec="$2" d
+  [[ -n "$now" && -n "$rec" ]] || return 0
+  if [[ "$now" =~ ^[0-9]+$ && "$rec" =~ ^[0-9]+$ ]]; then
+    d=$(( now - rec )); (( d < 0 )) && d=$(( -d ))
+    (( d <= 2 ))
+  else
+    [[ "$now" == "$rec" ]]
+  fi
+}
+
+# rc 0 when <pid> is alive and, if a start time was recorded and ps can read
+# one now, still the same process.
+_fi_af_pid_alive() {
+  [[ "$1" =~ ^[1-9][0-9]*$ ]] || return 1
+  kill -0 "$1" 2>/dev/null || return 1
+  [[ -n "${2:-}" ]] || return 0
+  _fi_af_pstart "$1"
+  _fi_af_pstart_same "$FI_AF_PSTART" "$2"
 }
 
 # Sortable by queue time: the drain loop takes the oldest first.
@@ -147,16 +198,18 @@ FI_AF_ENTRY="" FI_AF_LEDGER=""
 # lock whose owner is a running A item with a dead pid (SIGKILL, sleep): it
 # would otherwise block the reap for the full hour.
 fi_af_lock() {
-  local id="$1" lock="$FI_AF_ST/lock" now age mt owner="" opid=""
+  local id="$1" lock="$FI_AF_ST/lock" now age mt owner="" opid="" opstart="" brk owner2="" mt2
+  brk="$lock.break"
   if mkdir "$lock" 2>/dev/null; then
     printf '%s\n' "$id" >"$lock/owner"; return 0
   fi
   [[ -f "$lock/owner" ]] && { IFS= read -r owner <"$lock/owner" || true; }
   if [[ -n "$owner" ]]; then
     opid="$(_fi_af_field "$FI_AF_ST/running/$owner" pid)" || opid=""
+    opstart="$(_fi_af_field "$FI_AF_ST/running/$owner" pstart)" || opstart=""
   fi
-  if [[ ! "$opid" =~ ^[1-9][0-9]*$ ]] || kill -0 "$opid" 2>/dev/null; then
-    mt="$(fi_file_mtime "$lock")"
+  mt="$(fi_file_mtime "$lock")"
+  if [[ ! "$opid" =~ ^[1-9][0-9]*$ ]] || _fi_af_pid_alive "$opid" "$opstart"; then
     if (( mt == 0 )); then
       # stat failed (the lock vanished since the mkdir): not evidence of age.
       # Retake it if it is gone, else leave whoever holds it alone.
@@ -167,10 +220,31 @@ fi_af_lock() {
     age=$(( now - mt ))
     (( age >= ${FOUND_ISSUES_AUTOFIX_LOCK_STALE:-3600} )) || return 1
   fi
-  mv "$lock" "$lock.stale.$$" 2>/dev/null || return 1
+  # Breaking is serialized: of two contenders that both judged the owner dead
+  # only the one holding the break mutex proceeds, and it re-reads the owner
+  # (and the lock's age) first, so a lock another contender already broke and
+  # retook is never moved away from its new holder.
+  if ! mkdir "$brk" 2>/dev/null; then
+    # A mutex left by a contender that died inside the break: drop it.
+    mt2="$(fi_file_mtime "$brk")"
+    if (( mt2 > 0 )) && (( $(date +%s) - mt2 >= 60 )); then rm -rf "$brk"; fi
+    return 1
+  fi
+  [[ -f "$lock/owner" ]] && { IFS= read -r owner2 <"$lock/owner" || true; }
+  mt2="$(fi_file_mtime "$lock")"
+  if [[ "$owner2" != "$owner" || "$mt2" != "$mt" ]]; then
+    rmdir "$brk" 2>/dev/null || true
+    return 1
+  fi
+  mv "$lock" "$lock.stale.$$" 2>/dev/null || { rmdir "$brk" 2>/dev/null || true; return 1; }
   rm -rf "$lock.stale.$$"
-  mkdir "$lock" 2>/dev/null || return 1
-  printf '%s\n' "$id" >"$lock/owner"
+  if mkdir "$lock" 2>/dev/null; then
+    printf '%s\n' "$id" >"$lock/owner"
+    rmdir "$brk" 2>/dev/null || true
+    return 0
+  fi
+  rmdir "$brk" 2>/dev/null || true
+  return 1
 }
 
 fi_af_unlock() {
@@ -539,7 +613,7 @@ fi_af_reap() {
       fi_af_seg_write "$(_fi_af_field "$FI_AF_ST/done/${f##*/}" root)"
       continue
     fi
-    if [[ -n "$AFI_pid" ]] && kill -0 "$AFI_pid" 2>/dev/null; then continue; fi
+    if [[ -n "$AFI_pid" ]] && _fi_af_pid_alive "$AFI_pid" "$AFI_pstart"; then continue; fi
     fi_af_worktree_remove
     if (( ${AFI_crashes:-0} < 1 )); then
       fi_af_item_set "$f" crashes 1
@@ -647,24 +721,49 @@ fi_af_claim() {
     5) fi_af_retire "$id" stale "$FI_AF_WHY" || fi_af_unlock "$id"; return 5 ;;
     8) fi_af_unlock "$id"; fi_af_log "$id" "waiting: $FI_AF_WHY"; return 8 ;;
   esac
+  # Move to running/ FIRST, then stamp the running file: fi_af_item_set on the
+  # queue file checks it and later mv's its tmp copy over it, so a cancel that
+  # moved the item away in between would have the stamp recreate queue/<id>
+  # and ship an item cancel reported as cancelled. A lost mv means exactly
+  # that cancel won.
+  mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
   # The wait is over: clear its clock too, or the next wait of a requeued
   # item would start from this one's wait_since and retire stale at once.
-  fi_af_item_set "$q" waiting ""
-  fi_af_item_set "$q" wait_since ""
-  fi_af_item_set "$q" wait_next ""
+  fi_af_item_set "$r" waiting ""
+  fi_af_item_set "$r" wait_since ""
+  fi_af_item_set "$r" wait_next ""
   # Launcher A's run passes its own long-lived pid. A standalone claim is an
   # in-session fixer (launcher B): its claim process exits at once, so there
   # is no pid to record. The repo lock, refreshed by every B-side call, is
   # what keeps the item from being reaped (ledger lib/autofix-queue.sh:263).
-  fi_af_item_set "$q" pid "${FI_AF_PID:-}"
-  if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$q" launcher A; else fi_af_item_set "$q" launcher B; fi
-  mv "$q" "$r" || { fi_af_unlock "$id"; return 1; }
+  fi_af_item_set "$r" pid "${FI_AF_PID:-}"
+  if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$r" launcher A; else fi_af_item_set "$r" launcher B; fi
   fi_af_seg_write "$AFI_root"
-  fi_af_cap_take spot "$id"
   if ! fi_af_worktree_add; then
+    # A fetch or worktree failure is usually transient (network, a busy
+    # index): give the item back to the queue, at most 3 times in a row, and
+    # fail it as before only after that. A requeue spends no daily slot.
+    local tries
+    tries="$(_fi_af_field "$r" wt_retries)" || tries=0
+    [[ "$tries" =~ ^[0-9]+$ ]] || tries=0
+    if (( tries < 3 )); then
+      local why="$FI_AF_WHY"
+      fi_af_item_set "$r" wt_retries "$(( tries + 1 ))"
+      # Spaced like a wait (the drain and the Stop hook skip it until
+      # wait_next), so three retries outlast a short outage.
+      fi_af_item_set "$r" waiting "$why"
+      fi_af_item_set "$r" wait_next "$(( $(date +%s) + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
+      fi_af_worktree_remove
+      fi_af_requeue "$id" "$why; retry $(( tries + 1 )) of 3"
+      FI_AF_WHY="$why; requeued, retry $(( tries + 1 )) of 3"
+      return 8
+    fi
+    fi_af_cap_take spot "$id"
     fi_af_finish "$id" failed "$FI_AF_WHY"
     return 6
   fi
+  fi_af_cap_take spot "$id"
+  fi_af_item_set "$r" wt_retries ""
   fi_af_item_set "$r" wt "$AFI_wt"
   fi_af_item_set "$r" branch "$AFI_branch"
   fi_af_item_set "$r" base "$AFI_base"

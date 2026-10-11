@@ -11,17 +11,18 @@
 #   fi_afh_state
 #   fi_afh_launcher <harness> <permission_mode> <agent_id>
 #   fi_afh_ids <text>
-#   fi_afh_item <id>
+#   fi_afh_item <id> [<cwd>]
 #   fi_afh_now
 #   fi_afh_mark <item> <A|B> <epoch>
-#   fi_afh_launch_a <item> <engine> <fi-bin>
+#   fi_afh_root_resolve <root> <ref-cwd> [<item>]
+#   fi_afh_launch_a <item> <engine> <fi-bin> [<cwd>]
 #   fi_afh_context_b <id> [<item>]
 #   fi_afh_lock_fresh <lock-dir>
 #   fi_afh_stop <payload> <engine> <fi-bin>
 
 # shellcheck disable=SC2154  # AFI_* are set by fi_af_item_read (autofix-queue.sh)
 
-FI_AFH_LAUNCHER="" FI_AFH_ITEM="" FI_AFH_NOW="" FI_AFH_DAY=""
+FI_AFH_LAUNCHER="" FI_AFH_ITEM="" FI_AFH_NOW="" FI_AFH_DAY="" FI_AFH_ROOT=""
 FI_AFH_IDS=()
 
 fi_afh_state() { printf '%s' "${FOUND_ISSUES_STATE_DIR:-$HOME/.claude/found-issues}/autofix"; }
@@ -52,11 +53,26 @@ fi_afh_ids() {
   done
 }
 
+# The queued item for <id>, or fail. A marker re-printed for an id that was
+# launched within the Stop grace is not relaunched (a duplicate B nudge, a
+# reset launched=), and an item of another repo than <cwd> (default: the
+# hook's own cwd) is not this session's to launch.
 fi_afh_item() {
-  local f
+  local f ref="${2:-$PWD}"
   FI_AFH_ITEM=""
+  [[ -n "$FI_AFH_NOW" ]] || fi_afh_now
   for f in "$(fi_afh_state)"/*/queue/"$1"; do
-    [[ -f "$f" ]] && { FI_AFH_ITEM="$f"; return 0; }
+    [[ -f "$f" ]] || continue
+    fi_af_item_read "$f" || continue
+    if [[ "$AFI_launched" =~ ^[0-9]+$ ]] \
+       && (( FI_AFH_NOW - AFI_launched < ${FOUND_ISSUES_AUTOFIX_STOP_GRACE:-60} )); then
+      continue
+    fi
+    if [[ "$ref" != "$AFI_root" ]]; then
+      fi_afh_root_resolve "$AFI_root" "$ref" "$f" || continue
+      [[ "$ref" == "$FI_AFH_ROOT" ]] || [[ "$(fi_afh_common_dir "$FI_AFH_ROOT")" == "$(fi_afh_common_dir "$ref")" ]] || continue
+    fi
+    FI_AFH_ITEM="$f"; return 0
   done
   return 1
 }
@@ -72,14 +88,39 @@ fi_afh_mark() {
   fi_af_item_set "$1" launcher "$2" && fi_af_item_set "$1" launched "$3"
 }
 
+# The directory a run for an item rooted at <root> starts in. <root> itself
+# when it exists. An item queued from a .claude/worktrees/<name> checkout that
+# was removed since (reaper, session end) falls back to the main checkout, the
+# prefix before the FIRST /.claude/worktrees/, when that is a git checkout of
+# the same repo as <ref-cwd>. Anything else is refused. With <item>, a
+# fallback is written back to it: the run reads root= for its worktree, ledger
+# and git calls, and the dead path would fail every one of them; a wt= under
+# the dead root went with it.
+fi_afh_root_resolve() {
+  local root="$1" ref="$2" item="${3:-}" main ref_git main_git
+  FI_AFH_ROOT=""
+  if [[ -d "$root" ]]; then FI_AFH_ROOT="$root"; return 0; fi
+  [[ "$root" == */.claude/worktrees/* ]] || return 1
+  main="${root%%/.claude/worktrees/*}"
+  [[ -n "$main" && -d "$main" && -e "$main/.git" ]] || return 1
+  ref_git="$(fi_afh_common_dir "$ref")" || return 1
+  main_git="$(fi_afh_common_dir "$main")" || return 1
+  [[ "$ref_git" == "$main_git" ]] || return 1
+  FI_AFH_ROOT="$main"
+  [[ -n "$item" ]] || return 0
+  fi_af_item_set "$item" root "$main" || return 1
+  [[ -z "$AFI_wt" ]] || fi_af_item_set "$item" wt "" || return 1
+  AFI_root="$main" AFI_wt=""
+}
+
 # Detached and fd-clean: the session never waits on it and bats never hangs
 # on an inherited fd 3.
 fi_afh_launch_a() {
   local item="$1" engine="$2" bin="$3" log
   fi_af_item_read "$item" || return 1
-  [[ -d "$AFI_root" ]] || return 1
+  fi_afh_root_resolve "$AFI_root" "${4:-$PWD}" "$item" || return 1
   log="${item%/queue/*}/spawn.log"
-  ( cd "$AFI_root" && nohup "$bin" autofix run "$AFI_id" --engine "$engine" \
+  ( cd "$FI_AFH_ROOT" && nohup "$bin" autofix run "$AFI_id" --engine "$engine" \
       </dev/null >>"$log" 2>&1 3>&- & ) >/dev/null 2>&1
 }
 
@@ -147,7 +188,7 @@ fi_afh_common_dir() {
 # or the item was launched less than FOUND_ISSUES_AUTOFIX_STOP_GRACE seconds
 # ago (default 60; a B fixer may not have claimed yet).
 fi_afh_stop() {
-  local input="$1" engine="$2" bin="$3" st_root f st cwd cwd_git="" root_seen="" root_git=""
+  local input="$1" engine="$2" bin="$3" st_root f st cwd cwd_git="" root_seen="" root_git="" eff v cap n line
   local re_agent='"agent_id"[[:space:]]*:[[:space:]]*"[^"]' re_cwd='"cwd"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
   local -a items=()
   [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]] && return 0
@@ -170,13 +211,17 @@ fi_afh_stop() {
     [[ -n "$AFI_root" ]] || continue
     # Same repo, any checkout (3.4.2): a sibling worktree or the main
     # checkout drains an item queued from a nested worktree, and a separate
-    # repo nested under the root does not. git forks only when the cwd is
-    # not the root itself, once for the cwd and once per distinct root.
-    if [[ "$cwd" != "$AFI_root" ]]; then
+    # repo nested under the root does not. A nested worktree that was removed
+    # resolves to its main checkout (fi_afh_root_resolve). git forks only when
+    # the cwd is not the root itself, once for the cwd and once per distinct
+    # root.
+    fi_afh_root_resolve "$AFI_root" "$cwd" || continue
+    eff="$FI_AFH_ROOT"
+    if [[ "$cwd" != "$eff" ]]; then
       [[ -n "$cwd_git" ]] || cwd_git="$(fi_afh_common_dir "$cwd")" || cwd_git="-"
       [[ "$cwd_git" != "-" ]] || continue
-      if [[ "$AFI_root" != "$root_seen" ]]; then
-        root_seen="$AFI_root"; root_git="$(fi_afh_common_dir "$AFI_root")" || root_git="-"
+      if [[ "$eff" != "$root_seen" ]]; then
+        root_seen="$eff"; root_git="$(fi_afh_common_dir "$eff")" || root_git="-"
       fi
       [[ "$root_git" == "$cwd_git" ]] || continue
     fi
@@ -184,8 +229,23 @@ fi_afh_stop() {
        && (( FI_AFH_NOW - AFI_launched < ${FOUND_ISSUES_AUTOFIX_STOP_GRACE:-60} )); then
       continue
     fi
+    # Per-repo switch: found-issues.autofix=false there means every run exits
+    # 1 at once, so do not spawn one at every Stop.
+    v="$(git -C "$eff" config --type=bool --get found-issues.autofix 2>/dev/null || true)"
+    [[ "$v" == "true" ]] || continue
+    # Today's spot cap, read the way fi_af_cap_ok does: a B claim that hits it
+    # (claim rc 3) writes no capped marker, so count the claims here.
+    if [[ "$AFI_kind" != "sweep" ]]; then
+      cap="$(git -C "$eff" config --get found-issues.autofix.dailyFixes 2>/dev/null || true)"
+      [[ "$cap" =~ ^[0-9]+$ ]] && (( 10#$cap >= 1 )) || cap=5
+      n=0
+      if [[ -f "$st/day/$FI_AFH_DAY.spot" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$st/day/$FI_AFH_DAY.spot"
+      fi
+      (( n < 10#$cap )) || continue
+    fi
     fi_afh_mark "$f" A "$FI_AFH_NOW"
-    fi_afh_launch_a "$f" "$engine" "$bin"
+    fi_afh_launch_a "$f" "$engine" "$bin" "$cwd"
     return 0
   done
   return 0

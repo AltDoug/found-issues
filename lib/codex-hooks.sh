@@ -273,6 +273,17 @@ cmd_install_codex_hooks() {
     }
   fi
 
+  # The shims exec these from the install root at run time; a stripped or
+  # partial checkout would otherwise be reported as a successful install.
+  local fi_h fi_hroot
+  fi_hroot="$(cd "$FI_BIN_DIR/.." && pwd -P)/hooks"
+  for fi_h in session-start format-enforcer pre-branch-delete post-bash-dispatch first-touch stop-reminder; do
+    if [[ ! -f "$fi_hroot/$fi_h.sh" ]]; then
+      fi_err "install-codex-hooks: hook script missing: $fi_hroot/$fi_h.sh — reinstall found-issues, then re-run."
+      return 1
+    fi
+  done
+
   fi_codex_write_shims "$codex_home" || {
     fi_err "install-codex-hooks: could not write the hook shims under $(fi_codex_shim_dir "$codex_home")."
     return 5

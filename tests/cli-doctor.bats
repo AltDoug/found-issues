@@ -346,7 +346,7 @@ EOF
   HOME="$(pwd)/tmp" fi_run doctor-statusline-runtime
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "Runtime probe"
-  ! echo "$output" | grep -q "Plugin runtime"
+  ! echo "$output" | grep -q "Plugin runtime" || false
   ! echo "$output" | grep -q "Mode detection"
 }
 
@@ -418,7 +418,7 @@ _fi_running_version() {
   HOME="$(pwd)/tmp" fi_run doctor
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "does not match the installed plugin"
-  ! echo "$output" | grep -q "restart your session"
+  ! echo "$output" | grep -q "restart your session" || false
   echo "$output" | grep -q "outside the plugin cache"
 }
 
@@ -429,6 +429,6 @@ _fi_running_version() {
 
   HOME="$(pwd)/tmp" fi_run doctor
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -q "does not match the installed plugin"
+  ! echo "$output" | grep -q "does not match the installed plugin" || false
   ! echo "$output" | grep -q "matches the installed plugin"
 }

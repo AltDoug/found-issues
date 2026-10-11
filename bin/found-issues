@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="3.6.2"
+readonly FI_VERSION="3.7.0"
 
 # Statusline fast path (lib/segment-cache.sh): `status --format=segment` runs
 # every few seconds per session, so it is answered from a content-checked
@@ -82,6 +82,8 @@ fi
 source "$FI_LIB_DIR/canonicalize.sh"
 # shellcheck source=../lib/parse-entries.sh
 source "$FI_LIB_DIR/parse-entries.sh"
+# shellcheck source=../lib/repo-id.sh
+source "$FI_LIB_DIR/repo-id.sh"
 # v3 fix tags: off-limits, tag text, retag (spec 2026-10-03 §3).
 # shellcheck source=../lib/autofix-tags.sh
 source "$FI_LIB_DIR/autofix-tags.sh"
@@ -135,6 +137,8 @@ source "$FI_LIB_DIR/log.sh"
 source "$FI_LIB_DIR/defer.sh"
 # shellcheck source=../lib/resolve.sh
 source "$FI_LIB_DIR/resolve.sh"
+# shellcheck source=../lib/unannotate.sh
+source "$FI_LIB_DIR/unannotate.sh"
 # shellcheck source=../lib/tag.sh
 source "$FI_LIB_DIR/tag.sh"
 # shellcheck source=../lib/decide.sh
@@ -287,35 +291,6 @@ EOF
   printf '%s' "$target"
 }
 
-# Get the GitHub repo identifier (org/repo) from the current repo's origin.
-# Echoes empty if not on GitHub.
-fi_repo_id() {
-  local remote_url
-  remote_url="$(git remote get-url origin 2>/dev/null || true)"
-  if [[ "$remote_url" != *"github.com"* ]]; then
-    # get-url expands url.<x>.insteadOf; the configured URL still names the
-    # GitHub repo (a mirror or a local bare remote in tests).
-    remote_url="$(git config --get remote.origin.url 2>/dev/null || true)"
-    [[ "$remote_url" == *"github.com"* ]] || return 1
-  fi
-  # Strip trailing slashes, then a literal .git suffix, then capture the
-  # last two path segments verbatim. The earlier single-pass form used
-  # [^/.]+ for the repo segment, truncating dotted repo names
-  # (vercel/next.js -> vercel/next) in (PR: ...) annotations, which then
-  # made sync query the wrong repo. The slash strip comes first so
-  # pasted-URL remotes like https://github.com/org/repo.git/ still lose
-  # the .git suffix.
-  # Builtin (no sed fork); same three steps.
-  while [[ "$remote_url" == */ ]]; do remote_url="${remote_url%/}"; done
-  remote_url="${remote_url%.git}"
-  local re_gh='github\.com[:/]([^/]+/[^/]+)'
-  [[ "$remote_url" =~ $re_gh ]] || return 1
-  local id="${BASH_REMATCH[1]}"
-  local re_id='^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
-  [[ "$id" =~ $re_id ]] || return 1
-  printf '%s' "$id"
-}
-
 # Resolve the default branch with a layered fallback chain:
 #   1. git symbolic-ref refs/remotes/origin/HEAD (primary, fast, no network)
 #   2. gh repo view --json defaultBranchRef.name (fallback when origin/HEAD unset)
@@ -433,6 +408,7 @@ main() {
     defer)            cmd_defer "$@" ;;
     promote-deferred)     cmd_promote_deferred "$@" ;;
     resolve)          cmd_resolve "$@" ;;
+    unannotate)       cmd_unannotate "$@" ;;
     tag)              cmd_tag "$@" ;;
     decide)           cmd_decide "$@" ;;
     config)           cmd_config "$@" ;;

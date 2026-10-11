@@ -314,7 +314,7 @@ EOF
   echo "$output" | grep -q 'a.ts:1'
   echo "$output" | grep -q 'b.ts:1'
   echo "$output" | grep -q 'c.ts:1'
-  ! echo "$output" | grep -q 'd.ts:1'
+  ! echo "$output" | grep -q 'd.ts:1' || false
   ! echo "$output" | grep -q 'e.ts:1'
 }
 

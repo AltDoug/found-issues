@@ -242,7 +242,7 @@ teardown() { fi_teardown_tmp; }
   fi_run decide "src/a.sh:1" --answer "alias (keep old name)"
   [ "$status" -eq 0 ]
   grep -q 'naming (decided: alias \[keep old name\])' docs/found-issues.md
-  ! grep -q 'rename or alias' docs/found-issues.md
+  ! grep -q 'rename or alias' docs/found-issues.md || false
   fi_run decide "plain bug" --answer x
   [ "$status" -eq 3 ]
 }

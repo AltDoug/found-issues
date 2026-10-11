@@ -289,7 +289,7 @@ EOF
   fi_run log "config/{dev,prod}.yml — duplicated keys drift"
   fi_run sync
   [ "$status" -eq 0 ]
-  ! grep -q 'closure: tombstone' docs/found-issues.md
+  ! grep -q 'closure: tombstone' docs/found-issues.md || false
   [ "$(grep -c '^- \[open\]' docs/found-issues.md)" -eq 2 ]
 }
 

@@ -4,6 +4,34 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-10-10
+
+Ledger fix batch 3: auto-fix queue, hook and sweep hardening, a stricter sync closer, and a new `unannotate` verb (the reason this is a minor release).
+
+### Added
+- **`found-issues unannotate <match> <ref>`** (snapshot-guarded against concurrent ledger writes) strips one `(PR: …)`, `(PR-auto: …)`, `(commit: …)` or `(commit-auto: …)` marker from one `[open]` entry. It is the supported way to undo a wrong annotation; `defer`, `resolve` and the `defer` command docs now point at it instead of "edit the ledger by hand".
+- **Sync prints a ready command per hook suggestion.** Each `(PR-auto:)` / `(commit-auto:)` awaiting confirmation gets its own `confirm:` (`annotate-pr` / `annotate-commit --force --pick`) and `reject:` (`unannotate`) line.
+
+### Changed
+- **The sync closer checks the commit touched the cited file.** A `(commit: <sha>)` on the default branch now closes its entry only when that commit changed the cited path (a directory matches any file under it, a glob by pattern, the pre-rename path counts). Otherwise the entry stays `[open]` and sync prints one line with the `unannotate` undo (or `resolve` when the fix landed in another file). Entries whose location git never tracked (topics) close as before.
+- **Session start:** entries whose location is not a file path (`(host env, not repo code)`) leave the normal list and appear in a short, age-stamped "Environment notes" block (3 in standard mode, 5 in full), marked as untrusted data. Criticals and line-less file paths (including `Makefile`-style names) stay in the list.
+
+### Fixed
+- **Auto-fix hook:**
+  - A marker re-printed for an item launched within the Stop grace no longer launches it again or sends a second nudge, and a marker for another repo's item is ignored.
+  - Stop no longer spawns a run in a repo with `found-issues.autofix=false` or with today's spot cap already used.
+  - An item queued from a `.claude/worktrees/<name>` checkout that was later removed no longer strands: it launches from the main checkout of the same repo, and that root is written back to the item.
+- **Auto-fix queue:**
+  - Recorded pids carry their start time (read in UTC, compared with 2 s of slack), so a reused pid is not mistaken for the run (reap, lock break, cancel).
+  - A failed worktree add or fetch requeues the item up to 3 times, 15 minutes apart, before failing it, without spending a daily slot.
+  - Spot and sweep claims move the item to `running/` before stamping it, so a cancel in between can no longer resurrect a cancelled item.
+  - Breaking a stale lock is serialized, so two contenders cannot both break and retake it.
+- **Auto-sweep:** a sweep retired for "no test command" is not requeued again the same day; an entry retagged or resolved since the sweep was claimed is skipped; the ledger annotation is retried when the ledger changed under it.
+- **Sync / mode detection:** an empty or half-written mode cache is re-detected instead of trusted for an hour, and written atomically. Sync warns when `(PR: …)` entries cannot close because the GitHub repo does not resolve, and `doctor` warns on `git` mode with a remote present.
+- **Codex:** `install-codex-hooks` refuses to report success when a hook script is missing from the install.
+- **PR annotation hook** uses the CLI's own `fi_repo_id` (now `lib/repo-id.sh`) to decide whether a `gh pr create` URL is this repo.
+- **Tests:** 42 mid-test bare `!` assertions (which assert nothing in bats) now use `|| false`, with a guard test.
+
 ## [3.6.2] - 2026-10-10
 
 A ledger fix batch: 33 open entries (each re-checked against the current code first) plus one found while fixing them, each fixed with a regression test.

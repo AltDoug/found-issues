@@ -84,7 +84,7 @@ EOF
   LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 fi_run archive
   [ "$status" -eq 0 ]
   [ "$(grep -c '^- \[open\]' docs/found-issues.md)" -eq 2 ]
-  ! grep -q '^- \[fixed\]' docs/found-issues.md
+  ! grep -q '^- \[fixed\]' docs/found-issues.md || false
   grep -q 'a.sh:1 — old' docs/found-issues-archive.md
 }
 
@@ -94,7 +94,7 @@ EOF
     > docs/found-issues.md
   fi_run archive
   [ "$status" -eq 0 ]
-  ! grep -q '^- \[fixed\]' docs/found-issues.md
+  ! grep -q '^- \[fixed\]' docs/found-issues.md || false
   grep -q '^- \[open\].*c.sh:1' docs/found-issues.md
   fi_run archive
   [ "$(grep -c 'a.sh:1 — old' docs/found-issues-archive.md)" -eq 1 ]
@@ -204,7 +204,7 @@ EOF
   fi_run annotate-commit
   [ "$status" -eq 0 ]
   grep -q "(commit-auto: $short)" docs/found-issues.md
-  ! grep -q "(commit: $short)" docs/found-issues.md
+  ! grep -q "(commit: $short)" docs/found-issues.md || false
   # annot-10: the printed confirm command names the resolved sha, not HEAD
   [[ "$output" == *"annotate-commit $short --pick"* ]]
   [[ "$output" != *"annotate-commit HEAD"* ]]

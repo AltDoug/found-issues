@@ -15,12 +15,19 @@
 
 # shellcheck disable=SC2154  # AFI_*/FI_AF_* come from autofix-queue.sh / autofix-config.sh
 
-# A pid we may signal: alive and running `found-issues … autofix run`.
+# A pid we may signal: alive, running `found-issues ... autofix run`, and the
+# very process the item recorded. Any live autofix run matches the command, so
+# the start time stamped with the pid (fi_af_item_set) is what ties it to THIS
+# item's state dir: a run from another state dir, or a pid the OS reused, has a
+# different start time. Where ps cannot print a start time (Git Bash) the
+# command match alone decides.
 _fi_af_is_run_pid() {
   local cmd
   [[ "$1" =~ ^[0-9]+$ ]] && kill -0 "$1" 2>/dev/null || return 1
   cmd="$(ps -o command= -p "$1" 2>/dev/null || true)"
-  [[ "$cmd" == *found-issues*"autofix run"* ]]
+  [[ "$cmd" == *found-issues*"autofix run"* ]] || return 1
+  _fi_af_pstart "$1"
+  _fi_af_pstart_same "$FI_AF_PSTART" "${2:-}"
 }
 
 # Phase 5 ruling 6: retire a queued or running item as cancelled, stopping
@@ -56,7 +63,7 @@ fi_af_cancel() {
   # that item's id.
   [[ -f "$FI_AF_ST/lock/owner" ]] && { IFS= read -r owner <"$FI_AF_ST/lock/owner" || true; }
   if [[ "$owner" == "$id" ]]; then
-    if _fi_af_is_run_pid "$AFI_pid"; then
+    if _fi_af_is_run_pid "$AFI_pid" "$AFI_pstart"; then
       how="by autofix cancel (background run $AFI_pid stopped)"
       kill -TERM "$AFI_pid" 2>/dev/null || true
       while kill -0 "$AFI_pid" 2>/dev/null && (( n < 40 )); do sleep 0.25; n=$((n + 1)); done

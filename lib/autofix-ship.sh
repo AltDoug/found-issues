@@ -133,6 +133,18 @@ fi_af_test_report() {
 # <ledger> ("" = the source checkout's). `annotate-pr --pick <loc>` matches
 # by location, so with two entries on one line it tags the wrong one or both.
 fi_af_annotate_ledger() {
+  # Batch 3: rc 3 = the ledger changed between the snapshot and the write;
+  # the entry is re-found and the write tried again (three attempts).
+  local try rc=0
+  for try in 1 2 3; do
+    rc=0
+    _fi_af_annotate_ledger_once "$1" "$2" || rc=$?
+    (( rc == 3 )) || return "$rc"
+  done
+  return "$rc"
+}
+
+_fi_af_annotate_ledger_once() {
   fi_af_find_entry "$1" || return 1
   local new="$FI_AF_ENTRY $2" snapshot tmp line done_one=0
   snapshot="$(fi_ledger_snapshot "$FI_AF_LEDGER")"
