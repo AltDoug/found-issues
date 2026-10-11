@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.2] - 2026-10-11
+
+Ledger fix batch 6: an old CLI on PATH no longer silences the annotation hook, a crashed run's unshipped fixes survive, and `fix ship` records what its test gate ran.
+
+### Fixed
+- **An older `found-issues` on PATH no longer silences auto-annotation.** When the CLI the post-bash hook resolves rejects `--hook-auto` (rc 2, version skew), the hook retries with the plugin's own CLI, and if that is missing too it shows the manual annotation prompt. Either way it names the stale CLI. Before, the `gh pr create` and `git commit` routes printed nothing.
+- **A crashed auto-fix run keeps its unshipped commits.** When the reaper finds a dead run whose branch holds commits past its base (a sweep's verified fixes, never pushed), it renames the branch to `fi/rescued/<id>` instead of deleting it. The branch is recorded on the item and shown by `autofix status`, but never written into the shared ledger, since it exists only in that machine's checkout. If git refuses the rename, the branch is kept under its own name.
+- **`fix ship` records what its test gate ran.** `fix ship`, `fix test` and launcher B's `autofix test` print the gate verdict with TAP counts (`tests: pass — N planned, X ok, Y not ok[, Z skipped]`), summed over every plan. `fix ship` also appends that line to the PR body it opens. Before, a passing gate printed nothing.
+
 ## [3.8.1] - 2026-10-11
 
 Ledger fix batch 5: three follow-ups from the 3.8.0 review.
