@@ -228,7 +228,7 @@ fi_af_seg_write() {
   done
   fi_af_root_key "$root"; name="$FI_AF_KEY"
   dir="$FI_AF_ROOT/seg"
-  if (( n == 0 )); then rm -f "$dir/$name" 2>/dev/null; return 0; fi
+  if (( n == 0 )); then rm -f "$dir/$name" 2>/dev/null || true; return 0; fi
   mkdir -p "$dir" 2>/dev/null || return 0
   if printf '%s\n' "$n" >"$dir/$name.$$" 2>/dev/null; then
     mv -f "$dir/$name.$$" "$dir/$name" 2>/dev/null || rm -f "$dir/$name.$$"
