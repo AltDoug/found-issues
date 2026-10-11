@@ -170,7 +170,7 @@ fi_af_sweep_check() {
   n=$((n + $(_fi_af_untagged_count "$file" "$root")))
   (( n > 0 )) || return 0
   (( crit || n >= $(fi_af_int sweepThreshold 5) )) || return 0
-  engine="$(fi_af_engine 2>/dev/null || true)"
+  engine="$(fi_af_engine_setting)"
   fi_af_new_id
   fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID" "id=$FI_AF_ID" "kind=sweep" \
     "root=$root" "slug=$slug" "loc=sweep" "engine=$engine" \

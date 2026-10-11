@@ -140,6 +140,11 @@ fi_af_b_verify() {
     printf 'tests fail: fix them (found-issues autofix test %s) before verify\n' "$id"; return 3
   fi
   engine="$(fi_af_engine "${AFI_engine:-claude}")" || engine=claude
+  # An item queued as engine=auto keeps what it resolved to, so its PR body,
+  # status row and a sweep continuation name the engine that really ran.
+  if [[ "${AFI_engine:-}" != "$engine" ]]; then
+    AFI_engine="$engine"; fi_af_item_set "$r" engine "$engine"
+  fi
   _fi_af_chain_seed
   if ! fi_af_run_budget_left "$engine"; then
     if (( sweep )); then

@@ -118,9 +118,10 @@ fi_afh_root_resolve() {
 fi_afh_launch_a() {
   local item="$1" engine="$2" bin="$3" log
   fi_af_item_read "$item" || return 1
-  # The engine recorded at queue time wins (an explicit
-  # found-issues.autofix.engine=codex); the session harness fills in only
-  # when the item names none (empty, auto, anything else).
+  # An explicit engine recorded at queue time wins
+  # (found-issues.autofix.engine=codex or claude); an item queued under
+  # engine=auto records auto, so the harness draining it runs it, whichever
+  # harness queued it (ledger lib/autofix-hook.sh:124).
   case "$AFI_engine" in claude|codex) engine="$AFI_engine" ;; esac
   fi_afh_root_resolve "$AFI_root" "${4:-$PWD}" "$item" || return 1
   log="${item%/queue/*}/spawn.log"

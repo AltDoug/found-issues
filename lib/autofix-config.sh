@@ -16,7 +16,7 @@
 #   fi_af_dirs <owner/repo>
 #   fi_af_context
 #   fi_af_test_command <dir>
-#   fi_af_engine [<explicit>]
+#   fi_af_engine [<explicit>] / fi_af_engine_setting
 #   fi_af_no_prompts
 #   fi_cfg_show_line <key>
 #   cmd_config [<key> [<value>|--unset]] [--global]
@@ -235,6 +235,16 @@ fi_af_engine() {
   return 1
 }
 
+# The engine an item records when it is queued: an explicit claude or codex
+# setting, else auto, which the harness that launches it resolves (ledger
+# lib/autofix-hook.sh:124: resolving at queue time pinned an item logged in
+# Claude Code to claude even when a Codex Stop hook drained it).
+fi_af_engine_setting() {
+  local e
+  e="$(fi_af_cfg engine auto)"
+  case "$e" in claude|codex) printf '%s' "$e" ;; *) printf 'auto' ;; esac
+}
+
 # Spec §1: nothing auto-fix launches may prompt. Unattended git/gh must
 # fail instead of waiting on a credential prompt (git asks on /dev/tty even
 # with stdin redirected). A user's own GIT_SSH_COMMAND is kept.
@@ -406,7 +416,7 @@ cmd_config() {
   printf 'Set found-issues.%s = %s (%s)\n' "$FI_CFG_KEY" "$FI_CFG_VAL" "${scope#--}"
   # Switched off here (or everywhere): its STUCK marker would outlive the switch.
   if [[ "$FI_CFG_KEY" == autofix && "$FI_CFG_VAL" == false ]]; then
-    if [[ "$scope" == --global ]]; then fi_af_stuck_clear
+    if [[ "$scope" == --global ]]; then fi_af_stuck_clear --global
     else fi_af_stuck_clear "$(git rev-parse --show-toplevel 2>/dev/null || true)"; fi
   fi
   if [[ "$scope" == --global ]]; then

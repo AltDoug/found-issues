@@ -180,7 +180,7 @@ fi_af_queue_spot() {
       return 0
     fi
   done
-  engine="$(fi_af_engine 2>/dev/null || true)"
+  engine="$(fi_af_engine_setting)"
   fi_af_new_id
   fi_af_item_write "$FI_AF_ST/queue/$FI_AF_ID" "id=$FI_AF_ID" "kind=spot" \
     "root=$root" "slug=$slug" "loc=$FE_loc" "key=$key" "entry=$entry" \
