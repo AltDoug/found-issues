@@ -129,6 +129,22 @@ fi_af_test_report() {
   tail -n "${2:-30}" "$1" 2>/dev/null || true
 }
 
+# "N planned, X ok, Y not ok[, Z skipped]" for a TAP log (bats), summed over
+# every plan when the test command runs bats more than once; nothing for
+# other runners. The verdict line fix ship prints and a PR body quotes
+# (ledger lib/fix-plumbing.sh:113).
+fi_af_tap_summary() {
+  awk '
+    /^1\.\.[0-9]+[[:space:]]*$/ { sub(/^1\.\./, ""); planned += $0; plans++; next }
+    /^not ok / { nok++; next }
+    /^ok / { if ($0 ~ /# [Ss][Kk][Ii][Pp]/) skip++; else ok++ }
+    END {
+      if (!plans) exit
+      printf "%d planned, %d ok, %d not ok", planned, ok, nok
+      if (skip) printf ", %d skipped", skip
+    }' "$1" 2>/dev/null
+}
+
 # Append a closing annotation to THIS item's entry (matched by dedup key) in
 # <ledger> ("" = the source checkout's). `annotate-pr --pick <loc>` matches
 # by location, so with two entries on one line it tags the wrong one or both.

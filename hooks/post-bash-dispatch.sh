@@ -236,14 +236,39 @@ pushes), \`/found-issues:sync\` will auto-flip these to [fixed]."
 }
 
 # The routes below call the CLI with --hook-auto. rc 2 is a usage error, and
-# that call has none on a current CLI, so an older found-issues earlier on
-# PATH than this hook's own is the cause (ledger hooks/post-bash-dispatch.sh:232).
-# The route then falls back to the manual prompt instead of dropping silently.
-skew_note() {
-  printf '%s' "## found-issues — the CLI at $FI_BIN rejected --hook-auto (rc 2)
+# that call has none on a current CLI, so the CLI is older than this hook (an
+# older found-issues earlier on PATH; ledger hooks/post-bash-dispatch.sh:232).
+# hook_auto_run then retries with the plugin's own CLI; when that is missing
+# or fails the same way, the route falls back to the manual prompt instead of
+# dropping silently. Sets HA_OUT, HA_RC, HA_SKEW (the CLI that rejected the
+# flag) and HA_ALT (the CLI that answered instead).
+hook_auto_run() { # $1=stderr file, rest = CLI arguments
+  local errf="$1" alt self
+  shift
+  HA_SKEW="" HA_ALT=""
+  HA_OUT="$("$FI_BIN" "$@" 2>"$errf")" && HA_RC=0 || HA_RC=$?
+  [[ "$HA_RC" -eq 2 ]] || return 0
+  HA_SKEW="$FI_BIN"
+  self="$(command -v "$FI_BIN" 2>/dev/null || printf '%s' "$FI_BIN")"
+  for alt in "${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/bin/found-issues}" "$__fi_hook_dir/../bin/found-issues"; do
+    [[ -n "$alt" && -x "$alt" && ! "$alt" -ef "$self" ]] || continue
+    HA_OUT="$("$alt" "$@" 2>"$errf")" && HA_RC=0 || HA_RC=$?
+    if [[ "$HA_RC" -ne 2 ]]; then HA_ALT="$alt"; return 0; fi
+  done
+}
 
-It is older than this hook, so nothing was annotated automatically. Update it
-or remove the stale copy from PATH; the manual prompt follows."
+skew_note() {
+  if [[ -n "$HA_ALT" ]]; then
+    printf '%s' "## found-issues — the CLI at $HA_SKEW rejected --hook-auto (rc 2)
+
+It is older than this hook, so the plugin's own CLI ($HA_ALT) annotated
+instead. Update the older copy or remove it from PATH."
+  else
+    printf '%s' "## found-issues — the CLI at $HA_SKEW rejected --hook-auto (rc 2)
+
+It looks older than this hook, so nothing was annotated automatically. Update
+it or remove the stale copy from PATH; the manual prompt follows."
+  fi
 }
 
 # Accumulator for pr-create / git-commit route output. Both routes below
@@ -297,7 +322,9 @@ if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+create([[:space:]]
       # incomplete (lib/annotate.sh fi_pr_touched_files). Everything else
       # stays discarded, as before.
       note_f="$(mktemp "${TMPDIR:-/tmp}/fi-pr-note.XXXXXX" 2>/dev/null)" || note_f=/dev/null
-      out="$("$FI_BIN" annotate-pr "$pr_num" --hook-auto 2>"$note_f")" && rc=0 || rc=$?
+      hook_auto_run "$note_f" annotate-pr "$pr_num" --hook-auto
+      out="$HA_OUT" rc="$HA_RC"
+      [[ -n "$HA_ALT" ]] && ctx+="$(skew_note)"$'\n\n'
       pr_note="$(grep -F 'were not checked' "$note_f" 2>/dev/null || true)"
       [[ "$note_f" != /dev/null ]] && rm -f "$note_f"
       if [[ "$rc" -eq 0 && "$out" == *"Suggested"* ]]; then
@@ -382,7 +409,9 @@ if [[ "$cmd_unquoted" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]] \
       legacy_out="$(legacy_commit_prompt)"
       [[ -n "$legacy_out" ]] && ctx+="$legacy_out"$'\n\n'
     else
-      out="$("$FI_BIN" annotate-commit HEAD --hook-auto 2>/dev/null)" && rc=0 || rc=$?
+      hook_auto_run /dev/null annotate-commit HEAD --hook-auto
+      out="$HA_OUT" rc="$HA_RC"
+      [[ -n "$HA_ALT" ]] && ctx+="$(skew_note)"$'\n\n'
       if [[ "$rc" -eq 0 && "$out" == *"Suggested"* ]]; then
         ctx+="## found-issues — this commit produced annotation SUGGESTIONS
 

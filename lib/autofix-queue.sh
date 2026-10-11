@@ -40,7 +40,7 @@ AFI_engine="" AFI_engine_q="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
 AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
+AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0" AFI_rescued=""
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -55,14 +55,14 @@ fi_af_item_read() {
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
   AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
+  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0" AFI_rescued=""
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|engine_q|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|held_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries)
+      id|kind|root|slug|loc|key|entry|engine|engine_q|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|held_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries|rescued)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -663,6 +663,10 @@ fi_af_reap() {
     kept=""
     if kept="$(_fi_af_rescue_branch)"; then
       fi_af_log "$AFI_id" "the dead run's commits are kept on $kept"
+      # Recorded on the item (autofix status shows it), never in the ledger:
+      # the branch exists only in this machine's checkout.
+      fi_af_item_set "$f" rescued "${AFI_rescued:+$AFI_rescued }$kept"
+      fi_af_item_set "$f" branch ""
       AFI_branch=""
     fi
     fi_af_worktree_remove
@@ -685,7 +689,7 @@ fi_af_reap() {
       fi_af_seg_write "$AFI_root"
       fi_af_log "$AFI_id" "requeued after a crash"
     else
-      fi_af_finish "$AFI_id" failed "crashed${kept:+; commits kept on $kept}"
+      fi_af_finish "$AFI_id" failed "crashed"
     fi
   done
 }
@@ -693,7 +697,10 @@ fi_af_reap() {
 # A dead run's branch holding commits past its base (a sweep's verified
 # fixes, never pushed) is renamed to fi/rescued/<id> instead of deleted, so
 # the paid work survives the reap (ledger lib/autofix-queue.sh:583). Prints
-# the new name; rc 1 = nothing to keep. A ship retry keeps its branch anyway.
+# the branch that now holds them; rc 1 = nothing to keep. A rename git
+# refuses (a rebase in progress, a ref lock) keeps the branch under its own
+# name rather than letting the reap delete it. A ship retry keeps its branch
+# anyway.
 _fi_af_rescue_branch() {
   local new
   [[ -n "$AFI_branch" && -n "$AFI_root" && -n "${AFI_base_sha:-}" ]] || return 1
@@ -702,7 +709,10 @@ _fi_af_rescue_branch() {
   [[ -n "$(git -C "$AFI_root" rev-list "$AFI_base_sha..refs/heads/$AFI_branch" 2>/dev/null)" ]] || return 1
   new="fi/rescued/$AFI_id"
   git -C "$AFI_root" rev-parse -q --verify "refs/heads/$new" >/dev/null 2>&1 && new="$new-$(date +%s)"
-  git -C "$AFI_root" branch -m "$AFI_branch" "$new" >/dev/null 2>&1 || return 1
+  if ! git -C "$AFI_root" branch -m "$AFI_branch" "$new" >/dev/null 2>&1; then
+    fi_af_log "$AFI_id" "could not rename $AFI_branch to $new; keeping it under its own name"
+    new="$AFI_branch"
+  fi
   printf '%s' "$new"
 }
 

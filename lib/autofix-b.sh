@@ -100,7 +100,9 @@ fi_af_b_test() {
   fi_af_test_report "$log" 30
   tail -n 5 "$log.err" 2>/dev/null
   fi_af_touch_lock "$id"
-  if (( rc == 0 )); then printf 'tests: pass\n'; else printf 'tests: fail (exit %s)\n' "$rc"; fi
+  local sum
+  sum="$(fi_af_tap_summary "$log")"
+  if (( rc == 0 )); then printf 'tests: pass%s\n' "${sum:+ — $sum}"; else printf 'tests: fail (exit %s)%s\n' "$rc" "${sum:+ — $sum}"; fi
   fi_af_log "$id" "b test $n: rc=$rc"
   return $rc
 }

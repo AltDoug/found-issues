@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # Batch 6: an older found-issues CLI that rejects --hook-auto (rc 2) no
-# longer swallows the post-bash annotation routes silently; the hook falls
-# back to the manual prompt and says why (ledger hooks/post-bash-dispatch.sh:232).
+# longer swallows the post-bash annotation routes silently; the hook
+# retries with the plugin's own CLI, then falls back to the manual prompt,
+# and says why (ledger hooks/post-bash-dispatch.sh:232).
 
 load 'helpers'
 
@@ -35,19 +36,58 @@ payload() { # $1=command $2=stdout
 }
 run_hook() { payload "$1" "${2:-}" | "$HOOK"; }
 
-@test "b6 skew: pr create with a CLI that rejects --hook-auto falls back to the manual prompt" {
+# A copy of the hook with no sibling bin/ (lib from the repo), so the bundled
+# CLI cannot answer either.
+binless_hook() {
+  mkdir -p "$TMP/iso/hooks"
+  cp "$HOOK" "$TMP/iso/hooks/"
+  export FOUND_ISSUES_LIB_DIR="$TEST_REPO_ROOT/lib"
+  unset CLAUDE_PLUGIN_ROOT
+  HOOK="$TMP/iso/hooks/post-bash-dispatch.sh"
+}
+
+@test "b6 skew: pr create retries with the plugin's own CLI when the PATH one rejects --hook-auto" {
+  unset CLAUDE_PLUGIN_ROOT
+  "$FI_BIN" log "src/foo.py:99 — wrong cast" >/dev/null
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF='diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n ctx40\n-old42\n+new42\n ctx43'
+  run run_hook 'gh pr create' 'https://github.com/org/repo/pull/7'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"found-issues annotate-pr 7 --pick"* ]]
+  [[ "$output" == *"$TMP/oldbin/found-issues rejected --hook-auto"* ]]
+  [[ "$output" == *"annotated"*"instead"* ]]
+  [[ "$output" != *"/found-issues:annotate-pr 7"* ]]
+}
+
+@test "b6 skew: git commit retries with the plugin's own CLI when the PATH one rejects --hook-auto" {
+  unset CLAUDE_PLUGIN_ROOT
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  "$FI_BIN" log "src/foo.py:2 — bug" >/dev/null
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+  run run_hook 'git commit -m fix' ''
+  [ "$status" -eq 0 ]
+  grep -q '(commit-auto:' docs/found-issues.md
+  [[ "$output" == *"rejected --hook-auto"* ]]
+}
+
+@test "b6 skew: pr create with no CLI that knows --hook-auto falls back to the manual prompt" {
+  binless_hook
   "$FI_BIN" log "src/foo.py:42 — null check" >/dev/null
   export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
   run run_hook 'gh pr create --fill' 'https://github.com/org/repo/pull/7'
   [ "$status" -eq 0 ]
   [[ "$output" == *"/found-issues:annotate-pr 7"* ]]
-  [[ "$output" == *"--hook-auto"* ]]
-  [[ "$output" == *"$TMP/oldbin/found-issues"* ]]
+  [[ "$output" == *"$TMP/oldbin/found-issues rejected --hook-auto"* ]]
+  [[ "$output" == *"manual prompt follows"* ]]
   run grep -q '(PR' docs/found-issues.md
   [ "$status" -ne 0 ]
 }
 
-@test "b6 skew: git commit with a CLI that rejects --hook-auto falls back to the manual prompt" {
+@test "b6 skew: git commit with no CLI that knows --hook-auto falls back to the manual prompt" {
+  binless_hook
   mkdir -p src
   printf 'l1\nl2\nl3\n' > src/foo.py
   git add -A && git commit -q -m seed
@@ -57,7 +97,7 @@ run_hook() { payload "$1" "${2:-}" | "$HOOK"; }
   run run_hook 'git commit -m fix' ''
   [ "$status" -eq 0 ]
   [[ "$output" == *"/found-issues:annotate-commit"* ]]
-  [[ "$output" == *"--hook-auto"* ]]
+  [[ "$output" == *"manual prompt follows"* ]]
   run grep -q '(commit' docs/found-issues.md
   [ "$status" -ne 0 ]
 }

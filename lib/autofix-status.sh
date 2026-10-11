@@ -158,6 +158,7 @@ fi_af_status() {
         printf '  %s  %s  %s\n' "$AFI_id" "${AFI_kind:-spot}" "$(_fi_af_loc_label)"
         if [[ -n "$AFI_waiting" ]]; then printf '      waiting: %s\n' "$AFI_waiting"; fi
       fi
+      if [[ -n "$AFI_rescued" ]]; then printf '      commits kept on local branch %s\n' "$AFI_rescued"; fi
     done
   done
   file="$(fi_find_issues_file "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" 2>/dev/null || true)"
@@ -185,6 +186,8 @@ fi_af_status() {
       fi_af_item_read "${f#* }" || true
       printf '  %s  %s — %s\n' "$AFI_id" "$(_fi_af_loc_label)" "$AFI_result"
       if [[ -n "$AFI_base" ]]; then printf '      into %s (%s)\n' "$AFI_base" "${AFI_base_why:-?}"; fi
+      # A crashed run's unshipped commits (ledger lib/autofix-queue.sh:583).
+      if [[ -n "$AFI_rescued" ]]; then printf '      commits kept on local branch %s\n' "$AFI_rescued"; fi
       _fi_af_tokens_row
       _fi_af_pr_num
       if [[ -n "$FI_AF_PRNUM" ]]; then
