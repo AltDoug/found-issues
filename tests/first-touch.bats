@@ -126,9 +126,13 @@ touch_json() { # $1 tool, $2 path, $3 session
   { printf '# found-issues\n\n'; for i in $(seq 1 150); do printf -- '- [open] 2026-10-01 src/z%s.sh:1 — z\n' "$i"; done
     printf -- '- [fixed] 2026-10-01 src/old.sh:3 — OLD-BUG\n'; } > docs/found-issues.md
   printf '1\n' > src/old.sh
+  # Build the payloads before the clock starts: a jq spawn per iteration is
+  # not the hook's cost and pushed hosted macOS past the bound (run 38111232480).
+  for k in 1 2 3 4 5 6 7 8 9 10; do js[$k]="$(touch_json Read "$PWD/src/old.sh" "u$k")"; done
   start=$(perl -MTime::HiRes=time -e 'printf "%.0f", time*1000')
-  for k in 1 2 3 4 5 6 7 8 9 10; do bash "$HOOK" <<< "$(touch_json Read "$PWD/src/old.sh" "u$k")" >/dev/null; done
+  for k in 1 2 3 4 5 6 7 8 9 10; do bash "$HOOK" <<< "${js[$k]}" >/dev/null; done
   end=$(perl -MTime::HiRes=time -e 'printf "%.0f", time*1000')
+  echo "per-call ms: $(( (end - start) / 10 ))"
   [ $(( (end - start) / 10 )) -lt 50 ]
 }
 
