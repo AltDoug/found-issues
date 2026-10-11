@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.1] - 2026-10-11
+
+Ledger fix batch 5: three follow-ups from the 3.8.0 review.
+
+### Fixed
+- **Auto-fix engine `auto` is resolved at launch.** With `found-issues.autofix.engine` unset or `auto`, a queued spot or sweep item now records `engine=auto` (and `engine_q=auto`) instead of the harness that queued it, so an item logged in Claude Code and drained by a Codex Stop hook runs on Codex, and the reverse. The engine a run resolved never pins the item: a requeued item goes back as `auto`, and a re-launch follows the draining harness again. An explicit `claude` or `codex` setting still wins, a sweep continuation keeps its chain's engine, and an invalid setting now warns when the item is queued. Items already queued before 3.8.1 keep the engine they recorded.
+- **`config autofix false --global` keeps a stuck repo's warning.** The STUCK marker of a repo whose own `found-issues.autofix=true` keeps auto-fix on there is no longer wiped. The stuck file now records the repo's main worktree, and a marker whose repo config git cannot read is kept too. `found-issues autofix off`, the kill switch, still clears every marker.
+- **`fix ship` takes repeated `--pick`.** Each flag is passed on to `annotate-pr` as its own pick, so a `"<loc> — <fragment>"` pick (two entries at one location) ships alongside plain picks. Before, only the last `--pick` counted, and a list holding a fragment pick annotated nothing. A comma list in one `--pick` still splits.
+
 ## [3.8.0] - 2026-10-10
 
 Ledger fix batch 4: a stuck-repo marker for auto-fix (the reason this is a minor release), a conflict guard for armed auto-merge PRs, a louder and longer `fix ship`, and a sandbox fix that restores the fixer's command allowlist.
