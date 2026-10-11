@@ -282,7 +282,7 @@ FI_AF_RC_ON="" FI_AF_RC_CAP=5
 fi_af_repo_cfg() {
   local line key val on
   FI_AF_RC_ON="" FI_AF_RC_CAP=5
-  while IFS= read -r line; do
+  while IFS= read -r line || [[ -n "$line" ]]; do
     key="${line%% *}" val="" on=""
     [[ "$line" == *" "* ]] && val="${line#* }" || on=true
     case "$key" in
@@ -735,7 +735,7 @@ _fi_af_busy_set() {
   local pushed name acc=$'\n' lc=""
   pushed="$(_fi_af_pushed_ref)"
   [[ "$(git -C "$AFI_root" config --bool --get core.ignorecase 2>/dev/null || true)" == true ]] && lc=1
-  while IFS= read -r -d '' name; do
+  while IFS= read -r -d '' name || [[ -n "$name" ]]; do
     [[ -n "$name" ]] && acc+="$name"$'\n'
   done < <(
     git -C "$AFI_root" diff --name-only -z --no-renames HEAD 2>/dev/null || true

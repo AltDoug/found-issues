@@ -89,11 +89,12 @@ SH
   [[ "$output" == *"already CLOSED"* ]]
 }
 
-@test "guard: --guard still stops on failed checks" {
+@test "guard: --guard watches through failed checks until its horizon (review c)" {
   export GH_MOCK_PR_VIEW=$'7\t{"state":"OPEN","statusCheckRollup":[{"conclusion":"FAILURE"}]}'
   run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar --guard
   [ "$status" -eq 1 ]
-  [[ "$output" == *"checks failed"* ]]
+  [[ "$output" != *"checks failed"* ]] || false
+  [[ "$output" == *"still pending after 3 checks"* ]]
 }
 
 @test "guard: a bad flag after --repo is a usage error" {
