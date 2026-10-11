@@ -97,7 +97,9 @@ number. With `--auto`: print the report and proceed with bucket 2 only.
    a file, then run
    `found-issues fix ship <worktree> --source <source> --title "<title>" --body-file <file> --pick <location>,<location>`
    (`<source>` is `fix workspace`'s `source=` line) with exactly the
-   entries this PR fixes — never `--all` (file-level
+   entries this PR fixes. When two entries share a location, pick one by
+   `"<location> — <symptom fragment>"` in its OWN `--pick` flag (repeat
+   the flag; a fragment pick is never comma-split). Never `--all` (file-level
    auto-match over-annotates: the 2026-07-09 incident false-closed 9
    entries that later needed manual de-annotation). It refuses a dirty
    worktree or red tests, then pushes, opens the PR, annotates the
