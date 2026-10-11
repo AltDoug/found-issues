@@ -107,7 +107,8 @@ fi_segment_cache_put() {
 # writes the file and prints the SessionStart line), so the threshold, the
 # root-to-filename key and the reader exist once. The file: line 1 the streak
 # count, line 2 the first failing test names, line 3 the epoch of the last
-# base failure; a streak whose last failure is older than FI_AF_STUCK_MAX_AGE
+# base failure (line 4, the repo root, is read only by fi_af_stuck_clear);
+# a streak whose last failure is older than FI_AF_STUCK_MAX_AGE
 # (7 days) no longer counts, so a repo nobody touches does not stay red.
 FI_AF_STUCK_AFTER="${FI_AF_STUCK_AFTER:-3}"
 FI_AF_STUCK_MAX_AGE="${FI_AF_STUCK_MAX_AGE:-604800}"
