@@ -248,8 +248,8 @@ hook_auto_run() { # $1=stderr file, rest = CLI arguments
   HA_SKEW="" HA_ALT=""
   HA_OUT="$("$FI_BIN" "$@" 2>"$errf")" && HA_RC=0 || HA_RC=$?
   [[ "$HA_RC" -eq 2 ]] || return 0
-  HA_SKEW="$FI_BIN"
   self="$(command -v "$FI_BIN" 2>/dev/null || printf '%s' "$FI_BIN")"
+  HA_SKEW="$self"
   for alt in "${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/bin/found-issues}" "$__fi_hook_dir/../bin/found-issues"; do
     [[ -n "$alt" && -x "$alt" && ! "$alt" -ef "$self" ]] || continue
     HA_OUT="$("$alt" "$@" 2>"$errf")" && HA_RC=0 || HA_RC=$?
