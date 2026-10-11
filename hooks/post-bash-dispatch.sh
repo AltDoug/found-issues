@@ -235,6 +235,17 @@ When the commit lands on the default branch (or already has, for direct
 pushes), \`/found-issues:sync\` will auto-flip these to [fixed]."
 }
 
+# The routes below call the CLI with --hook-auto. rc 2 is a usage error, and
+# that call has none on a current CLI, so an older found-issues earlier on
+# PATH than this hook's own is the cause (ledger hooks/post-bash-dispatch.sh:232).
+# The route then falls back to the manual prompt instead of dropping silently.
+skew_note() {
+  printf '%s' "## found-issues — the CLI at $FI_BIN rejected --hook-auto (rc 2)
+
+It is older than this hook, so nothing was annotated automatically. Update it
+or remove the stale copy from PATH; the manual prompt follows."
+}
+
 # Accumulator for pr-create / git-commit route output. Both routes below
 # are evaluated independently (non-exclusive) and append here instead of
 # emitting immediately; a single fi_emit_post_context call at the bottom of
@@ -306,6 +317,10 @@ Compare each candidate's symptom against what the PR actually changes, then run:
   found-issues annotate-pr $pr_num --pick <path:line>[,...]
 (or --all only if the PR genuinely addresses every candidate). Entries the PR does not fix must NOT be annotated — they would false-flip to [fixed] on merge."
         ctx+=$'\n\n'
+      elif [[ "$rc" -eq 2 ]]; then
+        ctx+="$(skew_note)"$'\n\n'
+        legacy_out="$(legacy_pr_prompt "$pr_num")"
+        [[ -n "$legacy_out" ]] && ctx+="$legacy_out"$'\n\n'
       fi
       if [[ -n "$pr_note" ]]; then
         ctx+="## found-issues — PR #$pr_num file list is incomplete
@@ -383,6 +398,10 @@ $out
 
 If this commit addresses any candidate, run the printed --pick command; otherwise ignore."
         ctx+=$'\n\n'
+      elif [[ "$rc" -eq 2 ]]; then
+        ctx+="$(skew_note)"$'\n\n'
+        legacy_out="$(legacy_commit_prompt)"
+        [[ -n "$legacy_out" ]] && ctx+="$legacy_out"$'\n\n'
       fi
     fi
   fi
