@@ -48,7 +48,10 @@
 # command that fills one (go test, cargo test, uv run, gradle, npm) behaves
 # as it does at baseline; found-issues' own cache stays denied (measured the
 # same day: ~/.cache writable, ~/.cache/found-issues and ~/Documents refused).
-FI_AF_SANDBOX_SETTINGS='{"sandbox":{"enabled":true,"failIfUnavailable":true,"allowUnsandboxedCommands":false,"network":{"allowedDomains":["*"]},"filesystem":{"allowWrite":["~/.cache","~/Library/Caches","~/.npm","~/.cargo/registry","~/.cargo/git","~/go/pkg/mod","~/.gradle/caches","~/.m2/repository"],"denyWrite":["~/.cache/found-issues"]}}}'
+# autoAllowBashIfSandboxed:false keeps the --allowedTools allowlist the gate:
+# left at its default, dontAsk auto-allows every sandboxed Bash command (live
+# probe 2026-10-10: touch, git commit and curl all ran with no denial).
+FI_AF_SANDBOX_SETTINGS='{"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":false,"failIfUnavailable":true,"allowUnsandboxedCommands":false,"network":{"allowedDomains":["*"]},"filesystem":{"allowWrite":["~/.cache","~/Library/Caches","~/.npm","~/.cargo/registry","~/.cargo/git","~/go/pkg/mod","~/.gradle/caches","~/.m2/repository"],"denyWrite":["~/.cache/found-issues"]}}}'
 FI_AF_SBWARN=""
 FI_AF_TOOLS=() FI_AF_CMD=() FI_AF_BARGS=() FI_AF_TEXT="" FI_AF_COST="0" FI_AF_TOKENS=0
 FI_AF_RESULT="" FI_AF_RESULT_TEXT="" FI_AF_APPROVE="false" FI_AF_REASON=""
@@ -299,7 +302,7 @@ _fi_af_model_rejected() {
 
 fi_af_collect() {
   local engine="$1" out="$2" last="$3" c t
-  FI_AF_TEXT="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0
+  FI_AF_TEXT="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0 FI_AF_LIMIT=""
   if [[ "$engine" == "codex" ]]; then
     [[ -n "$last" && -f "$last" ]] && FI_AF_TEXT="$(cat "$last")"
     t="$(jq -s '[.[] | select(.type=="turn.completed") | (.usage.input_tokens // 0) + (.usage.output_tokens // 0)] | add // 0' "$out" 2>/dev/null || true)"
@@ -340,6 +343,9 @@ fi_af_collect() {
     # subtype; error_max_* is a run limit this run set, not an outage.
     FI_AF_ENGINE_ERR="$(jq -r 'if (.is_error == true or ((.subtype // "success") | startswith("error_"))) and (((.subtype // "") | startswith("error_max_")) | not) then (.result // .subtype // "engine error") else empty end' "$out" 2>/dev/null || true)"
     FI_AF_ENGINE_ERR="${FI_AF_ENGINE_ERR//$'\n'/ }"
+    # The run limit the child hit, if any (error_max_turns, error_max_budget_usd):
+    # claude -p may exit non-zero on it, and the caller must not read that as an outage.
+    FI_AF_LIMIT="$(jq -r 'if ((.subtype // "") | startswith("error_max_")) then .subtype else empty end' "$out" 2>/dev/null || true)"
     c="$(jq -r '.total_cost_usd // 0' "$out" 2>/dev/null || true)"
     [[ "$c" =~ ^[0-9.eE+-]+$ ]] || c=0
     FI_AF_COST="$(awk -v a="$FI_AF_COST" -v b="$c" 'BEGIN { printf "%.4f", a + b }')"

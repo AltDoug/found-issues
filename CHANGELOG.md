@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-10-10
+
+Ledger fix batch 4: a stuck-repo marker for auto-fix (the reason this is a minor release), a conflict guard for armed auto-merge PRs, a louder and longer `fix ship`, and a sandbox fix that restores the fixer's command allowlist.
+
+### Added
+- **Auto-fix STUCK marker.** After 3 items in a row retire `stale: tests fail at base`, the statusline segment shows a red `🔧stuck` and the session-start auto-fix summary says so, with the first failing test names and the `found-issues.autofix.worktreeFiles` hint. Linked worktrees of a repo share one streak, and only a green base resets it (a cancel or a no-longer-eligible retire neither counts nor resets). It clears when the base suite is found green, on `found-issues autofix off` or `config autofix false`, and ignores a streak older than 7 days.
+- **`autofix merge-when-green --guard`.** A fix PR whose auto-merge was armed now also gets a guard watcher (24 h by default, a look every 5 min: `FOUND_ISSUES_AUTOFIX_GUARD_POLLS` / `_GUARD_SLEEP`, one per PR, still watching through a failed check). It never merges itself; it only merges the base into the PR when the conflict is in the ledger alone, so the armed auto-merge can fire.
+
+### Fixed
+- **Security: sandboxed Claude fixers keep the allowlist.** With the Bash sandbox available, `dontAsk` auto-allowed every sandboxed Bash command, so the fixer's `--allowedTools` allowlist was not enforced (a live probe ran `touch`, `git commit` and `curl` with no denial). The sandbox settings now set `autoAllowBashIfSandboxed: false`; re-probed live, only the test command runs.
+- **`fix ship`:** the test gate has its own 60-minute timeout (`FOUND_ISSUES_FIX_SHIP_TIMEOUT_SECS`, validated) instead of the 20-minute auto-fix watchdog, and prints the failing-tests report when it refuses. A pick that matches no entry now makes ship exit non-zero and names it, and a pick may be the entry's location exactly as written in the ledger.
+- **Auto-fix verifier:** a verifier that hits its max-turns or budget limit is a reject, not an outage (no free re-run of the paid fixer, a sweep carries on). Only the watchdog (not a bare exit 124) counts as a timeout, for the verifier and the fixer. A fixer that hits its own run limit is a counted no-change attempt, not an outage.
+- **Auto-fix hook:** the item's recorded engine wins over the session harness at launch; the Stop fallback shares one enabled/cap check with the CLI and forks less per Stop.
+- **Auto-sweep:** busy files are listed once per claim (paths normalized, merge commits included) instead of 2-4 git calls per candidate; a failed fetch while cutting the worktree waits and requeues instead of failing (the failed cut's branch and directory are removed first, so the retry can succeed, and a continuation batch keeps its chain's base), and the daily slot is taken only after the worktree is cut; `skip_files` diffs ignore renames; an entry skipped for touching an earlier batch's file holds that file for the rest of the chain and is checked before the verifier is paid; the classifier offers not-yet-offered entries first.
+- **Hooks:** the "could not find its lib" warnings of the branch-delete guard and the format enforcer reach the model as `additionalContext` instead of stderr.
+- **Statusline:** a local-mode ledger nested under a repo-tracked home no longer inherits that repo's auto-fix wrench count.
+
 ## [3.7.0] - 2026-10-10
 
 Ledger fix batch 3: auto-fix queue, hook and sweep hardening, a stricter sync closer, and a new `unannotate` verb (the reason this is a minor release).

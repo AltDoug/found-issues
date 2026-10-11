@@ -117,10 +117,11 @@ fi_af_enabled() {
   if [[ -e "$FI_AF_ROOT/disabled" ]]; then
     FI_AF_WHY="switched off (found-issues autofix on)"; return 1
   fi
-  local v
-  v="$(git config --type=bool --get found-issues.autofix 2>/dev/null || true)"
-  [[ "$v" == "true" ]] || { FI_AF_WHY="found-issues.autofix is not true"; return 1; }
-  fi_repo_id >/dev/null 2>&1 || { FI_AF_WHY="origin is not a GitHub repo"; return 1; }
+  # fi_af_repo_cfg / fi_af_origin_ok (autofix-queue.sh) are shared with the
+  # Stop-hook fallback (fi_afh_stop), so the two gates cannot drift.
+  fi_af_repo_cfg .
+  [[ "$FI_AF_RC_ON" == "true" ]] || { FI_AF_WHY="found-issues.autofix is not true"; return 1; }
+  fi_af_origin_ok . || { FI_AF_WHY="origin is not a GitHub repo"; return 1; }
 }
 
 fi_af_dirs() {
@@ -403,6 +404,11 @@ cmd_config() {
   _fi_cfg_valid || return 2
   git config "$scope" "found-issues.$FI_CFG_KEY" "$FI_CFG_VAL" || return 1
   printf 'Set found-issues.%s = %s (%s)\n' "$FI_CFG_KEY" "$FI_CFG_VAL" "${scope#--}"
+  # Switched off here (or everywhere): its STUCK marker would outlive the switch.
+  if [[ "$FI_CFG_KEY" == autofix && "$FI_CFG_VAL" == false ]]; then
+    if [[ "$scope" == --global ]]; then fi_af_stuck_clear
+    else fi_af_stuck_clear "$(git rev-parse --show-toplevel 2>/dev/null || true)"; fi
+  fi
   if [[ "$scope" == --global ]]; then
     local local_val
     local_val="$(git config --local --get "found-issues.$FI_CFG_KEY" 2>/dev/null || true)"

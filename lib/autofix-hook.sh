@@ -118,6 +118,10 @@ fi_afh_root_resolve() {
 fi_afh_launch_a() {
   local item="$1" engine="$2" bin="$3" log
   fi_af_item_read "$item" || return 1
+  # The engine recorded at queue time wins (an explicit
+  # found-issues.autofix.engine=codex); the session harness fills in only
+  # when the item names none (empty, auto, anything else).
+  case "$AFI_engine" in claude|codex) engine="$AFI_engine" ;; esac
   fi_afh_root_resolve "$AFI_root" "${4:-$PWD}" "$item" || return 1
   log="${item%/queue/*}/spawn.log"
   ( cd "$FI_AFH_ROOT" && nohup "$bin" autofix run "$AFI_id" --engine "$engine" \
@@ -188,7 +192,7 @@ fi_afh_common_dir() {
 # or the item was launched less than FOUND_ISSUES_AUTOFIX_STOP_GRACE seconds
 # ago (default 60; a B fixer may not have claimed yet).
 fi_afh_stop() {
-  local input="$1" engine="$2" bin="$3" st_root f st cwd cwd_git="" root_seen="" root_git="" eff v cap n line
+  local input="$1" engine="$2" bin="$3" st_root f st cwd cwd_git="" root_seen="" root_git="" eff
   local re_agent='"agent_id"[[:space:]]*:[[:space:]]*"[^"]' re_cwd='"cwd"[[:space:]]*:[[:space:]]*"([^"\\]*)"'
   local -a items=()
   [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]] && return 0
@@ -208,7 +212,7 @@ fi_afh_stop() {
     [[ -d "$st/lock" ]] && fi_afh_lock_fresh "$st/lock" && continue
     fi_af_item_read "$f" || continue
     [[ "$AFI_wait_next" =~ ^[0-9]+$ ]] && (( AFI_wait_next > FI_AFH_NOW )) && continue
-    [[ -n "$AFI_root" ]] || continue
+    [[ -n "$AFI_root" && -n "$AFI_slug" ]] || continue
     # Same repo, any checkout (3.4.2): a sibling worktree or the main
     # checkout drains an item queued from a nested worktree, and a separate
     # repo nested under the root does not. A nested worktree that was removed
@@ -229,20 +233,17 @@ fi_afh_stop() {
        && (( FI_AFH_NOW - AFI_launched < ${FOUND_ISSUES_AUTOFIX_STOP_GRACE:-60} )); then
       continue
     fi
-    # Per-repo switch: found-issues.autofix=false there means every run exits
-    # 1 at once, so do not spawn one at every Stop.
-    v="$(git -C "$eff" config --type=bool --get found-issues.autofix 2>/dev/null || true)"
-    [[ "$v" == "true" ]] || continue
-    # Today's spot cap, read the way fi_af_cap_ok does: a B claim that hits it
-    # (claim rc 3) writes no capped marker, so count the claims here.
+    # Per-repo switch and today's spot cap, through the helpers fi_af_enabled
+    # and fi_af_cap_ok use (one git call). found-issues.autofix=false there
+    # means every run exits 1 at once, so do not spawn one at every Stop. A B
+    # claim that hits the cap (claim rc 3) writes no capped marker, so count
+    # the claims. No origin check here: an item is only queued after
+    # fi_repo_id resolved a GitHub slug, so it records one (an empty slug is
+    # a cheap no-fork skip) and a per-Stop check would only cost forks.
+    fi_af_repo_cfg "$eff"
+    [[ "$FI_AF_RC_ON" == "true" ]] || continue
     if [[ "$AFI_kind" != "sweep" ]]; then
-      cap="$(git -C "$eff" config --get found-issues.autofix.dailyFixes 2>/dev/null || true)"
-      [[ "$cap" =~ ^[0-9]+$ ]] && (( 10#$cap >= 1 )) || cap=5
-      n=0
-      if [[ -f "$st/day/$FI_AFH_DAY.spot" ]]; then
-        while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$st/day/$FI_AFH_DAY.spot"
-      fi
-      (( n < 10#$cap )) || continue
+      fi_af_claims_under "$st/day/$FI_AFH_DAY.spot" "$FI_AF_RC_CAP" || continue
     fi
     fi_afh_mark "$f" A "$FI_AFH_NOW"
     fi_afh_launch_a "$f" "$engine" "$bin" "$cwd"

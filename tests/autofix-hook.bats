@@ -64,6 +64,8 @@ AUTOFIX-QUEUED $ID")"
 
 @test "hook: codex always starts launcher A with the codex engine" {
   export FOUND_ISSUES_HARNESS=codex
+  # b4: an engine recorded on the item wins; the harness fills in only when none is.
+  fi_af_item_set "$QITEM" engine ""
   run hook "$(payload bypassPermissions "AUTOFIX-QUEUED $ID")"
   [ "$status" -eq 0 ]
   wait_spawn

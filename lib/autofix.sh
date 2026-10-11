@@ -34,8 +34,10 @@ Usage: found-issues autofix <command>
   ship <id>                   Test, commit, push, open the PR, annotate, arm auto-merge
   release <id> --already-fixed|--decide|--manual|--failed "<text>"
                               Give a claimed item back with an outcome
-  merge-when-green <N> [--repo owner/name]
+  merge-when-green <N> [--repo owner/name] [--guard]
                               Wait for PR <N>'s checks, then squash-merge it
+                              (--guard: only resolve ledger conflicts, never merge; one per PR, up to
+                              FOUND_ISSUES_AUTOFIX_GUARD_POLLS checks, default 288, 300 s apart)
 Settings: git config found-issues.autofix true|false (local overrides --global),
 found-issues.autofix.{engine,testCommand,worktreeFiles,dailyFixes,runBudget,runTimeoutMin,
 dailySweeps,sweepThreshold,sweepBatch,sweepBudget,codexModel,codexVerifierModel,
@@ -50,14 +52,19 @@ _fi_af_fix_attempt() {
   fi_af_fixer_cmd "$engine" "$(fi_af_fixer_prompt "$FI_AF_TESTCMD" "$feedback" "$engine")" "$base.last"
   [[ -z "$FI_AF_SBWARN" ]] || fi_af_log "$AFI_id" "warning: $FI_AF_SBWARN"
   fi_af_child "$base.out" "$base.err" "$AFI_wt" "${FI_AF_CMD[@]}" || rc=$?
+  # The watchdog is told by FI_AF_CHILD_TIMEDOUT, never by a bare exit 124
+  # (3.4.2): a fixer that exits 124 on its own is an engine error.
+  local timedout="${FI_AF_CHILD_TIMEDOUT:-}"
   fi_af_collect "$engine" "$base.out" "$base.last"
   if [[ "$engine" == codex ]]; then fi_af_codex_note "$AFI_id" fixer; fi
   fi_af_parse_result "$FI_AF_TEXT"
   FI_AF_FIX_RC=$rc
-  if [[ -z "$FI_AF_ENGINE_ERR" ]] && (( rc != 0 && rc != 124 )) && [[ "$FI_AF_RESULT" == "none" ]]; then
+  # A fixer that hit a run limit this run set (claude error_max_*) ran and
+  # gave up: a counted no-change attempt, never an outage that re-runs it free.
+  if [[ -z "$FI_AF_ENGINE_ERR" && -z "$timedout" && -z "$FI_AF_LIMIT" ]] && (( rc != 0 )) && [[ "$FI_AF_RESULT" == "none" ]]; then
     FI_AF_ENGINE_ERR="$engine exited $rc: $(tail -n 1 "$base.err" 2>/dev/null)"
   fi
-  (( rc == 124 )) && fi_af_log "$AFI_id" "attempt $n: fixer timed out"
+  [[ -n "$timedout" ]] && fi_af_log "$AFI_id" "attempt $n: fixer timed out"
   fi_af_log "$AFI_id" "attempt $n: fixer rc=$rc result=$FI_AF_RESULT"
 }
 
@@ -73,11 +80,25 @@ _fi_af_verify() {
   fi_af_collect "$engine" "$base.out" "$base.last"
   if [[ "$engine" == codex ]]; then fi_af_codex_note "$AFI_id" verifier; fi
   fi_af_parse_verdict "$FI_AF_TEXT"
-  # A verifier that exited non-zero and left no parseable verdict (a crash,
-  # a lost login, the watchdog's timeout) never ran: an outage, not a reject.
-  # A verdict it did leave stands whatever its exit code.
+  # A verifier that exited non-zero and left no parseable verdict never ran
+  # to a conclusion. Two different things look like that:
+  #  - it hit a run limit this run set (claude error_max_turns,
+  #    error_max_budget_usd, any error_max_*): the verifier ran and could not
+  #    decide, so the fix is REJECTED through the normal reject path (no
+  #    outage, no free re-run of the paid fixer, a sweep carries on);
+  #  - the watchdog's timeout, a crash, a lost login: an OUTAGE. The watchdog
+  #    is told by FI_AF_CHILD_TIMEDOUT, never by a bare exit 124 (3.4.2): a
+  #    verifier that exits 124 on its own is an ordinary crash.
+  # A verdict it did leave stands whatever its exit code. Codex has no
+  # turn/budget limit result, so for it every non-zero exit is an outage.
   if [[ -z "$FI_AF_ENGINE_ERR" ]] && (( rc != 0 )) && (( FI_AF_VERDICT_OK != 1 )); then
-    FI_AF_ENGINE_ERR="$engine verifier exited $rc"
+    if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then
+      FI_AF_ENGINE_ERR="$engine verifier exited 124 (timed out)"
+    elif [[ -n "$FI_AF_LIMIT" ]]; then
+      FI_AF_APPROVE="false" FI_AF_REASON="verifier hit its run limit ($FI_AF_LIMIT) before a verdict"
+    else
+      FI_AF_ENGINE_ERR="$engine verifier exited $rc"
+    fi
   fi
   fi_af_log "$AFI_id" "attempt $n: verifier rc=$rc approve=$FI_AF_APPROVE reason=$FI_AF_REASON"
 }
@@ -102,10 +123,11 @@ _fi_af_end() {
 # Spec §5 steps 2-5 for the loaded entry (AFI_entry, AFI_wt, AFI_base_sha):
 # up to 2 attempts of fix -> bash tests -> verifier. Shared by a spot run
 # and by each entry of a sweep. Sets FI_AF_OUTCOME (approved | already-fixed
-# | decide | manual | failed | outage) and FI_AF_OUTCOME_TEXT; on approved
+# | decide | manual | failed | outage | skipped-chain: a sweep entry that
+# touches a file of an earlier batch's PR) and FI_AF_OUTCOME_TEXT; on approved
 # the worktree holds the verified change and FI_AF_TREE its staged tree.
 _fi_af_fix_loop() {
-  local id="$1" engine="$2" n feedback="" why="" tlog ref
+  local id="$1" engine="$2" n feedback="" why="" tlog ref p
   ref="${AFI_base_sha:-origin/$AFI_base}"
   FI_AF_OUTCOME="" FI_AF_OUTCOME_TEXT=""
   for n in 1 2; do
@@ -134,6 +156,12 @@ _fi_af_fix_loop() {
     esac
     if [[ -z "$(fi_af_diff "$AFI_wt" "$ref")" ]]; then
       why="no change"; feedback="The attempt changed no files."; continue
+    fi
+    # A continuation fix that edits a file of an earlier batch's PR is
+    # dropped now, before the tests and the paid verifier run.
+    if declare -F _fi_af_sweep_skip_hit >/dev/null && p="$(_fi_af_sweep_skip_hit "$AFI_wt" "${AFI_head:-$ref}")"; then
+      FI_AF_OUTCOME=skipped-chain FI_AF_OUTCOME_TEXT="touches $p (file in an earlier batch's PR)"
+      return 0
     fi
     tlog="$FI_AF_RUNS/$id.tests$n.log"
     if ! fi_af_tests_pass "$AFI_wt" "$FI_AF_TESTCMD" "$tlog"; then
@@ -294,6 +322,8 @@ cmd_autofix() {
       fi_af_root
       mkdir -p "$FI_AF_ROOT"
       : >"$FI_AF_ROOT/disabled"
+      # Nothing runs now, so no repo is stuck: a marker would outlive the switch.
+      fi_af_stuck_clear
       printf 'Auto-fix switched off in every repo (undo: found-issues autofix on).\n' ;;
     claim)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix claim <id>"; return 2; }
@@ -383,12 +413,20 @@ cmd_autofix() {
         return 1
       fi ;;
     merge-when-green)
-      local mpr="${1:-}" mrepo=""
+      local mpr="${1:-}" mrepo="" mguard=0
       [[ $# -gt 0 ]] && shift
       if [[ "${1:-}" == "--repo" && -n "${2:-}" ]]; then mrepo="$2"; shift 2; fi
-      [[ $# -eq 0 && "$mpr" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number> [--repo owner/name]"; return 2; }
+      if [[ "${1:-}" == "--guard" ]]; then mguard=1; shift; fi
+      [[ $# -eq 0 && "$mpr" =~ ^[0-9]+$ ]] || { fi_err "Usage: found-issues autofix merge-when-green <PR-number> [--repo owner/name] [--guard]"; return 2; }
       fi_af_no_prompts
-      fi_af_merge_when_green "$mpr" "$mrepo" ;;
+      if (( mguard )); then
+        local mrc=0
+        _fi_af_guard_lock "$mpr" "$mrepo" || return 0
+        fi_af_merge_when_green "$mpr" "$mrepo" 1 || mrc=$?
+        _fi_af_guard_unlock
+        return "$mrc"
+      fi
+      fi_af_merge_when_green "$mpr" "$mrepo" 0 ;;
     next)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix next <id>"; return 2; }
       fi_af_context || return 1

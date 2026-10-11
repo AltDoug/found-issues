@@ -97,35 +97,106 @@ fi_segment_cache_put() {
 
 # 🔧N: auto-fix runs in progress in the ledger's repo (phase 5 ruling 1),
 # from the state file lib/autofix-status.sh writes per physical repo root.
+# 🔧stuck (3.8.0, ledger lib/autofix-queue.sh:345): the repo's last
+# FI_AF_STUCK_AFTER items all retired "stale: tests fail at base"; the streak
+# lives in autofix/stuck/<root>, written at retire time (fi_af_stuck_update).
 # Read AFTER the cache, never cached. Builtins only: cd -P resolves the
 # root git reports, so a symlinked checkout still finds its file.
+#
+# The stuck-file helpers below are shared with lib/autofix-status.sh (which
+# writes the file and prints the SessionStart line), so the threshold, the
+# root-to-filename key and the reader exist once. The file: line 1 the streak
+# count, line 2 the first failing test names, line 3 the epoch of the last
+# base failure; a streak whose last failure is older than FI_AF_STUCK_MAX_AGE
+# (7 days) no longer counts, so a repo nobody touches does not stay red.
+FI_AF_STUCK_AFTER="${FI_AF_STUCK_AFTER:-3}"
+FI_AF_STUCK_MAX_AGE="${FI_AF_STUCK_MAX_AGE:-604800}"
+
+# Sets FI_AF_KEY, the state-file name (seg/, stuck/) of a repo root.
+fi_af_root_key() { FI_AF_KEY="${1//[^A-Za-z0-9._-]/_}"; }
+
+# Sets FI_AF_KEY for a stuck/ file. A red base is a repo-wide state, so every
+# linked worktree shares its main worktree's streak: a linked worktree's .git
+# is a file "gitdir: <main>/.git/worktrees/<name>". Builtins only (statusline).
+fi_af_stuck_key() {
+  local root="$1" line=""
+  if [[ -f "$root/.git" ]]; then
+    IFS= read -r line <"$root/.git" || true
+    line="${line#gitdir: }"
+    [[ "$line" == /*/.git/worktrees/* ]] && root="${line%/.git/worktrees/*}"
+  fi
+  fi_af_root_key "$root"
+}
+
+# Sets FI_AF_NOW (epoch seconds): a builtin where bash has one, date otherwise
+# (only a bash older than 4.2 gets here, and never on the statusline fast path).
+fi_af_now() {
+  if fi_segment_clock_ok; then printf -v FI_AF_NOW '%(%s)T' -1
+  else FI_AF_NOW="$(date +%s)"; fi
+}
+
+# Reads a stuck file: sets FI_AF_STUCK_N / _NAMES / _TS (empty when unset).
+# rc 1 when there is no such file.
+# shellcheck disable=SC2034  # _NAMES is read by lib/autofix-status.sh
+fi_af_stuck_read() {
+  FI_AF_STUCK_N="" FI_AF_STUCK_NAMES="" FI_AF_STUCK_TS=""
+  [[ -f "$1" ]] || return 1
+  { IFS= read -r FI_AF_STUCK_N || true; IFS= read -r FI_AF_STUCK_NAMES || true; IFS= read -r FI_AF_STUCK_TS || true; } <"$1"
+  return 0
+}
+
+# rc 0 when the file holds a live streak: the count reached
+# FI_AF_STUCK_AFTER and its last base failure is within FI_AF_STUCK_MAX_AGE
+# (a file without a timestamp counts as fresh). Leaves the fields set.
+fi_af_stuck_active() {
+  fi_af_stuck_read "$1" || return 1
+  [[ "$FI_AF_STUCK_N" =~ ^[0-9]+$ ]] && (( 10#$FI_AF_STUCK_N >= FI_AF_STUCK_AFTER )) || return 1
+  if [[ "$FI_AF_STUCK_TS" =~ ^[0-9]+$ ]]; then
+    fi_af_now
+    (( FI_AF_NOW - 10#$FI_AF_STUCK_TS <= FI_AF_STUCK_MAX_AGE )) || return 1
+  fi
+  return 0
+}
+
 fi_segment_af_suffix() {
-  local file="$1" root saved n="" st
+  local file="$1" root saved n="" base name local_form=""
   FI_SEG_AF="" FI_SEG_AF_N=0
   case "$file" in
     */docs/found-issues.md) root="${file%/docs/found-issues.md}" ;;
-    */.found-issues.md)     root="${file%/.found-issues.md}" ;;
+    */.found-issues.md)     root="${file%/.found-issues.md}"; local_form=1 ;;
     *) return 0 ;;
   esac
   [[ -n "${FOUND_ISSUES_STATE_DIR:-}" || -n "${HOME:-}" ]] || return 0
-  st="${FOUND_ISSUES_STATE_DIR:-$HOME/.claude/found-issues}/autofix/seg"
-  [[ -d "$st" ]] || return 0
+  base="${FOUND_ISSUES_STATE_DIR:-$HOME/.claude/found-issues}/autofix"
+  [[ -d "$base" ]] || return 0
   saved="$PWD"
   cd -P "$root" 2>/dev/null || return 0
   root="$PWD"
-  # The state file is keyed by the git toplevel; a nested (monorepo package)
-  # ledger sits below it, so walk up to the directory holding .git.
-  n="$root"
-  while [[ -n "$n" && "$n" != "/" && ! -e "$n/.git" ]]; do n="${n%/*}"; done
-  [[ -n "$n" && "$n" != "/" ]] && root="$n"
-  n=""
   cd "$saved" 2>/dev/null || return 0
-  root="$st/${root//[^A-Za-z0-9._-]/_}"
-  [[ -f "$root" ]] || return 0
-  IFS= read -r n <"$root" || true
-  if [[ "$n" =~ ^[1-9][0-9]*$ ]]; then
-    FI_SEG_AF_N="$n"
-    FI_SEG_AF=$'\033[35m'"🔧$n"$'\033[0m'
+  # The state file is keyed by the git toplevel; a nested (monorepo package)
+  # ledger sits below it, so walk up to the directory holding .git. Git mode
+  # only (3.8.0): a local-mode ledger (FOUND_ISSUES_MODE=local, or the
+  # .found-issues.md form that only local mode creates below a repo root)
+  # nested under some repo, e.g. a dotfiles repo tracking $HOME, does not
+  # inherit that repo's counts.
+  if [[ ! -e "$root/.git" ]]; then
+    [[ "${FOUND_ISSUES_MODE:-}" == local || -n "$local_form" ]] && return 0
+    n="$root"
+    while [[ -n "$n" && "$n" != "/" && ! -e "$n/.git" ]]; do n="${n%/*}"; done
+    [[ -n "$n" && "$n" != "/" ]] && root="$n"
+  fi
+  n=""
+  fi_af_root_key "$root"; name="$FI_AF_KEY"
+  if [[ -f "$base/seg/$name" ]]; then
+    IFS= read -r n <"$base/seg/$name" || true
+    if [[ "$n" =~ ^[1-9][0-9]*$ ]]; then
+      FI_SEG_AF_N="$n"
+      FI_SEG_AF=$'\033[35m'"🔧$n"$'\033[0m'
+    fi
+  fi
+  fi_af_stuck_key "$root"
+  if fi_af_stuck_active "$base/stuck/$FI_AF_KEY"; then
+    FI_SEG_AF+="${FI_SEG_AF:+ }"$'\033[31m'"🔧stuck"$'\033[0m'
   fi
   return 0
 }

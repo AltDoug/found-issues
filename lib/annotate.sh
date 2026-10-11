@@ -248,7 +248,8 @@ fi_annotate_apply_picks() {
   # Pass A: per selector, collect every [open] entry at its location (the
   # group), then select within it: the whole group for a plain location, the
   # fragment matches for the extended form.
-  local line loc i p_loc p_frag k
+  local line loc raw_loc i p_loc p_frag k
+  local _fi_re_loc_prefix='^- \[open\]( \[!\])? [0-9]{4}-[0-9]{2}-[0-9]{2} '
   # Final-partial-line guard (READ-LOOP GUARD, bin/found-issues). This pass only
   # scans, but dropping the final entry here makes it unpickable — the pick
   # reports "no [open] entry matches" for an entry that is plainly there.
@@ -256,11 +257,17 @@ fi_annotate_apply_picks() {
     [[ "$line" =~ ^-\ \[open\] ]] || continue
     fi_entry_loc_v "$line" || continue
     loc="$FE_loc"
+    # The location text exactly as written (between the date and the ' — '
+    # separator), so a pick copied from the ledger matches even when the
+    # parser keeps only its first token as the path.
+    raw_loc="$line"
+    [[ "$line" =~ $_fi_re_loc_prefix ]] && raw_loc="${line#"${BASH_REMATCH[0]}"}"
+    raw_loc="${raw_loc%% — *}"
     for (( i = 0; i < ${#pick_arr[@]}; i++ )); do
       pick="${pick_arr[$i]}"
       p_loc="$pick"
       [[ "$pick" == *" — "* ]] && p_loc="${pick%% — *}"
-      [[ "$loc" == "$p_loc" ]] || continue
+      [[ "$loc" == "$p_loc" || "$raw_loc" == "$p_loc" ]] || continue
       pick_group[$i]+="$line"$'\n'
     done
   done <"$file"
@@ -357,11 +364,18 @@ fi_annotate_apply_picks() {
     printf '%s: no [open] entry matches pick:\n%s' "$cmd_label" "$unmatched"
   fi
 
+  # FOUND_ISSUES_PICK_STRICT=1 (set by `fix ship`): a pick that matched
+  # nothing, or was refused as ambiguous, fails the run even when another
+  # pick annotated something. Off, the exit stays 0 on any annotation.
+  local strict_bad=0
+  if [[ "${FOUND_ISSUES_PICK_STRICT:-}" == "1" && ( -n "$unmatched" || -n "$ambiguous" ) ]]; then
+    strict_bad=1
+  fi
   if (( matched > 0 )); then
     cmd_status plain
-    return 0
+    return $(( strict_bad ? 4 : 0 ))
   fi
-  (( already > 0 )) && return 0
+  (( already > 0 )) && return $(( strict_bad ? 4 : 0 ))
   return 1
 }
 

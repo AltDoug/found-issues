@@ -18,6 +18,8 @@
 #   fi_af_queue_spot <entry-line>
 #   fi_af_lock <id> / fi_af_unlock <id>
 #   fi_af_cap_ok <kind> <limit> / fi_af_cap_take <kind> <id>
+#   fi_af_claims_under <day-file> <limit>
+#   fi_af_repo_cfg [<dir>] / fi_af_origin_ok [<dir>]
 #   fi_af_find_entry [<ledger>]
 #   fi_af_eligible
 #   fi_af_worktree_add / fi_af_worktree_remove [drop]
@@ -38,7 +40,7 @@ AFI_engine="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt="" AFI_branch=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
 AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
+AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -53,14 +55,14 @@ fi_af_item_read() {
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
   AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
+  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0"
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries)
+      id|kind|root|slug|loc|key|entry|engine|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|held_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -254,13 +256,54 @@ fi_af_unlock() {
   return 0
 }
 
-# Spec §7: claims per repo per day, one line per claim.
-fi_af_cap_ok() {
-  local f="$FI_AF_ST/day/$(fi_today).$1" n=0 line
-  if [[ -f "$f" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$f"
+# Spec §7: claims per repo per day, one line per claim. <file> holds the
+# claims (the day's .spot or .sweep file); 0 while there are fewer than
+# <limit>. Shared by fi_af_cap_ok and the Stop fallback (fi_afh_stop), so
+# the two count one way; no fork.
+fi_af_claims_under() {
+  local n=0 line
+  if [[ -f "$1" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do n=$((n + 1)); done <"$1"
   fi
   (( n < $2 ))
+}
+
+fi_af_cap_ok() {
+  fi_af_claims_under "$FI_AF_ST/day/$(fi_today).$1" "$2"
+}
+
+# The per-repo gate of <dir> (default .) in ONE git call: sets FI_AF_RC_ON
+# to true or "" (found-issues.autofix, read the way git config --type=bool
+# does: true/yes/on, a bare key, any nonzero integer) and FI_AF_RC_CAP (the
+# spot cap, found-issues.autofix.dailyFixes; 5 unless a positive integer, as
+# fi_af_int, minus its warning). Shared by fi_af_enabled and the Stop
+# fallback, which would otherwise carry two copies of these reads.
+FI_AF_RC_ON="" FI_AF_RC_CAP=5
+fi_af_repo_cfg() {
+  local line key val on
+  FI_AF_RC_ON="" FI_AF_RC_CAP=5
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    key="${line%% *}" val="" on=""
+    [[ "$line" == *" "* ]] && val="${line#* }" || on=true
+    case "$key" in
+      found-issues.autofix)
+        case "$val" in
+          [Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn]) on=true ;;
+        esac
+        [[ "$val" =~ ^[0-9]+$ ]] && (( 10#$val != 0 )) && on=true
+        FI_AF_RC_ON="$on" ;;
+      found-issues.autofix.dailyfixes)
+        if [[ "$val" =~ ^[0-9]+$ ]] && (( 10#$val >= 1 )); then FI_AF_RC_CAP="$((10#$val))"
+        else FI_AF_RC_CAP=5; fi ;;
+    esac
+  done < <(git -C "${1:-.}" config --get-regexp '^found-issues\.autofix(\.dailyfixes)?$' 2>/dev/null || true)
+}
+
+# 0 when origin of <dir> (default .) is a GitHub repo (v3 is GitHub-PR-mode
+# only, spec §2): fi_repo_id's own rule, run in <dir>.
+fi_af_origin_ok() {
+  if [[ -z "${1:-}" || "$1" == "." ]]; then fi_repo_id >/dev/null 2>&1; return; fi
+  ( cd "$1" 2>/dev/null && fi_repo_id >/dev/null 2>&1 )
 }
 
 fi_af_cap_take() {
@@ -562,7 +605,9 @@ fi_af_base_tests() {
   fi_af_tests_pass "$AFI_wt" "$t" "$log" || rc=$?
   git -C "$AFI_wt" reset -q --hard "${AFI_base_sha:-HEAD}" >/dev/null 2>&1 || true
   git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
-  if (( rc == 0 )); then rm -f "$red"; return 0; fi
+  # A green base is what ends a STUCK streak (besides switch-off and the
+  # week's age-out): other retires say nothing about the base.
+  if (( rc == 0 )); then rm -f "$red"; fi_af_stuck_clear "$AFI_root"; return 0; fi
   # 3.4.2: the watchdog firing is not a red suite (ledger :341).
   if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then
     local secs="$FI_AF_CHILD_TIMEDOUT" took
@@ -587,6 +632,7 @@ fi_af_retire() {
   fi_af_item_set "$f" finished "$(date +%s)"
   mv "$f" "$FI_AF_ST/done/$id"
   fi_af_seg_write "$(_fi_af_field "$FI_AF_ST/done/$id" root)"
+  fi_af_stuck_update "$(_fi_af_field "$FI_AF_ST/done/$id" root)" "$outcome" "$text" "$id"
   fi_af_unlock "$id"
   fi_af_log "$id" "$outcome: $text"
 }
@@ -656,9 +702,15 @@ _fi_af_entry_file() {
 # Never a diff against origin/<base> itself: a checkout merely behind origin
 # differs from it without holding any work of its own. rc 0 = busy.
 _fi_af_file_busy() {
-  local p="$1" cur up pushed
+  local p="$1" pushed
   [[ -n "$(git -C "$AFI_root" diff --name-only HEAD -- "$p" 2>/dev/null)" ]] && return 0
-  pushed="origin/$AFI_base"
+  pushed="$(_fi_af_pushed_ref)"
+  [[ -n "$(git -C "$AFI_root" rev-list -1 "$pushed..HEAD" -- "$p" 2>/dev/null)" ]]
+}
+
+# The ref the root checkout's commits count as pushed against (see above).
+_fi_af_pushed_ref() {
+  local cur up pushed="origin/$AFI_base"
   cur="$(git -C "$AFI_root" symbolic-ref -q --short HEAD 2>/dev/null || true)"
   if [[ -n "$cur" ]]; then
     up="$(git -C "$AFI_root" config --get "branch.$cur.merge" 2>/dev/null || true)"
@@ -667,7 +719,47 @@ _fi_af_file_busy() {
       pushed="origin/$up"
     fi
   fi
-  [[ -n "$(git -C "$AFI_root" rev-list -1 "$pushed..HEAD" -- "$p" 2>/dev/null)" ]]
+  printf '%s' "$pushed"
+}
+
+# Batch 4 (ledger lib/autofix-sweep.sh:274): the same test for many files in
+# one pass, for a sweep claim that holds the repo lock. Sets FI_AF_BUSY_SET to
+# a newline-delimited list (leading and trailing newline) of every path with
+# uncommitted changes or unpushed work; _fi_af_in_busy_set <path> tests it
+# (a directory is busy when anything under it is). Names are read NUL-
+# terminated, so no path is C-quoted. Unpushed work is every path an unpushed
+# commit touched (merge commits against each parent, -m) plus the net change
+# since the merge base (pushed...HEAD), so a merge's own result is covered.
+# In a checkout with core.ignorecase the set is lowercased and so are queries.
+_fi_af_busy_set() {
+  local pushed name acc=$'\n' lc=""
+  pushed="$(_fi_af_pushed_ref)"
+  [[ "$(git -C "$AFI_root" config --bool --get core.ignorecase 2>/dev/null || true)" == true ]] && lc=1
+  while IFS= read -r -d '' name || [[ -n "$name" ]]; do
+    [[ -n "$name" ]] && acc+="$name"$'\n'
+  done < <(
+    git -C "$AFI_root" diff --name-only -z --no-renames HEAD 2>/dev/null || true
+    git -C "$AFI_root" log -m --no-renames --name-only -z --format= "$pushed..HEAD" 2>/dev/null || true
+    git -C "$AFI_root" diff --name-only -z --no-renames "$pushed...HEAD" 2>/dev/null || true
+  )
+  [[ -z "$lc" ]] || acc="$(printf '%s' "$acc" | tr '[:upper:]' '[:lower:]')"$'\n'
+  FI_AF_BUSY_SET="$acc"
+  FI_AF_BUSY_LC="$lc"
+}
+
+# rc 0 = busy. A path with a leading ./ is normalized; one that still is not
+# a plain relative path (absolute, .. or empty components, a trailing dot
+# component) is asked of git as a pathspec, per file, as before the set.
+_fi_af_in_busy_set() {
+  local q="$1"
+  while [[ "$q" == ./* ]]; do q="${q#./}"; done
+  q="${q%/}"
+  [[ -n "$q" ]] || return 1
+  case "/$q/" in
+    //*|*//*|*/./*|*/../*) _fi_af_file_busy "$1"; return ;;
+  esac
+  [[ -z "${FI_AF_BUSY_LC:-}" ]] || q="$(printf '%s' "$q" | tr '[:upper:]' '[:lower:]')"
+  [[ "$FI_AF_BUSY_SET" == *$'\n'"$q"$'\n'* || "$FI_AF_BUSY_SET" == *$'\n'"$q"/* ]]
 }
 
 # Spec section 2: rc 0 = go; rc 8 = wait (item stays queued); rc 5 = waited
@@ -697,6 +789,31 @@ _fi_af_wait_check() {
   fi_af_item_set "$q" wait_next "$(( now + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
   FI_AF_WHY="$why"
   return 8
+}
+
+# A fetch or worktree failure at the cut is usually transient (network, a
+# busy index): give the claimed item back to the queue, at most 3 times in a
+# row, spaced like a wait. rc 0 = requeued (the caller returns 8, FI_AF_WHY
+# says why); rc 1 = out of retries, the caller fails the item as before.
+# Spot and sweep claims share it. A requeue spends no daily slot.
+_fi_af_wt_fail_requeue() {
+  local id="$1" r="$FI_AF_ST/running/$1" tries why="$FI_AF_WHY"
+  tries="$(_fi_af_field "$r" wt_retries)" || tries=0
+  [[ "$tries" =~ ^[0-9]+$ ]] || tries=0
+  (( tries < 3 )) || return 1
+  fi_af_item_set "$r" wt_retries "$(( tries + 1 ))"
+  # Spaced like a wait (the drain and the Stop hook skip it until
+  # wait_next), so three retries outlast a short outage.
+  fi_af_item_set "$r" waiting "$why"
+  fi_af_item_set "$r" wait_next "$(( $(date +%s) + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
+  # The failed cut's debris goes now, from the AFI_wt/AFI_branch the cut set:
+  # fi_af_requeue re-reads the item, which records neither until a cut
+  # succeeds, so its own remove finds nothing and every retry would hit the
+  # same leftover branch or directory.
+  fi_af_worktree_remove
+  fi_af_requeue "$id" "$why; retry $(( tries + 1 )) of 3"
+  FI_AF_WHY="$why; requeued, retry $(( tries + 1 )) of 3"
+  return 0
 }
 
 # Spec §5.1. Lock first, so of two claimers exactly one sees the queue file.
@@ -740,25 +857,9 @@ fi_af_claim() {
   if [[ -n "${FI_AF_PID:-}" ]]; then fi_af_item_set "$r" launcher A; else fi_af_item_set "$r" launcher B; fi
   fi_af_seg_write "$AFI_root"
   if ! fi_af_worktree_add; then
-    # A fetch or worktree failure is usually transient (network, a busy
-    # index): give the item back to the queue, at most 3 times in a row, and
-    # fail it as before only after that. A requeue spends no daily slot.
-    local tries
-    tries="$(_fi_af_field "$r" wt_retries)" || tries=0
-    [[ "$tries" =~ ^[0-9]+$ ]] || tries=0
-    if (( tries < 3 )); then
-      local why="$FI_AF_WHY"
-      fi_af_item_set "$r" wt_retries "$(( tries + 1 ))"
-      # Spaced like a wait (the drain and the Stop hook skip it until
-      # wait_next), so three retries outlast a short outage.
-      fi_af_item_set "$r" waiting "$why"
-      fi_af_item_set "$r" wait_next "$(( $(date +%s) + ${FOUND_ISSUES_AUTOFIX_WAIT_RECHECK:-900} ))"
-      fi_af_worktree_remove
-      fi_af_requeue "$id" "$why; retry $(( tries + 1 )) of 3"
-      FI_AF_WHY="$why; requeued, retry $(( tries + 1 )) of 3"
-      return 8
-    fi
-    fi_af_cap_take spot "$id"
+    # The daily slot is taken only once a worktree exists (below), so a claim
+    # that never got one spends none, even when it gives up.
+    _fi_af_wt_fail_requeue "$id" && return 8
     fi_af_finish "$id" failed "$FI_AF_WHY"
     return 6
   fi
@@ -788,9 +889,13 @@ fi_af_requeue() {
   # A queued item resolves its landing branch fresh at its next claim and
   # starts B's attempt count and verdict over; a ship retry keeps the base
   # its kept branch was cut from and the approved tree the ship re-checks.
+  # A sweep continuation (cont >= 2) keeps its chain's base too: its
+  # skip_files were computed against that branch, and batch 1's PR targets it.
   if [[ ! "${AFI_ship_tries:-0}" =~ ^[1-9] ]]; then
-    fi_af_item_set "$r" base ""
-    fi_af_item_set "$r" base_why ""
+    if [[ ! "${AFI_cont:-}" =~ ^[0-9]+$ ]] || (( 10#$AFI_cont < 2 )); then
+      fi_af_item_set "$r" base ""
+      fi_af_item_set "$r" base_why ""
+    fi
     _fi_af_clear_attempts "$r"
   fi
   mv "$r" "$FI_AF_ST/queue/$id"

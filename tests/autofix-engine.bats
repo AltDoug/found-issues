@@ -50,6 +50,9 @@ teardown() { fi_teardown_tmp; }
   [ "$(printf '%s' "$settings" | jq -r '.sandbox.enabled')" = true ]
   [ "$(printf '%s' "$settings" | jq -r '.sandbox.failIfUnavailable')" = true ]
   [ "$(printf '%s' "$settings" | jq -r '.sandbox.allowUnsandboxedCommands')" = false ]
+  # 3.8.0: without this, dontAsk auto-allows every sandboxed Bash command and
+  # the --allowedTools allowlist is bypassed (live probe 2026-10-10).
+  [ "$(printf '%s' "$settings" | jq -r '.sandbox.autoAllowBashIfSandboxed')" = false ]
   [ "$(printf '%s' "$settings" | jq -r '.sandbox.network.allowedDomains[0]')" = '*' ]
   # package caches writable, found-issues' own cache not
   printf '%s' "$settings" | jq -e '.sandbox.filesystem.allowWrite | index("~/.cache") and index("~/Library/Caches")' >/dev/null

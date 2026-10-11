@@ -258,7 +258,16 @@ if [[ -n "$lib_dir" ]]; then
   source "$lib_dir/detect-mode.sh"
   mode="$(fi_detect_mode 2>/dev/null || echo "local")"
 else
-  echo "found-issues: format-enforcer could not find its lib; ledger format NOT enforced." >&2
+  # Lib-free on purpose (the lib is what is missing): no jq, no helpers. On
+  # Claude, stderr on a PreToolUse exit 0 reaches nobody, so the fixed line
+  # goes out as hookSpecificOutput.additionalContext JSON; Codex (the same
+  # signals as lib/harness.sh fi_detect_harness) keeps stderr.
+  if [[ "${FOUND_ISSUES_HARNESS:-}" == "codex" ]] \
+      || { [[ "${FOUND_ISSUES_HARNESS:-}" != "claude" && -z "${CLAUDE_CODE_ENTRYPOINT:-}" && -n "${PLUGIN_DATA:-}" ]]; }; then
+    echo "found-issues: format-enforcer could not find its lib; ledger format NOT enforced." >&2
+  else
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"found-issues: format-enforcer could not find its lib; ledger format NOT enforced."}}'
+  fi
 fi
 
 # Format the violation report
