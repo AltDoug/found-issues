@@ -56,10 +56,22 @@ _fi_fix_test() {
   fi
   fi_af_test_report "$log" 30
   tail -n 5 "$log.err" 2>/dev/null
+  local sum
+  sum="$(_fi_fix_tap_summary "$log")"
   rm -f "$log" "$log.err"
   if [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then printf 'tests: timed out after %ss\n' "$FI_AF_CHILD_TIMEDOUT"; fi
-  if (( rc == 0 )); then printf 'tests: pass\n'; else printf 'tests: fail (exit %s)\n' "$rc"; fi
+  if (( rc == 0 )); then printf 'tests: pass%s\n' "${sum:+ — $sum}"; else printf 'tests: fail (exit %s)%s\n' "$rc" "${sum:+ — $sum}"; fi
   return $rc
+}
+
+# "1..N, X ok, Y not ok" for a TAP log (bats), nothing for other runners: the
+# line fix ship prints and a PR body quotes (ledger lib/fix-plumbing.sh:113).
+_fi_fix_tap_summary() {
+  local plan ok nok
+  plan="$(grep -m1 -E '^1\.\.[0-9]+$' "$1" 2>/dev/null)" || return 0
+  ok="$(grep -c '^ok ' "$1" 2>/dev/null)"
+  nok="$(grep -c '^not ok ' "$1" 2>/dev/null)"
+  printf '%s, %s ok, %s not ok' "$plan" "${ok:-0}" "${nok:-0}"
 }
 
 # prompt-9: the (PR:) annotation is committed onto the PR branch too, so it
@@ -116,6 +128,8 @@ _fi_fix_ship() {
     fi_err "fix ship: tests fail in $wt — not shipping"
     return 1
   fi
+  # The gate's verdict line, so a PR body can quote what ran.
+  printf '%s\n' "${treport##*$'\n'}"
   fi_af_no_prompts
   git -C "$wt" push -q -u origin "$br" 2>/dev/null || { fi_err "fix ship: git push failed"; return 1; }
   url="$(cd "$wt" && gh pr create --repo "$slug" --base "$base" --head "$br" --title "$title" --body-file "$bodyf")" \
