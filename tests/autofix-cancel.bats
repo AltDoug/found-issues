@@ -44,6 +44,38 @@ wait_engine() {
   [ "$status" -ne 0 ]
 }
 
+# Operator decision 2026-10-11 (ledger lib/autofix-status.sh:79): a cancel
+# keeps a running item's unshipped commits, like the 3.8.2 reap.
+@test "autofix cancel: a claimed item's commits past its base are kept on fi/rescued/<id>" {
+  wt="$("$FI_BIN" autofix claim "$ID")"
+  br="$(sed -n 's/^branch=//p' "$ST/running/$ID")"
+  [ -n "$br" ]
+  sed -i.bak 's/ - / + /' "$wt/src/calc.sh"; rm -f "$wt/src/calc.sh.bak"
+  git -C "$wt" commit -qam "fix: add subtracts"
+  sha="$(git -C "$wt" rev-parse HEAD)"
+  run "$FI_BIN" autofix cancel "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Its commits are kept on branch fi/rescued/$ID"* ]]
+  [ ! -d "$wt" ]
+  [ "$(git rev-parse "refs/heads/fi/rescued/$ID")" = "$sha" ]
+  [ -z "$(git branch --list "$br")" ]
+  grep -q "^rescued=fi/rescued/$ID$" "$ST/done/$ID"
+  grep -q '^result=cancelled: .*commits kept on fi/rescued/' "$ST/done/$ID"
+  run "$FI_BIN" autofix status
+  [[ "$output" == *"commits kept on local branch fi/rescued/$ID"* ]]
+}
+
+@test "autofix cancel: a claimed item with no commits of its own still drops its branch" {
+  wt="$("$FI_BIN" autofix claim "$ID")"
+  br="$(sed -n 's/^branch=//p' "$ST/running/$ID")"
+  run "$FI_BIN" autofix cancel "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"kept on branch"* ]]
+  [ -z "$(git branch --list "$br")" ]
+  [ -z "$(git branch --list "fi/rescued/*")" ]
+  ! grep -q '^rescued=' "$ST/done/$ID" || false
+}
+
 @test "autofix cancel: an A run and its engine child are stopped" {
   export FI_STANDIN_SLEEP=4713
   "$FI_BIN" autofix run "$ID" --engine claude >/dev/null 2>&1 &

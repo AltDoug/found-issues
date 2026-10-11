@@ -34,7 +34,7 @@ _fi_af_is_run_pid() {
 # Phase 5 ruling 6: retire a queued or running item as cancelled, stopping
 # an A run and its engine child first. No ledger write.
 fi_af_cancel() {
-  local id="$1" r="$FI_AF_ST/running/$1" q="$FI_AF_ST/queue/$1" d="$FI_AF_ST/done/$1" n=0 how owner=""
+  local id="$1" r="$FI_AF_ST/running/$1" q="$FI_AF_ST/queue/$1" d="$FI_AF_ST/done/$1" n=0 how owner="" kept=""
   if [[ -f "$d" ]]; then fi_err "autofix: $id already finished"; return 1; fi
   # One atomic move out of the queue (review I6): a claim that wins the race
   # has moved the item to running/, which the branch below handles; never a
@@ -77,6 +77,18 @@ fi_af_cancel() {
   # The run may have finished the item while it was stopping.
   if [[ ! -f "$r" ]]; then fi_err "autofix: $id already finished"; return 1; fi
   fi_af_item_read "$r" || true
+  # Operator decision 2026-10-11 (ledger lib/autofix-status.sh:79): the
+  # stopped run's unshipped commits are kept, as the reap keeps a dead one's.
+  kept=""
+  if kept="$(_fi_af_rescue_branch)"; then
+    fi_af_log "$id" "the cancelled run's commits are kept on $kept"
+    fi_af_item_set "$r" rescued "${AFI_rescued:+$AFI_rescued }$kept"
+    fi_af_item_set "$r" branch ""
+    AFI_branch=""
+    how="$how; commits kept on $kept"
+  else
+    kept=""
+  fi
   fi_af_worktree_remove
   if [[ -n "$AFI_pr" ]]; then
     how="$how; PR #$AFI_pr was already open"
@@ -84,6 +96,7 @@ fi_af_cancel() {
   fi
   fi_af_retire "$id" cancelled "$how"
   printf 'Cancelled %s.\n' "$id"
+  [[ -z "$kept" ]] || printf 'Its commits are kept on branch %s (delete it with git branch -D when no longer wanted).\n' "$kept"
 }
 
 FI_AF_PRNUM=""
