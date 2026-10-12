@@ -120,12 +120,14 @@ push_change() {
 }
 
 @test "readiness: a base run that passed only on its re-run records one run's time" {
-  git config found-issues.autofix.testCommand "sleep 2; if [ -f '$TMP/flaked' ]; then exit 0; fi; : > '$TMP/flaked'; exit 1"
+  # One run sleeps 3 s, two would take 6+: the bound leaves room for a loaded
+  # host (the full suite once recorded more than 3 s for a 2 s run).
+  git config found-issues.autofix.testCommand "sleep 3; if [ -f '$TMP/flaked' ]; then exit 0; fi; : > '$TMP/flaked'; exit 1"
   fi_af_queue_fixture
   "$FI_BIN" autofix claim "$ID" >/dev/null
   fi_af_ready_read "$REPO"
   [ "$FI_AF_RD_STATUS" = green ]
-  (( FI_AF_RD_SECS >= 1 && FI_AF_RD_SECS <= 3 ))
+  (( FI_AF_RD_SECS >= 2 && FI_AF_RD_SECS < 6 ))
 }
 
 @test "readiness: a base timeout at the limit gates the queue until the limit can grow" {

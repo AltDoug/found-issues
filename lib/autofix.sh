@@ -434,7 +434,7 @@ cmd_autofix() {
     next)
       [[ $# -eq 1 ]] || { fi_err "Usage: found-issues autofix next <id>"; return 2; }
       fi_af_context || return 1
-      fi_af_b_running "$1" || return 1
+      fi_af_b_running "$1" handout || return 1
       [[ "$AFI_kind" == "sweep" ]] || { fi_err "autofix: next is for sweeps; $1 is a single item"; return 2; }
       if [[ -z "$AFI_entry" ]]; then
         printf 'No entries left. Run: found-issues autofix ship %s\n' "$1"; return 0

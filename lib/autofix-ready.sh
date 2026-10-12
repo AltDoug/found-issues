@@ -213,7 +213,8 @@ fi_af_superseded() {
   fi
   [[ -n "$p" && "$p" != *found-issues*.md ]] || return 1
   git -C "$AFI_root" cat-file -e "$AFI_base_sha:$p" 2>/dev/null || return 1
-  git -C "$AFI_root" fetch -q origin "$AFI_base" >/dev/null 2>&1 || return 1
+  # A caller that fetched already (the sweep drop scan) sets FI_AF_SUP_FETCHED.
+  [[ -n "${FI_AF_SUP_FETCHED:-}" ]] || git -C "$AFI_root" fetch -q origin "$AFI_base" >/dev/null 2>&1 || return 1
   git -C "$AFI_root" diff --quiet "$AFI_base_sha" "origin/$AFI_base" -- "$p" >/dev/null 2>&1 || rc=$?
   (( rc == 1 )) || return 1
   if [[ -n "$l1$name" ]]; then
