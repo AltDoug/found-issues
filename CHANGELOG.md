@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.0] - 2026-10-12
+
+Critical entries wait for a human, the end-of-turn check goes quiet, and fixes for the issues reported by @jbelmana.
+
+### Added
+- **Held closures** (issues #161, #169; the hold from @jbelmana's PR #171, re-seated on current main). `sync` no longer auto-closes a critical (`[!]`) entry, or one carrying a `(hold: <reason>)` marker, by any automatic route (merged PR, landed commit, git-confirmed tombstone). The entry stays `[open]`, a critical one gains `(hold: needs human verify)` once, and `sync` prints `Held: N entries for human verification (NOT closed):` with each one. Close it with `found-issues resolve "<loc>" --verified review`, which also drops the hold. `found-issues tag "<loc>" --hold "<reason>"` puts any entry on hold and `--unhold` takes it off. `hold` is a recognised annotation key, so a held entry keeps its `(PR: ...)` and `(commit: ...)` annotations (the plain-text marker in #171 hid them from the parser). An auto-fix that finds a held or critical entry already fixed leaves it open the same way.
+
+### Changed
+- **The end-of-turn check is silent by default.** In a session that edited code, the Stop hook used to block once and ask for a `<!-- found-issues-checked: ... -->` marker, which Claude Code shows as a "Stop hook error" the user has to scroll past, and most of those blocks only bought a marker-only turn. Now every session gets the same silent reminder: it reaches the model with your next prompt, asks it to log anything it noticed out of scope, and asks for no reply marker. `FOUND_ISSUES_STOP_REMINDER=block` restores the visible block (`FOUND_ISSUES_STOP_REMINDER_EVERY_TURN=on` implies it); `off` still turns the check off. The injected rules say the marker is needed only when a block asks for it. Codex is unchanged.
+
+### Fixed
+- **A symlinked ledger stays a symlink** (#160). Ledger writes replaced the link with a regular file; they now resolve the link chain and write the target in place, with the temp file beside the target so the rename stays atomic.
+- **A differently-cased ledger is found** (#164). `Docs/Found-Issues.md`, `docs/FOUND-ISSUES.md` and other casings are the ledger, with the exact-case name preferred, in the CLI, the statusline fast path and the first-touch hook; `log` no longer creates a second lowercase ledger next to one.
+- **`resolve --verified human` is read back** (#161). It wrote a token the parser ignored; `review` is now canonical and `human` is an alias for it.
+- **The SessionStart statusline check parses a quoted path with spaces** (#165), using the same parser as `doctor` and `install-statusline` (3.6.2).
+- **No `mktemp -t` left** (#174). The statusline install, uninstall and target code used it at 14 sites, which fails under a sandboxed macOS shell; temp files now go beside their target or in `${TMPDIR:-/tmp}`, and a test fails if `mktemp -t` comes back.
+- **The Stop hook finds a marker anywhere in the current turn** (#167), not just in the last 8 KB of the transcript, so a verbose turn that wrote it early is not asked again.
+
 ## [3.9.3] - 2026-10-12
 
 Auto-fix runs a repo's tests on the caller's PATH.
