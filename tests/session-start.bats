@@ -232,6 +232,35 @@ EOF
   rm -rf "$FAKE_HOME"
 }
 
+# Issue #165: statusLine.command was split on whitespace, so a quoted script
+# path containing spaces never resolved and the shim was silently not migrated.
+@test "session-start: auto-migrates a custom BASH statusline whose quoted path has spaces" {
+  FAKE_HOME="$(mktemp -d)"
+  mkdir -p "$FAKE_HOME/.claude" "$FAKE_HOME/My Scripts"
+  cat > "$FAKE_HOME/My Scripts/statusline.sh" <<'EOF2'
+#!/bin/bash
+# === found-issues plugin segment ===
+__FI_CLI=found-issues
+__FI_DIR="${CLAUDE_PROJECT_DIR:-}"
+__FI_SEG=""
+if [[ -n "$__FI_CLI" && -n "$__FI_DIR" ]]; then
+  __FI_SEG=$( cd "$__FI_DIR" 2>/dev/null && "$__FI_CLI" status --format=segment 2>/dev/null || true )
+fi
+# === end found-issues plugin segment ===
+LINE1="repo | main${__FI_SEG}"  # found-issues:seg
+echo "$LINE1"
+EOF2
+  cat > "$FAKE_HOME/.claude/settings.json" <<EOF2
+{"statusLine": {"command": "bash \"$FAKE_HOME/My Scripts/statusline.sh\""}}
+EOF2
+  HOME="$FAKE_HOME" PATH="$TEST_REPO_ROOT/bin:$PATH" run bash "${BATS_TEST_DIRNAME}/../hooks/session-start.sh" < /dev/null
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "auto-migrated"
+  ls "$FAKE_HOME/My Scripts"/statusline.sh.fi-bak-* >/dev/null 2>&1
+  grep -q -- "--cwd" "$FAKE_HOME/My Scripts/statusline.sh"
+  rm -rf "$FAKE_HOME"
+}
+
 @test "session-start: canonical statusline.sh is never migrated via the target branch" {
   # Even when settings.json points statusLine.command at the canonical file,
   # the daily nudge owns it — the --target migration must not double up.

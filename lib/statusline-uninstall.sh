@@ -56,7 +56,8 @@ cmd_uninstall_statusline() {
   fi
   backup="$(fi_save_statusline_backup "$sl_file" || true)"
   original_mode=$(fi_capture_mode "$sl_file")
-  tmp="$(mktemp -t found-issues-statusline.XXXXXX)"
+  # Beside the target: same-filesystem rename, no writable $TMPDIR needed (issue #174).
+  tmp="$(mktemp "$(dirname "$sl_file")/.found-issues-statusline.tmp.XXXXXX")"
   # Delete every line from the start marker through the end marker, inclusive.
   # No blank-line tracking needed because install no longer inserts one.
   awk -v start="$FI_STATUSLINE_START_MARKER" -v endm="$FI_STATUSLINE_END_MARKER" '
