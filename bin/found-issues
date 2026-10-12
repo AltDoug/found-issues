@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="3.8.4"
+readonly FI_VERSION="3.9.0"
 
 # Statusline fast path (lib/segment-cache.sh): `status --format=segment` runs
 # every few seconds per session, so it is answered from a content-checked
@@ -104,6 +104,8 @@ source "$FI_LIB_DIR/autofix-classify.sh"
 source "$FI_LIB_DIR/autofix-sweep.sh"
 # shellcheck source=../lib/autofix-status.sh
 source "$FI_LIB_DIR/autofix-status.sh"
+# shellcheck source=../lib/autofix-ready.sh
+source "$FI_LIB_DIR/autofix-ready.sh"
 # shellcheck source=../lib/fix-plumbing.sh
 source "$FI_LIB_DIR/fix-plumbing.sh"
 # shellcheck source=../lib/detect-mode.sh

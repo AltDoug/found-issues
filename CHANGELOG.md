@@ -4,6 +4,21 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0] - 2026-10-12
+
+Auto-fix readiness: auto-fix measures each repo's suite, sizes its own run limit from it, says when a repo cannot run it, and stops shipping fixes a live session already made.
+
+### Added
+- **The run limit follows the measured suite.** Every base test run records its result and time per repo. The watchdog for a run's tests and engine calls is now twice a measured passing suite (rounded up to a minute), or twice the limit a timed-out suite hit, up to 120 min; `autofix.runTimeoutMin` is the floor. A growing suite no longer needs the limit raised by hand: kh2-midgar's went from 20 to 40 to 60 min that way while its suite grew past 42 min, and a fixer run timed out at 40 too. `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS` still pins it.
+- **`found-issues autofix ready`** shows the test command, the last base run (passing time, red, or the limit it timed out at), the run limit and where it came from, and the verdict: ready, or waiting and why.
+- **One "Auto-fix is waiting in this repo" line at session start.** A repo with auto-fix on and an open `(fix: ...)` entry that cannot run it now says so: no test command (with how to set one or switch auto-fix off there), or a suite that timed out at the longest limit it can get. Before, those entries waited silently, and 39 of a week's 157 items retired with "no test command". A red base keeps its STUCK line.
+
+### Changed
+- **A suite that timed out at its longest limit queues nothing.** A spot or sweep is not queued while the repo's last base run timed out at a limit the next run would not exceed (the 120-min cap, or a pinned `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS`); the log output says why. Raising `runTimeoutMin` or changing the test command lifts it, and the record expires after a week.
+
+### Fixed
+- **An auto-fix run no longer ships a fix a live session already made** (ledger `lib/autofix-ship.sh:206`, recommended variant). A spot run now checks whether its cited file changed on the landing branch since the commit it was cut from, before the fixer starts and again at ship. If it did, the run retires `stale: superseded: <path> changed on <base> since <sha>`, and the entry stays open for a later run to re-check against the new base. Before, kh2-midgar#19 shipped a fix that `6cdefeb` had already made mid-run without annotating the ledger, so the 3.6.0 ledger check missed it. A topic entry (no file) is never superseded.
+
 ## [3.8.4] - 2026-10-11
 
 Ledger fix batch 8: `autofix cancel` keeps a stopped run's unshipped commits, and a deeply nested repo root no longer wedges auto-fix.

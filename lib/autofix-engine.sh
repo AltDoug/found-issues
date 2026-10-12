@@ -70,7 +70,8 @@ fi_af_child() {
   local out="$1" err="$2" cwd="$3" secs cpid waited=0 rc=0
   shift 3
   FI_AF_CHILD_TIMEDOUT=""
-  secs="${FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS:-$(( $(fi_af_int runTimeoutMin 20) * 60 ))}"
+  # 3.9.0: runTimeoutMin is a floor; a measured base suite may raise it.
+  secs="$(fi_af_timeout_secs "${AFI_root:-}" "$cwd")"
   # PATH changes only inside the child's subshell, on purpose.
   # shellcheck disable=SC2030,SC2031
   if command -v perl >/dev/null 2>&1; then

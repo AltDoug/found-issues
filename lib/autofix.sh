@@ -15,6 +15,7 @@ Usage: found-issues autofix <command>
   on | off                    Clear or set the kill switch (all repos)
   status                      Queue, running, today's count, recent results
   summary [--peek]            What finished since the last interactive session
+  ready                       Test command, measured base run, run limit, verdict
   cancel <id>                 Stop a queued or running item (and its background run);
                               no ledger change
   run <id> [--engine claude|codex]
@@ -216,6 +217,9 @@ _fi_af_run_one() {
   if ! FI_AF_TESTCMD="$(fi_af_test_command "$AFI_wt")"; then
     _fi_af_end "$id" manual "no test command"; return 0
   fi
+  # 3.9.0 (ledger lib/autofix-ship.sh:206): the base tests can take most of
+  # an hour; a file a live session changed meanwhile is not worth a fixer.
+  if fi_af_superseded; then _fi_af_end "$id" stale "$FI_AF_WHY"; return 0; fi
   if ! engine="$(fi_af_engine "${engine_opt:-$(fi_af_item_engine 2>/dev/null || true)}")" || ! command -v "$engine" >/dev/null 2>&1; then
     _fi_af_end "$id" failed "no ${engine:-claude or codex} on PATH"; return 0
   fi
@@ -471,9 +475,13 @@ cmd_autofix() {
       fi_af_no_prompts
       _fi_af_run "$rid" "$eng" ;;
     summary)
+      # 3.9.0: a repo that cannot run auto-fix says so, even before it ever
+      # queued anything (so before it has state dirs).
+      local sslug rline
+      rline="$(fi_af_ready_line 2>/dev/null || true)"
+      [[ -z "$rline" ]] || printf '%s\n' "$rline"
       # fi_af_context creates the state dirs: a repo auto-fix never touched
       # has nothing to summarize and must not get any.
-      local sslug
       sslug="$(fi_repo_id 2>/dev/null)" || return 0
       fi_af_root
       [[ -d "$FI_AF_ROOT/${sslug//\//__}" ]] || return 0
@@ -486,6 +494,8 @@ cmd_autofix() {
     status)
       fi_af_context || return 1
       fi_af_status ;;
+    ready)
+      fi_af_ready_report ;;
     ""|-h|--help|help) _fi_af_usage ;;
     *) fi_unknown_arg autofix "$sub"; return 2 ;;
   esac

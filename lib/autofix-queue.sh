@@ -172,6 +172,11 @@ fi_af_queue_spot() {
     printf 'Auto-fix: not queued, no test command (set found-issues.autofix.testCommand)\n'
     return 0
   fi
+  # 3.9.0: a suite that timed out at the longest limit it may get.
+  if ! fi_af_ready_ok "$root"; then
+    printf 'Auto-fix: not queued, %s\n' "$FI_AF_WHY"
+    return 0
+  fi
   for f in "$FI_AF_ST"/queue/* "$FI_AF_ST"/running/*; do
     [[ -f "$f" ]] || continue
     fi_af_item_read "$f" || true
@@ -440,6 +445,9 @@ fi_af_fixed_elsewhere() {
       fi
     done < <(git -C "$AFI_root" show "origin/$AFI_base:$p" 2>/dev/null || true)
   done
+  # 3.9.0 (ledger lib/autofix-ship.sh:206): fixed meanwhile without a ledger
+  # annotation shows as the cited file changing on the base.
+  fi_af_superseded && return 0
   return 1
 }
 
@@ -602,7 +610,12 @@ fi_af_base_tests() {
     return 1
   fi
   # A red base is re-run once (fi_af_tests_pass): a flake is not red.
+  local t0; t0="$(date +%s)"
   fi_af_tests_pass "$AFI_wt" "$t" "$log" || rc=$?
+  # 3.9.0: the repo's readiness record (lib/autofix-ready.sh).
+  if (( rc == 0 )); then fi_af_ready_write "$AFI_root" green "$(( $(date +%s) - t0 ))" "$t"
+  elif [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then fi_af_ready_write "$AFI_root" timeout "$FI_AF_CHILD_TIMEDOUT" "$t"
+  else fi_af_ready_write "$AFI_root" red "$(( $(date +%s) - t0 ))" "$t"; fi
   git -C "$AFI_wt" reset -q --hard "${AFI_base_sha:-HEAD}" >/dev/null 2>&1 || true
   git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
   # A green base is what ends a STUCK streak (besides switch-off and the
