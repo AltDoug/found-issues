@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # stop-reminder.sh — Stop hook
 #
-# Forces <!-- found-issues-checked: ... --> marker on every assistant turn.
-# This is the discipline-enforcer that creates the proactive logging habit.
+# Asks the model, once per session, whether it noticed anything out of scope.
+# 3.10.0: silent by default — the ask reaches the model with the next prompt
+# (hooks/prompt-nudge.sh) and nothing is shown. FOUND_ISSUES_STOP_REMINDER=block
+# brings back the visible once-per-session block in sessions that edited code,
+# which asks for a <!-- found-issues-checked: ... --> marker.
 #
 # Hook event: Stop
 # Exit codes:
-#   0  — allow stop (marker present, or check skipped)
-#   2  — block stop (marker missing); message to stderr
+#   0  — allow stop (marker present, check skipped, or silent reminder queued)
+#   2  — block stop (block mode, marker missing); message to stderr
 #
 # Stdin: JSON describing the hook event including transcript_path.
 
@@ -307,14 +310,18 @@ if [[ -n "$recent_tail" ]]; then
   fi
 fi
 
-# Check the last ~8KB of the transcript for the marker. 8KB is enough to
-# capture the most recent assistant turn even with long output.
+# Look for the marker in the current turn. 3.10.0 (issue #167): the last
+# 8KB alone missed a marker a verbose turn wrote earlier; the turn read above
+# covers it, and the 8KB tail still catches text flushed since that read.
 #
 # Brief retry: Claude Code fires Stop before the final assistant text is
 # flushed to disk, so a first-pass check can miss a marker the assistant
 # actually included. One short sleep gives the flush a chance to land
 # before we block. If the marker still isn't present, stop_hook_active
 # on the retry-fire (above) prevents an infinite block loop.
+if [[ "${last_turn:-}" == *'<!-- found-issues-checked:'* ]]; then
+  exit 0
+fi
 for attempt in 1 2; do
   if tail -c 8192 "$transcript_path" 2>/dev/null \
      | grep -q '<!-- found-issues-checked:'; then
@@ -330,6 +337,13 @@ if (( ! code_edit )) && [[ -n "$session_id" && -f "$REMINDED_DIR/$session_id.cod
   code_edit=1
 fi
 [[ "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" == "on" ]] && code_edit=1
+# 3.10.0: the block is opt-in. Claude Code shows a blocking Stop hook as a
+# "Stop hook error" box the user scrolls past, and most blocks bought a
+# marker-only turn (3.2.1 scan); by default a code-editing session gets the
+# same silent reminder as any other.
+if [[ "${FOUND_ISSUES_STOP_REMINDER:-on}" != "block" && "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" != "on" ]]; then
+  code_edit=0
+fi
 if (( ! code_edit )); then
   [[ -n "$session_id" ]] || exit 0
   [[ -e "$REMINDED_DIR/$session_id.nudge" || -e "$REMINDED_DIR/$session_id.nudged" ]] && exit 0

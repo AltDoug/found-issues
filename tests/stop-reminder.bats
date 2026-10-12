@@ -7,6 +7,9 @@ HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/hooks/stop-reminder.sh"
 
 setup() {
   fi_setup_tmp
+  # 3.10.0: the visible block is opt-in. Most tests here pin the block mode;
+  # the "silent default" tests unset it.
+  export FOUND_ISSUES_STOP_REMINDER=block
 }
 
 teardown() {
@@ -627,5 +630,61 @@ TRANSCRIPT
     run_stop_on "$TR"
     [ "$status" -eq 2 ] || { echo "expected a block for $f"; false; }
   done
+  rm -f "$TR"
+}
+
+# --- 3.10.0: silent by default, and the marker found anywhere in the turn ---
+
+@test "stop-reminder: by default a code edit without the marker does not block and queues a silent reminder" {
+  unset FOUND_ISSUES_STOP_REMINDER
+  TR="$(mktemp)"
+  write_tr "$TR" /x/app.py
+  run_stop_on "$TR" sess-silent1
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -e "$(nudge_file sess-silent1)" ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: the default reminder asks to log but asks for no reply marker" {
+  unset FOUND_ISSUES_STOP_REMINDER
+  TR="$(mktemp)"
+  write_tr "$TR" /x/app.py
+  run_stop_on "$TR" sess-silent2
+  [ "$status" -eq 0 ]
+  run_prompt sess-silent2
+  [ "$status" -eq 0 ]
+  ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+  [[ "$ctx" == *"/found-issues:log"* ]]
+  [[ "$ctx" == *"No reply marker is needed"* ]]
+  [[ "$ctx" != *"found-issues-checked"* ]]
+  # Once per session: a later code edit adds nothing and never blocks.
+  run_stop_on "$TR" sess-silent2
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$(nudge_file sess-silent2)" ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: block mode still blocks a code edit without the marker" {
+  TR="$(mktemp)"
+  write_tr "$TR" /x/app.py
+  run_stop_on "$TR" sess-block1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"found-issues-checked: none-noticed"* ]]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: a marker written early in a verbose turn is found (issue 167)" {
+  TR="$(mktemp)"
+  big="$(head -c 20000 /dev/zero | tr '\0' 'x')"
+  cat > "$TR" <<TRANSCRIPT
+{"parentUuid":"u-1","type":"user","message":{"role":"user","content":[{"type":"text","text":"write it"}]},"uuid":"user-1","sessionId":"s-1"}
+{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Noted. <!-- found-issues-checked: none-noticed -->"},{"type":"tool_use","id":"toolu_02","name":"Write","input":{"file_path":"/x/app.py","content":"hi"}}]},"uuid":"asst-1","sessionId":"s-1"}
+{"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_02","type":"tool_result","content":"$big","is_error":false}]},"uuid":"toolres-1","sessionId":"s-1"}
+{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Written."}]},"uuid":"asst-2","sessionId":"s-1"}
+TRANSCRIPT
+  run_stop_on "$TR" sess-167
+  [ "$status" -eq 0 ]
   rm -f "$TR"
 }
