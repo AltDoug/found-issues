@@ -6,12 +6,13 @@
 </h1>
 
 > Your AI agent has a blind spot. **found-issues** is the Claude Code
-> plugin that makes it log, track, and auto-close the bugs it would
-> otherwise shrug at.
+> and Codex plugin that makes it log, track, and auto-close the bugs it
+> would otherwise shrug at.
 
 [![tests](https://github.com/AltDoug/found-issues/actions/workflows/test.yml/badge.svg)](https://github.com/AltDoug/found-issues/actions/workflows/test.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
+[![Codex plugin](https://img.shields.io/badge/Codex-plugin-black.svg)](AGENTS.md#installing-for-codex)
 
 **7 lifecycle hooks · 14 slash commands · 1861 tests on Linux/macOS · zero manual bookkeeping**
 
@@ -66,8 +67,9 @@ codex plugin add found-issues
 found-issues install-codex-hooks
 ```
 
-`install-codex-hooks` is a required one-time step (re-run after `codex
-plugin update`): Codex 0.144.5 removed plugin-bundled hooks, so
+`install-codex-hooks` is a required one-time step (its entries survive
+`codex plugin update` since 2.10.3; re-run it when a release adds a
+hook): Codex 0.144.5 removed plugin-bundled hooks, so
 found-issues wires SessionStart / format-enforcer / branch-guard /
 annotator / first-touch into Codex's own `$CODEX_HOME/hooks.json` instead. Then start a
 new Codex session. The ledger (`docs/found-issues.md`) is shared across
@@ -233,15 +235,15 @@ Auto-detects 4 modes per repo: `local`, `git`, `github-direct`, `github-pr`. Mix
 |---|---|---|
 | Linux (Ubuntu) | bash | ✅ Supported |
 | macOS | bash | ✅ Supported |
-| Windows | Git Bash | ⚠️ Best effort — works, not CI-tested since 2026-08-28 |
+| Windows 11 | Git Bash | ⚠️ Works, not CI-tested — the maintainer runs auto-fix on it daily |
 
 The CLI and hooks are bash-based, so on Windows you need a bash
 interpreter — that's what [Git for Windows](https://gitforwindows.org/)
 (Git Bash) provides. WSL works too. CI runs the full test suite on Linux
-and macOS; the Windows leg was retired 2026-08-28 (no Windows Claude Code
-host in use by the maintainer, and it was the costliest runner) — the
-Windows-compat code and the ASCII test-name guard remain, and a Windows
-regression report is welcome.
+and macOS; the Windows leg was retired 2026-08-28 (it was the costliest
+runner). The Windows-compat code and the ASCII test-name guard remain,
+the maintainer's Windows 11 box runs found-issues and auto-fix every day,
+and a Windows regression report is welcome.
 
 ## Status
 
