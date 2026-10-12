@@ -32,11 +32,16 @@ This handles three closure mechanisms automatically:
 
   A path being absent says nothing about whether the issue was fixed, and no supported command reopens a `[fixed]` entry — so when in doubt, leave it `[open]`.
 
+**Holds.** None of the three mechanisms closes an entry that is flagged `[!]` CRITICAL or carries a `(hold: <reason>)` marker, including under `--dry-run`. The closure is withheld for a human: the entry stays `[open]`, a critical gains `(hold: needs human verify)` once (a hold already present is left as written), it is excluded from the `Closed:` count, and sync prints `Held: N entr(y|ies) for human verification (NOT closed):` with one line per entry. Set a hold yourself with `found-issues tag "<match>" --hold "<reason>"`, drop it with `--unhold`. Close a held entry with `found-issues resolve "<distinctive text>" --verified review` after re-checking the code yourself (this also works when the entry still carries its merged `(PR: ...)`, and removes the hold); never close one in Phase 2.
+
 The CLI output, section by section, and what each one asks of you:
 
 - `Synced. Closed: N (P PR + C commit + T tombstone).` (plus `Demoted:` /
   `Renamed:` counts), `Synced. Nothing to close.`, or with `--dry-run`
   `Dry run — nothing written.` — report it.
+- `Held: N entr(y|ies) for human verification (NOT closed):` — closures withheld
+  for `[!]` critical or `(hold: ...)` entries (see Holds above). Report the list
+  to the user as a decision they own; do not resolve those entries yourself.
 - The status line (`3 issues · 1 in PR`) — pass it through.
 - `N hook-suggested annotation(s) awaiting confirmation (NOT closed)` — a
   `(PR-auto:)`/`(commit-auto:)` suggestion whose ref has landed. Each item is
@@ -83,7 +88,8 @@ for AI verification. An entry is eligible when it has:
 - Only demoted annotations: `(PR-closed: ...)` and/or `(commit-stale: ...)`.
 
 Entries with an active `(PR: ...)` or `(commit: ...)` annotation are NOT
-eligible — those represent in-flight work and should be left alone.
+eligible — those represent in-flight work and should be left alone. Entries
+with a `(hold: ...)` marker are NOT eligible either — a human closes those.
 
 For each eligible entry:
 

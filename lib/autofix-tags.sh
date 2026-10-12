@@ -113,7 +113,7 @@ fi_tag_resolve() {
         FI_TAG_KIND="manual"; FI_TAG_VALUE="off-limits: $cat"; return 0
       fi
       FI_TAG_KIND="fix"; FI_TAG_VALUE="$value" ;;
-    decide|manual|decided|autofix-failed)
+    decide|manual|decided|autofix-failed|hold)
       fi_tag_text "$value" || { fi_err "--$kind needs a one-line, non-empty text"; return 2; }
       FI_TAG_KIND="$kind"; FI_TAG_VALUE="$FI_TAG_TEXT" ;;
     *) fi_err "unknown tag kind: $kind"; return 2 ;;
@@ -130,6 +130,8 @@ fi_entry_retag() {
     autofix-failed)    drop='autofix-failed' ;;
     drop-until)        drop='until' ;;
     drop-autofix-failed) drop='autofix-failed' ;;
+    hold)              drop='hold' ;;
+    drop-hold)         drop='hold' ;;
     *) return 2 ;;
   esac
   fi_annotation_tail_v "$line"

@@ -138,8 +138,13 @@ cmd_resolve() {
   # An active (PR: ...) annotation means in-flight work. Closing it by hand
   # races the PR-merge flip that `sync` performs, and sync.md already excludes
   # such entries from AI verification. Same refusal `defer` makes.
+  #
+  # Exception: a (hold: ...) entry. Sync will never flip it when the PR merges
+  # (that is what the hold is for), so resolve is its only way out.
   local re_pr='\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)'
-  if [[ "$target" =~ $re_pr ]]; then
+  local held_target=0
+  if fi_parse_entry_vars "$target" && [[ -n "$FE_hold" ]]; then held_target=1; fi
+  if (( ! held_target )) && [[ "$target" =~ $re_pr ]]; then
     local pr_match="${BASH_REMATCH[0]}"
     fi_err "resolve: entry has an active PR annotation $pr_match."
     fi_err "It will flip to [fixed] on its own when that PR merges (via /found-issues:sync)."
@@ -159,6 +164,10 @@ cmd_resolve() {
     if [[ "$line" == "$target" ]] && (( found == 0 )); then
       found=1
       local new_line="${line/"- [$status]"/- [fixed]}"
+      # A closed entry no longer waits on a human: drop the hold marker.
+      if (( held_target )) && fi_entry_retag "$new_line" drop-hold ""; then
+        new_line="$FI_RETAGGED"
+      fi
       new_line="${new_line} (verified: ${verified}) (fixed: ${today})"
       printf '%s\n' "$new_line" >> "$tmp"
     else

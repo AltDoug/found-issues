@@ -134,6 +134,10 @@ cmd_sync() {
   fi
 
   local closed_pr=0 closed_commit=0 closed_tomb=0
+  # Closures withheld for a human (3.10.0): [!] critical entries and entries
+  # carrying a (hold: ...) marker. held_list holds one display line each.
+  local held_count=0
+  local -a held_list=()
   local woke=0
   # Hook-suggested annotations whose ref HAS landed. These never close an
   # entry — they are diff-inferred, not confirmed (see fi_auto_form in
@@ -224,6 +228,7 @@ cmd_sync() {
       e_commits="$FE_commits"
       local e_prs_auto="$FE_prs_auto" e_commits_auto="$FE_commits_auto"
       local e_renamed_from="$FE_renamed_from"
+      local e_critical="$FE_critical" e_hold="$FE_hold" e_symptom="$FE_symptom"
       local e_loc
       e_loc="$(fi_entry_loc "$line" 2>/dev/null || printf '%s' "$e_path")"
 
@@ -329,7 +334,7 @@ cmd_sync() {
               if [[ -n "$e_path" && "$e_path" != *:* ]] \
                  && fi_path_in_history "$sha" "$e_path" "$e_renamed_from" \
                  && ! fi_commit_touches_entry "$sha" "$e_path" "$e_renamed_from"; then
-                entry_notes+=("commit $sha is on $default_branch but did not touch $e_path — left [open] ($e_loc); if the annotation is wrong: found-issues unannotate $(fi_sq "$e_loc") $sha; if the fix landed in another file: found-issues resolve $(fi_sq "$e_loc") --verified human")
+                entry_notes+=("commit $sha is on $default_branch but did not touch $e_path — left [open] ($e_loc); if the annotation is wrong: found-issues unannotate $(fi_sq "$e_loc") $sha; if the fix landed in another file: found-issues resolve $(fi_sq "$e_loc") --verified review")
                 continue
               fi
               closure_kind="commit"
@@ -487,6 +492,40 @@ cmd_sync() {
         fi
       fi
 
+      # --- hold (#161, #169) ---
+      # Every closure above is an INFERRED signal: a merged PR or landed commit
+      # says a change shipped, a tombstone says the file is gone -- none says
+      # the defect is fixed. For most entries that is a fair bet. For a [!]
+      # critical, or an entry a human marked (hold: <reason>), it is not: sync
+      # runs unattended at SessionStart and nothing reopens a [fixed] entry, so
+      # a wrong closure is silent and permanent. Walk back the counter the
+      # mechanism already bumped, leave the entry [open], mark it (once) and
+      # list it in the summary. A human closes it with
+      # `found-issues resolve <loc> --verified review`.
+      if [[ -n "$closure_kind" && ( "$e_critical" == "yes" || -n "$e_hold" ) ]]; then
+        case "$closure_kind" in
+          pr)        closed_pr=$((closed_pr - 1)) ;;
+          commit)    closed_commit=$((closed_commit - 1)) ;;
+          tombstone) closed_tomb=$((closed_tomb - 1)) ;;
+        esac
+        closure_kind=""
+        closure_label=""
+        held_count=$((held_count + 1))
+        if [[ -z "$e_hold" ]]; then
+          e_hold="needs human verify"
+          # Keyed group at the end of the tail (before a CR, if the ledger is
+          # CRLF); the parser reads it without disturbing (PR:)/(commit:).
+          if [[ "$line" == *$'\r' ]]; then
+            line="${line%$'\r'} (hold: $e_hold)"$'\r'
+          else
+            line="$line (hold: $e_hold)"
+          fi
+        fi
+        local held_sym="${e_symptom:0:60}"
+        [[ ${#e_symptom} -gt 60 ]] && held_sym+="..."
+        held_list+=("$e_loc — $held_sym [hold: $e_hold]")
+      fi
+      # --- end hold ---
       if [[ -n "$closure_kind" ]]; then
         # Flip [open] -> [fixed], append closure_label
         local fixed_line="${line/\[open\]/[fixed]}" fixed_eol=""
@@ -593,6 +632,17 @@ cmd_sync() {
     printf '%s\n' "$summary"
   else
     printf 'Synced. Nothing to close.\n'
+  fi
+  # A held closure nobody is told about is as useless as one that silently
+  # closes work: a decision nobody is told to make never gets made.
+  if (( held_count > 0 )); then
+    printf 'Held: %d %s for human verification (NOT closed):\n' \
+      "$held_count" "$( (( held_count == 1 )) && printf 'entry' || printf 'entries')"
+    local hl
+    for hl in "${held_list[@]}"; do
+      printf '  - %s\n' "$hl"
+    done
+    printf 'Re-check each against the code, then: found-issues resolve "<distinctive text>" --verified review\n'
   fi
   cmd_status plain
 

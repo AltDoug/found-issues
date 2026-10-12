@@ -63,17 +63,24 @@ COMMANDS
                                         to touched annotation.
   promote-deferred <match>              Flip [deferred] → [open], preserving all
                                         annotations as evidence of recurrence.
-  resolve <match> [--verified ai|human] Flip [open] → [fixed], appending
+  resolve <match> [--verified ai|review|human]
+                                        Flip [open] → [fixed], appending
                                         (verified: ...) (fixed: <today>). Use this
                                         instead of editing the ledger by hand.
-                                        Refuses entries with an active (PR: ...).
+                                        human is an alias for review. Refuses
+                                        entries with an active (PR: ...) unless
+                                        the entry carries a (hold: ...) marker.
   unannotate <match> <ref>              Strip one (PR:), (PR-auto:), (commit:) or
                                         (commit-auto:) marker from one [open] entry.
                                         <ref> is #N, N, org/repo#N or a commit sha.
                                         Use this to undo a mis-annotation.
   tag <match> --fix S|M|L | --decide "<q>" | --manual "<why>" | --retry
+  tag <match> --hold "<reason>" | --unhold
                                         Set the entry's one fix tag (v3).
                                         Off-limits paths are tagged manual.
+                                        --hold marks (hold: <reason>): sync
+                                        never auto-closes the entry; a human
+                                        closes it with resolve --verified review.
   decide [--count] | decide <match> --answer "<text>"
                                         The decision queue: list open
                                         (decide: ...) questions, or record one.
