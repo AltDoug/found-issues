@@ -366,28 +366,81 @@ fi
 # commit whose message happens to mention "gh pr create" still gets its
 # own commit-annotation pass.
 #
-# A `cd`/`pushd` ahead of the commit may have landed it in ANOTHER repo, while
-# this route annotates the hook cwd repo's HEAD. Resolve the cd target and skip
-# only when it is not inside the cwd repo (or cannot be resolved).
-commit_in_other_repo() {
-  [[ "$cmd_unquoted" =~ (^|[[:space:];\&|\(])(cd|pushd)[[:space:]]+.*git[[:space:]]+commit ]] || return 1
-  local re='(^|[[:space:];&|(])(cd|pushd)[[:space:]]+("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:];&|)]+)'
-  [[ "$cmd" =~ $re ]] || return 0
-  local target="${BASH_REMATCH[3]}"
+# The commit may have landed in ANOTHER repo than the one holding the ledger
+# this route annotates (a `cd`/`pushd`, `git -C`, an earlier call that moved
+# the shell, a `bash -c '...'` wrapper). The commit itself decides:
+#   1. git prints "[branch abc1234] subject"; when that sha is in the tool
+#      output it must exist in the ledger repo (cat-file), else the commit
+#      landed elsewhere and nothing is annotated.
+#   2. With no sha in the output, the directory the command ran in must be in
+#      the ledger repo: the payload's `.cwd` (else this hook's cwd), moved by a
+#      `cd`/`pushd` target and then a `git -C` target.
+
+# commit_sha_from_output — the sha of the last "[branch sha] subject" line in
+# the tool output ("" when absent or unparseable).
+commit_sha_from_output() {
+  local out line re='^\[[^]]*[[:space:]]([0-9a-f]{7,40})\]' found=""
+  out="$(printf '%s' "$input" | jq -r '.tool_response | if type == "string" then . else (.stdout // "") end' 2>/dev/null || true)"
+  while IFS= read -r line; do
+    [[ "$line" =~ $re ]] && found="${BASH_REMATCH[1]}"
+  done <<<"$out"
+  printf '%s' "$found"
+}
+
+# unquote_dir <base> <raw target> — echo the absolute dir the target names
+# relative to <base>; non-zero when it cannot be resolved (unexpanded
+# variable, command substitution, missing dir).
+unquote_dir() {
+  local base="$1" target="$2"
   target="${target#[\"\']}"; target="${target%[\"\']}"
   case "$target" in
     "~") target="$HOME" ;;
     "~/"*) target="$HOME/${target#\~/}" ;;
   esac
-  [[ -z "$target" || "$target" == *'$'* || "$target" == *'`'* ]] && return 0
-  [[ -d "$target" ]] || return 0
+  [[ -z "$target" || "$target" == *'$'* || "$target" == *'`'* ]] && return 1
+  [[ "$target" == /* ]] || target="$base/$target"
+  [[ -d "$target" ]] || return 1
+  printf '%s' "$target"
+}
+
+commit_in_other_repo() {
+  local base="$PWD" pc moved=0 re target
+  pc="$(get_field '.cwd')"
+  if [[ -n "$pc" ]]; then
+    [[ -d "$pc" ]] && base="$pc" || return 0
+  fi
+  if [[ "$cmd_unquoted" =~ (^|[[:space:];\&|\(])(cd|pushd)[[:space:]]+.*git[[:space:]]+commit ]]; then
+    re='(^|[[:space:];&|(])(cd|pushd)[[:space:]]+("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:];&|)]+)'
+    [[ "$cmd" =~ $re ]] || return 0
+    base="$(unquote_dir "$base" "${BASH_REMATCH[3]}")" || return 0
+    moved=1
+  fi
+  re='git[[:space:]]+(-c[[:space:]]+[^[:space:]]+[[:space:]]+)*-C[[:space:]]+("[^"]*"|'"'"'[^'"'"']*'"'"'|[^[:space:];&|]+)([[:space:]]+[^;&|]*)?[[:space:]]commit([[:space:]]|$)'
+  if [[ "$cmd" =~ $re ]]; then
+    base="$(unquote_dir "$base" "${BASH_REMATCH[2]}")" || return 0
+    moved=1
+  fi
+  [[ "$moved" -eq 0 && "$base" == "$PWD" ]] && return 1
   local here there
   here="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
-  there="$(git -C "$target" rev-parse --show-toplevel 2>/dev/null)" || return 0
+  there="$(git -C "$base" rev-parse --show-toplevel 2>/dev/null)" || return 0
   [[ "$(cd "$here" && pwd -P)" != "$(cd "$there" && pwd -P)" ]]
 }
-if [[ "$cmd_unquoted" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]] \
-   && ! commit_in_other_repo; then
+
+# The route runs for `git commit` and for `git [-c k=v] [-C dir] commit`.
+commit_sha=""
+commit_route=0
+if [[ "$cmd_unquoted" =~ (^|[^A-Za-z_])git[[:space:]]+((-c|-C)[[:space:]]+[^[:space:]]*[[:space:]]+)*commit($|[^-A-Za-z_]) ]]; then
+  commit_route=1
+  commit_sha="$(commit_sha_from_output)"
+  if [[ -n "$commit_sha" ]]; then
+    # Authoritative: the commit must exist in the ledger repo.
+    git cat-file -e "${commit_sha}^{commit}" 2>/dev/null || commit_route=0
+  elif commit_in_other_repo; then
+    commit_route=0
+  fi
+fi
+if [[ "$commit_route" -eq 1 ]]; then
   exit_code="$(get_field '.tool_response.exit_code')"
   # A missing exit_code counts as success (Claude Code's Bash tool_response
   # carries none), so a failed or no-op `git commit` would re-annotate the
@@ -397,7 +450,7 @@ if [[ "$cmd_unquoted" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]] \
   seen_file=""
   commit_seen=0
   if git rev-parse --git-dir >/dev/null 2>&1; then
-    head_sha="$(git rev-parse HEAD 2>/dev/null)" || head_sha=""
+    head_sha="$(git rev-parse "${commit_sha:-HEAD}^{commit}" 2>/dev/null)" || head_sha=""
     seen_file="$(git rev-parse --git-dir 2>/dev/null)/found-issues-last-head"
     if [[ -n "$head_sha" && -f "$seen_file" && "$(cat "$seen_file" 2>/dev/null)" == "$head_sha" ]]; then
       commit_seen=1
@@ -405,11 +458,15 @@ if [[ "$cmd_unquoted" =~ (^|[^A-Za-z_])git[[:space:]]+commit($|[^-A-Za-z_]) ]] \
   fi
   if [[ ( -z "$exit_code" || "$exit_code" == "0" ) && "$commit_seen" -eq 0 ]] && git rev-parse --git-dir >/dev/null 2>&1; then
     [[ -n "$head_sha" ]] && printf '%s\n' "$head_sha" >"$seen_file" 2>/dev/null || true
+    # Annotate the commit git printed (it may sit off HEAD, e.g. made in a linked
+    # worktree); HEAD when the output carried no sha.
+    annotate_ref=HEAD
+    [[ -n "$commit_sha" && -n "$head_sha" ]] && annotate_ref="$head_sha"
     if [[ "${FOUND_ISSUES_AUTO_ANNOTATE:-on}" == "off" ]]; then
       legacy_out="$(legacy_commit_prompt)"
       [[ -n "$legacy_out" ]] && ctx+="$legacy_out"$'\n\n'
     else
-      hook_auto_run /dev/null annotate-commit HEAD --hook-auto
+      hook_auto_run /dev/null annotate-commit "$annotate_ref" --hook-auto
       out="$HA_OUT" rc="$HA_RC"
       [[ -n "$HA_ALT" ]] && ctx+="$(skew_note)"$'\n\n'
       if [[ "$rc" -eq 0 && "$out" == *"Suggested"* ]]; then

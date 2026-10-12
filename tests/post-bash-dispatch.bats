@@ -332,6 +332,102 @@ run_hook_raw() { # $1=raw json
   [[ "$output" == *"touches files referenced"* ]]
 }
 
+# === commit lands in another repository (#166, 3.10.0) ===
+# The commit route used to decide only from a leading cd/pushd in the command
+# text. It now decides by the commit itself: the sha git prints ("[branch sha]")
+# must exist in the ledger repo; with no sha in the output the directory the
+# command ran in (payload .cwd, cd/pushd, git -C) must be inside the ledger repo.
+
+# payload with a printed stdout and an optional payload cwd.
+payload_ctx() { # $1=command $2=stdout $3=cwd(optional)
+  jq -nc --arg c "$1" --arg s "$2" --arg d "${3:-}" \
+    '{tool_name:"Bash", tool_input:{command:$c}, tool_response:{stdout:$s, exit_code:"0"}}
+     + (if $d == "" then {} else {cwd:$d} end)'
+}
+
+run_hook_ctx() { payload_ctx "$@" | "$HOOK"; }
+
+# Seed this repo with a fixing commit for src/foo.py:2 (entry logged between).
+_seed_fix_commit() {
+  mkdir -p src
+  printf 'l1\nl2\nl3\n' > src/foo.py
+  git add -A && git commit -q -m seed
+  fi_run log "src/foo.py:2 — bug"
+  printf 'l1\nFIX\nl3\n' > src/foo.py
+  git add -A && git commit -q -m fix
+}
+
+# A second, unrelated repo holding its own commit; sets OTHER and OTHER_SHA.
+_make_other_repo() {
+  OTHER="$(mktemp -d "$TMP/other.XXXXXX")"
+  git -C "$OTHER" init -q -b main
+  git -C "$OTHER" config user.email other@example.com
+  git -C "$OTHER" config user.name Other
+  git -C "$OTHER" commit -q --allow-empty -m "other work"
+  OTHER_SHA="$(git -C "$OTHER" rev-parse --short=7 HEAD)"
+}
+
+@test "git commit: payload cwd in another repo is not annotated against this repo" {
+  _seed_fix_commit
+  _make_other_repo
+  run run_hook_ctx 'git commit -m fix' '' "$OTHER"
+  [ "$status" -eq 0 ]
+  run grep -q '(commit-auto:' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "git commit: a sha printed by git that is not in this repo is not annotated" {
+  _seed_fix_commit
+  _make_other_repo
+  run run_hook_ctx 'git commit -m fix' "[main $OTHER_SHA] other work" ""
+  [ "$status" -eq 0 ]
+  run grep -q '(commit-auto:' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "git commit: bash -c with a quoted cd into another repo is not annotated" {
+  _seed_fix_commit
+  _make_other_repo
+  run run_hook_ctx "bash -c 'cd $OTHER && git commit -m fix'" "[main $OTHER_SHA] other work" ""
+  [ "$status" -eq 0 ]
+  run grep -q '(commit-auto:' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "git commit: git -C into another repo is not annotated" {
+  _seed_fix_commit
+  _make_other_repo
+  run run_hook_ctx "git -C $OTHER commit -m fix" "[main $OTHER_SHA] other work" ""
+  [ "$status" -eq 0 ]
+  run grep -q '(commit-auto:' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "git commit: git -C into another repo with no sha in the output is not annotated" {
+  _seed_fix_commit
+  _make_other_repo
+  run run_hook_ctx "git -C $OTHER commit -m fix" "" ""
+  [ "$status" -eq 0 ]
+  run grep -q '(commit-auto:' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "git commit: git -C this repo is still annotated" {
+  _seed_fix_commit
+  sha="$(git rev-parse --short=7 HEAD)"
+  run run_hook_ctx "git -C $PWD commit -m fix" "[main $sha] fix" ""
+  [ "$status" -eq 0 ]
+  grep -q "src/foo.py:2 .*(commit-auto: $sha)" docs/found-issues.md
+}
+
+@test "git commit: a same-repo commit with its sha printed and a payload cwd in a subdir is annotated" {
+  _seed_fix_commit
+  sha="$(git rev-parse --short=7 HEAD)"
+  run run_hook_ctx 'git commit -m fix' "[main $sha] fix" "$PWD/src"
+  [ "$status" -eq 0 ]
+  grep -q "src/foo.py:2 .*(commit-auto: $sha)" docs/found-issues.md
+}
+
 @test "codex harness: candidate surface is additionalContext JSON" {
   unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
   export PLUGIN_DATA="$TMP/plugdata"
