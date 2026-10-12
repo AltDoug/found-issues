@@ -434,8 +434,12 @@ if [[ "$cmd_unquoted" =~ (^|[^A-Za-z_])git[[:space:]]+((-c|-C)[[:space:]]+[^[:sp
   commit_route=1
   commit_sha="$(commit_sha_from_output)"
   if [[ -n "$commit_sha" ]]; then
-    # Authoritative: the commit must exist in the ledger repo.
+    # The commit must exist in the ledger repo's object store...
     git cat-file -e "${commit_sha}^{commit}" 2>/dev/null || commit_route=0
+    # ...and, when the directory it ran in is known, that directory must belong
+    # to this checkout: a linked worktree shares the object store (the sha
+    # exists here) but has its own ledger.
+    [[ "$commit_route" -eq 1 ]] && commit_in_other_repo && commit_route=0
   elif commit_in_other_repo; then
     commit_route=0
   fi
@@ -458,8 +462,8 @@ if [[ "$commit_route" -eq 1 ]]; then
   fi
   if [[ ( -z "$exit_code" || "$exit_code" == "0" ) && "$commit_seen" -eq 0 ]] && git rev-parse --git-dir >/dev/null 2>&1; then
     [[ -n "$head_sha" ]] && printf '%s\n' "$head_sha" >"$seen_file" 2>/dev/null || true
-    # Annotate the commit git printed (it may sit off HEAD, e.g. made in a linked
-    # worktree); HEAD when the output carried no sha.
+    # Annotate the commit git printed (it may sit off HEAD); HEAD when the
+    # output carried no sha.
     annotate_ref=HEAD
     [[ -n "$commit_sha" && -n "$head_sha" ]] && annotate_ref="$head_sha"
     if [[ "${FOUND_ISSUES_AUTO_ANNOTATE:-on}" == "off" ]]; then

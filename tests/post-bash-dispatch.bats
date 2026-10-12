@@ -428,6 +428,29 @@ _make_other_repo() {
   grep -q "src/foo.py:2 .*(commit-auto: $sha)" docs/found-issues.md
 }
 
+# A linked worktree shares the object store, so the sha exists here too; the
+# commit still belongs to the worktree's own checkout and ledger.
+@test "git commit: a commit made in a linked worktree is not annotated into this ledger" {
+  _seed_fix_commit
+  WT="$(cd "$(mktemp -d "$TMP/wt.XXXXXX")" && pwd -P)/linked"
+  git worktree add -q -b wt-branch "$WT"
+  printf 'l1\nFIX2\nl3\n' > "$WT/src/foo.py"
+  git -C "$WT" -c user.email=t@e.com -c user.name=T commit -q -am "wt fix"
+  sha="$(git -C "$WT" rev-parse --short=7 HEAD)"
+  run run_hook_ctx "cd $WT && git commit -m fix" "[wt-branch $sha] wt fix" ""
+  [ "$status" -eq 0 ]
+  run grep -q '(commit-auto:' docs/found-issues.md
+  [ "$status" -ne 0 ]
+  run run_hook_ctx "git -C $WT commit -m fix" "[wt-branch $sha] wt fix" ""
+  [ "$status" -eq 0 ]
+  run grep -q '(commit-auto:' docs/found-issues.md
+  [ "$status" -ne 0 ]
+  run run_hook_ctx "git commit -m fix" "[wt-branch $sha] wt fix" "$WT"
+  [ "$status" -eq 0 ]
+  run grep -q '(commit-auto:' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
 @test "codex harness: candidate surface is additionalContext JSON" {
   unset CLAUDE_CODE_ENTRYPOINT 2>/dev/null || true
   export PLUGIN_DATA="$TMP/plugdata"
