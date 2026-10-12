@@ -86,6 +86,25 @@ push_change() {
   [ "$(fi_af_timeout_secs "$REPO")" = 5160 ]
 }
 
+@test "readiness: a fast red base run never lowers the measured suite time" {
+  git config found-issues.autofix.testCommand 'exit 1'
+  fi_af_queue_fixture
+  fi_af_ready_write "$REPO" green 2400 "exit 1"
+  "$FI_BIN" autofix claim "$ID" >/dev/null || true
+  fi_af_ready_read "$REPO" "exit 1"
+  [ "$FI_AF_RD_STATUS" = red ]
+  [ "$FI_AF_RD_SECS" = 2400 ]
+}
+
+@test "readiness: the report ignores a record measured for another test command" {
+  source "$FI_BIN"; fi_af_context
+  fi_af_ready_write "$REPO" red 30 "bats tests/"
+  run "$FI_BIN" autofix ready
+  [[ "$output" == *"last base run: never"* ]]
+  [[ "$output" == *"verdict: ready"* ]]
+  [[ "$output" != *"red last time"* ]] || false
+}
+
 @test "readiness: a record older than a week still sizes the limit but no longer gates" {
   source "$FI_BIN"; fi_af_context
   fi_af_ready_write "$REPO" timeout 7200 "sh test.sh"
@@ -153,6 +172,9 @@ push_change() {
   [[ "$output" != *"waiting in this repo"* ]] || false
   git config found-issues.autofix true
   printf '# found-issues\n\n- [open] 2026-10-01 src/calc.sh:1 — add subtracts (manual: needs eyes)\n' > docs/found-issues.md
+  run "$FI_BIN" autofix summary
+  [[ "$output" != *"waiting in this repo"* ]] || false
+  printf '# found-issues\n\n- [open] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small) (PR: foo/bar#12)\n' > docs/found-issues.md
   run "$FI_BIN" autofix summary
   [[ "$output" != *"waiting in this repo"* ]] || false
 }

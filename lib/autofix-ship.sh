@@ -96,12 +96,15 @@ fi_af_run_tests() {
 # kill is not re-run; the first log is kept as <log>.first.log.
 fi_af_tests_pass() {
   local wt="$1" cmd="$2" log="$3" first rc=0
+  # 3.9.0: when the last run started, so a re-run is timed on its own.
+  FI_AF_LAST_RUN_START="$(date +%s)"
   fi_af_run_tests "$wt" "$cmd" "$log" || rc=$?
   (( rc == 0 )) && return 0
   [[ -z "${FI_AF_CHILD_TIMEDOUT:-}" ]] || return "$rc"
   first="$(fi_af_test_failures "$log" | head -n 1)"
   mv -f "$log" "${log%.log}.first.log" 2>/dev/null || true
   fi_af_log "$AFI_id" "tests failed (${first:-exit $rc}); re-running once"
+  FI_AF_LAST_RUN_START="$(date +%s)"
   fi_af_run_tests "$wt" "$cmd" "$log" || return $?
   fi_af_log "$AFI_id" "tests passed on the re-run: the first failure was flaky"
 }

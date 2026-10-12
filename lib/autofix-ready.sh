@@ -59,6 +59,15 @@ fi_af_ready_read() {
   [[ -f "$f" ]] || return 1
   { IFS= read -r FI_AF_RD_STATUS || true; IFS= read -r FI_AF_RD_SECS || true
     IFS= read -r FI_AF_RD_TS || true; IFS= read -r FI_AF_RD_CMD || true; } <"$f"
+  # A rejected record leaves no fields behind for a caller to misread.
+  if ! _fi_af_ready_valid "$@"; then
+    FI_AF_RD_STATUS="" FI_AF_RD_SECS="" FI_AF_RD_TS="" FI_AF_RD_CMD="" FI_AF_RD_OLD=""
+    return 1
+  fi
+  return 0
+}
+
+_fi_af_ready_valid() {
   case "$FI_AF_RD_STATUS" in green|red|timeout) ;; *) return 1 ;; esac
   [[ "$FI_AF_RD_SECS" =~ ^[0-9]+$ && "$FI_AF_RD_TS" =~ ^[0-9]+$ ]] || return 1
   (( $(date +%s) - 10#$FI_AF_RD_TS <= FI_AF_READY_MAX_AGE )) || FI_AF_RD_OLD=1
@@ -129,9 +138,9 @@ fi_af_ready_line() {
   [[ -f "$file" ]] || return 0
   # Something auto-fix could take: a (fix: small|medium) entry, or an untagged
   # one a sweep would classify. Manual, decide, fix-large and autofix-failed
-  # entries never reach it.
+  # entries never reach it, nor one whose fix is already in a PR or commit.
   # One process, no pipe: under pipefail an early-exiting reader can fail it.
-  awk '/^- \[open\]/ && !/\((manual|decide): / && !/\(fix: large\)/ && !/autofix-failed/ { f = 1; exit } END { exit !f }' "$file" 2>/dev/null || return 0
+  awk '/^- \[open\]/ && !/\((manual|decide): / && !/\(fix: large\)/ && !/autofix-failed/ && !/\((PR|commit): / { f = 1; exit } END { exit !f }' "$file" 2>/dev/null || return 0
   if ! fi_af_test_command "$root" >/dev/null 2>&1; then
     printf '%s\n' 'Auto-fix is waiting in this repo: no test command, so none of its open entries gets queued. Set one with found-issues config autofix.testCommand "<cmd>", or switch auto-fix off here with found-issues config autofix false.'
     return 0
@@ -171,7 +180,7 @@ fi_af_ready_report() {
   printf 'run limit: %s (%s)\n' "$(_fi_af_ready_lim "$lim")" "$how"
   if [[ -z "$cmd" ]]; then verdict="waiting: no test command (set one: found-issues config autofix.testCommand \"<cmd>\")"
   elif ! fi_af_ready_ok "$root"; then verdict="$FI_AF_WHY"
-  elif [[ "$FI_AF_RD_STATUS" == red ]]; then verdict="ready, but the base was red last time (see found-issues autofix status)"
+  elif fi_af_ready_read "$root" "$cmd" && [[ "$FI_AF_RD_STATUS" == red ]]; then verdict="ready, but the base was red last time (see found-issues autofix status)"
   fi
   printf 'verdict: %s\n' "$verdict"
 }
