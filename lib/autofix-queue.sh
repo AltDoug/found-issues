@@ -982,9 +982,18 @@ _fi_af_ledger_swap() {
   fi_ledger_replace "$file" "$tmp" "$snapshot"
 }
 
-# Already fixed at origin: close it the way `resolve` does.
+# Already fixed at origin: close it the way `resolve` does. 3.10.0: not a
+# critical or (hold: ...) entry, which waits for a human like sync's holds;
+# a critical one gains the same (hold: needs human verify) marker.
 fi_af_ledger_resolve() {
   fi_af_find_entry || return 1
+  if [[ "$FI_AF_ENTRY" == *" (hold: "* ]]; then
+    return 0
+  fi
+  if [[ "$FI_AF_ENTRY" == "- [open] [!] "* ]]; then
+    _fi_af_ledger_swap "$FI_AF_LEDGER" "$FI_AF_ENTRY" "$FI_AF_ENTRY (hold: needs human verify)"
+    return
+  fi
   _fi_af_ledger_swap "$FI_AF_LEDGER" "$FI_AF_ENTRY" \
     "- [fixed]${FI_AF_ENTRY#- \[open\]} (verified: ai) (fixed: $(fi_today))"
 }
