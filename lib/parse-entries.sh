@@ -18,6 +18,27 @@
 #   fi_count_residual <file>
 #   fi_count_stale <file> [<days=30>]
 
+# fi_docs_ledger <dir> — print the docs ledger inside <dir>, return 1 if none.
+# 3.10.0: the lookup matched only the lowercase docs/found-issues.md, so on a
+# case-sensitive filesystem a ledger spelled Docs/Found-Issues.md or
+# docs/FOUND-ISSUES.md was invisible (and a second lowercase one got created).
+# The exact-case file wins; otherwise the first case-insensitive match, found
+# with bracket-class globs: builtins only (statusline hot path), bash 3.2 safe.
+fi_docs_ledger() {
+  local dir="$1" f
+  if [[ -f "$dir/docs/found-issues.md" ]]; then
+    printf '%s' "$dir/docs/found-issues.md"
+    return 0
+  fi
+  for f in "$dir"/[Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]; do
+    if [[ -f "$f" ]]; then
+      printf '%s' "$f"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Walk up from start_dir looking for the issues file.
 # Prefers <dir>/docs/found-issues.md, falls back to <dir>/.found-issues.md.
 # Inside a git repo the walk stops at the repo root (a directory holding a
@@ -27,12 +48,12 @@
 # test per directory, no git fork (statusline hot path).
 fi_find_issues_file() {
   local start="${1:-$PWD}"
-  local dir
+  local dir found
   dir="$(cd "$start" 2>/dev/null && pwd)" || return 1
 
   while [[ -n "$dir" && "$dir" != "/" ]]; do
-    if [[ -f "$dir/docs/found-issues.md" ]]; then
-      printf '%s' "$dir/docs/found-issues.md"
+    if found="$(fi_docs_ledger "$dir")"; then
+      printf '%s' "$found"
       return 0
     fi
     if [[ -f "$dir/.found-issues.md" ]]; then
@@ -114,8 +135,26 @@ fi_unknown_arg() {
 #     if the ledger changed since it was taken — someone else wrote it while
 #     we were working from the old copy, and moving ours over theirs would
 #     silently revert their write. tmp is always consumed.
+# fi_ledger_realpath <path> — the final target of a symlink chain, else <path>.
+# 3.10.0 (#160): a symlinked ledger was replaced by a regular file on every
+# write. Same walk as fi_resolve_link (lib/statusline-core.sh, which cannot be
+# sourced from here: readonly constants); macOS readlink has no -f.
+fi_ledger_realpath() {
+  local p="$1" t n=0
+  while [[ -L "$p" ]] && (( n < 40 )); do
+    t="$(readlink "$p")" || break
+    case "$t" in
+      /*) p="$t" ;;
+      *)  if [[ "$p" == */* ]]; then p="${p%/*}/$t"; else p="$t"; fi ;;
+    esac
+    n=$(( n + 1 ))
+  done
+  printf '%s' "$p"
+}
+
 fi_ledger_tmp() {
-  local file="$1" dir="."
+  local file dir="."
+  file="$(fi_ledger_realpath "$1")"
   [[ "$file" == */* ]] && dir="${file%/*}"
   mktemp "$dir/.found-issues.tmp.XXXXXX"
 }
@@ -125,7 +164,9 @@ fi_ledger_snapshot() {
 }
 
 fi_ledger_replace() {
-  local file="$1" tmp="$2" snapshot="${3:-}"
+  local file tmp="$2" snapshot="${3:-}" mode=""
+  # 3.10.0 (#160): write through a symlinked ledger; the link survives.
+  file="$(fi_ledger_realpath "$1")"
   if cmp -s "$tmp" "$file"; then
     rm -f "$tmp"
     return 0
@@ -135,9 +176,25 @@ fi_ledger_replace() {
     return 3
   fi
   if [[ -f "$file" ]]; then
-    local mode
     mode="$(stat -c %a "$file" 2>/dev/null || stat -f %Lp "$file" 2>/dev/null || true)"
     [[ "$mode" =~ ^[0-7]+$ ]] && { chmod "$mode" "$tmp" 2>/dev/null || true; }
+  fi
+  # A caller that staged tmp beside the link (not beside the resolved target)
+  # is re-staged there, so the rename stays on one filesystem and atomic.
+  local want="." have="."
+  [[ "$file" == */* ]] && want="${file%/*}"
+  [[ "$tmp" == */* ]] && have="${tmp%/*}"
+  if [[ "$want" != "$have" ]]; then
+    local tmp2
+    tmp2="$(fi_ledger_tmp "$file")" || { rm -f "$tmp"; return 1; }
+    if cat "$tmp" >"$tmp2"; then
+      rm -f "$tmp"
+      tmp="$tmp2"
+      [[ "$mode" =~ ^[0-7]+$ ]] && { chmod "$mode" "$tmp" 2>/dev/null || true; }
+    else
+      rm -f "$tmp" "$tmp2"
+      return 1
+    fi
   fi
   mv "$tmp" "$file"
 }

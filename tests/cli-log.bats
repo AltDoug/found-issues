@@ -578,3 +578,13 @@ EOF
   fi_run log "src/a.sh:1 — the --critical flag is ignored here"
   [ "$status" -eq 0 ]
 }
+
+@test "log: appends to a differently-cased Docs/Found-Issues.md and creates no second ledger (#164)" {
+  mkdir -p Docs
+  printf '# found-issues\n\n' > Docs/Found-Issues.md
+  fi_run log "src/foo.py:42 — cased ledger bug"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'cased ledger bug' Docs/Found-Issues.md)" = "1" ]
+  [ "$(ls Docs | wc -l | tr -d ' ')" = "1" ]
+  [ "$(ls -d [Dd][Oo][Cc][Ss] | wc -l | tr -d ' ')" = "1" ]
+}
