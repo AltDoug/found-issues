@@ -53,7 +53,7 @@ TRANSCRIPT
   cat > "$TR" <<'TRANSCRIPT'
 {"type":"user","message":"fix this"}
 {"type":"assistant","message":"done","tool_uses":[{"name":"Edit","input":{}}]}
-response <!-- found-issues-checked: none-noticed --> done
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"response <!-- found-issues-checked: none-noticed --> done"}]}}
 TRANSCRIPT
   input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
   run bash -c "echo '$input' | '$HOOK'"
@@ -66,7 +66,7 @@ TRANSCRIPT
   cat > "$TR" <<'TRANSCRIPT'
 {"type":"user","message":"fix this"}
 {"type":"assistant","message":"done","tool_uses":[{"name":"Edit","input":{}}]}
-response <!-- found-issues-checked: logged --> done
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"response <!-- found-issues-checked: logged --> done"}]}}
 TRANSCRIPT
   input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
   run bash -c "echo '$input' | '$HOOK'"
@@ -79,7 +79,7 @@ TRANSCRIPT
   cat > "$TR" <<'TRANSCRIPT'
 {"type":"user","message":"fix this"}
 {"type":"assistant","message":"done","tool_uses":[{"name":"Edit","input":{}}]}
-response <!-- found-issues-checked: deferred --> done
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"response <!-- found-issues-checked: deferred --> done"}]}}
 TRANSCRIPT
   input="{\"hook_event_name\":\"Stop\",\"transcript_path\":\"$TR\"}"
   run bash -c "echo '$input' | '$HOOK'"
@@ -686,5 +686,119 @@ TRANSCRIPT
 TRANSCRIPT
   run_stop_on "$TR" sess-167
   [ "$status" -eq 0 ]
+  rm -f "$TR"
+}
+
+# --- 3.10.0 review: the marker counts only in the assistant's own text ---
+
+marker_tr() { # $1 = path, $2 = tool_use content, $3 = tool_result content
+  cat > "$1" <<TRANSCRIPT
+{"parentUuid":"u-1","type":"user","message":{"role":"user","content":[{"type":"text","text":"write it"}]},"uuid":"user-1","sessionId":"s-1"}
+{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"Write","input":{"file_path":"/x/app.py","content":"$2"}}]},"uuid":"asst-1","sessionId":"s-1"}
+{"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_02","type":"tool_result","content":"$3","is_error":false}]},"uuid":"toolres-1","sessionId":"s-1"}
+{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Written."}]},"uuid":"asst-2","sessionId":"s-1"}
+TRANSCRIPT
+}
+
+@test "stop-reminder: a marker only inside a tool_result does not satisfy the block" {
+  TR="$(mktemp)"
+  marker_tr "$TR" "hi" "rules say: <!-- found-issues-checked: none-noticed -->"
+  run_stop_on "$TR" sess-mk-result
+  [ "$status" -eq 2 ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: a marker only inside a tool_use input does not satisfy the block" {
+  TR="$(mktemp)"
+  marker_tr "$TR" "fixture <!-- found-issues-checked: none-noticed -->" "ok"
+  run_stop_on "$TR" sess-mk-input
+  [ "$status" -eq 2 ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: a marker in a tool_result does not skip the silent reminder either" {
+  unset FOUND_ISSUES_STOP_REMINDER
+  TR="$(mktemp)"
+  marker_tr "$TR" "hi" "rules say: <!-- found-issues-checked: none-noticed -->"
+  run_stop_on "$TR" sess-mk-silent
+  [ "$status" -eq 0 ]
+  [ -e "$(nudge_file sess-mk-silent)" ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: a marker in the assistant text of the turn still satisfies the block" {
+  TR="$(mktemp)"
+  cat > "$TR" <<'TRANSCRIPT'
+{"parentUuid":"u-1","type":"user","message":{"role":"user","content":[{"type":"text","text":"write it"}]},"uuid":"user-1","sessionId":"s-1"}
+{"parentUuid":"user-1","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"Write","input":{"file_path":"/x/app.py","content":"hi"}}]},"uuid":"asst-1","sessionId":"s-1"}
+{"parentUuid":"asst-1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_02","type":"tool_result","content":"ok","is_error":false}]},"uuid":"toolres-1","sessionId":"s-1"}
+{"parentUuid":"toolres-1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done. <!-- found-issues-checked: logged -->"}]},"uuid":"asst-2","sessionId":"s-1"}
+TRANSCRIPT
+  run_stop_on "$TR" sess-mk-text
+  [ "$status" -eq 0 ]
+  rm -f "$TR"
+}
+
+# --- 3.10.0 review: silent mode exits before reading the transcript ---
+
+# A `tail` stub that logs each call, then runs the real one.
+tail_stub() { # $1 = log file
+  mkdir -p "$TMP/stubbin"
+  printf '#!/usr/bin/env bash\necho called >> "%s"\nexec "%s" "$@"\n' "$1" "$(command -v tail)" > "$TMP/stubbin/tail"
+  chmod +x "$TMP/stubbin/tail"
+}
+
+run_stop_stubbed() { # $1 = transcript, $2 = session_id
+  mkdir -p "$TMP/srhome"
+  run bash -c "echo '{\"hook_event_name\":\"Stop\",\"session_id\":\"$2\",\"transcript_path\":\"$1\"}' | PATH='$TMP/stubbin':\"\$PATH\" HOME='$TMP/srhome' FOUND_ISSUES_REMINDER_VERBOSITY=terse '$HOOK'"
+}
+
+@test "stop-reminder: silent mode with a delivered reminder exits before reading the transcript" {
+  unset FOUND_ISSUES_STOP_REMINDER
+  TR="$(mktemp)"; LOG="$TMP/tail.log"
+  write_tr "$TR" /x/app.py
+  tail_stub "$LOG"
+  mkdir -p "$TMP/srhome/.claude/found-issues/reminded"
+  : > "$TMP/srhome/.claude/found-issues/reminded/sess-early1.nudged"
+  run_stop_stubbed "$TR" sess-early1
+  [ "$status" -eq 0 ]
+  [ ! -e "$LOG" ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: silent mode with a queued reminder exits before reading the transcript" {
+  unset FOUND_ISSUES_STOP_REMINDER
+  TR="$(mktemp)"; LOG="$TMP/tail.log"
+  write_tr "$TR" /x/app.py
+  tail_stub "$LOG"
+  mkdir -p "$TMP/srhome/.claude/found-issues/reminded"
+  : > "$TMP/srhome/.claude/found-issues/reminded/sess-early2.nudge"
+  run_stop_stubbed "$TR" sess-early2
+  [ "$status" -eq 0 ]
+  [ ! -e "$LOG" ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: the stub sees the transcript read when no reminder was delivered (control)" {
+  unset FOUND_ISSUES_STOP_REMINDER
+  TR="$(mktemp)"; LOG="$TMP/tail.log"
+  write_tr "$TR" /x/app.py
+  tail_stub "$LOG"
+  run_stop_stubbed "$TR" sess-early3
+  [ "$status" -eq 0 ]
+  [ -e "$LOG" ]
+  [ -e "$(nudge_file sess-early3)" ]
+  rm -f "$TR"
+}
+
+@test "stop-reminder: block mode still reads the transcript when a reminder was delivered earlier" {
+  TR="$(mktemp)"; LOG="$TMP/tail.log"
+  write_tr "$TR" /x/app.py
+  tail_stub "$LOG"
+  mkdir -p "$TMP/srhome/.claude/found-issues/reminded"
+  : > "$TMP/srhome/.claude/found-issues/reminded/sess-early4.nudged"
+  run_stop_stubbed "$TR" sess-early4
+  [ "$status" -eq 2 ]
+  [ -e "$LOG" ]
   rm -f "$TR"
 }

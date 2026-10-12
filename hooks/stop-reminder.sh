@@ -168,6 +168,18 @@ if [[ "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" != "on" \
   exit 0
 fi
 
+# 3.10.0 review: the silent default queues at most one reminder per session
+# (.nudge, then .nudged once the prompt hook delivered it). Once either exists
+# nothing below can change the outcome, so leave before the 4MB tail, the awk
+# and the jq passes that every Stop of every turn would otherwise pay. Block
+# mode (and EVERY_TURN, which implies it) still needs the transcript.
+if [[ "${FOUND_ISSUES_STOP_REMINDER:-on}" != "block" \
+      && "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" != "on" \
+      && -n "$session_id" \
+      && ( -e "$REMINDED_DIR/$session_id.nudge" || -e "$REMINDED_DIR/$session_id.nudged" ) ]]; then
+  exit 0
+fi
+
 # Extract transcript_path
 # Builtin when the JSON string has no escapes (always, for a real path on
 # macOS/Linux); jq only to decode one that does (Windows backslashes).
@@ -319,12 +331,31 @@ fi
 # actually included. One short sleep gives the flush a chance to land
 # before we block. If the marker still isn't present, stop_hook_active
 # on the retry-fire (above) prevents an infinite block loop.
-if [[ "${last_turn:-}" == *'<!-- found-issues-checked:'* ]]; then
+#
+# The marker only counts in the assistant's own text. The turn is raw
+# transcript JSONL, so a tool_result (a `cat` of the rules, a grep for the
+# marker) or a tool_use input (an edited fixture) can carry the literal
+# string without the assistant having written it.
+text_has_marker() { # $1 = transcript lines (JSONL; the first may be a cut one)
+  local texts
+  # No jq: the assistant text cannot be told apart, so fall back to the raw
+  # substring (the pre-3.10.0 behaviour, fail-open).
+  command -v jq >/dev/null 2>&1 || { [[ "$1" == *'<!-- found-issues-checked:'* ]]; return; }
+  # Real shape: message.content[] items of type "text". Also the flat
+  # fixtures' string `message` and a string `content`.
+  texts="$(printf '%s' "$1" | jq -R -r 'fromjson? | select(.type=="assistant")
+      | (.message | if type=="string" then .
+         elif type=="object" then (.content | if type=="string" then .
+           elif type=="array" then (.[]? | objects | select(.type=="text") | .text? | strings)
+           else empty end)
+         else empty end)' 2>/dev/null || true)"
+  [[ "$texts" == *'<!-- found-issues-checked:'* ]]
+}
+if text_has_marker "${last_turn:-}"; then
   exit 0
 fi
 for attempt in 1 2; do
-  if tail -c 8192 "$transcript_path" 2>/dev/null \
-     | grep -q '<!-- found-issues-checked:'; then
+  if text_has_marker "$(tail -c 8192 "$transcript_path" 2>/dev/null || true)"; then
     exit 0
   fi
   [[ $attempt -eq 1 ]] && sleep 0.3
