@@ -153,6 +153,7 @@ fi_af_sweep_check() {
   fi_af_dirs "$slug"
   _fi_af_sweep_retire_stale
   fi_af_test_command "$root" >/dev/null 2>&1 || return 0
+  fi_af_ready_ok "$root" || return 0
   fi_af_sweep_pending && return 0
   fi_af_cap_ok sweep "$(fi_af_int dailySweeps 1)" || return 0
   # A sweep that retired for want of a test command on the landing branch

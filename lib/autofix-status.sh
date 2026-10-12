@@ -325,6 +325,13 @@ fi_af_stuck_clear() {
   return 0
 }
 
+# 3.9.0: the run limit doctor shows is the one runs get (lib/autofix-ready.sh).
+_fi_af_limit_min() {
+  local s
+  s="$(fi_af_timeout_secs "$(git rev-parse --show-toplevel 2>/dev/null || true)")"
+  if [[ "$s" =~ ^[0-9]+$ ]]; then printf '%s' "$(( (10#$s + 59) / 60 ))"; else printf '%s' "$s"; fi
+}
+
 # The SessionStart line for a repo whose auto-fix is stuck (empty otherwise).
 # Fixed text plus bash-sanitized test names: no model text reaches it.
 fi_af_stuck_line() {
@@ -510,6 +517,6 @@ fi_af_doctor() {
   [[ -n "$st" ]] && st="$st per sweep" || st="no token cap per sweep"
   printf '   Caps: %s spot fixes/day, %s sweep(s)/day (at %s fixable, %s fixes per PR), %s, %s, %s, %s, %s min per run\n' \
     "$(fi_af_int dailyFixes 5)" "$(fi_af_int dailySweeps 1)" "$(fi_af_int sweepThreshold 5)" \
-    "$(fi_af_sweep_batch)" "$rb" "$sb" "$rt" "$st" "$(fi_af_int runTimeoutMin 20)"
+    "$(fi_af_sweep_batch)" "$rb" "$sb" "$rt" "$st" "$(_fi_af_limit_min)"
   printf '   Fix PRs merge themselves once checks pass. Stop: found-issues autofix off\n\n'
 }

@@ -13,7 +13,7 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
-**7 lifecycle hooks · 14 slash commands · 1830 tests on Linux/macOS · zero manual bookkeeping**
+**7 lifecycle hooks · 14 slash commands · 1851 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -188,6 +188,10 @@ in your checkout waits until you push it.
 - See it: `🔧N` (running) and `❓N` (decisions waiting) in the statusline,
   `found-issues autofix status`, a "since last session" line at session
   start, and `found-issues doctor`.
+- Readiness: auto-fix only queues where a test command exists, and sizes
+  its run limit from the measured suite. A repo that cannot run it gets one
+  "Auto-fix is waiting in this repo" line at session start; `found-issues
+  autofix ready` shows why.
 - Stop it: `found-issues autofix off` (every repo), `found-issues autofix
   cancel <id>` (one run), `FOUND_ISSUES_AUTOFIX=off` (one shell).
 
@@ -241,7 +245,7 @@ regression report is welcome.
 
 ## Status
 
-**v3.8.4** — opt-in auto-fix and auto-sweep on top of the ledger;
+**v3.9.0** — opt-in auto-fix and auto-sweep on top of the ledger;
 actively developed and dogfooded (this repo's own ledger is maintained by
 the plugin). End-to-end runtime probes exercise the generated statusline
 shims against synthetic Claude Code stdin on every CI run, and stand-in

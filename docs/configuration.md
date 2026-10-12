@@ -209,7 +209,7 @@ found-issues config autofix.sweepBatch --unset
 | `autofix.sweepBatch` | `8` | Fixes per sweep PR; a sweep fixes every fixable entry, one PR per batch (a legacy `sweepMax` is read when this is unset: the listing then shows `<n> (from legacy sweepMax)`, `found-issues config autofix.sweepMax --unset [--global]` removes it, and setting it is refused in favour of this key) |
 | `autofix.runBudget` | unset (no cap) | USD estimate per spot run (Claude Code's `total_cost_usd`) |
 | `autofix.sweepBudget` | unset (no cap) | USD estimate per sweep, shared by all of its batches |
-| `autofix.runTimeoutMin` | `20` | Minutes per engine call |
+| `autofix.runTimeoutMin` | `20` | Minutes per engine call or test run, as a floor (since 3.9.0): every base test run records its time (`found-issues autofix ready` shows it), and the limit becomes twice a measured passing suite, or twice the limit a timed-out one hit, up to 120 min. A value above 120 is used as is |
 
 | Variable | Default | What it controls |
 |---|---|---|
@@ -220,7 +220,7 @@ found-issues config autofix.sweepBatch --unset
 | `FOUND_ISSUES_AUTOFIX_SHIP_TRIES` | `3` | Ship attempts a sweep gets. A failed ship keeps the sweep's branch and requeues it so the next run only ships; the last failure ends the sweep failed, its branch still kept |
 | `FOUND_ISSUES_AUTOFIX_SHIP_WAIT` | `900` | Seconds before a requeued sweep retries its ship |
 | `FOUND_ISSUES_AUTOFIX_OUTAGE_MAX` | `3` | Engine outages in a row (a failed turn, a verifier that died) after which a spot item finishes failed with the last outage text instead of being requeued again |
-| `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS` | `runTimeoutMin` × 60 | Per engine-call timeout override |
+| `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS` | measured (see `runTimeoutMin`) | Per engine-call timeout override; pins the limit, so a suite that timed out at it is not queued again until it changes |
 | `FOUND_ISSUES_FIX_SHIP_TIMEOUT_SECS` | `3600` | Test-gate timeout for `found-issues fix ship` (independent of `runTimeoutMin`); on failure ship prints the failing-tests report |
 | `FOUND_ISSUES_AUTOFIX_MERGE_POLLS` / `_MERGE_SLEEP` | `60` / `60` | How long `autofix merge-when-green` waits for checks. A PR that conflicts with its base only in the ledger gets the base merged in (both sides' annotations kept, at most 3 times) and is waited on again; a conflict anywhere else stops the watch. When auto-merge was armed instead, a `--guard` watcher runs instead, for its own much longer horizon (`FOUND_ISSUES_AUTOFIX_GUARD_POLLS`, default `288` checks `FOUND_ISSUES_AUTOFIX_GUARD_SLEEP` apart, default `300` s, so 24 h; one guard per PR, a second exits at once): it never merges itself, only resolves a ledger-only conflict so the armed auto-merge can fire, keeps watching through a failed check (a re-run can still turn it green), and exits once the PR is merged or closed |
 | `FOUND_ISSUES_AUTOFIX_WAIT_RECHECK` | `900` | Seconds before a waiting item (its cited file is not on the landing branch yet, or has uncommitted or unpushed changes) is looked at again |
