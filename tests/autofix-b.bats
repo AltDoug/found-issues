@@ -151,6 +151,28 @@ tap_fail_cmd() {
   [[ "$output" == *"tests: pass"* ]]
 }
 
+@test "b: the repo test command runs on the caller's PATH, not the plugin bin first" {
+  local first="$BATS_TEST_TMPDIR/callerbin"
+  mkdir -p "$first"
+  git -C "$REPO" config found-issues.autofix.testCommand "[ \"\${PATH%%:*}\" = '$first' ]"
+  export PATH="$first:$PATH"
+  claim
+  run "$FI_BIN" autofix test "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tests: pass"* ]]
+}
+
+@test "b: autofix test called from inside a fixer runs on the outer caller's PATH" {
+  local first="$BATS_TEST_TMPDIR/callerbin"
+  mkdir -p "$first"
+  git -C "$REPO" config found-issues.autofix.testCommand "[ \"\${PATH%%:*}\" = '$first' ] && [ -z \"\${FI_AF_CALLER_PATH:-}\" ]"
+  export PATH="$first:$PATH"
+  claim
+  FI_AF_CALLER_PATH="$PATH" PATH="$TEST_REPO_ROOT/bin:$PATH" run "$FI_BIN" autofix test "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tests: pass"* ]]
+}
+
 @test "b: the repo test command does not inherit the watchdog's timeout override" {
   git -C "$REPO" config found-issues.autofix.testCommand '[ -z "${FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS:-}" ]'
   claim
