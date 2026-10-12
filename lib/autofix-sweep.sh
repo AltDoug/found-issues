@@ -15,7 +15,7 @@
 #   fi_af_sweep_pending
 #   fi_af_sweep_check (untagged entries count toward the threshold)
 #   fi_af_sweep_claim <id>
-#   fi_af_sweep_load <id>
+#   fi_af_sweep_load <id> [handout]
 #   fi_af_sweep_commit <id> / fi_af_sweep_settle <id> <outcome> <text>
 #   _fi_af_run_sweep <id> <engine>
 #   fi_af_sweep_finish <id> / fi_af_sweep_ship
@@ -363,18 +363,113 @@ _fi_af_sweep_still_fixable() {
   return 0
 }
 
+# <handout> (launcher A's loop, B's `next`): the entry is about to go to a
+# fixer, so it is also checked for a superseded base. Every other B command
+# reloads the entry a fixer may be working on and must not move past it.
 fi_af_sweep_load() {
-  local file
+  local file why handout="${2:-}"
   while :; do
     _fi_af_sweep_load_one "$1" || return 1
     # Batch 3: the entry may have been retagged, resolved or annotated since
     # the claim listed it; one that is no longer fixable now is skipped.
-    file="$(fi_find_issues_file "$AFI_root" 2>/dev/null)" || return 0
-    [[ -f "$file" ]] || return 0
-    _fi_af_sweep_still_fixable "$file" && return 0
-    fi_af_sweep_settle "$1" skipped "no longer fixable: the entry changed since the sweep was claimed"
+    # 3.9.1: so is one handed out whose cited code a live session changed on
+    # the base: no fixer is paid for it.
+    file="$(fi_find_issues_file "$AFI_root" 2>/dev/null)" || file=""
+    if [[ -n "$file" && -f "$file" ]] && ! _fi_af_sweep_still_fixable "$file"; then
+      why="no longer fixable: the entry changed since the sweep was claimed"
+    elif [[ -n "$handout" ]] && _fi_af_sweep_superseded; then
+      why="$FI_AF_WHY"
+    else
+      return 0
+    fi
+    fi_af_sweep_settle "$1" skipped "$why"
     [[ "${AFI_more:-}" == 1 ]] && return 1
   done
+}
+
+# 3.9.1 (ledger lib/autofix-sweep.sh:747): fi_af_superseded for the loaded
+# sweep entry (AFI_loc), against the commit the sweep was cut from. The
+# in-memory AFI_base_sha follows the commit stack, the item's base_sha does not.
+_fi_af_sweep_superseded() {
+  local cut saved="${AFI_base_sha:-}" rc=0
+  cut="$(_fi_af_field "$FI_AF_ST/running/$AFI_id" base_sha)" || return 1
+  [[ -n "$cut" ]] || return 1
+  AFI_base_sha="$cut"
+  fi_af_superseded || rc=$?
+  AFI_base_sha="$saved"
+  return "$rc"
+}
+
+# 3.9.1 (ledger lib/autofix-sweep.sh:747): an entry is checked when it is
+# handed out and again before its commit; a live session can still change a
+# committed entry's code on the base before the sweep ships. Each such entry
+# is dropped here: the commit stack is rebuilt from the cut without its
+# commit and its outcome turns skipped, so the PR neither duplicates the live
+# fix nor closes the entry. A later commit that no longer applies without the
+# dropped ones goes with them. The rebuilt stack still faces the ship-time
+# test run (rebuilt=1: a red one is not retried). Not on a ship retry: that
+# branch may already be published.
+_fi_af_sweep_drop_superseded() {
+  local id="$1" saved="${AFI_loc:-}" rc=0
+  _fi_af_sweep_drop_scan "$id" || rc=$?
+  AFI_loc="$saved"
+  return "$rc"
+}
+
+_fi_af_sweep_drop_scan() {
+  local id="$1" r="$FI_AF_ST/running/$1" o="$FI_AF_ST/sweeps/$1.outcomes"
+  local cut commits n=0 i=0 kept=0 dropped=0 c loc out key text why
+  local plan="$FI_AF_ST/sweeps/$1.outcomes.new"
+  # One fetch for the whole scan (fi_af_superseded reads it).
+  local FI_AF_SUP_FETCHED=1
+  [[ ! "${AFI_ship_tries:-0}" =~ ^[1-9] && -f "$o" && -n "${AFI_head:-}" ]] || return 0
+  cut="$(_fi_af_field "$r" base_sha)" && [[ -n "$cut" ]] || return 0
+  git -C "$AFI_root" fetch -q origin "$AFI_base" >/dev/null 2>&1 || return 0
+  git -C "$AFI_root" diff --quiet "$cut" "origin/$AFI_base" >/dev/null 2>&1 && return 0
+  commits="$(git -C "$AFI_wt" rev-list --reverse "$cut..$AFI_head" 2>/dev/null)" || return 0
+  while IFS=$'\t' read -r loc out key text || [[ -n "$loc" ]]; do
+    [[ "$out" == fixed ]] && n=$((n + 1))
+  done <"$o"
+  # One commit per fixed entry, in order; anything else is left alone.
+  (( n > 0 )) && [[ "$(printf '%s\n' "$commits" | grep -c .)" == "$n" ]] || return 0
+  : >"$plan"
+  while IFS=$'\t' read -r loc out key text || [[ -n "$loc" ]]; do
+    why=""
+    if [[ "$out" == fixed ]]; then
+      AFI_loc="$loc"
+      if _fi_af_sweep_superseded; then why="$FI_AF_WHY"; dropped=$((dropped + 1)); fi
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$loc" "$out" "$key" "$text" "$why" >>"$plan"
+  done <"$o"
+  if (( dropped == 0 )); then rm -f "$plan"; return 0; fi
+  git -C "$AFI_wt" reset -q --hard "$cut" >/dev/null 2>&1 || { rm -f "$plan"; return 0; }
+  git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
+  : >"$o"
+  while IFS=$'\t' read -r loc out key text why || [[ -n "$loc" ]]; do
+    if [[ "$out" == fixed ]]; then
+      i=$((i + 1))
+      c="$(printf '%s\n' "$commits" | sed -n "${i}p")"
+      if [[ -z "$why" ]] && ! git -C "$AFI_wt" cherry-pick "$c" >>"$FI_AF_RUNS/$id.log" 2>&1; then
+        git -C "$AFI_wt" cherry-pick --abort >/dev/null 2>&1 || git -C "$AFI_wt" reset -q --hard HEAD >/dev/null 2>&1 || true
+        why="dropped: does not apply without the superseded fixes"
+      fi
+      if [[ -n "$why" ]]; then
+        out=skipped text="$why"
+        fi_af_log "$id" "sweep: $loc $text"
+      else
+        kept=$((kept + 1))
+      fi
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$loc" "$out" "$key" "$text" >>"$o"
+  done <"$plan"
+  rm -f "$plan"
+  AFI_head="$(git -C "$AFI_wt" rev-parse HEAD)"
+  AFI_fixed="$kept"
+  AFI_verdict_tree="$(git -C "$AFI_wt" rev-parse 'HEAD^{tree}')"
+  fi_af_item_set "$r" head "$AFI_head"
+  fi_af_item_set "$r" fixed "$AFI_fixed"
+  fi_af_item_set "$r" verdict_tree "$AFI_verdict_tree"
+  fi_af_item_set "$r" rebuilt 1
 }
 
 _fi_af_sweep_load_one() {
@@ -439,6 +534,11 @@ fi_af_sweep_commit() {
   if p="$(_fi_af_sweep_skip_hit "$AFI_wt" "$AFI_head")"; then
     FI_AF_WHY="touches $p (file in an earlier batch's PR)"
     fi_af_sweep_settle "$id" skipped-chain "$FI_AF_WHY"
+    return 2
+  fi
+  # 3.9.1: the base changed this entry's code while its fixer ran.
+  if _fi_af_sweep_superseded; then
+    fi_af_sweep_settle "$id" skipped "$FI_AF_WHY"
     return 2
   fi
   fi_parse_entry_vars "$AFI_entry" || true
@@ -578,7 +678,7 @@ _fi_af_run_sweep() {
   AFI_engine="$engine"
   # The engine the sweep really ran on, for its PR body and the status row.
   fi_af_item_set "$r" engine "$engine"
-  while fi_af_sweep_load "$id"; do
+  while fi_af_sweep_load "$id" handout; do
     fi_af_enabled || break
     _fi_af_fix_loop "$id" "$engine"
     _fi_af_chain_save "$r"
@@ -635,7 +735,10 @@ _fi_af_sweep_tally() {
 fi_af_sweep_finish() {
   local id="$1" r="$FI_AF_ST/running/$1"
   fi_af_item_read "$r" || return 1
+  _fi_af_sweep_drop_superseded "$id" || true
   if (( ${AFI_fixed:-0} == 0 )); then
+    # A full batch whose every fix was superseded still hands on the rest.
+    if [[ "${AFI_more:-}" == 1 ]] && fi_af_enabled; then _fi_af_sweep_queue_next "$id"; fi
     fi_af_finish "$id" stale "sweep fixed nothing ($(_fi_af_sweep_tally "$id"))"
     return 0
   fi
@@ -713,6 +816,12 @@ _fi_af_sweep_ship_failed() {
   # a retry ships it; the rest waits for the next sweep.
   fi_af_item_set "$r" more ""
   AFI_more=""
+  # 3.9.1: a stack rebuilt without superseded fixes that fails its tests
+  # fails the same way on every retry.
+  if [[ "$FI_AF_WHY" == "tests fail at ship" && "$(_fi_af_field "$r" rebuilt 2>/dev/null || true)" == 1 ]]; then
+    fi_af_finish "$id" failed "ship: tests fail after dropping superseded fixes (branch $AFI_branch kept)"
+    return 0
+  fi
   if (( tries >= max )); then
     fi_af_finish "$id" failed "ship: $FI_AF_WHY ($tries tries; branch $AFI_branch kept)"
     return 0

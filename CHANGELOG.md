@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.1] - 2026-10-12
+
+Sweeps get the superseded check: a sweep no longer ships a fix a live session already made.
+
+### Fixed
+- **A sweep no longer ships a fix a live session already made** (ledger `lib/autofix-sweep.sh:747`). 3.9.0 added the superseded check to spot runs only. A sweep now applies the same check, against the commit it was cut from, at three points. When an entry is handed to a fixer (launcher A's loop, launcher B's `autofix next`), an entry whose cited code changed on the landing branch is skipped without a paid fixer. Before an approved fix is committed, a change made while its fixer ran skips it. Before ship, a committed fix whose code changed since is dropped: the commit stack is rebuilt without its commit, a later commit that no longer applies without it goes too, and the rebuilt stack still faces the ship-time test run. A rebuilt stack that fails those tests ends `failed` with its branch kept, with no ship retries. Dropped entries show as `skipped` with the reason in the PR table, stay open in the ledger, and are not closed by the PR. A sweep whose every fix was dropped ends `stale` with no PR and still queues the next batch of a chain. Launcher B's other commands (`search`, `test`, `verify`, `release`, `brief`) never move past the entry a fixer is working on. A ship retry keeps its stack as it is.
+
 ## [3.9.0] - 2026-10-12
 
 Auto-fix readiness: auto-fix measures each repo's suite, sizes its own run limit from it, says when a repo cannot run it, and stops shipping fixes a live session already made.

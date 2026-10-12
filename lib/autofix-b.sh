@@ -9,7 +9,7 @@
 #
 # Functions:
 #   fi_af_touch_lock <id>
-#   fi_af_b_running <id>
+#   fi_af_b_running <id> [handout]
 #   fi_af_b_enabled <id>
 #   fi_af_sweep_brief
 #   fi_af_brief
@@ -27,13 +27,14 @@ fi_af_touch_lock() {
   return 0
 }
 
-# A sweep also loads its current entry (AFI_entry empty when none is left).
+# A sweep also loads its current entry (AFI_entry empty when none is left);
+# <handout> (`next` only) hands it to the fixer (fi_af_sweep_load).
 fi_af_b_running() {
   fi_af_item_read "$FI_AF_ST/running/$1" || { fi_err "autofix: $1 is not claimed (run: found-issues autofix claim $1)"; return 1; }
   fi_af_touch_lock "$1"
   if [[ "$AFI_kind" == "sweep" ]]; then
     # A full batch hands out no more entries: next and verify say ship.
-    if [[ "$AFI_more" == 1 ]]; then AFI_entry=""; else fi_af_sweep_load "$1" || AFI_entry=""; fi
+    if [[ "$AFI_more" == 1 ]]; then AFI_entry=""; else fi_af_sweep_load "$1" "${2:-}" || AFI_entry=""; fi
   fi
   return 0
 }
