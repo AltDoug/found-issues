@@ -125,7 +125,8 @@ AUTOFIX-QUEUED $id2")"
   printf 'x\n' >f.txt; git add f.txt; git commit -q -m x
   # An open entry citing the committed line, so the commit route has text too.
   printf -- '- [open] 2026-10-02 f.txt:1 — f is wrong\n' >>docs/found-issues.md
-  run hook "$(payload auto "AUTOFIX-QUEUED $ID" "" "git commit -m x && found-issues log --fix small y")"
+  # The commit route follows the payload cwd (#166), so it must name this repo.
+  run hook "$(payload auto "AUTOFIX-QUEUED $ID" "" "git commit -m x && found-issues log --fix small y" | jq -c --arg d "$PWD" '.cwd = $d')"
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -s 'length')" = 1 ]
   ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
