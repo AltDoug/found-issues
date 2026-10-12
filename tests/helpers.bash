@@ -28,7 +28,9 @@ export FOUND_ISSUES_CACHE_DIR="${BATS_RUN_TMPDIR:-${TMPDIR:-/tmp}}/fi-test-cache
 # which makes session-start take its headless path and fails every test of
 # the interactive one, and FI_AF_PID, which a test's claim records and its
 # cancel then TERMs: the real run. Tests that want either set it themselves.
-unset FOUND_ISSUES_AUTOFIX_CHILD FI_AF_PID
+# A suite run from a Claude Code hook inherits CLAUDE_PROJECT_DIR, which the
+# CLI prefers over the test's cwd, so list/status read the real ledger.
+unset FOUND_ISSUES_AUTOFIX_CHILD FI_AF_PID CLAUDE_PROJECT_DIR
 
 # Ensure the CLI is executable (bats clones into a tempdir, may lose +x)
 chmod +x "$FI_BIN" 2>/dev/null || true

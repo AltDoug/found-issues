@@ -224,6 +224,13 @@ teardown() { fi_teardown_tmp; }
   grep -q 'pid=\[\]' "$TMP/o"
 }
 
+@test "autofix engine: children do not inherit the session's CLAUDE_PROJECT_DIR" {
+  export CLAUDE_PROJECT_DIR="$TMP/elsewhere"
+  run fi_af_child "$TMP/o" "$TMP/e" "$TMP" sh -c 'echo "cpd=[${CLAUDE_PROJECT_DIR:-}]"'
+  [ "$status" -eq 0 ]
+  grep -q 'cpd=\[\]' "$TMP/o"
+}
+
 @test "autofix engine: the watchdog kills a hung child with 124" {
   FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS=1 run fi_af_child "$TMP/o" "$TMP/e" "$TMP" sleep 30
   [ "$status" -eq 124 ]
