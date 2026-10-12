@@ -64,6 +64,8 @@ FI_AF_CHILD_PGID="" FI_AF_ENGINE_ERR="" FI_AF_CHILD_TOKENS=0 FI_AF_VERDICT_OK=0 
 # While it runs, the repo lock is refreshed so a long run never looks stale.
 # The child never sees FI_AF_PID: inherited, a test that claims and cancels
 # an item in its own state recorded the real run's pid and TERMed it (3.0.3).
+# Nor CLAUDE_PROJECT_DIR (3.9.2): a hook-launched run inherits the session's,
+# the main checkout, which list/status prefer over the child's worktree cwd.
 # FI_AF_CHILD_TIMEDOUT holds the limit in seconds when the watchdog fired,
 # so a command that exits 124 on its own is not mistaken for it (3.4.2).
 fi_af_child() {
@@ -75,7 +77,7 @@ fi_af_child() {
   # PATH changes only inside the child's subshell, on purpose.
   # shellcheck disable=SC2030,SC2031
   if command -v perl >/dev/null 2>&1; then
-    ( cd "$cwd" && unset FI_AF_PID && PATH="${FI_BIN_DIR:+$FI_BIN_DIR:}$PATH" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' "$@" ) </dev/null >"$out" 2>"$err" &
+    ( cd "$cwd" && unset FI_AF_PID CLAUDE_PROJECT_DIR && PATH="${FI_BIN_DIR:+$FI_BIN_DIR:}$PATH" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec perl -e 'setpgrp(0, 0); exec { $ARGV[0] } @ARGV or exit 127' "$@" ) </dev/null >"$out" 2>"$err" &
     cpid=$!
     FI_AF_CHILD_PGID="$cpid"
     # autofix cancel (another process) needs the group to kill.
@@ -83,7 +85,7 @@ fi_af_child() {
       fi_af_item_set "$FI_AF_ST/running/$AFI_id" cpgid "$cpid" 2>/dev/null || true
     fi
   else
-    ( cd "$cwd" && unset FI_AF_PID && PATH="${FI_BIN_DIR:+$FI_BIN_DIR:}$PATH" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec "$@" ) </dev/null >"$out" 2>"$err" &
+    ( cd "$cwd" && unset FI_AF_PID CLAUDE_PROJECT_DIR && PATH="${FI_BIN_DIR:+$FI_BIN_DIR:}$PATH" && FOUND_ISSUES_AUTOFIX_CHILD=1 exec "$@" ) </dev/null >"$out" 2>"$err" &
     cpid=$!
   fi
   while kill -0 "$cpid" 2>/dev/null; do

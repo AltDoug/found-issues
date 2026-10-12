@@ -86,11 +86,12 @@ fi_af_diff() {
 # without the child marker fi_af_child sets, as a developer would run it.
 # Inherited, the marker turned every interactive-path session-start test in
 # this repo red, so every auto-fix of found-issues itself failed (3.0.2).
-# 3.9.2: CLAUDE_PROJECT_DIR goes too. A hook-launched run inherits the
-# session's (the main checkout, not the fix worktree), and this repo's
-# list/status tests resolve the ledger from it: 46 red at base.
+# 3.9.2: so does FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS. fi_af_child has read the
+# watchdog limit already; `fix ship` sets it for its gate, and inherited it
+# overrides the limit this repo's own readiness/watchdog tests compute.
+# (fi_af_child drops CLAUDE_PROJECT_DIR for every child, this one included.)
 fi_af_run_tests() {
-  fi_af_child "$3" "$3.err" "$1" bash -c "unset FOUND_ISSUES_AUTOFIX_CHILD CLAUDE_PROJECT_DIR; $2" || return $?
+  fi_af_child "$3" "$3.err" "$1" bash -c "unset FOUND_ISSUES_AUTOFIX_CHILD FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS; $2" || return $?
 }
 
 # 3.4.3: a red suite after a change is re-run once before it counts. A flaky

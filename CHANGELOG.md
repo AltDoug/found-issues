@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.2] - 2026-10-12
+
+Auto-fix runs a repo's tests the way a developer would, without the session's project directory.
+
+### Fixed
+- **A hook-launched auto-fix run no longer runs the repo's tests against the main checkout** (ledger `tests/cli-list.bats:28`). A run started from a Claude Code hook inherited the session's `CLAUDE_PROJECT_DIR`, which points at the main checkout, not the fix worktree. found-issues' own `list` and `status` resolve the ledger from it before the current directory, so their tests read the real ledger: a base run of this repo went 46 red while main CI and local runs passed, and every item retired `stale: tests fail at base`. Every auto-fix child (the test command at base, post-fix, sweep ship, retarget, readiness and `fix ship`, and the fixer, verifier and classifier) now runs without `CLAUDE_PROJECT_DIR`, so a `found-issues` call inside the fix worktree reads that worktree's ledger. The test helpers unset it too, so the suite is hermetic when run from a hook.
+- **`fix ship`'s gate limit no longer reaches the repo's tests.** `fix ship` sets `FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS` for its own 60-min gate, and the test command inherited it, overriding the limit this repo's readiness and watchdog tests compute. The test command now runs without it, as it already ran without `FOUND_ISSUES_AUTOFIX_CHILD`; the watchdog still applies the limit.
+
 ## [3.9.1] - 2026-10-12
 
 Sweeps get the superseded check: a sweep no longer ships a fix a live session already made.
