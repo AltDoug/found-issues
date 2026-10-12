@@ -37,8 +37,12 @@ COMMANDS
                                         Print counts (for statusline integration).
                                         --cwd overrides where to look for the issues file
                                         (defaults to \$CLAUDE_PROJECT_DIR or \$PWD).
-  annotate-pr <N> [--pick <loc>,...] [--all] [--hook-auto]
+  annotate-pr <N|org/repo#N> --pick <loc>,... | --all [--hook-auto]
                                         Annotate matching [open] entries with PR.
+                                        --pick is what closes: without it only
+                                        non-closing (PR-auto) suggestions are written.
+                                        A bare N follows the repo the picked entries'
+                                        paths sit in; org/repo#N requires --pick.
                                         Files cited by several entries need an explicit
                                         --pick (path:line list) or --all — file-level
                                         auto-match alone would over-annotate. A pick can

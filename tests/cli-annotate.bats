@@ -557,6 +557,90 @@ EOF
   unset GH_MOCK_PR_VIEW
 }
 
+# === annotate-pr: --pick is the primary form; a bare N follows the entry's repo (#168, 3.10.0) ===
+
+@test "annotate-pr: usage shows --pick as the closing form, not an optional extra" {
+  fi_run annotate-pr
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"annotate-pr <PR-number|org/repo#N> --pick <path:line>"* ]]
+  [[ "$output" != *"[--pick"* ]]
+  [[ "$output" == *"closes"* ]]
+  [[ "$output" == *"org/repo#N requires --pick"* ]]
+}
+
+# A ledger repo ($PARENT/ledger, origin acme/ledger) next to a sibling service
+# repo ($PARENT/svc, origin acme/svc). Leaves the shell in the ledger repo.
+_setup_sibling_repos() {
+  PARENT="$(cd "$(mktemp -d "$TMP/sib.XXXXXX")" && pwd -P)"
+  mkdir -p "$PARENT/ledger" "$PARENT/svc/src"
+  ( cd "$PARENT/svc" && git init -q -b main && git config user.email t@e.com && git config user.name T \
+      && git remote add origin https://github.com/acme/svc.git && echo x > src/x.sh )
+  cd "$PARENT/ledger"
+  git init -q -b main && git config user.email t@e.com && git config user.name T
+  git commit --allow-empty -q -m init
+  git remote add origin https://github.com/acme/ledger.git
+  fi_use_gh_shim
+  export GH_MOCK_PR_VIEW=$'5\tsrc/x.sh'
+  export GH_MOCK_TRACE="$PARENT/gh-trace.txt"
+}
+
+@test "annotate-pr: a bare N resolves against the repo a relative ../sibling entry path names" {
+  _setup_sibling_repos
+  fi_run log "../svc/src/x.sh:3 — sibling bug"
+  fi_run annotate-pr 5 --pick ../svc/src/x.sh:3
+  [ "$status" -eq 0 ]
+  grep -q '(PR: acme/svc#5)' docs/found-issues.md
+  grep -q -- '--repo acme/svc' "$GH_MOCK_TRACE"
+}
+
+@test "annotate-pr: a bare N resolves against the repo an absolute entry path sits in" {
+  _setup_sibling_repos
+  fi_run log "$PARENT/svc/src/x.sh:3 — sibling bug"
+  fi_run annotate-pr 5 --pick "$PARENT/svc/src/x.sh:3"
+  [ "$status" -eq 0 ]
+  grep -q '(PR: acme/svc#5)' docs/found-issues.md
+}
+
+@test "annotate-pr: a bare N for an entry inside the ledger repo still uses the ledger repo" {
+  _setup_sibling_repos
+  mkdir -p src && echo x > src/own.sh
+  fi_run log "src/own.sh:1 — own bug"
+  fi_run annotate-pr 5 --pick src/own.sh:1
+  [ "$status" -eq 0 ]
+  grep -q '(PR: acme/ledger#5)' docs/found-issues.md
+}
+
+@test "annotate-pr: picks spanning different repos are refused with the org/repo#N hint" {
+  _setup_sibling_repos
+  mkdir -p src && echo x > src/own.sh
+  fi_run log "src/own.sh:1 — own bug"
+  fi_run log "../svc/src/x.sh:3 — sibling bug"
+  fi_run annotate-pr 5 --pick src/own.sh:1,../svc/src/x.sh:3
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"org/repo#N"* ]]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "annotate-pr: org/repo#N still wins over the repo an entry path names" {
+  _setup_sibling_repos
+  fi_run log "../svc/src/x.sh:3 — sibling bug"
+  fi_run annotate-pr "acme/other#5" --pick ../svc/src/x.sh:3
+  [ "$status" -eq 0 ]
+  grep -q '(PR: acme/other#5)' docs/found-issues.md
+  run grep -q 'acme/svc' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "annotate-pr: a sibling repo with no GitHub origin is refused with the org/repo#N hint" {
+  _setup_sibling_repos
+  git -C "$PARENT/svc" remote remove origin
+  fi_run log "../svc/src/x.sh:3 — sibling bug"
+  fi_run annotate-pr 5 --pick ../svc/src/x.sh:3
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"org/repo#N"* ]]
+}
+
 @test "annotate-pr: malformed org/repo ref is rejected" {
   fi_run annotate-pr "acme/upstream#12x"
   [ "$status" -ne 0 ]
