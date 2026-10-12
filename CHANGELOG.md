@@ -20,6 +20,8 @@ Critical entries wait for a human, the end-of-turn check goes quiet, and fixes f
 - **`resolve --verified human` is read back** (#161). It wrote a token the parser ignored; `review` is now canonical and `human` is an alias for it.
 - **The SessionStart statusline check parses a quoted path with spaces** (#165), using the same parser as `doctor` and `install-statusline` (3.6.2).
 - **No `mktemp -t` left** (#174). The statusline install, uninstall and target code used it at 14 sites, which fails under a sandboxed macOS shell; temp files now go beside their target or in `${TMPDIR:-/tmp}`, and a test fails if `mktemp -t` comes back.
+- **A commit in another repository no longer annotates this ledger** (#166). The PostToolUse hook decided by the command text and only caught a leading `cd`/`pushd`; it now reads the sha git printed and annotates only a commit that exists in the ledger's repo (that exact sha, not HEAD), and with no sha it follows the payload's `cwd`, `cd`/`pushd` and `git -C`. `git -C <this repo> commit` and `git -c k=v commit`, which never reached the annotator before, now do.
+- **`annotate-pr` says `--pick` is what closes, and a bare `N` follows the picked entry's repo** (#168). The usage and `--help` show `--pick` as the closing form. A bare PR number is looked up in the git repository that contains the picked entry's path (a `../sibling/` or absolute path) when that is not the ledger's repo; picks spanning repos, or a sibling with no GitHub origin, are refused with a hint to pass `org/repo#N`.
 - **The Stop hook finds a marker anywhere in the current turn** (#167), not just in the last 8 KB of the transcript, so a verbose turn that wrote it early is not asked again.
 
 ## [3.9.3] - 2026-10-12
