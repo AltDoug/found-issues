@@ -68,6 +68,14 @@ _fi_annotate_pick_repo() {
       top="$ledger_top"
     else
       top="$(cd "$top" && pwd -P)"
+      # A submodule of the ledger repo is part of it, not another repo (its
+      # origin is not where this ledger's PRs live).
+      local sp
+      while [[ "$top" != "$ledger_top" ]]; do
+        sp="$(git -C "$top" rev-parse --show-superproject-working-tree 2>/dev/null)" || sp=""
+        [[ -n "$sp" ]] || break
+        top="$(cd "$sp" && pwd -P)"
+      done
     fi
     if [[ "$top" == "$ledger_top" ]]; then
       id="$here_id"

@@ -622,6 +622,21 @@ _setup_sibling_repos() {
   [ "$status" -ne 0 ]
 }
 
+@test "annotate-pr: a bare N for an entry inside a submodule of the ledger repo uses the ledger repo" {
+  _setup_sibling_repos
+  ( cd "$PARENT/svc" && git add -A && git commit -q -m init )
+  git -c protocol.file.allow=always submodule add -q "$PARENT/svc" vendor/lib
+  git commit -q -m "add submodule"
+  fi_run log "vendor/lib/src/x.sh:3 — submodule bug"
+  fi_run annotate-pr 5 --pick vendor/lib/src/x.sh:3
+  [ "$status" -eq 0 ]
+  grep -q '(PR: acme/ledger#5)' docs/found-issues.md
+  run grep -q 'acme/svc' "$GH_MOCK_TRACE"
+  [ "$status" -ne 0 ]
+  run grep -q 'acme/svc#' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
 @test "annotate-pr: org/repo#N still wins over the repo an entry path names" {
   _setup_sibling_repos
   fi_run log "../svc/src/x.sh:3 — sibling bug"
