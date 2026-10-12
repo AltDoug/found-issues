@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.3] - 2026-10-12
+
+Auto-fix runs a repo's tests on the caller's PATH.
+
+### Fixed
+- **The repo test command no longer runs the installed CLI ahead of the worktree's** (ledger `lib/autofix-engine.sh:80`). Every auto-fix child puts the plugin's own `bin` first on PATH so the fixer can call `found-issues`, and the test command inherited that order. In an auto-fix of found-issues itself, a test or hook script that finds `found-issues` via PATH (`session-start.sh` does) ran the installed release instead of the worktree's `bin/found-issues`, so a fix could look red or green depending on which version was installed. The test command (at base, after a fix, at sweep ship, retarget, readiness and `fix ship`) now runs on the PATH auto-fix was started with, also when a fixer calls `autofix test` from inside its own run (launcher B), where the plugin bin was already first; the fixer, verifier and classifier keep the plugin bin first.
+
 ## [3.9.2] - 2026-10-12
 
 Auto-fix runs a repo's tests the way a developer would, without the session's project directory.

@@ -231,6 +231,17 @@ teardown() { fi_teardown_tmp; }
   grep -q 'cpd=\[\]' "$TMP/o"
 }
 
+@test "autofix engine: children record the outermost caller's PATH once" {
+  local orig="$PATH"
+  run fi_af_child "$TMP/o" "$TMP/e" "$TMP" sh -c 'echo "caller=[$FI_AF_CALLER_PATH]"; echo "first=[${PATH%%:*}]"'
+  [ "$status" -eq 0 ]
+  grep -qF "caller=[$orig]" "$TMP/o"
+  grep -qF "first=[$FI_BIN_DIR]" "$TMP/o"
+  FI_AF_CALLER_PATH="$TMP/outer" run fi_af_child "$TMP/o" "$TMP/e" "$TMP" sh -c 'echo "caller=[$FI_AF_CALLER_PATH]"'
+  [ "$status" -eq 0 ]
+  grep -qF "caller=[$TMP/outer]" "$TMP/o"
+}
+
 @test "autofix engine: the watchdog kills a hung child with 124" {
   FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS=1 run fi_af_child "$TMP/o" "$TMP/e" "$TMP" sleep 30
   [ "$status" -eq 124 ]

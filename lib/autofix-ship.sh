@@ -90,8 +90,12 @@ fi_af_diff() {
 # watchdog limit already; `fix ship` sets it for its gate, and inherited it
 # overrides the limit this repo's own readiness/watchdog tests compute.
 # (fi_af_child drops CLAUDE_PROJECT_DIR for every child, this one included.)
+# 3.9.3: and it runs on the caller's PATH (FI_AF_CALLER_PATH when a fixer
+# called us from inside a child). fi_af_child puts the plugin bin first for
+# the engine; in an auto-fix of found-issues itself that made any test finding
+# found-issues via PATH run the installed CLI, not the worktree's.
 fi_af_run_tests() {
-  fi_af_child "$3" "$3.err" "$1" bash -c "unset FOUND_ISSUES_AUTOFIX_CHILD FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS; $2" || return $?
+  fi_af_child "$3" "$3.err" "$1" bash -c "unset FOUND_ISSUES_AUTOFIX_CHILD FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS FI_AF_CALLER_PATH; PATH=$(printf '%q' "${FI_AF_CALLER_PATH:-$PATH}"); $2" || return $?
 }
 
 # 3.4.3: a red suite after a change is re-run once before it counts. A flaky
