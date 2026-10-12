@@ -158,6 +158,8 @@ fi_af_log() {
 fi_af_queue_spot() {
   local entry="$1" slug root key engine f
   fi_af_enabled || return 0
+  # 3.10.0: a held entry waits for a human; auto-fix never takes it.
+  fi_parse_entry_vars "$entry" && [[ -n "$FE_hold" ]] && return 0
   slug="$(fi_repo_id 2>/dev/null)" || return 0
   fi_repo_root_cached
   root="$FI_REPO_ROOT"
@@ -377,6 +379,9 @@ fi_af_eligible() {
   fi
   if [[ -n "$FE_autofix_failed" ]]; then
     FI_AF_WHY="auto-fix failed before: $FE_autofix_failed"; return 1
+  fi
+  if [[ -n "$FE_hold" ]]; then
+    FI_AF_WHY="entry is on hold: $FE_hold"; return 1
   fi
   local fixable=""
   case "$FE_fixtag" in small|medium) fixable=1 ;; esac
@@ -986,16 +991,21 @@ _fi_af_ledger_swap() {
 # critical or (hold: ...) entry, which waits for a human like sync's holds;
 # a critical one gains the same (hold: needs human verify) marker.
 fi_af_ledger_resolve() {
+  local cr="" line
   fi_af_find_entry || return 1
-  if [[ "$FI_AF_ENTRY" == *" (hold: "* ]]; then
-    return 0
-  fi
-  if [[ "$FI_AF_ENTRY" == "- [open] [!] "* ]]; then
-    _fi_af_ledger_swap "$FI_AF_LEDGER" "$FI_AF_ENTRY" "$FI_AF_ENTRY (hold: needs human verify)"
+  # A CRLF ledger: work on the line without its CR and put it back, so an
+  # appended group lands before it (mirrors lib/sync.sh's hold code).
+  line="$FI_AF_ENTRY"
+  [[ "$line" == *$'\r' ]] && { cr=$'\r'; line="${line%$'\r'}"; }
+  # FE_hold comes from the annotation tail, not a substring of the line.
+  fi_parse_entry_vars "$line" || return 1
+  [[ -z "$FE_hold" ]] || return 0
+  if [[ "$FE_critical" == "yes" ]]; then
+    _fi_af_ledger_swap "$FI_AF_LEDGER" "$FI_AF_ENTRY" "$line (hold: needs human verify)$cr"
     return
   fi
   _fi_af_ledger_swap "$FI_AF_LEDGER" "$FI_AF_ENTRY" \
-    "- [fixed]${FI_AF_ENTRY#- \[open\]} (verified: ai) (fixed: $(fi_today))"
+    "- [fixed]${line#- \[open\]} (verified: ai) (fixed: $(fi_today))$cr"
 }
 
 # The ledger side of an outcome for the loaded entry (AFI_key): resolve,
