@@ -80,13 +80,33 @@ push_change() {
   [ "$(fi_af_timeout_secs "$REPO")" = 1200 ]
 }
 
-@test "readiness: a record older than a week is ignored" {
+@test "readiness: a red run sizes the limit too" {
   source "$FI_BIN"; fi_af_context
-  fi_af_ready_write "$REPO" green 3000 "sh test.sh"
+  fi_af_ready_write "$REPO" red 2562 "sh test.sh"
+  [ "$(fi_af_timeout_secs "$REPO")" = 5160 ]
+}
+
+@test "readiness: a record older than a week still sizes the limit but no longer gates" {
+  source "$FI_BIN"; fi_af_context
+  fi_af_ready_write "$REPO" timeout 7200 "sh test.sh"
+  fi_af_ready_ok "$REPO" && false
   fi_af_stuck_key "$REPO"
   f="$FI_AF_ROOT/ready/$FI_AF_KEY"
   sed -i.bak "3s/.*/$(( $(date +%s) - 8 * 86400 ))/" "$f"; rm -f "$f.bak"
-  [ "$(fi_af_timeout_secs "$REPO")" = 1200 ]
+  [ "$(fi_af_timeout_secs "$REPO")" = 7200 ]
+  fi_af_ready_ok "$REPO"
+  run "$FI_BIN" autofix ready
+  [[ "$output" == *"over a week old"* ]]
+  [[ "$output" == *"verdict: ready"* ]]
+}
+
+@test "readiness: a base run that passed only on its re-run records one run's time" {
+  git config found-issues.autofix.testCommand "sleep 2; if [ -f '$TMP/flaked' ]; then exit 0; fi; : > '$TMP/flaked'; exit 1"
+  fi_af_queue_fixture
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  fi_af_ready_read "$REPO"
+  [ "$FI_AF_RD_STATUS" = green ]
+  (( FI_AF_RD_SECS >= 1 && FI_AF_RD_SECS <= 3 ))
 }
 
 @test "readiness: a base timeout at the limit gates the queue until the limit can grow" {
@@ -188,6 +208,42 @@ EOF
   grep -Eq '^result=stale: superseded: src/calc.sh changed on main since [0-9a-f]{7}$' "$ST/done/$ID"
   # the fixer never ran: the stand-in engine left no trace
   [ ! -s "$FI_STANDIN_TRACE" ]
+}
+
+@test "superseded: a change far from the cited line does not retire the item" {
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do printf '# filler %s\n' "$i" >>src/calc.sh; done
+  git commit -qam filler && git push -q origin main
+  fi_af_queue_fixture; ST="$FI_AF_ST"
+  "$FI_BIN" autofix claim "$ID" >/dev/null
+  WT="$REPO/.claude/worktrees/fi-autofix-$ID"
+  sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"
+  "$FI_BIN" autofix verify "$ID" >/dev/null
+  rm -rf "$TMP/other-clone"
+  git clone -q "$TMP/remote.git" "$TMP/other-clone"
+  sed -i.bak 's/^# filler 20$/# filler twenty/' "$TMP/other-clone/src/calc.sh"; rm -f "$TMP/other-clone/src/calc.sh.bak"
+  git -C "$TMP/other-clone" -c user.email=o@x -c user.name=o commit -qam "far edit"
+  git -C "$TMP/other-clone" push -q origin main
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR #7"* ]]
+}
+
+@test "superseded: a path:name entry counts a changed line naming it; a bare path counts any change" {
+  source "$FI_BIN"; fi_af_context
+  printf 'wm_check() { :; }\nother() { :; }\n' > src/w.sh
+  git add -A && git commit -qm w && git push -q origin main
+  AFI_root="$REPO" AFI_base=main AFI_base_sha="$(git rev-parse HEAD)"
+  rm -rf "$TMP/other-clone"; git clone -q "$TMP/remote.git" "$TMP/other-clone"
+  sed -i.bak 's/^other() { :; }$/other() { true; }/' "$TMP/other-clone/src/w.sh"; rm -f "$TMP/other-clone/src/w.sh.bak"
+  git -C "$TMP/other-clone" -c user.email=o@x -c user.name=o commit -qam "edit other"
+  git -C "$TMP/other-clone" push -q origin main
+  AFI_loc="src/w.sh:wm_check"
+  fi_af_superseded && false
+  AFI_loc="src/w.sh:other"
+  fi_af_superseded
+  [[ "$FI_AF_WHY" == "superseded: src/w.sh changed on main since "* ]]
+  AFI_loc="src/w.sh"
+  fi_af_superseded
 }
 
 @test "superseded: a topic entry (no file) is never superseded" {

@@ -328,7 +328,7 @@ fi_af_stuck_clear() {
 # 3.9.0: the run limit doctor shows is the one runs get (lib/autofix-ready.sh).
 _fi_af_limit_min() {
   local s
-  s="$(fi_af_timeout_secs)"
+  s="$(fi_af_timeout_secs "$(git rev-parse --show-toplevel 2>/dev/null || true)")"
   if [[ "$s" =~ ^[0-9]+$ ]]; then printf '%s' "$(( (10#$s + 59) / 60 ))"; else printf '%s' "$s"; fi
 }
 

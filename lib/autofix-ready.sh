@@ -45,12 +45,13 @@ fi_af_ready_write() {
   return 0
 }
 
-# Sets FI_AF_RD_STATUS / _SECS / _TS / _CMD. rc 1 when there is no usable
-# record: none, malformed, older than FI_AF_READY_MAX_AGE, or (with <cmd>)
-# measured for another test command.
+# Sets FI_AF_RD_STATUS / _SECS / _TS / _CMD, and FI_AF_RD_OLD=1 for a record
+# older than FI_AF_READY_MAX_AGE (it still sizes the limit, a suite does not
+# shrink by itself, but it no longer gates). rc 1 when there is no usable
+# record: none, malformed, or (with <cmd>) measured for another test command.
 fi_af_ready_read() {
   local root="$1" f
-  FI_AF_RD_STATUS="" FI_AF_RD_SECS="" FI_AF_RD_TS="" FI_AF_RD_CMD=""
+  FI_AF_RD_STATUS="" FI_AF_RD_SECS="" FI_AF_RD_TS="" FI_AF_RD_CMD="" FI_AF_RD_OLD=""
   [[ -n "$root" ]] || return 1
   fi_af_root
   fi_af_stuck_key "$root"
@@ -60,7 +61,7 @@ fi_af_ready_read() {
     IFS= read -r FI_AF_RD_TS || true; IFS= read -r FI_AF_RD_CMD || true; } <"$f"
   case "$FI_AF_RD_STATUS" in green|red|timeout) ;; *) return 1 ;; esac
   [[ "$FI_AF_RD_SECS" =~ ^[0-9]+$ && "$FI_AF_RD_TS" =~ ^[0-9]+$ ]] || return 1
-  (( $(date +%s) - 10#$FI_AF_RD_TS <= FI_AF_READY_MAX_AGE )) || return 1
+  (( $(date +%s) - 10#$FI_AF_RD_TS <= FI_AF_READY_MAX_AGE )) || FI_AF_RD_OLD=1
   if [[ $# -ge 2 && "$FI_AF_RD_CMD" != "$(_fi_af_ready_cmd "$2")" ]]; then return 1; fi
   return 0
 }
@@ -68,7 +69,8 @@ fi_af_ready_read() {
 # The watchdog limit in seconds for one child of a run in <root> (<dir>
 # finds the test command; default the root). FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS
 # wins; otherwise runTimeoutMin is a floor and the measurement may raise it,
-# up to the cap: twice a green suite, or twice the limit a timed-out one hit.
+# up to the cap: twice a suite that ran to the end (green or red: a red run
+# measures the suite as well), or twice the limit a timed-out one hit.
 fi_af_timeout_secs() {
   local root="${1:-}" dir="${2:-${1:-}}" lim cap auto=0 cmd
   if [[ -n "${FOUND_ISSUES_AUTOFIX_TIMEOUT_SECS:-}" ]]; then
@@ -80,7 +82,7 @@ fi_af_timeout_secs() {
   [[ -n "$root" ]] || root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || true)"
   if [[ -n "$root" ]] && cmd="$(fi_af_test_command "$dir" 2>/dev/null)" && fi_af_ready_read "$root" "$cmd"; then
     case "$FI_AF_RD_STATUS" in
-      green) auto=$(( (2 * 10#$FI_AF_RD_SECS + 59) / 60 * 60 )) ;;
+      green|red) auto=$(( (2 * 10#$FI_AF_RD_SECS + 59) / 60 * 60 )) ;;
       timeout) auto=$(( 2 * 10#$FI_AF_RD_SECS )) ;;
     esac
     (( auto <= cap )) || auto=$cap
@@ -109,7 +111,7 @@ fi_af_ready_ok() {
   FI_AF_WHY=""
   cmd="$(fi_af_test_command "$root" 2>/dev/null)" || return 0
   fi_af_ready_read "$root" "$cmd" || return 0
-  [[ "$FI_AF_RD_STATUS" == timeout ]] || return 0
+  [[ "$FI_AF_RD_STATUS" == timeout && -z "$FI_AF_RD_OLD" ]] || return 0
   lim="$(fi_af_timeout_secs "$root")"
   [[ "$lim" =~ ^[0-9]+$ ]] || return 0
   (( 10#$lim > 10#$FI_AF_RD_SECS )) && return 0
@@ -125,10 +127,11 @@ fi_af_ready_line() {
   fi_af_enabled >/dev/null 2>&1 || return 0
   file="$(fi_find_issues_file "$root" 2>/dev/null)" || return 0
   [[ -f "$file" ]] || return 0
-  # Something auto-fix could take: a (fix: ...) entry, or an untagged one a
-  # sweep would classify. Entries tagged manual or decide never reach it.
+  # Something auto-fix could take: a (fix: small|medium) entry, or an untagged
+  # one a sweep would classify. Manual, decide, fix-large and autofix-failed
+  # entries never reach it.
   # One process, no pipe: under pipefail an early-exiting reader can fail it.
-  awk '/^- \[open\]/ && !/\(manual: / && !/\(decide: / { f = 1; exit } END { exit !f }' "$file" 2>/dev/null || return 0
+  awk '/^- \[open\]/ && !/\((manual|decide): / && !/\(fix: large\)/ && !/autofix-failed/ { f = 1; exit } END { exit !f }' "$file" 2>/dev/null || return 0
   if ! fi_af_test_command "$root" >/dev/null 2>&1; then
     printf '%s\n' 'Auto-fix is waiting in this repo: no test command, so none of its open entries gets queued. Set one with found-issues config autofix.testCommand "<cmd>", or switch auto-fix off here with found-issues config autofix false.'
     return 0
@@ -155,6 +158,7 @@ fi_af_ready_report() {
       red) printf 'last base run: red after %s (%s)\n' "$(_fi_af_ready_dur "$FI_AF_RD_SECS")" "$(fi_af_fmt_epoch "$FI_AF_RD_TS")" ;;
       timeout) printf 'last base run: timed out at the %s limit (%s)\n' "$(_fi_af_ready_lim "$FI_AF_RD_SECS")" "$(fi_af_fmt_epoch "$FI_AF_RD_TS")" ;;
     esac
+    [[ -z "$FI_AF_RD_OLD" ]] || printf '  (over a week old: it still sizes the run limit, but no longer gates the queue)\n'
   else
     printf 'last base run: never\n'
   fi
@@ -178,20 +182,47 @@ fi_af_fmt_epoch() {
 }
 
 # Ledger lib/autofix-ship.sh:206 (operator go 2026-10-12, recommended
-# variant): rc 0 (FI_AF_WHY set) when the spot item's cited file changed on
-# origin/<base> since the commit the run was cut from, i.e. a live session
-# worked on it meanwhile (kh2-midgar#19 shipped a fix 6cdefeb had made).
+# variant): rc 0 (FI_AF_WHY set) when origin/<base> changed the cited code
+# since the commit the run was cut from, i.e. a live session worked on it
+# meanwhile (kh2-midgar#19 shipped a fix 6cdefeb had made). path:line(-line)
+# counts only a change within FI_AF_SUPERSEDED_NEAR lines of the cited ones,
+# so another entry's fix elsewhere in the file does not retire this one;
+# path:name counts a changed line naming it; a bare path counts any change.
 # A topic entry, a path not in the base, or any git failure: not superseded.
+FI_AF_SUPERSEDED_NEAR="${FI_AF_SUPERSEDED_NEAR:-3}"
 fi_af_superseded() {
-  local p rc=0
+  local loc="${AFI_loc:-}" p="" l1="" l2="" name="" rc=0 hit=0 line a b hi
+  local re_line='^(.+):([0-9]+)(-([0-9]+))?$' re_hunk='^@@ -([0-9]+)(,([0-9]+))? '
   FI_AF_WHY=""
-  [[ -n "${AFI_root:-}" && -n "${AFI_base:-}" && -n "${AFI_base_sha:-}" && "${AFI_loc:-}" == *:* ]] || return 1
-  p="${AFI_loc%:*}"
+  [[ -n "${AFI_root:-}" && -n "${AFI_base:-}" && -n "${AFI_base_sha:-}" && -n "$loc" ]] || return 1
+  if [[ "$loc" =~ $re_line ]]; then
+    p="${BASH_REMATCH[1]}" l1="${BASH_REMATCH[2]}" l2="${BASH_REMATCH[4]:-${BASH_REMATCH[2]}}"
+  elif [[ "$loc" == *:* ]]; then
+    p="${loc%:*}" name="${loc##*:}"
+  else
+    p="$loc"
+  fi
   [[ -n "$p" && "$p" != *found-issues*.md ]] || return 1
   git -C "$AFI_root" cat-file -e "$AFI_base_sha:$p" 2>/dev/null || return 1
   git -C "$AFI_root" fetch -q origin "$AFI_base" >/dev/null 2>&1 || return 1
   git -C "$AFI_root" diff --quiet "$AFI_base_sha" "origin/$AFI_base" -- "$p" >/dev/null 2>&1 || rc=$?
   (( rc == 1 )) || return 1
+  if [[ -n "$l1$name" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ -n "$l1" ]]; then
+        [[ "$line" =~ $re_hunk ]] || continue
+        a="${BASH_REMATCH[1]}" b="${BASH_REMATCH[3]:-1}"
+        hi=$(( 10#$a + (10#$b > 0 ? 10#$b - 1 : 0) ))
+        if (( 10#$a - FI_AF_SUPERSEDED_NEAR <= 10#$l2 && hi + FI_AF_SUPERSEDED_NEAR >= 10#$l1 )); then hit=1; break; fi
+      else
+        case "$line" in
+          "+++"*|"---"*) ;;
+          [+-]*"$name"*) hit=1; break ;;
+        esac
+      fi
+    done < <(git -C "$AFI_root" diff -U0 "$AFI_base_sha" "origin/$AFI_base" -- "$p" 2>/dev/null || true)
+    (( hit )) || return 1
+  fi
   FI_AF_WHY="superseded: $p changed on $AFI_base since ${AFI_base_sha:0:7}"
   return 0
 }

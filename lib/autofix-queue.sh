@@ -610,12 +610,16 @@ fi_af_base_tests() {
     return 1
   fi
   # A red base is re-run once (fi_af_tests_pass): a flake is not red.
-  local t0; t0="$(date +%s)"
+  local t0 took; t0="$(date +%s)"
+  rm -f "${log%.log}.first.log" 2>/dev/null || true
   fi_af_tests_pass "$AFI_wt" "$t" "$log" || rc=$?
-  # 3.9.0: the repo's readiness record (lib/autofix-ready.sh).
-  if (( rc == 0 )); then fi_af_ready_write "$AFI_root" green "$(( $(date +%s) - t0 ))" "$t"
+  # 3.9.0: the repo's readiness record (lib/autofix-ready.sh). A re-run after
+  # a failure (a .first.log) ran the suite twice: record one run's time.
+  took=$(( $(date +%s) - t0 ))
+  [[ -f "${log%.log}.first.log" ]] && took=$(( took / 2 ))
+  if (( rc == 0 )); then fi_af_ready_write "$AFI_root" green "$took" "$t"
   elif [[ -n "${FI_AF_CHILD_TIMEDOUT:-}" ]]; then fi_af_ready_write "$AFI_root" timeout "$FI_AF_CHILD_TIMEDOUT" "$t"
-  else fi_af_ready_write "$AFI_root" red "$(( $(date +%s) - t0 ))" "$t"; fi
+  else fi_af_ready_write "$AFI_root" red "$took" "$t"; fi
   git -C "$AFI_wt" reset -q --hard "${AFI_base_sha:-HEAD}" >/dev/null 2>&1 || true
   git -C "$AFI_wt" clean -qfd >/dev/null 2>&1 || true
   # A green base is what ends a STUCK streak (besides switch-off and the
