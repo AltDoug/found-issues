@@ -26,7 +26,7 @@ found-issues defer <match> [--reason "<text>"] [--mute-until YYYY-MM-DD] [--unti
 ## When to use defer
 
 - **Out-of-scope but real**: a logged issue is genuine but you've decided not to address it in the current cycle (e.g., behind another work stream, blocked on external dep, low-priority cleanup).
-- **NOT for "this isn't a real issue"**: do not defer those. Close them through the CLI (`found-issues resolve <match> --verified human`) instead of editing the file by hand. A wrong `(PR: ...)` or `(commit: ...)` annotation is undone with `found-issues unannotate <match> <ref>`, never by hand.
+- **NOT for "this isn't a real issue"**: do not defer those. Close them through the CLI (`found-issues resolve <match> --verified review`) instead of editing the file by hand. A wrong `(PR: ...)` or `(commit: ...)` annotation is undone with `found-issues unannotate <match> <ref>`, never by hand.
 - **NOT for in-flight PRs**: the plugin auto-flips entries to `[fixed]` when the referenced PR merges via `/found-issues:sync`. Defer would interfere.
 
 ## Re-defer behavior

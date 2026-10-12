@@ -46,14 +46,42 @@ teardown() {
   grep -q '^- \[fixed\].*(verified: ai)' docs/found-issues.md
 }
 
-@test "resolve: --verified human records a human verdict" {
+@test "resolve: --verified human is an alias that records review" {
   mkdir -p src
   printf 'a\nb\nc\n' > src/foo.py
   fi_run log "src/foo.py:2 — null deref"
 
   fi_run resolve "null deref" --verified human
   [ "$status" -eq 0 ]
-  grep -q '(verified: human)' docs/found-issues.md
+  grep -q "(verified: review)" docs/found-issues.md
+}
+
+@test "resolve: --verified review is accepted and recorded" {
+  mkdir -p src
+  printf 'a\nb\nc\n' > src/foo.py
+  fi_run log "src/foo.py:2 — null deref"
+
+  fi_run resolve "null deref" --verified review
+  [ "$status" -eq 0 ]
+  grep -q "(verified: review)" docs/found-issues.md
+}
+
+@test "resolve: a human-resolved entry is read back as verified review" {
+  mkdir -p src
+  printf 'a\nb\nc\n' > src/foo.py
+  fi_run log "src/foo.py:2 — null deref"
+  fi_run resolve "null deref" --verified human
+  [ "$status" -eq 0 ]
+
+  fi_run list --status=all --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"verified":"review"'* ]]
+}
+
+@test "resolve: usage lists ai|review|human" {
+  fi_run resolve --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ai|review|human"* ]]
 }
 
 @test "resolve: rejects an unknown --verified value" {

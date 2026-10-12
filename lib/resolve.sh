@@ -55,7 +55,7 @@ cmd_resolve() {
       --deferred) status="deferred"; shift ;;
       -h|--help)
         printf 'Usage: found-issues resolve <match>   OR   --match <match>\n'
-        printf '       [--verified ai|human]   (default: ai)\n'
+        printf '       [--verified ai|review|human]   (default: ai; human is an alias for review)\n'
         printf '       [--deferred]   close a [deferred] entry instead of an [open] one\n'
         return 0
         ;;
@@ -72,15 +72,19 @@ cmd_resolve() {
 
   if [[ -z "$match" ]]; then
     fi_err "resolve: missing <match> argument"
-    fi_err "Usage: found-issues resolve <match> [--verified ai|human]   OR   --match <match>"
+    fi_err "Usage: found-issues resolve <match> [--verified ai|review|human]   OR   --match <match>"
     return 2
   fi
 
-  # Only two verdict sources are meaningful: an agent that read the code, or a
-  # human who confirmed it. Anything else would land in the ledger as an
-  # unrecognized annotation and drift the format.
-  if [[ "$verified" != "ai" && "$verified" != "human" ]]; then
-    fi_err "resolve: --verified must be 'ai' or 'human', got: $verified"
+  # Only two verdict sources are meaningful: an agent that read the code (ai),
+  # or a human who confirmed it (review). The parser and the format spec read
+  # exactly ai|review, so `human` is accepted as an alias and written as
+  # `review` -- it used to be written verbatim and the reader ignored it
+  # (#161). Anything else would land in the ledger as an unrecognized
+  # annotation and drift the format.
+  if [[ "$verified" == "human" ]]; then verified="review"; fi
+  if [[ "$verified" != "ai" && "$verified" != "review" ]]; then
+    fi_err "resolve: --verified must be 'ai', 'review' or 'human', got: $verified"
     return 2
   fi
 
