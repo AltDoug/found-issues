@@ -143,6 +143,14 @@ tap_fail_cmd() {
   [[ "$output" == *"tests: pass"* ]]
 }
 
+@test "b: the repo test command runs without the session's CLAUDE_PROJECT_DIR" {
+  git -C "$REPO" config found-issues.autofix.testCommand '[ -z "${CLAUDE_PROJECT_DIR:-}" ]'
+  claim
+  CLAUDE_PROJECT_DIR="$REPO" run "$FI_BIN" autofix test "$ID"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tests: pass"* ]]
+}
+
 @test "b: test lists every failing TAP test with its diagnostics, not just the tail" {
   git -C "$REPO" config found-issues.autofix.testCommand "$(tap_fail_cmd)"
   claim
