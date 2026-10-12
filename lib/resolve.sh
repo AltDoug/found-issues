@@ -33,6 +33,8 @@
 #   2 usage error, bad --verified value, or ambiguous match
 #   3 entry is already [fixed]
 #   4 entry has an active (PR: ...) annotation
+#   (2 also covers an entry carrying a (hold: ...) marker resolved without
+#   --verified review: a hold reserves the closure for a human)
 #
 # --deferred (3.6.0) targets [deferred] entries instead: sync's deferred
 # review closes the ones whose symptom is gone or whose subject no longer
@@ -140,10 +142,18 @@ cmd_resolve() {
   # such entries from AI verification. Same refusal `defer` makes.
   #
   # Exception: a (hold: ...) entry. Sync will never flip it when the PR merges
-  # (that is what the hold is for), so resolve is its only way out.
+  # (that is what the hold is for), so resolve --verified review is its only
+  # way out.
   local re_pr='\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)'
   local held_target=0
   if fi_parse_entry_vars "$target" && [[ -n "$FE_hold" ]]; then held_target=1; fi
+  # A hold reserves the closure for a human. `ai` (the default) is an agent's
+  # verdict, so it must not release a hold: refuse before touching the ledger.
+  if (( held_target )) && [[ "$verified" != "review" ]]; then
+    fi_err "resolve: entry is on hold (hold: $FE_hold) and waits for a human."
+    fi_err "Re-check the code, then close it with: found-issues resolve <match> --verified review"
+    return 2
+  fi
   if (( ! held_target )) && [[ "$target" =~ $re_pr ]]; then
     local pr_match="${BASH_REMATCH[0]}"
     fi_err "resolve: entry has an active PR annotation $pr_match."

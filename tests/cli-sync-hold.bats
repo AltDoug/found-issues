@@ -211,3 +211,43 @@ seed_removed_file() {
   fi_run resolve "in flight" --verified review
   [ "$status" -eq 4 ]
 }
+
+# A hold reserves the closure for a human: the default verifier (ai) and an
+# explicit ai are refused, and the ledger is left byte-identical.
+@test "hold: resolve with the default verifier refuses a held entry and leaves the ledger alone" {
+  mkdir -p docs
+  printf -- '- [open] [!] 2026-05-01 src/a.sh:10 — held critical (PR: acme/r#5) (hold: needs human verify)\n' > docs/found-issues.md
+  cp docs/found-issues.md before.md
+  fi_run resolve "held critical"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--verified review"* ]]
+  cmp docs/found-issues.md before.md
+}
+
+@test "hold: resolve --verified ai refuses a held entry and leaves the ledger alone" {
+  mkdir -p docs
+  printf -- '- [open] 2026-05-01 src/a.sh:10 — held plain (hold: waiting on QA)\n' > docs/found-issues.md
+  cp docs/found-issues.md before.md
+  fi_run resolve "held plain" --verified ai
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--verified review"* ]]
+  cmp docs/found-issues.md before.md
+}
+
+@test "hold: resolve --verified human closes a held entry as review and drops the hold" {
+  mkdir -p docs
+  printf -- '- [open] 2026-05-01 src/a.sh:10 — held plain (hold: waiting on QA)\n' > docs/found-issues.md
+  fi_run resolve "held plain" --verified human
+  [ "$status" -eq 0 ]
+  grep -q '^- \[fixed\] .*held plain.*(verified: review) (fixed: ' docs/found-issues.md
+  run grep -c '(hold: ' docs/found-issues.md
+  [ "$output" = "0" ]
+}
+
+@test "hold: resolve with the default verifier still closes a non-held entry" {
+  mkdir -p docs
+  printf -- '- [open] 2026-05-01 src/a.sh:10 — plain thing\n' > docs/found-issues.md
+  fi_run resolve "plain thing"
+  [ "$status" -eq 0 ]
+  grep -q '^- \[fixed\] .*plain thing.*(verified: ai) (fixed: ' docs/found-issues.md
+}
