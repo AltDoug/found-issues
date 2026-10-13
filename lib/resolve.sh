@@ -33,6 +33,8 @@
 #   2 usage error, bad --verified value, or ambiguous match
 #   3 entry is already [fixed]
 #   4 entry has an active (PR: ...) annotation
+#   (2 also covers an entry carrying a (hold: ...) marker resolved without
+#   --verified review: a hold reserves the closure for a human)
 #
 # --deferred (3.6.0) targets [deferred] entries instead: sync's deferred
 # review closes the ones whose symptom is gone or whose subject no longer
@@ -55,7 +57,7 @@ cmd_resolve() {
       --deferred) status="deferred"; shift ;;
       -h|--help)
         printf 'Usage: found-issues resolve <match>   OR   --match <match>\n'
-        printf '       [--verified ai|human]   (default: ai)\n'
+        printf '       [--verified ai|review|human]   (default: ai; human is an alias for review)\n'
         printf '       [--deferred]   close a [deferred] entry instead of an [open] one\n'
         return 0
         ;;
@@ -72,15 +74,19 @@ cmd_resolve() {
 
   if [[ -z "$match" ]]; then
     fi_err "resolve: missing <match> argument"
-    fi_err "Usage: found-issues resolve <match> [--verified ai|human]   OR   --match <match>"
+    fi_err "Usage: found-issues resolve <match> [--verified ai|review|human]   OR   --match <match>"
     return 2
   fi
 
-  # Only two verdict sources are meaningful: an agent that read the code, or a
-  # human who confirmed it. Anything else would land in the ledger as an
-  # unrecognized annotation and drift the format.
-  if [[ "$verified" != "ai" && "$verified" != "human" ]]; then
-    fi_err "resolve: --verified must be 'ai' or 'human', got: $verified"
+  # Only two verdict sources are meaningful: an agent that read the code (ai),
+  # or a human who confirmed it (review). The parser and the format spec read
+  # exactly ai|review, so `human` is accepted as an alias and written as
+  # `review` -- it used to be written verbatim and the reader ignored it
+  # (#161). Anything else would land in the ledger as an unrecognized
+  # annotation and drift the format.
+  if [[ "$verified" == "human" ]]; then verified="review"; fi
+  if [[ "$verified" != "ai" && "$verified" != "review" ]]; then
+    fi_err "resolve: --verified must be 'ai', 'review' or 'human', got: $verified"
     return 2
   fi
 
@@ -134,8 +140,21 @@ cmd_resolve() {
   # An active (PR: ...) annotation means in-flight work. Closing it by hand
   # races the PR-merge flip that `sync` performs, and sync.md already excludes
   # such entries from AI verification. Same refusal `defer` makes.
+  #
+  # Exception: a (hold: ...) entry. Sync will never flip it when the PR merges
+  # (that is what the hold is for), so resolve --verified review is its only
+  # way out.
   local re_pr='\(PR: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)'
-  if [[ "$target" =~ $re_pr ]]; then
+  local held_target=0
+  if fi_parse_entry_vars "$target" && [[ -n "$FE_hold" ]]; then held_target=1; fi
+  # A hold reserves the closure for a human. `ai` (the default) is an agent's
+  # verdict, so it must not release a hold: refuse before touching the ledger.
+  if (( held_target )) && [[ "$verified" != "review" ]]; then
+    fi_err "resolve: entry is on hold (hold: $FE_hold) and waits for a human."
+    fi_err "Re-check the code, then close it with: found-issues resolve <match> --verified review"
+    return 2
+  fi
+  if (( ! held_target )) && [[ "$target" =~ $re_pr ]]; then
     local pr_match="${BASH_REMATCH[0]}"
     fi_err "resolve: entry has an active PR annotation $pr_match."
     fi_err "It will flip to [fixed] on its own when that PR merges (via /found-issues:sync)."
@@ -155,6 +174,10 @@ cmd_resolve() {
     if [[ "$line" == "$target" ]] && (( found == 0 )); then
       found=1
       local new_line="${line/"- [$status]"/- [fixed]}"
+      # A closed entry no longer waits on a human: drop the hold marker.
+      if (( held_target )) && fi_entry_retag "$new_line" drop-hold ""; then
+        new_line="$FI_RETAGGED"
+      fi
       new_line="${new_line} (verified: ${verified}) (fixed: ${today})"
       printf '%s\n' "$new_line" >> "$tmp"
     else

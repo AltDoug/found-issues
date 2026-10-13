@@ -223,31 +223,6 @@ cmd_install_statusline() {
   fi
 }
 
-# fi_statusline_command_path <command-string>
-# Resolve the statusline script path out of settings.json statusLine.command.
-# Takes the final argument (a trailing quoted argument may contain spaces),
-# strips its surrounding quotes, and expands ${HOME}, $HOME and a leading ~.
-# Prints the path; prints nothing for an empty command. Shared by the
-# runtime probe and `doctor`.
-fi_statusline_command_path() {
-  local cmd="$1" tok q h="$HOME"
-  cmd="${cmd%"${cmd##*[![:space:]]}"}"
-  [[ -n "$cmd" ]] || return 0
-  q="${cmd: -1}"
-  if [[ "$q" == '"' || "$q" == "'" ]]; then
-    tok="${cmd%?}"
-    tok="${tok##*"$q"}"
-  else
-    tok="${cmd##*[[:space:]]}"
-  fi
-  tok=${tok//'${HOME}'/$h}
-  tok=${tok//'$HOME'/$h}
-  if [[ "$tok" == "~" || "$tok" == "~/"* ]]; then
-    tok="$h${tok#\~}"
-  fi
-  printf '%s' "$tok"
-}
-
 # Diagnostic dry-run: print the current state of the statusline integration
 # and the recommended action. No file modifications.
 # fi_run_statusline_runtime_probe: reusable runtime probe body.
@@ -311,7 +286,7 @@ fi_run_statusline_runtime_probe() {
     # — stdout is the segment and may legitimately contain keywords like
     # "undefined" (e.g. detached HEAD) or path tokens like "cannot-wait".
     local probe_stderr_tmp
-    probe_stderr_tmp="$(mktemp -t fi-probe-stderr.XXXXXX)"
+    probe_stderr_tmp="$(mktemp "${TMPDIR:-/tmp}/fi-probe-stderr.XXXXXX")"
     if command -v perl >/dev/null 2>&1; then
       probe_output="$(printf '%s' "$probe_stdin" | perl -e 'alarm(5); exec @ARGV' -- "${executor[@]}" 2>"$probe_stderr_tmp" || true)"
     elif command -v timeout >/dev/null 2>&1; then
@@ -461,7 +436,9 @@ cmd_install_statusline_inline() {
 
   local original_mode tmp
   original_mode=$(fi_capture_mode "$FI_STATUSLINE_FILE")
-  tmp="$(mktemp -t found-issues-statusline.XXXXXX)"
+  # Beside the (resolved) target: the mv below is then a same-filesystem
+  # rename, and needs no writable $TMPDIR (issue #174).
+  tmp="$(mktemp "$(dirname "$(fi_resolve_link "$FI_STATUSLINE_FILE")")/.found-issues-statusline.tmp.XXXXXX")"
   awk -v insert_after="$last_line1" \
       -v start="$FI_STATUSLINE_START_MARKER" \
       -v endm="$FI_STATUSLINE_END_MARKER" '
@@ -535,7 +512,7 @@ cmd_install_statusline_append() {
   fi
 
   local block_file
-  block_file="$(mktemp -t fi-sl-block.XXXXXX)"
+  block_file="$(mktemp "${TMPDIR:-/tmp}/fi-sl-block.XXXXXX")"
   cat >"$block_file" <<EOF
 $FI_STATUSLINE_START_MARKER
 # Appended by \`found-issues install-statusline\`. Remove this entire block
@@ -577,7 +554,7 @@ EOF
 
   if [[ -n "$insert_at" ]]; then
     local merged_file
-    merged_file="$(mktemp -t fi-sl-merged.XXXXXX)"
+    merged_file="$(mktemp "${TMPDIR:-/tmp}/fi-sl-merged.XXXXXX")"
     {
       head -n "$((insert_at - 1))" "$FI_STATUSLINE_FILE"
       cat "$block_file"

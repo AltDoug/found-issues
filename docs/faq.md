@@ -223,8 +223,9 @@ Set the env var:
 export FOUND_ISSUES_STOP_REMINDER=off
 ```
 
-…to disable just the Stop-hook marker (the most-visible piece). Or
-uninstall the plugin entirely if you don't want any of it.
+…to disable just the end-of-turn reminder (silent by default since 3.10.0;
+`block` makes it a visible once-per-session block). Or uninstall the
+plugin entirely if you don't want any of it.
 
 You can also disable individual hooks:
 - `FOUND_ISSUES_FORMAT_ENFORCER=off`

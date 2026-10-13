@@ -658,3 +658,80 @@ EOF
   [[ "$output" == *'"line":42'* ]]
   [[ "$output" == *'"line_end":null'* ]]
 }
+
+# === 3.10.0: symlinked ledger (#160) and case-insensitive probe (#164) ===
+
+@test "fi_ledger_replace: a symlinked ledger keeps its link and the target gets the write (#160)" {
+  mkdir -p real docs
+  printf 'old\n' > real/ledger.md
+  chmod 640 real/ledger.md
+  ln -s ../real/ledger.md docs/found-issues.md
+  tmp="$(fi_ledger_tmp docs/found-issues.md)"
+  printf 'new\n' > "$tmp"
+  fi_ledger_replace docs/found-issues.md "$tmp"
+  [ -L docs/found-issues.md ]
+  [ "$(readlink docs/found-issues.md)" = "../real/ledger.md" ]
+  [ "$(cat real/ledger.md)" = "new" ]
+  [ ! -L real/ledger.md ]
+  [ "$(stat -c %a real/ledger.md 2>/dev/null || stat -f %Lp real/ledger.md)" = "640" ]
+  # no temp file left beside either path
+  [ -z "$(ls -A docs | grep -v '^found-issues.md$' || true)" ]
+  [ -z "$(ls -A real | grep -v '^ledger.md$' || true)" ]
+}
+
+@test "fi_ledger_replace: a chained symlinked ledger resolves to the final file (#160)" {
+  mkdir -p real docs
+  printf 'old\n' > real/ledger.md
+  ln -s ledger.md real/hop.md
+  ln -s ../real/hop.md docs/found-issues.md
+  tmp="$(fi_ledger_tmp docs/found-issues.md)"
+  printf 'new\n' > "$tmp"
+  fi_ledger_replace docs/found-issues.md "$tmp"
+  [ -L docs/found-issues.md ]
+  [ -L real/hop.md ]
+  [ "$(cat real/ledger.md)" = "new" ]
+}
+
+@test "fi_ledger_replace: the snapshot check reads the resolved ledger (#160)" {
+  mkdir -p real docs
+  printf 'old\n' > real/ledger.md
+  ln -s ../real/ledger.md docs/found-issues.md
+  snap="$(fi_ledger_snapshot docs/found-issues.md)"
+  tmp="$(fi_ledger_tmp docs/found-issues.md)"
+  printf 'new\n' > "$tmp"
+  printf 'concurrent\n' > real/ledger.md
+  run fi_ledger_replace docs/found-issues.md "$tmp" "$snap"
+  [ "$status" -eq 3 ]
+  [ "$(cat real/ledger.md)" = "concurrent" ]
+}
+
+@test "find_issues_file: finds a differently-cased docs/Found-Issues.md (#164)" {
+  mkdir -p Docs
+  echo "# found-issues" > Docs/Found-Issues.md
+  result="$(fi_find_issues_file)"
+  [ "$(printf '%s' "$result" | tr 'A-Z' 'a-z')" = "$(pwd | tr 'A-Z' 'a-z')/docs/found-issues.md" ]
+  [ "$(cat "$result")" = "# found-issues" ]
+}
+
+@test "find_issues_file: finds docs/FOUND-ISSUES.md (#164)" {
+  mkdir -p docs
+  echo "# upper" > docs/FOUND-ISSUES.md
+  result="$(fi_find_issues_file)"
+  [ "$(cat "$result")" = "# upper" ]
+}
+
+@test "find_issues_file: prefers the exact-case ledger over a differently-cased one (#164)" {
+  mkdir -p docs
+  echo "# exact" > docs/found-issues.md
+  echo "# odd" > docs/Found-Issues.md
+  result="$(fi_find_issues_file)"
+  if [ "$(ls docs | wc -l | tr -d ' ')" = "2" ]; then [ "$(cat "$result")" = "# exact" ]; fi
+}
+
+@test "find_issues_file: a cased docs ledger beats the root .found-issues.md (#164)" {
+  mkdir -p DOCS
+  echo "# docs" > DOCS/found-issues.md
+  echo "# root" > .found-issues.md
+  result="$(fi_find_issues_file)"
+  [ "$(cat "$result")" = "# docs" ]
+}

@@ -18,6 +18,27 @@
 #   fi_count_residual <file>
 #   fi_count_stale <file> [<days=30>]
 
+# fi_docs_ledger <dir> — print the docs ledger inside <dir>, return 1 if none.
+# 3.10.0: the lookup matched only the lowercase docs/found-issues.md, so on a
+# case-sensitive filesystem a ledger spelled Docs/Found-Issues.md or
+# docs/FOUND-ISSUES.md was invisible (and a second lowercase one got created).
+# The exact-case file wins; otherwise the first case-insensitive match, found
+# with bracket-class globs: builtins only (statusline hot path), bash 3.2 safe.
+fi_docs_ledger() {
+  local dir="$1" f
+  if [[ -f "$dir/docs/found-issues.md" ]]; then
+    printf '%s' "$dir/docs/found-issues.md"
+    return 0
+  fi
+  for f in "$dir"/[Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]; do
+    if [[ -f "$f" ]]; then
+      printf '%s' "$f"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Walk up from start_dir looking for the issues file.
 # Prefers <dir>/docs/found-issues.md, falls back to <dir>/.found-issues.md.
 # Inside a git repo the walk stops at the repo root (a directory holding a
@@ -27,12 +48,12 @@
 # test per directory, no git fork (statusline hot path).
 fi_find_issues_file() {
   local start="${1:-$PWD}"
-  local dir
+  local dir found
   dir="$(cd "$start" 2>/dev/null && pwd)" || return 1
 
   while [[ -n "$dir" && "$dir" != "/" ]]; do
-    if [[ -f "$dir/docs/found-issues.md" ]]; then
-      printf '%s' "$dir/docs/found-issues.md"
+    if found="$(fi_docs_ledger "$dir")"; then
+      printf '%s' "$found"
       return 0
     fi
     if [[ -f "$dir/.found-issues.md" ]]; then
@@ -114,8 +135,26 @@ fi_unknown_arg() {
 #     if the ledger changed since it was taken — someone else wrote it while
 #     we were working from the old copy, and moving ours over theirs would
 #     silently revert their write. tmp is always consumed.
+# fi_ledger_realpath <path> — the final target of a symlink chain, else <path>.
+# 3.10.0 (#160): a symlinked ledger was replaced by a regular file on every
+# write. Same walk as fi_resolve_link (lib/statusline-core.sh, which cannot be
+# sourced from here: readonly constants); macOS readlink has no -f.
+fi_ledger_realpath() {
+  local p="$1" t n=0
+  while [[ -L "$p" ]] && (( n < 40 )); do
+    t="$(readlink "$p")" || break
+    case "$t" in
+      /*) p="$t" ;;
+      *)  if [[ "$p" == */* ]]; then p="${p%/*}/$t"; else p="$t"; fi ;;
+    esac
+    n=$(( n + 1 ))
+  done
+  printf '%s' "$p"
+}
+
 fi_ledger_tmp() {
-  local file="$1" dir="."
+  local file dir="."
+  file="$(fi_ledger_realpath "$1")"
   [[ "$file" == */* ]] && dir="${file%/*}"
   mktemp "$dir/.found-issues.tmp.XXXXXX"
 }
@@ -125,7 +164,9 @@ fi_ledger_snapshot() {
 }
 
 fi_ledger_replace() {
-  local file="$1" tmp="$2" snapshot="${3:-}"
+  local file tmp="$2" snapshot="${3:-}" mode=""
+  # 3.10.0 (#160): write through a symlinked ledger; the link survives.
+  file="$(fi_ledger_realpath "$1")"
   if cmp -s "$tmp" "$file"; then
     rm -f "$tmp"
     return 0
@@ -135,9 +176,25 @@ fi_ledger_replace() {
     return 3
   fi
   if [[ -f "$file" ]]; then
-    local mode
     mode="$(stat -c %a "$file" 2>/dev/null || stat -f %Lp "$file" 2>/dev/null || true)"
     [[ "$mode" =~ ^[0-7]+$ ]] && { chmod "$mode" "$tmp" 2>/dev/null || true; }
+  fi
+  # A caller that staged tmp beside the link (not beside the resolved target)
+  # is re-staged there, so the rename stays on one filesystem and atomic.
+  local want="." have="."
+  [[ "$file" == */* ]] && want="${file%/*}"
+  [[ "$tmp" == */* ]] && have="${tmp%/*}"
+  if [[ "$want" != "$have" ]]; then
+    local tmp2
+    tmp2="$(fi_ledger_tmp "$file")" || { rm -f "$tmp"; return 1; }
+    if cat "$tmp" >"$tmp2"; then
+      rm -f "$tmp"
+      tmp="$tmp2"
+      [[ "$mode" =~ ^[0-7]+$ ]] && { chmod "$mode" "$tmp" 2>/dev/null || true; }
+    else
+      rm -f "$tmp" "$tmp2"
+      return 1
+    fi
   fi
   mv "$tmp" "$file"
 }
@@ -158,7 +215,7 @@ fi_annotation_tail_v() {
   local line="$1" tail=""
   # Only (fix: small|medium|large) is a fix tag; any other "(fix: ...)" text is
   # user text and stays in the symptom (and fi_entry_retag keeps it).
-  local re_tail_group='\(((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested|decide|decided|manual|until|autofix-failed): [^)]*|fix: (small|medium|large))\)[[:space:]]*$'
+  local re_tail_group='\(((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested|decide|decided|manual|until|autofix-failed|hold): [^)]*|fix: (small|medium|large))\)[[:space:]]*$'
   while [[ "$line" =~ $re_tail_group ]]; do
     local grp="${BASH_REMATCH[0]}"
     tail="${grp}${tail}"
@@ -198,6 +255,7 @@ fi_parse_entry() {
   printf 'manual=%s\n' "$FE_manual"
   printf 'until=%s\n' "$FE_until"
   printf 'autofix_failed=%s\n' "$FE_autofix_failed"
+  printf 'hold=%s\n' "$FE_hold"
 }
 
 # fi_parse_entry_vars <line> — builtin-only twin of fi_parse_entry. Sets the
@@ -215,7 +273,7 @@ FE_status="" FE_critical="" FE_date="" FE_path="" FE_line="" FE_line_end=""
 FE_symptom="" FE_fix="" FE_prs="" FE_prs_auto="" FE_prs_closed=""
 FE_commits="" FE_commits_auto="" FE_commits_stale="" FE_renamed_from=""
 FE_fixed_date="" FE_verified=""
-FE_fixtag="" FE_decide="" FE_decided="" FE_manual="" FE_until="" FE_autofix_failed=""
+FE_fixtag="" FE_decide="" FE_decided="" FE_manual="" FE_until="" FE_autofix_failed="" FE_hold=""
 
 # _fi_collect <tail> <regex with one capture group> — comma-join every
 # capture, left to right, the way `grep -oE | sed | paste -sd ,` did.
@@ -234,7 +292,7 @@ fi_parse_entry_vars() {
   FE_symptom="" FE_fix="" FE_prs="" FE_prs_auto="" FE_prs_closed=""
   FE_commits="" FE_commits_auto="" FE_commits_stale="" FE_renamed_from=""
   FE_fixed_date="" FE_verified=""
-  FE_fixtag="" FE_decide="" FE_decided="" FE_manual="" FE_until="" FE_autofix_failed=""
+  FE_fixtag="" FE_decide="" FE_decided="" FE_manual="" FE_until="" FE_autofix_failed="" FE_hold=""
 
   local re_status='^- \[(open|deferred|fixed)\]'
   [[ "$line" =~ $re_status ]] || return 1
@@ -314,6 +372,10 @@ fi_parse_entry_vars() {
     [[ "$tail" =~ $re_until ]] && FE_until="${BASH_REMATCH[1]}"
     local re_afail='\(autofix-failed: ([^)]*)\)'
     [[ "$tail" =~ $re_afail ]] && FE_autofix_failed="${BASH_REMATCH[1]}"
+    # 3.10.0: a human/agent hold, or the one sync writes for a critical
+    # entry. Tail only, like every v3 tag. A held entry is never auto-closed.
+    local re_hold='\(hold: ([^)]*)\)'
+    [[ "$tail" =~ $re_hold ]] && FE_hold="${BASH_REMATCH[1]}"
   fi
 
   local re_renamed='\(renamed-from: ([^)]+)\)'
@@ -407,7 +469,7 @@ _fi_count_tail() {
   LC_ALL=C awk -v mode="$1" '
     function tailof(l,   t) {
       t = ""
-      while (match(l, /\((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested|decide|decided|manual|until|autofix-failed): [^)]*\)[[:space:]]*$|\(fix: (small|medium|large)\)[[:space:]]*$/)) {
+      while (match(l, /\((PR|PR-auto|PR-closed|commit|commit-auto|commit-stale|verified|fixed|closure|renamed-from|touched|defer-cycle|reason|mute-until|suggested|decide|decided|manual|until|autofix-failed|hold): [^)]*\)[[:space:]]*$|\(fix: (small|medium|large)\)[[:space:]]*$/)) {
         t = substr(l, RSTART) t
         l = substr(l, 1, RSTART - 1)
       }
@@ -655,7 +717,7 @@ fi_entry_to_json() {
   local status="" critical="" date="" path="" line="" line_end="" symptom="" fix=""
   local prs="" prs_auto="" prs_closed="" commits="" commits_auto="" commits_stale="" renamed_from=""
   local fixed_date="" verified=""
-  local fixtag="" decide="" decided="" manual="" until_="" autofix_failed=""
+  local fixtag="" decide="" decided="" manual="" until_="" autofix_failed="" hold=""
   local kv key val
   while IFS= read -r kv; do
     key="${kv%%=*}"
@@ -684,6 +746,7 @@ fi_entry_to_json() {
       manual)         manual="$val" ;;
       until)          until_="$val" ;;
       autofix_failed) autofix_failed="$val" ;;
+      hold)           hold="$val" ;;
     esac
   done <<< "$parsed"
 
@@ -701,7 +764,7 @@ fi_entry_to_json() {
   local mute
   mute="$(fi_extract_mute_until "$raw")"
 
-  printf '{"line_no":%s,"status":"%s","critical":%s,"date":%s,"path":%s,"line":%s,"line_end":%s,"symptom":%s,"suggested":%s,"prs":%s,"prs_auto":%s,"prs_closed":%s,"commits":%s,"commits_auto":%s,"commits_stale":%s,"verified":%s,"fixed_date":%s,"renamed_from":%s,"mute_until":%s,"fix_tag":%s,"decide":%s,"decided":%s,"manual":%s,"until":%s,"autofix_failed":%s,"raw":%s}' \
+  printf '{"line_no":%s,"status":"%s","critical":%s,"date":%s,"path":%s,"line":%s,"line_end":%s,"symptom":%s,"suggested":%s,"prs":%s,"prs_auto":%s,"prs_closed":%s,"commits":%s,"commits_auto":%s,"commits_stale":%s,"verified":%s,"fixed_date":%s,"renamed_from":%s,"mute_until":%s,"fix_tag":%s,"decide":%s,"decided":%s,"manual":%s,"until":%s,"autofix_failed":%s,"hold":%s,"raw":%s}' \
     "$line_no" "$status" "$crit_bool" \
     "$(fi_json_str "$date")" "$(fi_json_str "$path")" "$line_json" "$line_end_json" \
     "$(fi_json_str "$symptom")" "$(fi_json_str "$fix")" \
@@ -711,7 +774,7 @@ fi_entry_to_json() {
     "$(fi_json_str "$renamed_from")" "$(fi_json_str "$mute")" \
     "$(fi_json_str "$fixtag")" "$(fi_json_str "$decide")" "$(fi_json_str "$decided")" \
     "$(fi_json_str "$manual")" "$(fi_json_str "$until_")" "$(fi_json_str "$autofix_failed")" \
-    "$(fi_json_str "$raw")"
+    "$(fi_json_str "$hold")" "$(fi_json_str "$raw")"
 }
 
 # Compute touch threshold for a given defer-cycle.

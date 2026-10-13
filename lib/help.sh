@@ -37,8 +37,12 @@ COMMANDS
                                         Print counts (for statusline integration).
                                         --cwd overrides where to look for the issues file
                                         (defaults to \$CLAUDE_PROJECT_DIR or \$PWD).
-  annotate-pr <N> [--pick <loc>,...] [--all] [--hook-auto]
+  annotate-pr <N|org/repo#N> --pick <loc>,... | --all [--hook-auto]
                                         Annotate matching [open] entries with PR.
+                                        --pick is what closes: without it only
+                                        non-closing (PR-auto) suggestions are written.
+                                        A bare N follows the repo the picked entries'
+                                        paths sit in; org/repo#N requires --pick.
                                         Files cited by several entries need an explicit
                                         --pick (path:line list) or --all — file-level
                                         auto-match alone would over-annotate. A pick can
@@ -63,17 +67,24 @@ COMMANDS
                                         to touched annotation.
   promote-deferred <match>              Flip [deferred] → [open], preserving all
                                         annotations as evidence of recurrence.
-  resolve <match> [--verified ai|human] Flip [open] → [fixed], appending
+  resolve <match> [--verified ai|review|human]
+                                        Flip [open] → [fixed], appending
                                         (verified: ...) (fixed: <today>). Use this
                                         instead of editing the ledger by hand.
-                                        Refuses entries with an active (PR: ...).
+                                        human is an alias for review. Refuses
+                                        entries with an active (PR: ...) unless
+                                        the entry carries a (hold: ...) marker.
   unannotate <match> <ref>              Strip one (PR:), (PR-auto:), (commit:) or
                                         (commit-auto:) marker from one [open] entry.
                                         <ref> is #N, N, org/repo#N or a commit sha.
                                         Use this to undo a mis-annotation.
   tag <match> --fix S|M|L | --decide "<q>" | --manual "<why>" | --retry
+  tag <match> --hold "<reason>" | --unhold
                                         Set the entry's one fix tag (v3).
                                         Off-limits paths are tagged manual.
+                                        --hold marks (hold: <reason>): sync
+                                        never auto-closes the entry; a human
+                                        closes it with resolve --verified review.
   decide [--count] | decide <match> --answer "<text>"
                                         The decision queue: list open
                                         (decide: ...) questions, or record one.

@@ -183,6 +183,7 @@ fi_segment_af_suffix() {
   FI_SEG_AF="" FI_SEG_AF_N=0
   case "$file" in
     */docs/found-issues.md) root="${file%/docs/found-issues.md}" ;;
+    */[Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]) root="${file%/*/*}" ;;
     */.found-issues.md)     root="${file%/.found-issues.md}"; local_form=1 ;;
     *) return 0 ;;
   esac
@@ -231,7 +232,7 @@ fi_segment_join() {
 # (fi_find_issues_file: cd + logical pwd, then walk up checking
 # docs/found-issues.md before .found-issues.md, never checking "/").
 fi_segment_fast_path() {
-  local format="segment" cwd="" search_root saved dir file="" ts last now interval name
+  local format="segment" cwd="" search_root saved dir file="" ts last now interval name __fi_c
   fi_segment_clock_ok || return 1
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -255,6 +256,11 @@ fi_segment_fast_path() {
   [[ "$dir" == //* ]] && return 1
   while [[ -n "$dir" && "$dir" != "/" ]]; do
     if [[ -f "$dir/docs/found-issues.md" ]]; then file="$dir/docs/found-issues.md"; break; fi
+    # 3.10.0 (#164): the same case-insensitive docs probe as fi_docs_ledger
+    # (lib/parse-entries.sh, not loaded yet on this fast path).
+    for __fi_c in "$dir"/[Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]; do
+      [[ -f "$__fi_c" ]] && { file="$__fi_c"; break 2; }
+    done
     if [[ -f "$dir/.found-issues.md" ]]; then file="$dir/.found-issues.md"; break; fi
     [[ -e "$dir/.git" ]] && break
     dir="${dir%/*}"

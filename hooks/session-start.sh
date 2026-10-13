@@ -386,8 +386,18 @@ if [[ "${FOUND_ISSUES_AUTO_MIGRATE:-on}" != "off" ]]; then
   if [[ -f "$__fi_settings" ]] && command -v jq >/dev/null 2>&1; then
     __fi_cmd="$(jq -r '.statusLine.command // ""' "$__fi_settings" 2>/dev/null || true)"
     if [[ -n "$__fi_cmd" ]]; then
-      # Last whitespace-separated token is the file path.
-      __fi_target="$(printf '%s' "$__fi_cmd" | LC_ALL=C awk '{print $NF}' | sed "s|\${HOME}|$HOME|g; s|^~|$HOME|")"
+      # The script path is the command's final argument, which may be quoted
+      # and contain spaces (issue #165). One shared parser, defined in
+      # lib/statusline-core.sh (constants + functions only, cheap to source).
+      if ! declare -F fi_statusline_command_path >/dev/null 2>&1 \
+         && [[ -f "$__fi_hook_dir/../lib/statusline-core.sh" ]]; then
+        # shellcheck source=../lib/statusline-core.sh disable=SC1091
+        source "$__fi_hook_dir/../lib/statusline-core.sh" 2>/dev/null || true
+      fi
+      __fi_target=""
+      if declare -F fi_statusline_command_path >/dev/null 2>&1; then
+        __fi_target="$(fi_statusline_command_path "$__fi_cmd")"
+      fi
       case "$__fi_target" in
         *.js|*.mjs|*.cjs) __fi_lang=node ;;
         *.py)             __fi_lang=python ;;

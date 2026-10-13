@@ -140,3 +140,15 @@ render_stubbed() {
   [ -e "$TMP/synced" ]
   unset FOUND_ISSUES_AUTOSYNC_CMD
 }
+
+@test "segment-cache: a differently-cased Docs/Found-Issues.md is the ledger on the fast path (#164)" {
+  need_fast_bash
+  rm -rf "${TMP:?}/docs" && mkdir -p "$TMP/Docs"
+  printf '# found-issues\n\n- [open] %s src/foo.py — bug\n' "$(date +%Y-%m-%d)" >"$TMP/Docs/Found-Issues.md"
+  fi_run status --format=segment --cwd "$TMP"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 issue"* ]]
+  run render_stubbed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 issue"* ]]
+}

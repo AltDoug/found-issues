@@ -47,7 +47,9 @@ Bucket every verified entry:
    guard rejects a SHA already on the default branch unless `--force`) and
    sync flips it. Cite the `git show` evidence in the PR body. Otherwise
    close it with
-   `found-issues resolve "<unique symptom fragment>" --verified ai`.
+   `found-issues resolve "<unique symptom fragment>" --verified ai`. An entry
+   with a `(hold: ...)` marker is a human's to close (`resolve` refuses `ai`
+   on it): leave it open and report it.
    Never run sync from this command (it archives, leaving a ledger and
    archive diff behind). Evidence belongs in the PR body and final
    report, never appended to the entry line.

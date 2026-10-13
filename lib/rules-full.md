@@ -26,9 +26,9 @@ On `/found-issues:sync`, for each unannotated `[open]` entry: read the code at `
 
 Before deleting any branch, consolidate its `[open]` and `[deferred]` entries missing from main: `/found-issues:promote`. The pre-delete hook blocks otherwise.
 
-## Stop-hook marker (if enabled)
+## Stop-hook marker (only when asked)
 
-The first tool-using turn of a session ends with exactly one HTML comment:
+By default no reply marker is needed: a reminder to log what you noticed arrives with the user's next prompt. Only when a Stop hook block asks for it (`FOUND_ISSUES_STOP_REMINDER=block`), end that reply with exactly one HTML comment:
 `<!-- found-issues-checked: none-noticed -->` | `logged` | `deferred` (rare; say why).
 
 ## Dead code

@@ -49,6 +49,10 @@ dir="$(cd "$cwd" 2>/dev/null && pwd -P)" || exit 0
 ledger=""
 while [[ -n "$dir" && "$dir" != "/" ]]; do
   if [[ -f "$dir/docs/found-issues.md" ]]; then ledger="$dir/docs/found-issues.md"; root="$dir"; break; fi
+  # 3.10.0 (#164): a differently-cased docs ledger is the ledger too.
+  for _ft_c in "$dir"/[Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]; do
+    [[ -f "$_ft_c" ]] && { ledger="$_ft_c"; root="$dir"; break 2; }
+  done
   if [[ -f "$dir/.found-issues.md" ]]; then ledger="$dir/.found-issues.md"; root="$dir"; break; fi
   dir="${dir%/*}"
 done

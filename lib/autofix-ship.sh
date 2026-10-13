@@ -28,11 +28,19 @@ FI_SELF="${FI_BIN_DIR:-}/found-issues"
 
 # The worktree's own ledger files, relative. Only paths INSIDE the worktree:
 # fi_find_issues_file would walk up into the source checkout when the
-# worktree has none (Review Focus 2).
+# worktree has none (Review Focus 2). 3.10.0: the docs ledger may be spelled
+# Docs/Found-Issues.md or docs/FOUND-ISSUES.md (fi_docs_ledger finds it), so
+# the resolved file is listed beside the lowercase defaults.
 fi_af_ledger_paths() {
-  local p
+  local wt="$1" p docs=""
+  if docs="$(fi_docs_ledger "$wt")"; then
+    docs="${docs#"$wt"/}"
+    printf '%s\n' "$docs"
+  else
+    docs=""
+  fi
   for p in docs/found-issues.md docs/found-issues-archive.md .found-issues.md; do
-    [[ -f "$1/$p" ]] && printf '%s\n' "$p"
+    [[ "$p" != "$docs" && -f "$wt/$p" ]] && printf '%s\n' "$p"
   done
   return 0
 }
@@ -40,10 +48,24 @@ fi_af_ledger_paths() {
 # The fixer must not change the ledger, and a headless child's SessionStart
 # sync may have (Review Focus 3). Put every ledger file back to <ref> — the
 # fixed list, not just the files that still exist, or a deleted ledger
-# would ship as a deletion.
+# would ship as a deletion. 3.10.0: the list adds the docs ledger as it is
+# spelled in the worktree or at <ref> (a recased ledger the fixer deleted is
+# only at <ref>), found case-insensitively like fi_docs_ledger.
 fi_af_reset_ledger() {
-  local wt="$1" ref="$2" p
-  for p in docs/found-issues.md docs/found-issues-archive.md .found-issues.md; do
+  local wt="$1" ref="$2" p d seen=$'\n' docs
+  local -a paths=(docs/found-issues.md docs/found-issues-archive.md .found-issues.md)
+  if docs="$(fi_docs_ledger "$wt")"; then
+    paths[${#paths[@]}]="${docs#"$wt"/}"
+  fi
+  while IFS= read -r d || [[ -n "$d" ]]; do
+    case "$d" in [Dd][Oo][Cc][Ss]) ;; *) continue ;; esac
+    while IFS= read -r p || [[ -n "$p" ]]; do
+      case "$p" in "$d"/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]) paths[${#paths[@]}]="$p" ;; esac
+    done < <(git -C "$wt" ls-tree --name-only "$ref:$d" 2>/dev/null | sed "s|^|$d/|")
+  done < <(git -C "$wt" ls-tree --name-only "$ref" 2>/dev/null)
+  for p in "${paths[@]}"; do
+    [[ "$seen" == *$'\n'"$p"$'\n'* ]] && continue
+    seen+="$p"$'\n'
     if git -C "$wt" cat-file -e "$ref:$p" 2>/dev/null; then
       git -C "$wt" checkout -q "$ref" -- "$p" 2>/dev/null || true
     else

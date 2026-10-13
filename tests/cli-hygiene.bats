@@ -70,7 +70,7 @@ teardown() { fi_teardown_tmp; }
   grep -q '^- \[open\].*a.sh:1' docs/found-issues.md
   fi_run resolve a.sh --verified=human
   [ "$status" -eq 0 ]
-  grep -q '(verified: human)' docs/found-issues.md
+  grep -q '(verified: review)' docs/found-issues.md
 }
 
 @test "install-statusline --dry-run without --target is refused and writes nothing (status-8)" {

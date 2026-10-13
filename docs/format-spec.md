@@ -8,7 +8,7 @@ Canonical entry format for `docs/found-issues.md` (or `<cwd>/.found-issues.md` i
 - [STATUS] [!] YYYY-MM-DD [LOCATION] — SYMPTOM [(suggested: FIX)] [ANNOTATION]* [(fixed: YYYY-MM-DD)] [(verified: ai|review)]
 ```
 
-Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract topic without slashes (e.g., `dispatch/shutdown`, `workflow`). `ANNOTATION` is one of the parenthesized forms in the Optional-parts table below — the active link forms `(PR: ORG/REPO#N)` / `(commit: SHA)`, their hook-suggested twins `(PR-auto: ...)` / `(commit-auto: ...)`, their sync-demoted twins `(PR-closed: ...)` / `(commit-stale: ...)`, the closure trail forms `(closure: tombstone)` / `(renamed-from: PATH)`, the defer-flow forms `(touched: ...)` / `(defer-cycle: N)` / `(reason: ...)` / `(mute-until: YYYY-MM-DD)` / `(until: ...)`, and the v3 fix-tag forms `(fix: small|medium|large)` / `(decide: ...)` / `(decided: ...)` / `(manual: ...)` / `(autofix-failed: ...)`. Multiple annotations are allowed (entry addressed by both a PR and a follow-up commit).
+Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract topic without slashes (e.g., `dispatch/shutdown`, `workflow`). `ANNOTATION` is one of the parenthesized forms in the Optional-parts table below — the active link forms `(PR: ORG/REPO#N)` / `(commit: SHA)`, their hook-suggested twins `(PR-auto: ...)` / `(commit-auto: ...)`, their sync-demoted twins `(PR-closed: ...)` / `(commit-stale: ...)`, the closure trail forms `(closure: tombstone)` / `(renamed-from: PATH)`, the defer-flow forms `(touched: ...)` / `(defer-cycle: N)` / `(reason: ...)` / `(mute-until: YYYY-MM-DD)` / `(until: ...)`, and the v3 fix-tag forms `(fix: small|medium|large)` / `(decide: ...)` / `(decided: ...)` / `(manual: ...)` / `(autofix-failed: ...)`, and the 3.10 closure hold `(hold: ...)`. Multiple annotations are allowed (entry addressed by both a PR and a follow-up commit).
 
 ## Required parts
 
@@ -36,7 +36,7 @@ Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract
 | Commit-stale annotation | `(commit-stale: SHA)` (7+ hex chars) | `(commit-stale: a1b2c3d)` | Added by `/found-issues:sync` when commit SHA no longer reachable |
 | Renamed-from annotation | `(renamed-from: PATH)` | `(renamed-from: lib/old-name.py)` | Added by `/found-issues:sync` when entry path was git-mv'd |
 | Fixed date | `(fixed: YYYY-MM-DD)` | `(fixed: 2026-05-08)` | Added by `/found-issues:sync` on closure |
-| Verification | `(verified: ai)` or `(verified: review)` | `(verified: ai)` | Added when sync verifies via AI |
+| Verification | `(verified: ai)` or `(verified: review)` | `(verified: ai)` | `ai` is added when an agent verifies by reading the code; `review` when a human confirms. `found-issues resolve --verified ai\|review\|human` writes it (`human` is an alias and is written as `review`; the reader recognises exactly `ai` and `review`) |
 | Closure annotation | `(closure: tombstone)` | `(closure: tombstone)` | Added by `found-issues sync` when git confirms the cited file was removed — absent from `HEAD` and present in history. Mere absence never closes: shorter files, never-tracked paths and uncommitted deletions all stay `[open]` |
 | Touched annotation | `(touched: DATE[, DATE...][; ...])` | `(touched: 2026-05-08, 2026-05-12)` | Appended by `found-issues log` when a new log matches a `[deferred]` entry; `;` separates defer cycles |
 | Defer-cycle annotation | `(defer-cycle: N)` | `(defer-cycle: 2)` | Added by `found-issues defer` on re-defer (absent = cycle 1) |
@@ -47,6 +47,7 @@ Where `LOCATION` is either `path/file.ext`, `path/file.ext:LINE`, or an abstract
 | Decision needed | `(decide: QUESTION)` | `(decide: rename or alias?)` | v3. Set by `log --decide` / `tag --decide`. Listed by `found-issues decide` |
 | Decision recorded | `(decided: ANSWER)` | `(decided: alias)` | v3. Written by `found-issues decide --answer`; replaces `(decide: ...)` |
 | Manual only | `(manual: WHY)` | `(manual: off-limits: ci)` | v3. Set by `log --manual` / `tag --manual`, or forced for off-limits paths |
+| Hold | `(hold: REASON)` | `(hold: needs human verify)` | 3.10.0. A closure marker for a human. `sync` never auto-closes an entry that carries one, or any `[!]` critical entry: it stays `[open]`, a critical gains `(hold: needs human verify)` once, and `sync` prints `Held: N entr(y\|ies) for human verification`. Set with `found-issues tag <match> --hold "REASON"`, drop with `--unhold`; `found-issues resolve <match> --verified review` closes the entry (even with a merged `(PR: ...)`) and removes the marker; `resolve` with `ai` (the default) refuses a held entry |
 | Auto-fix failed | `(autofix-failed: REASON)` | `(autofix-failed: tests stayed red)` | v3. Written by the auto-fixer; the entry is never retried automatically. `found-issues tag <match> --retry` (3.5.0) drops it so auto-fix tries again |
 
 ## Status semantics
@@ -157,6 +158,9 @@ For programmatic validation in hooks and CLI:
 
 # Extract verification source
 '\(verified: (ai|review)\)'
+
+# Extract hold marker (annotation tail only; closure hold, 3.10.0)
+'\(hold: ([^)]*)\)'
 
 # Extract closure annotation (tombstone auto-close)
 '\(closure: tombstone\)'

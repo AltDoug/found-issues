@@ -306,9 +306,9 @@ cmd_install_statusline_target_bash() {
   splice_lines_sp="$(printf '%s' "$splice_line" | tr '\n' ' ')"
 
   local tmp_block tmp_modified
-  tmp_block="$(mktemp -t fi-target-block.XXXXXX)"
+  tmp_block="$(mktemp "${TMPDIR:-/tmp}/fi-target-block.XXXXXX")"
   fi_generate_bash_marker_block "$stdin_var" > "$tmp_block"
-  tmp_modified="$(mktemp -t fi-target-mod.XXXXXX)"
+  tmp_modified="$(mktemp "${TMPDIR:-/tmp}/fi-target-mod.XXXXXX")"
   LC_ALL=C awk -v insert_after="$insert_after" \
       -v splice_lines="$splice_lines_sp" \
       -v block_file="$tmp_block" '
@@ -524,14 +524,14 @@ cmd_install_statusline_target_node() {
 
   # Write marker block to tmp file (multi-line awk -v workaround, same as Task 1.4)
   local tmp_block tmp_modified
-  tmp_block="$(mktemp -t fi-target-node-block.XXXXXX)"
+  tmp_block="$(mktemp "${TMPDIR:-/tmp}/fi-target-node-block.XXXXXX")"
   fi_generate_node_marker_block > "$tmp_block"
 
   # splice_line is now a newline-separated list of line numbers; convert to space-separated
   # for awk -v (BSD awk rejects literal newlines in -v values)
   local splice_lines_sp
   splice_lines_sp="$(printf '%s' "$splice_line" | tr '\n' ' ')"
-  tmp_modified="$(mktemp -t fi-target-node-mod.XXXXXX)"
+  tmp_modified="$(mktemp "${TMPDIR:-/tmp}/fi-target-node-mod.XXXXXX")"
   LC_ALL=C awk -v insert_after="$insert_after" \
       -v splice_lines="$splice_lines_sp" \
       -v block_file="$tmp_block" '
@@ -756,14 +756,14 @@ cmd_install_statusline_target_python() {
 
   # Write marker block to tmp file (multi-line awk -v workaround)
   local tmp_block tmp_modified
-  tmp_block="$(mktemp -t fi-target-python-block.XXXXXX)"
+  tmp_block="$(mktemp "${TMPDIR:-/tmp}/fi-target-python-block.XXXXXX")"
   fi_generate_python_marker_block > "$tmp_block"
 
   # BSD awk on macOS rejects literal newlines in -v values; convert to space.
   local splice_lines_sp
   splice_lines_sp="$(printf '%s' "$splice_line" | tr '\n' ' ')"
 
-  tmp_modified="$(mktemp -t fi-target-python-mod.XXXXXX)"
+  tmp_modified="$(mktemp "${TMPDIR:-/tmp}/fi-target-python-mod.XXXXXX")"
   LC_ALL=C awk -v insert_after="$insert_after" \
       -v splice_lines="$splice_lines_sp" \
       -v block_file="$tmp_block" '

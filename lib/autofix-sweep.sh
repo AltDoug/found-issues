@@ -29,10 +29,14 @@
 FI_AF_SPOT_KEYS=""
 
 # Spec §3.1/§5.1: still [open], (fix: small|medium) or answered, no fix
-# reference or suggestion, never failed. Large, decide and manual wait.
+# reference or suggestion, never failed. Large, decide and manual wait, and
+# so does a (hold: ...) entry (3.10.0): it waits for a human, so a fixer run
+# on it would re-check the same entry forever. FE_hold is read from the
+# annotation tail, so a "(hold: " inside the symptom does not count.
 fi_af_fixable_now() {
   fi_parse_entry_vars "$1" || return 1
   [[ "$FE_status" == "open" ]] || return 1
+  [[ -z "$FE_hold" ]] || return 1
   [[ -z "$FE_prs$FE_prs_auto$FE_commits$FE_commits_auto$FE_autofix_failed" ]] || return 1
   case "$FE_fixtag" in small|medium) return 0 ;; esac
   [[ -n "$FE_decided" && -z "$FE_decide" ]]
@@ -131,7 +135,7 @@ _fi_af_untagged_count() {
   while IFS= read -r entry; do
     [[ -n "$entry" ]] || continue
     fi_parse_entry_vars "$entry" || continue
-    [[ -z "$FE_fixtag$FE_decide$FE_decided$FE_manual$FE_autofix_failed$FE_prs$FE_prs_auto$FE_commits$FE_commits_auto" ]] || continue
+    [[ -z "$FE_hold$FE_fixtag$FE_decide$FE_decided$FE_manual$FE_autofix_failed$FE_prs$FE_prs_auto$FE_commits$FE_commits_auto" ]] || continue
     if [[ -s "$seen" ]] && fi_entry_dedup_key_v "$entry" "$2" && grep -Fqx -- "$FI_KEY" "$seen"; then
       continue
     fi

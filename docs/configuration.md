@@ -31,8 +31,8 @@ individual opt-outs.
 
 | Variable | Default | What it controls |
 |---|---|---|
-| `FOUND_ISSUES_STOP_REMINDER` | `on` | The Stop hook that asks for `<!-- found-issues-checked: ... -->` after a substantive turn (Edit / Write / MultiEdit / a mutating Bash). Since 3.2.1 it blocks the Stop once per session, and only in a session that edited code (an Edit / Write / MultiEdit / NotebookEdit on a path that is not `.md` / `.mdx` / `.markdown` / `.txt` / `.rst` / `.adoc`). Any other substantive turn without the marker gets one non-blocking reminder per session, which the `UserPromptSubmit` hook (`prompt-nudge.sh`) hands to the model with your next prompt. Set to `off` if the marker friction outweighs the discipline-enforcement value. |
-| `FOUND_ISSUES_STOP_REMINDER_EVERY_TURN` | `off` | `on` brings back the pre-2.8.0 behavior: a block on every substantive turn without the marker, code edit or not. |
+| `FOUND_ISSUES_STOP_REMINDER` | `on` | The Stop hook that asks the model, once per session after a substantive turn (Edit / Write / MultiEdit / a mutating Bash), whether it noticed anything out of scope. `on` (default since 3.10.0) is silent: the `UserPromptSubmit` hook (`prompt-nudge.sh`) hands one reminder to the model with your next prompt, nothing is shown to you and no reply marker is asked for. `block` restores the visible pre-3.10.0 behavior: in a session that edited code (an Edit / Write / MultiEdit / NotebookEdit on a path that is not `.md` / `.mdx` / `.markdown` / `.txt` / `.rst` / `.adoc`) the Stop is blocked once and the model must end its reply with `<!-- found-issues-checked: ... -->`; Claude Code shows that block as a "Stop hook error". `off` turns the check off. |
+| `FOUND_ISSUES_STOP_REMINDER_EVERY_TURN` | `off` | `on` brings back the pre-2.8.0 behavior: a block on every substantive turn without the marker, code edit or not (implies `FOUND_ISSUES_STOP_REMINDER=block`). |
 | `FOUND_ISSUES_REMINDER_VERBOSITY` | `auto` | Stop-hook message verbosity. `full` (8-line educational form), `terse` (1-line form), or `auto` (terse iff `~/.claude/found-issues/.onboarded` exists). |
 | `FOUND_ISSUES_PROMOTE_GUARD` | `on` | The `pre-branch-delete` hook that hard-blocks `git branch -d` / `--delete` / `gh api ... DELETE` when the branch has `[open]` entries whose dedup key isn't on `main`. Set to `off` for a one-shot bypass (`FOUND_ISSUES_PROMOTE_GUARD=off git branch -D ...`). The inline prefix form is parsed from the command string itself, so it works inside Claude Code's Bash tool (where the hook subprocess otherwise would not inherit per-command env). The guard also auto-skips when the default branch does not track the issues file — repos using per-developer-local (gitignored) `docs/found-issues.md` get an exit-0 with a one-line note rather than a block. |
 | `FOUND_ISSUES_FORMAT_ENFORCER` | `on` | The `PreToolUse` format-enforcer that validates entries written via `Write` / `Edit` / `MultiEdit`. In `local` mode it's already off; in `git` mode it warns-only; in `github-*` modes it hard-blocks. Set to `off` to disable globally. |
@@ -169,8 +169,8 @@ These exist for testing and edge cases. Most users never touch them.
 The plugin tries to surface friction in-band rather than expecting users
 to find this page:
 
-- The Stop hook's blocking message names `FOUND_ISSUES_STOP_REMINDER=off`
-  in its stderr output when it fires.
+- The Stop hook shows nothing by default (3.10.0); its opt-in block mode
+  (`FOUND_ISSUES_STOP_REMINDER=block`) prints the markers to copy.
 - `pre-branch-delete` prints the promote sequence when it blocks. It
   deliberately does NOT name `FOUND_ISSUES_PROMOTE_GUARD=off`: the agent
   reads that message, and an advertised off switch is the cheapest way past

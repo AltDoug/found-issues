@@ -232,3 +232,12 @@ touch_json() { # $1 tool, $2 path, $3 session
     [[ "$ctx" == *"..."* ]]
   done
 }
+
+@test "first-touch: a differently-cased Docs/Found-Issues.md still injects its entries (#164)" {
+  git mv docs/found-issues.md docs/tmp-ledger.md
+  mkdir -p Docs && git mv docs/tmp-ledger.md Docs/Found-Issues.md
+  run bash "$HOOK" <<< "$(touch_json Read "$PWD/src/a.sh" s1)"
+  [ "$status" -eq 0 ]
+  ctx="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+  [[ "$ctx" == *"A-BUG-"* ]]
+}

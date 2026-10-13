@@ -30,7 +30,7 @@ _fi_af_classify_list() {
     [[ -n "$entry" ]] || continue
     fi_parse_entry_vars "$entry" || continue
     if [[ "$FE_status" == "open" ]]; then
-      [[ -z "$FE_fixtag$FE_decide$FE_decided$FE_manual$FE_autofix_failed$FE_prs$FE_prs_auto$FE_commits$FE_commits_auto" ]] || continue
+      [[ -z "$FE_hold$FE_fixtag$FE_decide$FE_decided$FE_manual$FE_autofix_failed$FE_prs$FE_prs_auto$FE_commits$FE_commits_auto" ]] || continue
       if [[ -n "$blob" ]] && fi_entry_dedup_key_v "$entry" "${AFI_root:-}" && [[ "$blob" == *$'\n'"$FI_KEY"$'\n'* ]]; then
         offered[${#offered[@]}]="$entry"
       else

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # prompt-nudge.sh — UserPromptSubmit hook (3.2.1 stop-reminder hybrid).
 #
-# stop-reminder.sh blocks a Stop only when the session edited code. Any other
-# substantive turn without the marker leaves one pending reminder,
+# stop-reminder.sh blocks a Stop only in block mode, in a session that edited
+# code (3.10.0: silent is the default). Any other substantive turn without the
+# marker leaves one pending reminder,
 # ~/.claude/found-issues/reminded/<session_id>.nudge. A Stop hook cannot
 # reach the model without forcing another (billed) turn, so this hook hands
 # the reminder over with the user's next prompt instead, once, and marks it
@@ -22,5 +23,11 @@ pending="$HOME/.claude/found-issues/reminded/$sid.nudge"
 [[ -f "$pending" ]] || exit 0
 mv -f "$pending" "${pending}d" 2>/dev/null || exit 0
 
-printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"found-issues: your previous turn changed files but ended without a found-issues acknowledgment. If you noticed any defect OUTSIDE that task (a bug, a broken contract, dead code, misleading docs), log it with /found-issues:log. End this reply with one of <!-- found-issues-checked: none-noticed --> | <!-- found-issues-checked: logged --> | <!-- found-issues-checked: deferred -->."}}'
+# 3.10.0: the default (silent) mode asks for no reply marker; only block mode,
+# where the Stop hook asks for one, keeps it in the reminder.
+if [[ "${FOUND_ISSUES_STOP_REMINDER:-on}" == "block" ]]; then
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"found-issues: your previous turn changed files but ended without a found-issues acknowledgment. If you noticed any defect OUTSIDE that task (a bug, a broken contract, dead code, misleading docs), log it with /found-issues:log. End this reply with one of <!-- found-issues-checked: none-noticed --> | <!-- found-issues-checked: logged --> | <!-- found-issues-checked: deferred -->."}}'
+else
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"found-issues: your previous turn changed files. If you noticed any defect OUTSIDE that task (a bug, a broken contract, dead code, misleading docs), log it with /found-issues:log before continuing. No reply marker is needed."}}'
+fi
 exit 0

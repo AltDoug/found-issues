@@ -132,7 +132,7 @@ hook:
 | Hook | Event | Job |
 |---|---|---|
 | `session-start.sh` | SessionStart | Run sync silently, inject the full rules and a lean ledger summary (criticals, up to 3 entries for files not in the repo, a pointer line; fenced as untrusted data) into a new session's context. With no open entries only the rules print. `FOUND_ISSUES_SESSION_CONTEXT=lean` swaps the rules for a ~1 KB core; `full` restores the 3.3.1 `[open]` list. A resumed session gets no injection. Auto-migrate broken custom statusline targets |
-| `stop-reminder.sh` | Stop | Ask for the `<!-- found-issues-checked: ... -->` marker after turns with substantive tool use (Edit/Write/MultiEdit/mutating Bash): a block once per session in sessions that edited code, else one non-blocking reminder (3.2.1); pure-conversation turns and non-interactive (`CLAUDE_CODE_ENTRYPOINT != cli`) sessions pass through |
+| `stop-reminder.sh` | Stop | After a turn with substantive tool use (Edit/Write/MultiEdit/mutating Bash), queue one silent reminder per session that `prompt-nudge.sh` hands the model with the next prompt (default since 3.10.0); `FOUND_ISSUES_STOP_REMINDER=block` instead blocks once per session in sessions that edited code and asks for the `<!-- found-issues-checked: ... -->` marker; pure-conversation turns and non-interactive (`CLAUDE_CODE_ENTRYPOINT != cli`) sessions pass through |
 | `prompt-nudge.sh` | UserPromptSubmit | Hand a pending stop-reminder reminder to the model with the next prompt, once (no extra turn) |
 | `format-enforcer.sh` | PreToolUse Write/Edit | Block malformed entries before they land |
 | `pre-branch-delete.sh` | PreToolUse Bash | Block branch deletion if entries unpromoted |

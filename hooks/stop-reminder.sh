@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # stop-reminder.sh — Stop hook
 #
-# Forces <!-- found-issues-checked: ... --> marker on every assistant turn.
-# This is the discipline-enforcer that creates the proactive logging habit.
+# Asks the model, once per session, whether it noticed anything out of scope.
+# 3.10.0: silent by default — the ask reaches the model with the next prompt
+# (hooks/prompt-nudge.sh) and nothing is shown. FOUND_ISSUES_STOP_REMINDER=block
+# brings back the visible once-per-session block in sessions that edited code,
+# which asks for a <!-- found-issues-checked: ... --> marker.
 #
 # Hook event: Stop
 # Exit codes:
-#   0  — allow stop (marker present, or check skipped)
-#   2  — block stop (marker missing); message to stderr
+#   0  — allow stop (marker present, check skipped, or silent reminder queued)
+#   2  — block stop (block mode, marker missing); message to stderr
 #
 # Stdin: JSON describing the hook event including transcript_path.
 
@@ -165,6 +168,18 @@ if [[ "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" != "on" \
   exit 0
 fi
 
+# 3.10.0 review: the silent default queues at most one reminder per session
+# (.nudge, then .nudged once the prompt hook delivered it). Once either exists
+# nothing below can change the outcome, so leave before the 4MB tail, the awk
+# and the jq passes that every Stop of every turn would otherwise pay. Block
+# mode (and EVERY_TURN, which implies it) still needs the transcript.
+if [[ "${FOUND_ISSUES_STOP_REMINDER:-on}" != "block" \
+      && "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" != "on" \
+      && -n "$session_id" \
+      && ( -e "$REMINDED_DIR/$session_id.nudge" || -e "$REMINDED_DIR/$session_id.nudged" ) ]]; then
+  exit 0
+fi
+
 # Extract transcript_path
 # Builtin when the JSON string has no escapes (always, for a real path on
 # macOS/Linux); jq only to decode one that does (Windows backslashes).
@@ -307,17 +322,40 @@ if [[ -n "$recent_tail" ]]; then
   fi
 fi
 
-# Check the last ~8KB of the transcript for the marker. 8KB is enough to
-# capture the most recent assistant turn even with long output.
+# Look for the marker in the current turn. 3.10.0 (issue #167): the last
+# 8KB alone missed a marker a verbose turn wrote earlier; the turn read above
+# covers it, and the 8KB tail still catches text flushed since that read.
 #
 # Brief retry: Claude Code fires Stop before the final assistant text is
 # flushed to disk, so a first-pass check can miss a marker the assistant
 # actually included. One short sleep gives the flush a chance to land
 # before we block. If the marker still isn't present, stop_hook_active
 # on the retry-fire (above) prevents an infinite block loop.
+#
+# The marker only counts in the assistant's own text. The turn is raw
+# transcript JSONL, so a tool_result (a `cat` of the rules, a grep for the
+# marker) or a tool_use input (an edited fixture) can carry the literal
+# string without the assistant having written it.
+text_has_marker() { # $1 = transcript lines (JSONL; the first may be a cut one)
+  local texts
+  # No jq: the assistant text cannot be told apart, so fall back to the raw
+  # substring (the pre-3.10.0 behaviour, fail-open).
+  command -v jq >/dev/null 2>&1 || { [[ "$1" == *'<!-- found-issues-checked:'* ]]; return; }
+  # Real shape: message.content[] items of type "text". Also the flat
+  # fixtures' string `message` and a string `content`.
+  texts="$(printf '%s' "$1" | jq -R -r 'fromjson? | select(.type=="assistant")
+      | (.message | if type=="string" then .
+         elif type=="object" then (.content | if type=="string" then .
+           elif type=="array" then (.[]? | objects | select(.type=="text") | .text? | strings)
+           else empty end)
+         else empty end)' 2>/dev/null || true)"
+  [[ "$texts" == *'<!-- found-issues-checked:'* ]]
+}
+if text_has_marker "${last_turn:-}"; then
+  exit 0
+fi
 for attempt in 1 2; do
-  if tail -c 8192 "$transcript_path" 2>/dev/null \
-     | grep -q '<!-- found-issues-checked:'; then
+  if text_has_marker "$(tail -c 8192 "$transcript_path" 2>/dev/null || true)"; then
     exit 0
   fi
   [[ $attempt -eq 1 ]] && sleep 0.3
@@ -330,6 +368,13 @@ if (( ! code_edit )) && [[ -n "$session_id" && -f "$REMINDED_DIR/$session_id.cod
   code_edit=1
 fi
 [[ "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" == "on" ]] && code_edit=1
+# 3.10.0: the block is opt-in. Claude Code shows a blocking Stop hook as a
+# "Stop hook error" box the user scrolls past, and most blocks bought a
+# marker-only turn (3.2.1 scan); by default a code-editing session gets the
+# same silent reminder as any other.
+if [[ "${FOUND_ISSUES_STOP_REMINDER:-on}" != "block" && "${FOUND_ISSUES_STOP_REMINDER_EVERY_TURN:-off}" != "on" ]]; then
+  code_edit=0
+fi
 if (( ! code_edit )); then
   [[ -n "$session_id" ]] || exit 0
   [[ -e "$REMINDED_DIR/$session_id.nudge" || -e "$REMINDED_DIR/$session_id.nudged" ]] && exit 0

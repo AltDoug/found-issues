@@ -49,6 +49,22 @@ assert_released() {
   assert_released
 }
 
+@test "autofix release: --already-fixed leaves a held entry open for a human" {
+  sed -i.bak 's/add subtracts (fix: small)$/add subtracts (fix: small) (hold: owner checks)/' docs/found-issues.md && rm -f docs/found-issues.md.bak
+  run "$FI_BIN" autofix release "$ID" --already-fixed "add already uses plus at origin/main"
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small) (hold: owner checks)$' docs/found-issues.md
+  assert_released
+}
+
+@test "autofix release: --already-fixed holds a critical entry instead of closing it" {
+  sed -i.bak 's/^- \[open\] 2026-10-01 src\/calc.sh:1/- [open] [!] 2026-10-01 src\/calc.sh:1/' docs/found-issues.md && rm -f docs/found-issues.md.bak
+  run "$FI_BIN" autofix release "$ID" --already-fixed "add already uses plus at origin/main"
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\] \[!\] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small) (hold: needs human verify)$' docs/found-issues.md
+  assert_released
+}
+
 @test "autofix release: an entry removed from the ledger still releases the item" {
   printf '# found-issues\n\n' > docs/found-issues.md
   run "$FI_BIN" autofix release "$ID" --failed "boom"

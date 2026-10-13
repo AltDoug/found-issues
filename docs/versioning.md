@@ -80,7 +80,7 @@ The check intentionally does NOT verify MAJOR bumps for "breaking" changes — t
 
 3.0.0 is MAJOR (operator decision 2026-10-03). What can break for someone upgrading from 2.x:
 
-- **New tags in the ledger.** Entries may carry `(fix: …)`, `(decide: …)`, `(decided: …)`, `(manual: …)`, `(until: …)` and `(autofix-failed: …)`. A 2.x CLI reading a 3.x ledger treats them as symptom text, so every machine that writes the same ledger should upgrade together.
+- **New tags in the ledger.** Entries may carry `(fix: …)`, `(decide: …)`, `(decided: …)`, `(manual: …)`, `(until: …)`, `(autofix-failed: …)` and (3.10) `(hold: …)`. A 2.x CLI reading a 3.x ledger treats them as symptom text, so every machine that writes the same ledger should upgrade together.
 - **`/found-issues:fix` changed shape.** It works in a fresh worktree on `fix/found-issues-<date>-<rand>`, runs the repo's test command through `found-issues fix test`, ships with `found-issues fix ship`, and closes already-fixed entries with `resolve --verified ai` instead of an archiving sync.
 - **The statusline segment gained two buckets.** `❓N` (decisions waiting) and `🔧N` (auto-fix runs in progress), inside the v1 shape (see `docs/statusline-integration-contract.md`); `status --format=json` gained `decisions` and `running`. Scripts that parse bucket text must allow them.
 - **Headless sessions are quiet.** `claude -p`, SDK sessions and auto-fix children no longer get the first-run hint or the daily notices, and no longer use them up.

@@ -14,7 +14,8 @@
 
 # === Subcommand: annotate-pr ===
 #
-# Usage: found-issues annotate-pr <PR-number> [--pick <loc>[,<loc>...]] [--all]
+# Usage: found-issues annotate-pr <PR-number|org/repo#N> --pick <loc>[,<loc>...]
+#        found-issues annotate-pr <PR-number> [--all]
 #
 # Scans the PR's diff for files referenced by [open] entries and appends
 # (PR: org/repo#N) to matching entries. File-level matching alone
@@ -31,6 +32,70 @@
 #     in a different file than the symptom.
 #   - --all restores annotate-everything-matching for PRs that genuinely
 #     address every listed entry.
+
+# Usage text: --pick is the form that CLOSES (a pick is the confirmation); the
+# bare form only writes non-closing (PR-auto: ...) suggestions.
+_fi_annotate_pr_usage() {
+  fi_err "Usage: found-issues annotate-pr <PR-number|org/repo#N> --pick <path:line>[,<path:line>...] [--all]"
+  fi_err "  --pick  confirms the entries the PR fixes; only a pick closes them on merge."
+  fi_err "  Without --pick only non-closing (PR-auto: ...) suggestions are written; org/repo#N requires --pick."
+}
+
+# _fi_annotate_pick_repo <picks_nl> — the repo a bare PR number belongs to when
+# the picked entries' paths name another git repo than the ledger's (#168).
+# Sets FI_PICK_REPO_ID to that repo's org/repo, or "" when every pick sits in
+# the ledger repo (the caller keeps fi_repo_id). Returns 2 (message printed)
+# when the picks span several repos or the other repo has no GitHub origin.
+_fi_annotate_pick_repo() {
+  local picks_nl="$1" pick loc path dir top ledger_top seen="" have=0 id here_id
+  FI_PICK_REPO_ID=""
+  ledger_top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  ledger_top="$(cd "$ledger_top" && pwd -P)"
+  here_id="$(fi_repo_id 2>/dev/null || true)"
+  while IFS= read -r pick; do
+    [[ -z "$pick" ]] && continue
+    loc="${pick%% — *}"
+    path="$loc"
+    # Drop a trailing :line (or :name); a bare path has none.
+    [[ "$path" == *:* && "${path##*:}" != */* ]] && path="${path%:*}"
+    [[ "$path" == /* ]] || path="$ledger_top/$path"
+    # Nearest existing ancestor: the path itself may not exist (yet).
+    dir="${path%/*}"
+    while [[ -n "$dir" && ! -d "$dir" ]]; do dir="${dir%/*}"; done
+    [[ -n "$dir" ]] || dir=/
+    top="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || top=""
+    if [[ -z "$top" ]]; then
+      top="$ledger_top"
+    else
+      top="$(cd "$top" && pwd -P)"
+      # A submodule of the ledger repo is part of it, not another repo (its
+      # origin is not where this ledger's PRs live).
+      local sp
+      while [[ "$top" != "$ledger_top" ]]; do
+        sp="$(git -C "$top" rev-parse --show-superproject-working-tree 2>/dev/null)" || sp=""
+        [[ -n "$sp" ]] || break
+        top="$(cd "$sp" && pwd -P)"
+      done
+    fi
+    if [[ "$top" == "$ledger_top" ]]; then
+      id="$here_id"
+    else
+      id="$(cd "$top" && fi_repo_id 2>/dev/null)" || {
+        fi_err "annotate-pr: $loc sits in $top, which has no GitHub origin; pass org/repo#N instead of a bare number"
+        return 2
+      }
+    fi
+    if [[ "$have" -eq 1 && "$seen" != "$id" ]]; then
+      fi_err "annotate-pr: the picked entries sit in different repos (${seen:-this repo} and ${id:-this repo}); a bare number cannot name one PR for both. Pass org/repo#N with picks from one repo"
+      return 2
+    fi
+    seen="$id" have=1
+  done <<<"$picks_nl"
+  if [[ "$have" -eq 1 && -n "$seen" && "$seen" != "$here_id" ]]; then
+    FI_PICK_REPO_ID="$seen"
+  fi
+  return 0
+}
 
 cmd_annotate_pr() {
   local pr_num=""
@@ -59,12 +124,12 @@ cmd_annotate_pr() {
         ;;
       -*)
         fi_err "annotate-pr: unknown flag: $1"
-        fi_err "Usage: found-issues annotate-pr <PR-number> [--pick <path:line>[,<path:line>...]] [--all]"
+        _fi_annotate_pr_usage
         return 2
         ;;
       *)
         if [[ -n "$pr_num" ]]; then
-          fi_err "Usage: found-issues annotate-pr <PR-number> [--pick <path:line>[,<path:line>...]] [--all]"
+          _fi_annotate_pr_usage
           return 2
         fi
         pr_num="$1"
@@ -74,7 +139,7 @@ cmd_annotate_pr() {
   done
 
   if [[ -z "$pr_num" ]]; then
-    fi_err "Usage: found-issues annotate-pr <PR-number> [--pick <path:line>[,<path:line>...]] [--all]"
+    _fi_annotate_pr_usage
     return 2
   fi
   local ref_repo="" _ref_re='^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#([0-9]+)$'
@@ -95,12 +160,22 @@ cmd_annotate_pr() {
     return 2
   fi
 
-  local repo_id
+  # A bare N names a PR in the repo the picked entries' paths sit in, which is
+  # not always the ledger's (a coordination repo tracking sibling repos).
+  local repo_id pick_repo=""
   if [[ -n "$ref_repo" ]]; then
     repo_id="$ref_repo"
-  elif ! repo_id="$(fi_repo_id)"; then
-    fi_err "annotate-pr: not in a GitHub repo"
-    return 1
+  else
+    if [[ -n "$picks_nl" ]]; then
+      _fi_annotate_pick_repo "$picks_nl" || return $?
+      pick_repo="$FI_PICK_REPO_ID"
+    fi
+    if [[ -n "$pick_repo" ]]; then
+      repo_id="$pick_repo"
+    elif ! repo_id="$(fi_repo_id)"; then
+      fi_err "annotate-pr: not in a GitHub repo"
+      return 1
+    fi
   fi
 
   if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
@@ -109,8 +184,8 @@ cmd_annotate_pr() {
   fi
 
   # Verify PR exists (in the ref's repo when cross-repo)
-  if [[ -n "$ref_repo" ]]; then
-    if ! gh pr view "$pr_num" --repo "$ref_repo" --json number >/dev/null 2>&1; then
+  if [[ -n "$ref_repo" || -n "$pick_repo" ]]; then
+    if ! gh pr view "$pr_num" --repo "$repo_id" --json number >/dev/null 2>&1; then
       fi_err "annotate-pr: PR #$pr_num not found in $repo_id"
       return 1
     fi

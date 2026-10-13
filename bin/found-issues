@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-readonly FI_VERSION="3.9.3"
+readonly FI_VERSION="3.10.0"
 
 # Statusline fast path (lib/segment-cache.sh): `status --format=segment` runs
 # every few seconds per session, so it is answered from a content-checked
@@ -269,8 +269,9 @@ fi_resolve_issues_file() {
   else
     local repo_root
     repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    if [[ -f "$repo_root/docs/found-issues.md" ]]; then
-      target="$repo_root/docs/found-issues.md"
+    # 3.10.0 (#164): a differently-cased docs ledger counts as the ledger.
+    if target="$(fi_docs_ledger "$repo_root")"; then
+      :
     elif [[ -f "$repo_root/.found-issues.md" ]]; then
       target="$repo_root/.found-issues.md"
     else

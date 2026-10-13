@@ -17,6 +17,7 @@
 #   fi_target_is_v15x_broken <file>
 #   fi_strip_target_markers <file>
 #   fi_strip_to_scratch <file>
+#   fi_statusline_command_path <command-string>
 
 # === Subcommand: install-statusline ===
 #
@@ -211,7 +212,9 @@ fi_strip_legacy_handwritten() {
   local file="$1"
   local tmp original_mode
   original_mode=$(fi_capture_mode "$file")
-  tmp="$(mktemp -t found-issues-statusline.XXXXXX)"
+  # Beside the target: the mv below is then a same-filesystem rename, and
+  # needs no writable $TMPDIR (issue #174).
+  tmp="$(mktemp "$(dirname "$file")/.found-issues-statusline.tmp.XXXXXX")"
 
   awk -v start="$FI_STATUSLINE_START_MARKER" \
       -v endm="$FI_STATUSLINE_END_MARKER" '
@@ -346,7 +349,7 @@ fi_strip_target_markers() {
   esac
 
   local tmp
-  tmp="$(mktemp -t fi-strip.XXXXXX)"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/fi-strip.XXXXXX")"
   # v1.5.x call-form splice fragments are CONSTANT strings emitted by the
   # installers (deferred __fiSeg(dir)/_fi_seg(_dir) with a fixed fallback
   # expression). Their nested parens defeat the ERE `[^)]*` patterns below
@@ -429,9 +432,34 @@ fi_strip_target_markers() {
 fi_strip_to_scratch() {
   local path="$1" language="$2"
   local scratch
-  scratch="$(mktemp -t fi-target-migrate.XXXXXX)" || return 1
+  scratch="$(mktemp "${TMPDIR:-/tmp}/fi-target-migrate.XXXXXX")" || return 1
   cp "$path" "$scratch" || { rm -f "$scratch"; return 1; }
   fi_strip_target_markers "$scratch" "$language" || { rm -f "$scratch"; return 1; }
   printf '%s' "$scratch"
 }
 
+# fi_statusline_command_path <command-string>
+# Resolve the statusline script path out of settings.json statusLine.command.
+# Takes the final argument (a trailing quoted argument may contain spaces),
+# strips its surrounding quotes, and expands ${HOME}, $HOME and a leading ~.
+# Prints the path; prints nothing for an empty command. Shared by the
+# runtime probe, `doctor` and the SessionStart hook (hooks/session-start.sh),
+# which is why it lives here and not in statusline-install.sh.
+fi_statusline_command_path() {
+  local cmd="$1" tok q h="$HOME"
+  cmd="${cmd%"${cmd##*[![:space:]]}"}"
+  [[ -n "$cmd" ]] || return 0
+  q="${cmd: -1}"
+  if [[ "$q" == '"' || "$q" == "'" ]]; then
+    tok="${cmd%?}"
+    tok="${tok##*"$q"}"
+  else
+    tok="${cmd##*[[:space:]]}"
+  fi
+  tok=${tok//'${HOME}'/$h}
+  tok=${tok//'$HOME'/$h}
+  if [[ "$tok" == "~" || "$tok" == "~/"* ]]; then
+    tok="$h${tok#\~}"
+  fi
+  printf '%s' "$tok"
+}

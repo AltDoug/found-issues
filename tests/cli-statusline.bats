@@ -289,6 +289,52 @@ SL
   [[ -x "$HOME/.claude/statusline.sh" ]]
 }
 
+# Issue #174: `mktemp -t` fails on macOS under a sandboxed shell. The inline
+# install and the uninstall build their temp file beside the statusline, so an
+# unusable $TMPDIR must not matter.
+@test "install and uninstall statusline work with an unusable TMPDIR (issue 174)" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+set -euo pipefail
+input=$(cat)
+LINE1="repo"
+LINE1="$LINE1 | branch"
+echo "$LINE1"
+SL
+  chmod 755 "$HOME/.claude/statusline.sh"
+  export TMPDIR="$TMP/no-such-tmpdir"
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"inserted inline LINE1 segment"* ]]
+  grep -Fq "# === found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
+  fi_run uninstall-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"removed found-issues segment"* ]]
+  run grep -Fq "found-issues plugin segment" "$HOME/.claude/statusline.sh"
+  [ "$status" -ne 0 ]
+  [[ -x "$HOME/.claude/statusline.sh" ]]
+  # No temp debris left beside the statusline.
+  run bash -c "ls -A \"$HOME/.claude\" | grep -F '.found-issues-statusline.tmp'"
+  [ "$status" -ne 0 ]
+}
+
+@test "install-statusline appends a standalone segment with TMPDIR set to a custom writable dir (issue 174)" {
+  cat > "$HOME/.claude/statusline.sh" <<'SL'
+#!/usr/bin/env bash
+set -euo pipefail
+input=$(cat)
+echo "repo | branch"
+SL
+  mkdir -p "$TMP/custom-tmp"
+  export TMPDIR="$TMP/custom-tmp"
+  fi_run install-statusline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"appended standalone segment"* ]]
+  grep -Fq "# === end found-issues plugin segment ===" "$HOME/.claude/statusline.sh"
+  # Temp files were cleaned out of the custom dir.
+  [ -z "$(ls -A "$TMP/custom-tmp")" ]
+}
+
 # === v1.0.3: --cwd flag, classifier, self-heal install, doctor-statusline ===
 
 @test "status: --cwd PATH locates issues file in arbitrary directory" {
