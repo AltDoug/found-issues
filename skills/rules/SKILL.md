@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 - **Log:** `/found-issues:log <path:line> — <symptom> (suggested: <fix>)` with one tag: `--fix small|medium|large` (a test proves the fix), `--decide "<question>"` (user's call) or `--manual "<why>"` (no test can prove it). Log bugs, races, security defects, misleading docs, and `dead code:` (zero call sites; never edit it). Skip nits, TODOs, speculation.
 - **After a PR or commit:** run the printed `found-issues annotate-pr <N> --pick <loc>,...` (or `annotate-commit <sha> --pick`) naming only entries it fixes; a pick closes on merge.
-- **Stop marker:** only when a Stop hook block asks for it, end that reply with `<!-- found-issues-checked: none-noticed -->`, `logged` or `deferred`; by default no marker is needed.
+- **Stop marker:** only if a Stop block asks: `<!-- found-issues-checked: none-noticed -->`, `logged` or `deferred`.
 - Each `/found-issues:*` command carries its own procedure.
 
 **Hard rules:** never write the ledger directly; never delete `[open]` entries; never mark `[fixed]` without verification; never bypass the pre-branch-delete check (run `/found-issues:promote` first).

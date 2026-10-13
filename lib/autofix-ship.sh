@@ -57,9 +57,9 @@ fi_af_reset_ledger() {
   if docs="$(fi_docs_ledger "$wt")"; then
     paths[${#paths[@]}]="${docs#"$wt"/}"
   fi
-  while IFS= read -r d; do
+  while IFS= read -r d || [[ -n "$d" ]]; do
     case "$d" in [Dd][Oo][Cc][Ss]) ;; *) continue ;; esac
-    while IFS= read -r p; do
+    while IFS= read -r p || [[ -n "$p" ]]; do
       case "$p" in "$d"/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]) paths[${#paths[@]}]="$p" ;; esac
     done < <(git -C "$wt" ls-tree --name-only "$ref:$d" 2>/dev/null | sed "s|^|$d/|")
   done < <(git -C "$wt" ls-tree --name-only "$ref" 2>/dev/null)
