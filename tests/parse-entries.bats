@@ -785,3 +785,39 @@ ledger_ref_repo() {
   [ "$status" -eq 1 ]
   [ -z "$output" ]
 }
+
+# === 3.10.2: ledger root and archive lookups, case-insensitive (#164) ===
+
+@test "docs_ledger_root: names the root of a ledger path in any case, string only" {
+  run fi_docs_ledger_root /r/pkg/app/docs/found-issues.md
+  [ "$status" -eq 0 ]
+  [ "$output" = "/r/pkg/app" ]
+  run fi_docs_ledger_root /r/pkg/app/Docs/Found-Issues.md
+  [ "$status" -eq 0 ]
+  [ "$output" = "/r/pkg/app" ]
+  run fi_docs_ledger_root /r/DOCS/FOUND-ISSUES.MD
+  [ "$status" -eq 0 ]
+  [ "$output" = "/r" ]
+  run fi_docs_ledger_root /r/.found-issues.md
+  [ "$status" -eq 1 ]
+  run fi_docs_ledger_root /r/notes/other.md
+  [ "$status" -eq 1 ]
+}
+
+@test "docs_archive_at_ref: finds the archive as tracked, beside any-case docs dir (#164)" {
+  ledger_ref_repo
+  mkdir -p Docs && echo "# x" > Docs/Found-Issues-Archive.md
+  git add -A && git commit -q -m init
+  run fi_docs_archive_at_ref HEAD
+  [ "$status" -eq 0 ]
+  [ "$output" = "Docs/Found-Issues-Archive.md" ]
+}
+
+@test "docs_archive_at_ref: none when the ref tracks no archive" {
+  ledger_ref_repo
+  mkdir -p docs && echo "# x" > docs/found-issues.md
+  git add -A && git commit -q -m init
+  run fi_docs_archive_at_ref HEAD
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
