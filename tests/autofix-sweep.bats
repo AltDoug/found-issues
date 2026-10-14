@@ -475,6 +475,66 @@ gh_mock() {
   [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
 }
 
+# 3.10.1 (ledger lib/autofix-sweep.sh:313): the red-base skip that ran no suite
+# (the memo says the base is already red) must not spend the day's slot. A
+# red-at-<base sha> marker blocks re-queuing until the base sha changes.
+red_memo_setup() { # a first sweep runs the red suite; a second claims on the memo
+  fi_af_sweep_fixture 4; fi_use_standins
+  git config found-issues.autofix.dailySweeps 3
+  git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; exit 1"
+  sweep_queue
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 5 ]
+  source "$FI_BIN"; fi_af_context
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  SID2="$(printf '%s\n' "$output" | sed -n 's/^AUTOFIX-SWEEP-DUE //p')"
+  [ -n "$SID2" ]
+}
+
+@test "sweep claim: a base that really ran red spends the day's slot" {
+  fi_af_sweep_fixture 4; fi_use_standins
+  git config found-issues.autofix.dailySweeps 3
+  git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; exit 1"
+  sweep_queue
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 5 ]
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 2 ]
+  [ "$(wc -l < "$ST/day/$(date +%Y-%m-%d).sweep" | tr -d ' ')" = 1 ]
+}
+
+@test "sweep claim: a known-red skip that ran no suite leaves the day's slot count unchanged" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"tests fail at base"* ]]
+  grep -q 'known red at' "$FI_AF_RUNS/$SID2.log"
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 2 ]
+  [ "$(wc -l < "$ST/day/$(date +%Y-%m-%d).sweep" | tr -d ' ')" = 1 ]
+  [ ! -e "$ST/day/$(date +%Y-%m-%d).capped" ]
+}
+
+@test "sweep check: after a known-red skip no sweep is queued while the base sha is unchanged" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$(ls "$ST/queue" 2>/dev/null)" ]
+}
+
+@test "sweep check: a new base sha queues a sweep again the same day, and spot fixes are unaffected" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  echo more >> README.md && git add README.md && git commit -qm more && git push -q origin main
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [[ "$output" == "AUTOFIX-SWEEP-DUE "* ]]
+  fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"
+}
+
 # 3.2.1 (ledger lib/autofix-sweep.sh:387): a failed ship keeps the branch and
 # requeues the sweep; the next run ships the same commits without fixing again.
 sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
