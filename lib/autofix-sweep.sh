@@ -144,6 +144,20 @@ _fi_af_untagged_count() {
   printf '%s' "$c"
 }
 
+# 0 when today's red-at-<base sha> marker (fi_af_sweep_claim) names the
+# commit origin/<base> of <root> is at now. No network: a sweep claim
+# fetched the base into this checkout, and a push moves it.
+_fi_af_sweep_redbase_hit() { # <root>
+  local line base sha
+  [[ -f "$FI_AF_ST/day/$(fi_today).sweep-redbase" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    base="${line%% *}" sha="${line#* }"
+    [[ -n "$base" && -n "$sha" && "$base" != "$line" ]] || continue
+    [[ "$(git -C "$1" rev-parse -q --verify "refs/remotes/origin/$base" 2>/dev/null)" == "$sha" ]] && return 0
+  done <"$FI_AF_ST/day/$(fi_today).sweep-redbase"
+  return 1
+}
+
 fi_af_sweep_check() {
   local slug root file entry n=0 crit=0 engine
   [[ "${FOUND_ISSUES_AUTOFIX_CHILD:-}" == "1" ]] && return 0
@@ -163,6 +177,9 @@ fi_af_sweep_check() {
   # A sweep that retired for want of a test command on the landing branch
   # (the root checkout may have one) is not queued again the same day.
   fi_af_cap_ok sweep-notest 1 || return 0
+  # 3.10.1: nor while the base is still the commit a sweep stopped on as
+  # known red without running the suite.
+  _fi_af_sweep_redbase_hit "$root" && return 0
   while IFS= read -r entry || [[ -n "$entry" ]]; do
     [[ -n "$entry" ]] || continue
     n=$((n + 1))
@@ -310,10 +327,17 @@ fi_af_sweep_claim() {
     fi_af_cap_take sweep-notest "$id"
     fi_af_finish "$id" stale "$FI_AF_WHY"; return 5
   fi
-  # Red at base: retire before the classifier spends anything. The day's
-  # slot is spent, or every Stop would queue a new sweep and re-run the suite.
+  # Red at base: retire before the classifier spends anything. When the suite
+  # ran, the day's slot is spent, or every Stop would queue a new sweep and
+  # re-run it. A stop on the known-red memo ran nothing (3.10.1, ledger :313):
+  # it keeps the slot and takes a red-at-<base sha> day marker instead, which
+  # fi_af_sweep_check honors until origin/<base> moves.
   if ! fi_af_base_tests "$id"; then
-    (( capped )) || fi_af_cap_take sweep "$id"
+    if [[ -n "${FI_AF_BASE_MEMO:-}" && -n "${AFI_base_sha:-}" ]]; then
+      fi_af_cap_take sweep-redbase "$AFI_base $AFI_base_sha"
+    else
+      (( capped )) || fi_af_cap_take sweep "$id"
+    fi
     FI_AF_WHY="${FI_AF_BASE_WHY:-tests fail at base}"
     fi_af_finish "$id" stale "$FI_AF_WHY"; return 5
   fi

@@ -611,13 +611,13 @@ fi_af_worktree_remove() {
 # worktree is reset after, so nothing the tests left reaches a fixer's diff.
 fi_af_base_tests() {
   local id="$1" t rc=0 log="$FI_AF_RUNS/$1.base-tests.log" red="$FI_AF_ST/base-red" key=""
-  FI_AF_BASE_WHY=""
+  FI_AF_BASE_WHY="" FI_AF_BASE_MEMO=""
   t="$(fi_af_test_command "$AFI_wt" 2>/dev/null)" || return 0
   # 3.6.0: a base found red is remembered by commit and test command, so the
   # next item on the same base retires without running the suite again.
   [[ -n "${AFI_base_sha:-}" ]] && key="$AFI_base_sha $t"
   if [[ -n "$key" && -f "$red" && "$(cat "$red" 2>/dev/null)" == "$key" ]]; then
-    FI_AF_BASE_WHY="tests fail at base"
+    FI_AF_BASE_WHY="tests fail at base" FI_AF_BASE_MEMO=1
     fi_af_log "$id" "tests fail at base: known red at ${AFI_base_sha:0:7} ($t), not re-run"
     return 1
   fi
