@@ -107,17 +107,20 @@ a single committed file; whichever harness is running reads and writes
 the same file, so a repo worked on from both Claude Code and Codex in
 the same day shares one ledger with no migration or sync step required.
 
-Two known v1 gaps on Codex specifically:
+One known gap on Codex specifically:
 
 - **No statusline counter.** Codex has no statusline surface, so the
   `3 critical · 12 other` glance-view only exists in Claude Code. The
   SessionStart entry injection and `found-issues status` still work on
   Codex — you just don't get the always-visible segment.
-- **No stop-hook marker discipline.** The `<!-- found-issues-checked:
-  ... -->` enforcement is Claude-only in v1 — Codex's transcript format
-  isn't parsed by the smart-fire logic, so the hook fails open (never
-  blocks) on Codex. Logging still works via the auto-injected rules;
-  it's just not mechanically enforced every turn.
+
+The end-of-turn check does run on Codex (since 2.10.0): Codex's Stop
+payload carries the final reply as `last_assistant_message`, so the hook
+reads the `<!-- found-issues-checked: ... -->` marker from it directly. On
+a turn that made a tool call and has no marker, it blocks once per
+session and asks the model to log what it noticed.
+`FOUND_ISSUES_STOP_REMINDER=off` turns it off. (Claude Code's check has
+been silent by default since 3.10.0; Codex still uses the one block.)
 
 ## Will it work with Cursor / Aider / plain API?
 
