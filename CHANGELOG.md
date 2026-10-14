@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.1] - 2026-10-13
+
+A differently-cased ledger counts as the ledger everywhere, sync stops probing held entries, and a sweep skipped at a known-red base keeps the day's slot.
+
+### Fixed
+- **A differently-cased docs ledger is the ledger in every hook and auto-fix path** (ledger `hooks/pre-commit.sh:27`, `hooks/format-enforcer.sh:66`, `lib/autofix-ship.sh:34`; follow-up to #164). 3.10.0 taught the lookup to find `Docs/Found-Issues.md` and similar, but several sites still matched only the literal `docs/found-issues.md`. The pre-commit format check now validates a staged differently-cased ledger. The Write/Edit format enforcer (including its fast gate and `apply_patch` hunks) matches the ledger case-insensitively. Auto-fix uses the ledger's real spelling when it annotates a PR branch, reads the base branch's ledger, allows a ledger-only merge conflict, and annotates in `fix ship`; the branch-delete guard does too. A new `fi_docs_ledger_at_ref` resolves the ledger's tracked spelling at a git ref. The first-touch hook and statusline root still assume lowercase on a case-sensitive filesystem (logged as `hooks/first-touch.sh:51`).
+- **sync decides holds before any closure probe** (ledger `lib/sync.sh:505`). A critical (`[!]`) or `(hold: ...)` entry was probed like any other (a `gh` PR call, git history and tombstone checks) on every sync, then walked back. Held entries now skip those probes entirely; the `Held:` summary is unchanged.
+- **A sweep stopped by the known-red memo keeps the day's sweep slot** (ledger `lib/autofix-sweep.sh:313`). When the base was already known red at its commit, the sweep ran no tests but still spent a daily slot, so a repo could burn every slot on skips and then could not sweep the same day after its base was fixed. A memo skip now records a red-at-base marker instead: no new sweep queues while the base commit is unchanged, and once it moves (for example after a push) a sweep can run that day. A base whose tests actually ran red still spends the slot, and spot fixes are unaffected.
+- **FAQ: the end-of-turn check runs on Codex** (ledger `docs/faq.md:116`). It has since 2.10.0, reading the marker from Codex's `last_assistant_message`; the FAQ still listed it as a Claude-only gap.
+
 ## [3.10.0] - 2026-10-12
 
 Critical entries wait for a human, the end-of-turn check goes quiet, and fixes for the issues reported by @jbelmana.
