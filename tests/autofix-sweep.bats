@@ -567,6 +567,22 @@ remote_moves() { # a second clone pushes to the shared remote; this checkout's o
   [[ "$output" == "AUTOFIX-SWEEP-DUE "* ]]
 }
 
+@test "sweep check: an auto-detected test command that differs in the root checkout still blocks" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  # No configured command: the memo holds what the base tree detected, and the
+  # root checkout (another branch's files) detects something else.
+  git config --unset found-issues.autofix.testCommand
+  local memo; memo="$(cat "$FI_AF_ST/base-red")"
+  printf '%s make test' "${memo%% *}" > "$FI_AF_ST/base-red"
+  mkdir -p tests && : > tests/extra.bats
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$(ls "$ST/queue" 2>/dev/null)" ]
+}
+
 @test "sweep check: when ls-remote fails the local ref decides and an unchanged sha still blocks" {
   red_memo_setup
   run "$FI_BIN" autofix claim "$SID2"

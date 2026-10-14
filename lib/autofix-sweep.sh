@@ -147,20 +147,25 @@ _fi_af_untagged_count() {
 # 0 while a stop on the known-red memo still holds. Today's sweep-redbase
 # marker (fi_af_sweep_claim) names the base; the block applies only while the
 # known-red memo ($FI_AF_ST/base-red, "<sha> <test command>", the one the
-# claim's fi_af_base_tests reads) still says that sha with the test command
-# <root> resolves now, so the two cannot disagree: a corrected testCommand or a
-# green run (memo removed) unblocks. The base must also still be at that sha
+# claim's fi_af_base_tests reads) still says that sha, and, when a testCommand
+# is configured, that command, so the two cannot disagree: a corrected
+# testCommand or a green run (memo removed) unblocks. The base must also still be at that sha
 # locally and on the remote: one ls-remote, only here, where a block would
 # apply (a fix merged on GitHub moves no local ref until a claim fetches). A
 # failed ls-remote falls back to the local ref, so offline stays blocked.
 _fi_af_sweep_redbase_hit() { # <root>
-  local line base sha t remote rc
+  local line base sha memo cfg remote rc
   [[ -f "$FI_AF_ST/day/$(fi_today).sweep-redbase" ]] || return 1
-  t="$(fi_af_test_command "$1" 2>/dev/null)" || return 1
+  memo="$(cat "$FI_AF_ST/base-red" 2>/dev/null)" || return 1
+  # Only a configured testCommand is compared: an auto-detected one follows
+  # the base tree, so it cannot change while the sha does not, and <root>'s
+  # own detection (another branch's files) would never match the memo's.
+  cfg="$(git -C "$1" config --get found-issues.autofix.testCommand 2>/dev/null || true)"
+  if [[ -n "$cfg" && "${memo#* }" != "$cfg" ]]; then return 1; fi
   while IFS= read -r line || [[ -n "$line" ]]; do
     base="${line%% *}" sha="${line#* }"
     [[ -n "$base" && -n "$sha" && "$base" != "$line" ]] || continue
-    [[ "$(cat "$FI_AF_ST/base-red" 2>/dev/null)" == "$sha $t" ]] || continue
+    [[ "${memo%% *}" == "$sha" ]] || continue
     [[ "$(git -C "$1" rev-parse -q --verify "refs/remotes/origin/$base" 2>/dev/null)" == "$sha" ]] || continue
     rc=0
     remote="$(GIT_TERMINAL_PROMPT=0 git -C "$1" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 \
