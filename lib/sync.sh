@@ -231,6 +231,10 @@ cmd_sync() {
       local e_critical="$FE_critical" e_hold="$FE_hold" e_symptom="$FE_symptom"
       local e_loc
       e_loc="$(fi_entry_loc "$line" 2>/dev/null || printf '%s' "$e_path")"
+      # Held (#161, #169): decided here, before any closure probe, so a held
+      # entry costs no gh PR call and no git history probe (see "hold" below).
+      local is_held=0
+      [[ "$e_critical" == "yes" || -n "$e_hold" ]] && is_held=1
 
       local closure_kind="" closure_label=""
       local -a entry_notes=()
@@ -270,12 +274,12 @@ cmd_sync() {
       # PR annotations can only close an entry when sync resolves the GitHub
       # repo; in 'git' mode (no github.com remote, or gh not authenticated)
       # they silently never do. Counted here, warned once at the end.
-      if [[ -n "$e_prs" && -z "$repo_id" ]]; then
+      if (( ! is_held )) && [[ -n "$e_prs" && -z "$repo_id" ]]; then
         pr_unresolved=$((pr_unresolved + 1))
       fi
 
       # Check PR annotations (single gh call per PR returning all needed fields)
-      if [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1; then
+      if (( ! is_held )) && [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1; then
         local IFS_old="$IFS"
         IFS=','
         for pr_ref in $e_prs; do
@@ -318,7 +322,7 @@ cmd_sync() {
       fi
 
       # Check commit annotations (only if not already closed via PR)
-      if [[ -z "$closure_kind" && -n "$e_commits" && -n "$default_branch" ]]; then
+      if (( ! is_held )) && [[ -z "$closure_kind" && -n "$e_commits" && -n "$default_branch" ]]; then
         local IFS_old="$IFS"
         IFS=','
         for sha in $e_commits; do
@@ -362,7 +366,7 @@ cmd_sync() {
       fi
 
       # Tombstone check (only if no annotations resolved AND path looks like a file)
-      if [[ -z "$closure_kind" && -n "$e_path" ]]; then
+      if (( ! is_held )) && [[ -z "$closure_kind" && -n "$e_path" ]]; then
         # Entry paths come from a committed file in a possibly-cloned repo —
         # treat as untrusted. Absolute paths and any ../ component would let
         # the probes below (stat, wc -l, rename detection) reach outside the
@@ -493,23 +497,18 @@ cmd_sync() {
       fi
 
       # --- hold (#161, #169) ---
-      # Every closure above is an INFERRED signal: a merged PR or landed commit
-      # says a change shipped, a tombstone says the file is gone -- none says
-      # the defect is fixed. For most entries that is a fair bet. For a [!]
-      # critical, or an entry a human marked (hold: <reason>), it is not: sync
-      # runs unattended at SessionStart and nothing reopens a [fixed] entry, so
-      # a wrong closure is silent and permanent. Walk back the counter the
-      # mechanism already bumped, leave the entry [open], mark it (once) and
-      # list it in the summary. A human closes it with
+      # Every closure signal (merged PR, landed commit, tombstone) is INFERRED:
+      # a merged PR or landed commit says a change shipped, a tombstone says
+      # the file is gone -- none says the defect is fixed. For most entries
+      # that is a fair bet. For a [!] critical, or an entry a human marked
+      # (hold: <reason>), it is not: sync runs unattended at SessionStart and
+      # nothing reopens a [fixed] entry, so a wrong closure is silent and
+      # permanent. So a held entry is decided up front (is_held, above) and
+      # none of the closure probes run for it: no gh PR call, no git history
+      # or tombstone probe, no closure counter to walk back. It stays [open],
+      # is marked (once) and listed in the summary. A human closes it with
       # `found-issues resolve <loc> --verified review`.
-      if [[ -n "$closure_kind" && ( "$e_critical" == "yes" || -n "$e_hold" ) ]]; then
-        case "$closure_kind" in
-          pr)        closed_pr=$((closed_pr - 1)) ;;
-          commit)    closed_commit=$((closed_commit - 1)) ;;
-          tombstone) closed_tomb=$((closed_tomb - 1)) ;;
-        esac
-        closure_kind=""
-        closure_label=""
+      if (( is_held )); then
         held_count=$((held_count + 1))
         if [[ -z "$e_hold" ]]; then
           e_hold="needs human verify"
