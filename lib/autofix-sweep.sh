@@ -144,16 +144,33 @@ _fi_af_untagged_count() {
   printf '%s' "$c"
 }
 
-# 0 when today's red-at-<base sha> marker (fi_af_sweep_claim) names the
-# commit origin/<base> of <root> is at now. No network: a sweep claim
-# fetched the base into this checkout, and a push moves it.
+# 0 while a stop on the known-red memo still holds. Today's sweep-redbase
+# marker (fi_af_sweep_claim) names the base; the block applies only while the
+# known-red memo ($FI_AF_ST/base-red, "<sha> <test command>", the one the
+# claim's fi_af_base_tests reads) still says that sha with the test command
+# <root> resolves now, so the two cannot disagree: a corrected testCommand or a
+# green run (memo removed) unblocks. The base must also still be at that sha
+# locally and on the remote: one ls-remote, only here, where a block would
+# apply (a fix merged on GitHub moves no local ref until a claim fetches). A
+# failed ls-remote falls back to the local ref, so offline stays blocked.
 _fi_af_sweep_redbase_hit() { # <root>
-  local line base sha
+  local line base sha t remote rc
   [[ -f "$FI_AF_ST/day/$(fi_today).sweep-redbase" ]] || return 1
+  t="$(fi_af_test_command "$1" 2>/dev/null)" || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
     base="${line%% *}" sha="${line#* }"
     [[ -n "$base" && -n "$sha" && "$base" != "$line" ]] || continue
-    [[ "$(git -C "$1" rev-parse -q --verify "refs/remotes/origin/$base" 2>/dev/null)" == "$sha" ]] && return 0
+    [[ "$(cat "$FI_AF_ST/base-red" 2>/dev/null)" == "$sha $t" ]] || continue
+    [[ "$(git -C "$1" rev-parse -q --verify "refs/remotes/origin/$base" 2>/dev/null)" == "$sha" ]] || continue
+    rc=0
+    remote="$(GIT_TERMINAL_PROMPT=0 git -C "$1" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 \
+      ls-remote origin "refs/heads/$base" 2>/dev/null)" || rc=$?
+    remote="${remote%%[[:space:]]*}"
+    if (( rc == 0 )) && [[ "$remote" =~ ^[0-9a-f]{40,64}$ ]]; then
+      [[ "$remote" == "$sha" ]] && return 0
+      continue
+    fi
+    return 0
   done <"$FI_AF_ST/day/$(fi_today).sweep-redbase"
   return 1
 }
@@ -331,7 +348,7 @@ fi_af_sweep_claim() {
   # ran, the day's slot is spent, or every Stop would queue a new sweep and
   # re-run it. A stop on the known-red memo ran nothing (3.10.1, ledger :313):
   # it keeps the slot and takes a red-at-<base sha> day marker instead, which
-  # fi_af_sweep_check honors until origin/<base> moves.
+  # fi_af_sweep_check honors until the base moves or the memo changes.
   if ! fi_af_base_tests "$id"; then
     if [[ -n "${FI_AF_BASE_MEMO:-}" && -n "${AFI_base_sha:-}" ]]; then
       fi_af_cap_take sweep-redbase "$AFI_base $AFI_base_sha"
