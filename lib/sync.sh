@@ -231,10 +231,12 @@ cmd_sync() {
       local e_critical="$FE_critical" e_hold="$FE_hold" e_symptom="$FE_symptom"
       local e_loc
       e_loc="$(fi_entry_loc "$line" 2>/dev/null || printf '%s' "$e_path")"
-      # Held (#161, #169): decided here, before any closure probe, so a held
-      # entry costs no gh PR call and no git history probe (see "hold" below).
+      # Held (#161, #169): an entry that already carries a (hold: ...) marker
+      # is decided here, before any closure probe (see "hold" below). A [!]
+      # critical WITHOUT a marker is not: it runs the probes like any entry
+      # and is held only if a closure signal fires.
       local is_held=0
-      [[ "$e_critical" == "yes" || -n "$e_hold" ]] && is_held=1
+      [[ -n "$e_hold" ]] && is_held=1
 
       local closure_kind="" closure_label=""
       local -a entry_notes=()
@@ -279,7 +281,7 @@ cmd_sync() {
       fi
 
       # Check PR annotations (single gh call per PR returning all needed fields)
-      if (( ! is_held )) && [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1; then
+      if [[ -n "$e_prs" && -n "$repo_id" ]] && command -v gh >/dev/null 2>&1; then
         local IFS_old="$IFS"
         IFS=','
         for pr_ref in $e_prs; do
@@ -293,7 +295,9 @@ cmd_sync() {
           local pr_state pr_branch pr_merged_at pr_head
           IFS=$'\x1f' read -r pr_state pr_branch pr_merged_at pr_head <<<"$_fi_pr_ans"
           local pr_landed=0
-          if [[ "$pr_state" == "MERGED" ]]; then
+          # A held entry never closes on a merged PR; the call is still made
+          # (only for entries that cite a PR) so a closed-unmerged one demotes.
+          if (( ! is_held )) && [[ "$pr_state" == "MERGED" ]]; then
             if [[ -z "$default_branch" || "$pr_branch" == "$default_branch" ]]; then
               pr_landed=1
             elif [[ "$pr_head" == fi/autofix/* || "$pr_head" == fi/sweep/* ]]; then
@@ -366,7 +370,7 @@ cmd_sync() {
       fi
 
       # Tombstone check (only if no annotations resolved AND path looks like a file)
-      if (( ! is_held )) && [[ -z "$closure_kind" && -n "$e_path" ]]; then
+      if [[ -z "$closure_kind" && -n "$e_path" ]]; then
         # Entry paths come from a committed file in a possibly-cloned repo —
         # treat as untrusted. Absolute paths and any ../ component would let
         # the probes below (stat, wc -l, rename detection) reach outside the
@@ -470,9 +474,10 @@ cmd_sync() {
               # spaced location rewrote only the prefix and garbled the entry.
               rename_source="$matched_src"
               # don't set closure_kind — entry stays [open] with corrected path
-            elif { [[ -n "$recovered_loc" ]] \
-                   && (cd "$repo_root" && fi_git_confirms_removed "$recovered_loc"); } \
-                 || (cd "$repo_root" && fi_git_confirms_removed "$e_path"); then
+            elif (( ! is_held )) \
+                 && { { [[ -n "$recovered_loc" ]] \
+                        && (cd "$repo_root" && fi_git_confirms_removed "$recovered_loc"); } \
+                      || (cd "$repo_root" && fi_git_confirms_removed "$e_path"); }; then
               # Absent from disk AND git confirms a committed removal. Anything
               # git cannot confirm — never-tracked abstract locations, gitignored
               # paths, uncommitted deletions — leaves the entry [open]. See
@@ -503,12 +508,34 @@ cmd_sync() {
       # that is a fair bet. For a [!] critical, or an entry a human marked
       # (hold: <reason>), it is not: sync runs unattended at SessionStart and
       # nothing reopens a [fixed] entry, so a wrong closure is silent and
-      # permanent. So a held entry is decided up front (is_held, above) and
-      # none of the closure probes run for it: no gh PR call, no git history
-      # or tombstone probe, no closure counter to walk back. It stays [open],
-      # is marked (once) and listed in the summary. A human closes it with
-      # `found-issues resolve <loc> --verified review`.
-      if (( is_held )); then
+      # permanent. Two cases, both leaving the entry [open] and listing it in
+      # the summary; a human closes it with
+      # `found-issues resolve <loc> --verified review`:
+      #   - already carries a (hold: ...) marker (human-set, or the auto
+      #     "needs human verify" from an earlier sync): decided up front
+      #     (is_held, above), so it never closes. It skips the commit and
+      #     tombstone closure probes and the merged-PR check, so no closure
+      #     counter is bumped or walked back. Two things still run because
+      #     they are corrections, not closures: rename correction after a
+      #     git mv, and demotion of a (PR:) annotation that closed unmerged
+      #     (the gh call is made only for an entry that cites a PR).
+      #   - a [!] critical WITHOUT a marker runs every probe like any entry.
+      #     Only if a closure signal fires is it held: the counter that
+      #     mechanism bumped is walked back, the marker is added (once) and
+      #     the entry is listed. With no signal it is left untouched, so
+      #     auto-fix and plain `resolve` still work on it.
+      local hold_now=$is_held
+      if [[ -n "$closure_kind" && "$e_critical" == "yes" ]]; then
+        case "$closure_kind" in
+          pr)        closed_pr=$((closed_pr - 1)) ;;
+          commit)    closed_commit=$((closed_commit - 1)) ;;
+          tombstone) closed_tomb=$((closed_tomb - 1)) ;;
+        esac
+        closure_kind=""
+        closure_label=""
+        hold_now=1
+      fi
+      if (( hold_now )); then
         held_count=$((held_count + 1))
         if [[ -z "$e_hold" ]]; then
           e_hold="needs human verify"

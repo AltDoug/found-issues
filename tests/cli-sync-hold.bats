@@ -272,7 +272,7 @@ SHIM
   export PATH="$TMP/git-shim:$PATH"
 }
 
-@test "hold: sync makes no gh PR call for a held entry and still checks a plain one" {
+@test "hold: sync checks a plain and an unmarked critical PR, and a marked entry never closes on one" {
   fi_use_gh_shim
   fi_init_github_repo foo/bar main
   export GH_MOCK_TRACE="$TMP/gh-trace"
@@ -288,14 +288,15 @@ LEDGER
 
   PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
   [ "$status" -eq 0 ]
-  # The plain control proves the trace works and the PR path ran.
+  # An unmarked critical probes like any entry (3.10.0), then is held.
+  grep -q 'pr view 42' "$GH_MOCK_TRACE"
   grep -q 'pr view 44' "$GH_MOCK_TRACE"
-  run grep -c 'pr view 4[23]' "$GH_MOCK_TRACE"
-  [ "$output" = "0" ]
-  # The plain entry closes; the held ones are marked and left open.
+  # The plain entry closes; the critical is marked, the human hold is untouched.
   grep -q '^- \[fixed\].*plain control.*(PR: foo/bar#44)' docs/found-issues.md
   grep -q '^- \[open\] \[!\].*critical with a merged PR (PR: foo/bar#42) (hold: needs human verify)$' docs/found-issues.md
   grep -q '^- \[open\] .*held by a human (PR: foo/bar#43) (hold: waiting on QA)$' docs/found-issues.md
+  [[ "$output" == *"Closed: 1 (1 PR + 0 commit + 0 tombstone)"* ]]
+  [[ "$output" == *"Held: 2 entries for human verification"* ]]
 }
 
 @test "hold: sync summary still counts and lists held entries when probes are skipped" {
@@ -317,7 +318,7 @@ LEDGER
   [[ "$output" == *"[hold: needs human verify]"* ]]
 }
 
-@test "hold: sync runs no git history probe for a held entry and still probes a plain one" {
+@test "hold: sync runs no removal probe for a marked entry and still probes a plain or unmarked critical one" {
   seed_removed_file
   mkdir -p src
   printf 'export const gone = 1;\n' > src/gone2.ts
@@ -336,13 +337,122 @@ LEDGER
 
   PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
   [ "$status" -eq 0 ]
-  # The plain control proves the wrapper sees the probes.
-  grep -q 'src/gone3.ts' "$TMP/git-trace"
-  run grep -c 'src/gone.ts\|src/gone2.ts' "$TMP/git-trace"
+  local sync_out="$output"
+  # The removal oracle (cat-file -e HEAD:<path>) runs for the plain control and
+  # the unmarked critical, never for the marked entry.
+  grep -q 'cat-file -e HEAD:src/gone3.ts' "$TMP/git-trace"
+  grep -q 'cat-file -e HEAD:src/gone.ts' "$TMP/git-trace"
+  run grep -c 'cat-file -e HEAD:src/gone2.ts' "$TMP/git-trace"
   [ "$output" = "0" ]
-  fi_run sync
-  [[ "$output" == *"Held: 2 entries for human verification (NOT closed):"* ]]
+  [[ "$sync_out" == *"Held: 2 entries for human verification (NOT closed):"* ]]
   grep -q '^- \[fixed\].*plain control in a removed file.*closure: tombstone' docs/found-issues.md
   grep -q '^- \[open\] \[!\].*critical in a removed file (hold: needs human verify)$' docs/found-issues.md
   grep -q '^- \[open\] .*held in a removed file (hold: waiting on QA)$' docs/found-issues.md
+}
+
+# 3.10.1 review fixes: a critical entry is marked only when a closure signal
+# would have fired (as in 3.10.0); a marked entry skips the closure probes but
+# still gets its path corrected after a rename and its closed PRs demoted.
+
+@test "hold: a critical entry with no closure signal is left untouched and not listed" {
+  mkdir -p src docs
+  printf 'x\n' > src/foo.py
+  printf -- '- [open] [!] 2026-05-01 src/foo.py:1 — critical with no closure signal\n' > docs/found-issues.md
+  cp docs/found-issues.md before.md
+
+  PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
+  [ "$status" -eq 0 ]
+  cmp docs/found-issues.md before.md
+  [[ "$output" != *"Held:"* ]]
+  # Still resolvable: no marker was added, so plain resolve is not refused.
+  fi_run resolve "critical with no closure signal"
+  [ "$status" -eq 0 ]
+}
+
+@test "hold: a critical entry with a closed-unmerged PR is not marked held" {
+  fi_use_gh_shim
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_PR_VIEW=$'5\t{"state":"CLOSED","baseRefName":"main","mergedAt":null,"isDraft":false}'
+  mkdir -p src docs
+  printf 'x\n' > src/foo.py
+  printf -- '- [open] [!] 2026-05-01 src/foo.py:1 — critical with a dead PR (PR: foo/bar#5)\n' > docs/found-issues.md
+
+  PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Held:"* ]]
+  run grep -c '(hold: ' docs/found-issues.md
+  [ "$output" = "0" ]
+  grep -q '(PR-closed: foo/bar#5)' docs/found-issues.md
+}
+
+@test "hold: a held entry still gets its path corrected after git mv" {
+  mkdir -p src docs
+  echo "content" > src/old.py
+  git add src/old.py
+  git commit -q -m "add old.py"
+  printf -- '- [open] 2026-05-01 src/old.py:1 — held bug (hold: waiting on QA)\n' > docs/found-issues.md
+  git mv src/old.py src/new.py
+  git commit -q -m "rename old to new"
+
+  PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*src/new.py:1.*held bug.*(hold: waiting on QA).*(renamed-from: src/old.py)' docs/found-issues.md
+  [[ "$output" == *"Held: 1 entry for human verification"* ]]
+}
+
+@test "hold: a held entry whose file was deleted stays open" {
+  seed_removed_file
+  mkdir -p docs
+  printf -- '- [open] 2026-05-01 src/gone.ts:1 — held in a removed file (hold: waiting on QA)\n' > docs/found-issues.md
+  cp docs/found-issues.md before.md
+
+  PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
+  [ "$status" -eq 0 ]
+  cmp docs/found-issues.md before.md
+  [[ "$output" != *"Closed:"* ]]
+}
+
+@test "hold: a held entry with a closed-unmerged PR gets the PR demoted" {
+  fi_use_gh_shim
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_PR_VIEW=$'5\t{"state":"CLOSED","baseRefName":"main","mergedAt":null,"isDraft":false}'
+  mkdir -p src docs
+  printf 'x\n' > src/foo.py
+  printf -- '- [open] 2026-05-01 src/foo.py:1 — held with a dead PR (PR: foo/bar#5) (hold: waiting on QA)\n' > docs/found-issues.md
+
+  PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
+  [ "$status" -eq 0 ]
+  grep -q '^- \[open\].*(PR-closed: foo/bar#5).*(hold: waiting on QA)' docs/found-issues.md
+  run grep -c '(PR: foo/bar#5)' docs/found-issues.md
+  [ "$output" = "0" ]
+}
+
+@test "hold: a held entry with a merged PR stays open and bumps no closure counter" {
+  fi_use_gh_shim
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_PR_VIEW=$'42\t{"state":"MERGED","baseRefName":"main","mergedAt":"2026-05-01T12:00:00Z","isDraft":false}'
+  mkdir -p src docs
+  printf 'x\n' > src/foo.py
+  printf -- '- [open] 2026-05-01 src/foo.py:1 — held bug (PR: foo/bar#42) (hold: waiting on QA)\n' > docs/found-issues.md
+  cp docs/found-issues.md before.md
+
+  PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
+  [ "$status" -eq 0 ]
+  cmp docs/found-issues.md before.md
+  [[ "$output" != *"Closed:"* ]]
+}
+
+@test "hold: a held entry with no PR annotation makes no gh call" {
+  fi_use_gh_shim
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_TRACE="$TMP/gh-trace"
+  : > "$GH_MOCK_TRACE"
+  mkdir -p src docs
+  printf 'x\n' > src/foo.py
+  printf -- '- [open] 2026-05-01 src/foo.py:1 — held bug (hold: waiting on QA)\n' > docs/found-issues.md
+
+  PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
+  [ "$status" -eq 0 ]
+  run grep -c 'pr view' "$GH_MOCK_TRACE"
+  [ "$output" = "0" ]
 }
