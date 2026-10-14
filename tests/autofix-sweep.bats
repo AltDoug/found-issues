@@ -475,6 +475,140 @@ gh_mock() {
   [ ! -d "$REPO/.claude/worktrees/fi-sweep-$SID" ]
 }
 
+# 3.10.1 (ledger lib/autofix-sweep.sh:313): the red-base skip that ran no suite
+# (the memo says the base is already red) must not spend the day's slot. A
+# red-at-<base sha> marker blocks re-queuing until the base sha changes.
+red_memo_setup() { # a first sweep runs the red suite; a second claims on the memo
+  fi_af_sweep_fixture 4; fi_use_standins
+  git config found-issues.autofix.dailySweeps 3
+  git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; exit 1"
+  sweep_queue
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 5 ]
+  source "$FI_BIN"; fi_af_context
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  SID2="$(printf '%s\n' "$output" | sed -n 's/^AUTOFIX-SWEEP-DUE //p')"
+  [ -n "$SID2" ]
+}
+
+@test "sweep claim: a base that really ran red spends the day's slot" {
+  fi_af_sweep_fixture 4; fi_use_standins
+  git config found-issues.autofix.dailySweeps 3
+  git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; exit 1"
+  sweep_queue
+  run "$FI_BIN" autofix claim "$SID"
+  [ "$status" -eq 5 ]
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 2 ]
+  [ "$(wc -l < "$ST/day/$(date +%Y-%m-%d).sweep" | tr -d ' ')" = 1 ]
+}
+
+@test "sweep claim: a known-red skip that ran no suite leaves the day's slot count unchanged" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"tests fail at base"* ]]
+  grep -q 'known red at' "$FI_AF_RUNS/$SID2.log"
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 2 ]
+  [ "$(wc -l < "$ST/day/$(date +%Y-%m-%d).sweep" | tr -d ' ')" = 1 ]
+  [ ! -e "$ST/day/$(date +%Y-%m-%d).capped" ]
+}
+
+@test "sweep check: after a known-red skip no sweep is queued while the base sha is unchanged" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$(ls "$ST/queue" 2>/dev/null)" ]
+}
+
+@test "sweep check: a new base sha queues a sweep again the same day, and spot fixes are unaffected" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  echo more >> README.md && git add README.md && git commit -qm more && git push -q origin main
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [[ "$output" == "AUTOFIX-SWEEP-DUE "* ]]
+  fi_af_cap_ok spot "$(fi_af_int dailyFixes 5)"
+}
+
+# 3.10.1 review: the block reads the known-red memo (base sha + test command)
+# and the REMOTE base sha, so a fix merged on GitHub or a corrected test
+# command unblocks the next trigger without anything fetching in between.
+remote_moves() { # a second clone pushes to the shared remote; this checkout's origin/main stays stale
+  git clone -q "$TMP/remote.git" "$TMP/other"
+  ( cd "$TMP/other" && git config user.email t@t && git config user.name t \
+      && echo fixed >> src/f1.sh && git commit -qam "merged fix" && git push -q origin main )
+}
+
+@test "sweep check: a fix merged on the remote unblocks the next trigger though the local origin ref is stale" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  local before; before="$(git rev-parse refs/remotes/origin/main)"
+  remote_moves
+  [ "$(git rev-parse refs/remotes/origin/main)" = "$before" ]
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [[ "$output" == "AUTOFIX-SWEEP-DUE "* ]]
+  [ ! -e "$ST/day/$(date +%Y-%m-%d).capped" ]
+}
+
+@test "sweep check: changing the test command after a known-red stop unblocks the next trigger" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  git config found-issues.autofix.testCommand "true"
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [[ "$output" == "AUTOFIX-SWEEP-DUE "* ]]
+}
+
+@test "sweep check: an auto-detected test command that differs in the root checkout still blocks" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  # No configured command: the memo holds what the base tree detected, and the
+  # root checkout (another branch's files) detects something else.
+  git config --unset found-issues.autofix.testCommand
+  local memo; memo="$(cat "$FI_AF_ST/base-red")"
+  printf '%s make test' "${memo%% *}" > "$FI_AF_ST/base-red"
+  mkdir -p tests && : > tests/extra.bats
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$(ls "$ST/queue" 2>/dev/null)" ]
+}
+
+@test "sweep check: when ls-remote fails the local ref decides and an unchanged sha still blocks" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  git config url."$TMP/nowhere.git".insteadOf https://github.com/foo/bar.git
+  git config --unset url."$TMP/remote.git".insteadOf
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$(ls "$ST/queue" 2>/dev/null)" ]
+}
+
+@test "sweep check: no ls-remote runs on a trigger where no block is in effect" {
+  fi_af_sweep_fixture 4; fi_use_standins
+  git config found-issues.autofix.sweepThreshold 3
+  mkdir -p "$TMP/shim"
+  printf '#!/bin/sh\ncase " $* " in *" ls-remote "*) echo ls >> "%s/lsr";; esac\nexec "%s" "$@"\n' "$TMP" "$(command -v git)" > "$TMP/shim/git"
+  chmod +x "$TMP/shim/git"
+  PATH="$TMP/shim:$PATH"
+  source "$FI_BIN"; fi_af_context
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [[ "$output" == "AUTOFIX-SWEEP-DUE "* ]]
+  [ ! -e "$TMP/lsr" ]
+}
+
 # 3.2.1 (ledger lib/autofix-sweep.sh:387): a failed ship keeps the branch and
 # requeues the sweep; the next run ships the same commits without fixing again.
 sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }

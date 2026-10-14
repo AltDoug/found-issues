@@ -45,6 +45,25 @@ fi_af_ledger_paths() {
   return 0
 }
 
+# The ledger a worktree annotates, relative to <wt>; rc 1 when it has none.
+# 3.10.1 (#164): the docs ledger in whatever case it is spelled. The spelling
+# git tracks at HEAD wins (a case-insensitive volume answers -f to any case,
+# but `git add` matches the tracked spelling only), then fi_docs_ledger, then
+# the local-mode .found-issues.md. Only paths INSIDE the worktree.
+fi_af_wt_ledger() {
+  local wt="$1" l
+  if l="$(fi_docs_ledger_at_ref HEAD "$wt")"; then
+    printf '%s' "$l"; return 0
+  fi
+  if l="$(fi_docs_ledger "$wt")"; then
+    printf '%s' "${l#"$wt"/}"; return 0
+  fi
+  if [[ -f "$wt/.found-issues.md" ]]; then
+    printf '%s' ".found-issues.md"; return 0
+  fi
+  return 1
+}
+
 # The fixer must not change the ledger, and a headless child's SessionStart
 # sync may have (Review Focus 3). Put every ledger file back to <ref> — the
 # fixed list, not just the files that still exist, or a deleted ledger
@@ -52,17 +71,14 @@ fi_af_ledger_paths() {
 # spelled in the worktree or at <ref> (a recased ledger the fixer deleted is
 # only at <ref>), found case-insensitively like fi_docs_ledger.
 fi_af_reset_ledger() {
-  local wt="$1" ref="$2" p d seen=$'\n' docs
+  local wt="$1" ref="$2" p seen=$'\n' docs
   local -a paths=(docs/found-issues.md docs/found-issues-archive.md .found-issues.md)
   if docs="$(fi_docs_ledger "$wt")"; then
     paths[${#paths[@]}]="${docs#"$wt"/}"
   fi
-  while IFS= read -r d || [[ -n "$d" ]]; do
-    case "$d" in [Dd][Oo][Cc][Ss]) ;; *) continue ;; esac
-    while IFS= read -r p || [[ -n "$p" ]]; do
-      case "$p" in "$d"/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]) paths[${#paths[@]}]="$p" ;; esac
-    done < <(git -C "$wt" ls-tree --name-only "$ref:$d" 2>/dev/null | sed "s|^|$d/|")
-  done < <(git -C "$wt" ls-tree --name-only "$ref" 2>/dev/null)
+  if docs="$(fi_docs_ledger_at_ref "$ref" "$wt")"; then
+    paths[${#paths[@]}]="$docs"
+  fi
   for p in "${paths[@]}"; do
     [[ "$seen" == *$'\n'"$p"$'\n'* ]] && continue
     seen+="$p"$'\n'
@@ -352,9 +368,7 @@ _fi_af_publish() {
   if _fi_af_sweep_is_cont; then
     fi_af_log "$AFI_id" "PR-branch ledger annotation skipped for a continuation batch"
   else
-    for p in docs/found-issues.md .found-issues.md; do
-      [[ -f "$wt/$p" ]] && { wl="$p"; break; }
-    done
+    wl="$(fi_af_wt_ledger "$wt")" || wl=""
   fi
   local annotated=$'\n' pushed=0 cur
   while IFS=$'\t' read -r key loc || [[ -n "$key" ]]; do
@@ -586,7 +600,10 @@ _fi_af_mwg_update() {
     while IFS= read -r f || [[ -n "$f" ]]; do
       case "$f" in
         "") ;;
-        docs/found-issues.md|docs/found-issues-archive.md|.found-issues.md) ;;
+        # 3.10.1 (#164): the docs ledger may be spelled Docs/Found-Issues.md;
+        # the archive beside it is always lowercase-named.
+        [Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]) ;;
+        [Dd][Oo][Cc][Ss]/found-issues-archive.md|.found-issues.md) ;;
         *) bad="${bad:+$bad, }$f" ;;
       esac
     done <<<"$files"

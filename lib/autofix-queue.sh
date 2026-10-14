@@ -439,7 +439,14 @@ fi_af_fixed_elsewhere() {
     FI_AF_WHY="fix in flight in PR #$FI_AF_DUP_PR"; return 0
   fi
   git -C "$AFI_root" fetch -q origin "$AFI_base" >/dev/null 2>&1 || return 1
-  for p in docs/found-issues.md docs/found-issues-archive.md .found-issues.md; do
+  # 3.10.1 (#164): the base may track its docs ledger as Docs/Found-Issues.md
+  # or docs/FOUND-ISSUES.md; git paths are case-sensitive, so name it as the
+  # base spells it (the archive sits beside it, always lowercase-named).
+  local lrel="" adir="docs"
+  lrel="$(fi_docs_ledger_at_ref "origin/$AFI_base" "$AFI_root" 2>/dev/null || true)"
+  [[ -n "$lrel" ]] || lrel="docs/found-issues.md"
+  adir="${lrel%/*}"
+  for p in "$lrel" "$adir/found-issues-archive.md" .found-issues.md; do
     while IFS= read -r line || [[ -n "$line" ]]; do
       [[ "$line" == "- ["* && "$line" == *" $AFI_loc "* ]] || continue
       fi_entry_dedup_key_v "$line" "$AFI_root" || continue
@@ -604,13 +611,13 @@ fi_af_worktree_remove() {
 # worktree is reset after, so nothing the tests left reaches a fixer's diff.
 fi_af_base_tests() {
   local id="$1" t rc=0 log="$FI_AF_RUNS/$1.base-tests.log" red="$FI_AF_ST/base-red" key=""
-  FI_AF_BASE_WHY=""
+  FI_AF_BASE_WHY="" FI_AF_BASE_MEMO=""
   t="$(fi_af_test_command "$AFI_wt" 2>/dev/null)" || return 0
   # 3.6.0: a base found red is remembered by commit and test command, so the
   # next item on the same base retires without running the suite again.
   [[ -n "${AFI_base_sha:-}" ]] && key="$AFI_base_sha $t"
   if [[ -n "$key" && -f "$red" && "$(cat "$red" 2>/dev/null)" == "$key" ]]; then
-    FI_AF_BASE_WHY="tests fail at base"
+    FI_AF_BASE_WHY="tests fail at base" FI_AF_BASE_MEMO=1
     fi_af_log "$id" "tests fail at base: known red at ${AFI_base_sha:0:7} ($t), not re-run"
     return 1
   fi

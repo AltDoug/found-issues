@@ -281,3 +281,18 @@ fix_it() { sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak
   [ "$status" -eq 0 ]
   grep -q '^pr merge 7 --squash --repo foo/bar$' "$GH_MOCK_TRACE"
 }
+
+@test "autofix ship: an entry fixed meanwhile in a recased base ledger is retired stale (#164)" {
+  fix_it
+  mkdir -p Docs
+  git mv docs/found-issues.md Docs/Found-Issues.md
+  sed -i.bak 's/^- \[open\] \(.*add subtracts (fix: small)\)$/- [fixed] \1 (PR: foo\/bar#587) (fixed: 2026-10-10)/' Docs/Found-Issues.md
+  rm -f Docs/Found-Issues.md.bak
+  git add Docs/Found-Issues.md
+  git commit -qm "fixed by another session, ledger recased" && git push -q origin main
+  git -C "$TMP/remote.git" cat-file -e "main:Docs/Found-Issues.md"
+  run "$FI_BIN" autofix ship "$ID"
+  [ "$status" -eq 0 ]
+  grep -q '^result=stale: fixed on main meanwhile$' "$ST/done/$ID"
+  ! git -C "$TMP/remote.git" rev-parse --verify -q "refs/heads/$BR" || false
+}

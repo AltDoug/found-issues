@@ -68,7 +68,7 @@ _fi_fix_test() {
 # reaches the default branch on merge, and the run leaves no ledger diff
 # behind in the worktree.
 _fi_fix_ship() {
-  local wt="" title="" bodyf="" root="" base br slug url pr p
+  local wt="" title="" bodyf="" root="" base br slug url pr
   # Each --pick is passed on as its own --pick: a "<loc> — <fragment>" value
   # is never comma-split, so one value holding a list of them annotated
   # nothing (ledger lib/fix-plumbing.sh:75).
@@ -142,12 +142,12 @@ _fi_fix_ship() {
   # annotate-pr finds its ledger by walking up from cwd: only run it in the
   # worktree when the worktree has its own ledger, or it would walk up into
   # the source checkout's.
-  if [[ -f "$wt/docs/found-issues.md" || -f "$wt/.found-issues.md" ]]; then
+  # 3.10.1 (#164): the worktree's docs ledger may be spelled Docs/Found-Issues.md.
+  local wl=""
+  if wl="$(fi_af_wt_ledger "$wt")"; then
     ( cd "$wt" && "$FI_SELF" annotate-pr "$pr" "${pargs[@]}" >/dev/null 2>&1 ) || true
     if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
-      for p in docs/found-issues.md .found-issues.md; do
-        [[ -f "$wt/$p" ]] && git -C "$wt" add -- "$p"
-      done
+      git -C "$wt" add -- "$wl"
       if ! { git -C "$wt" commit -q -m "docs(found-issues): annotate PR $pr" && git -C "$wt" push -q origin "$br"; } 2>/dev/null; then
         fi_err "fix ship: could not commit the annotation onto $br"
       fi

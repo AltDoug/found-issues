@@ -24,12 +24,27 @@ fi
 
 # Determine which file to check (prefer docs/, fall back to .found-issues.md)
 target=""
-for candidate in "docs/found-issues.md" ".found-issues.md"; do
-  if git diff --cached --name-only 2>/dev/null | grep -Fxq -- "$candidate"; then
-    target="$candidate"
-    break
-  fi
-done
+staged_names="$(git diff --cached --name-only 2>/dev/null || true)"
+# Precedence matches fi_find_issues_file: a docs ledger beats the root
+# .found-issues.md. 3.10.1 (#164): the docs ledger may be spelled
+# Docs/Found-Issues.md or docs/FOUND-ISSUES.md (same match as
+# fi_docs_ledger), so the order is the exact-case docs ledger, then the first
+# case-insensitive docs match, then .found-issues.md.
+if printf '%s\n' "$staged_names" | grep -Fxq -- "docs/found-issues.md"; then
+  target="docs/found-issues.md"
+else
+  while IFS= read -r candidate || [[ -n "$candidate" ]]; do
+    case "$candidate" in
+      [Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd])
+        target="$candidate"
+        break
+        ;;
+    esac
+  done <<<"$staged_names"
+fi
+if [[ -z "$target" ]] && printf '%s\n' "$staged_names" | grep -Fxq -- ".found-issues.md"; then
+  target=".found-issues.md"
+fi
 
 # Nothing relevant staged — allow
 if [[ -z "$target" ]]; then

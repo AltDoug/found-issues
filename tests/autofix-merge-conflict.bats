@@ -37,23 +37,31 @@ EOF
 setup() {
   fi_setup_tmp; fi_af_fixture
   export GH_MOCK_TRACE="$TMP/gh.trace" FOUND_ISSUES_AUTOFIX_MERGE_SLEEP=0 FOUND_ISSUES_AUTOFIX_MERGE_POLLS=6
-  printf -- '- [open] 2026-10-02 src/a.sh:1 — a breaks (fix: small)\n- [open] 2026-10-03 src/b.sh:1 — b breaks (fix: small)\n' >>docs/found-issues.md
+  # 3.10.1 (#164): a test named "recased" runs against a ledger that was
+  # recased (Docs/Found-Issues.md) before the PR branch was cut.
+  L=docs/found-issues.md
+  if [[ "$BATS_TEST_DESCRIPTION" == *recased* ]]; then
+    L=Docs/Found-Issues.md
+    mkdir -p Docs && git mv docs/found-issues.md "$L"
+    git commit -qm "recase ledger" && git push -q origin main
+  fi
+  printf -- '- [open] 2026-10-02 src/a.sh:1 — a breaks (fix: small)\n- [open] 2026-10-03 src/b.sh:1 — b breaks (fix: small)\n' >>"$L"
   git commit -qam "two more entries" && git push -q origin main
   dyn_gh
   # The fix PR: a fix commit, then its annotation on the a.sh entry.
   git switch -q -c "$DYN_HEAD"
   printf 'a() { :; }\n' >src/a.sh && git add src/a.sh && git commit -qm "fix: a breaks"
-  sed -i.bak 's/a breaks (fix: small)$/a breaks (fix: small) (PR: foo\/bar#7)/' docs/found-issues.md && rm -f docs/found-issues.md.bak
+  sed -i.bak 's/a breaks (fix: small)$/a breaks (fix: small) (PR: foo\/bar#7)/' "$L" && rm -f "$L.bak"
   git commit -qam "docs(found-issues): annotate src/a.sh:1 with PR 7" && git push -q -u origin "$DYN_HEAD"
   # Meanwhile another fix PR merged: it annotated the adjacent b.sh entry.
   git switch -q main
-  sed -i.bak 's/b breaks (fix: small)$/b breaks (fix: small) (PR: foo\/bar#6)/' docs/found-issues.md && rm -f docs/found-issues.md.bak
+  sed -i.bak 's/b breaks (fix: small)$/b breaks (fix: small) (PR: foo\/bar#6)/' "$L" && rm -f "$L.bak"
   printf 'b() { :; }\n' >src/b.sh && git add src/b.sh
   git commit -qam "fix: b breaks (#6)" && git push -q origin main
 }
 teardown() { fi_teardown_tmp; }
 
-remote_ledger() { git -C "$TMP/remote.git" show "$DYN_HEAD:docs/found-issues.md"; }
+remote_ledger() { git -C "$TMP/remote.git" show "$DYN_HEAD:${L:-docs/found-issues.md}"; }
 
 @test "merge-when-green: a ledger-only conflict is merged with both annotations kept, then the PR merges" {
   run git -C "$TMP/remote.git" merge-tree --write-tree main "$DYN_HEAD"
@@ -145,4 +153,14 @@ remote_ledger() { git -C "$TMP/remote.git" show "$DYN_HEAD:docs/found-issues.md"
   [[ "$output" != *"after 3 updates"* ]]
   [ "$(grep -c 'merged main into' <<<"$output")" -eq 1 ]
   git -C "$TMP/remote.git" merge-base --is-ancestor main "$DYN_HEAD"
+}
+
+@test "merge-when-green: a ledger-only conflict in a recased ledger is resolved too (#164)" {
+  run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"merged PR #7"* ]]
+  git -C "$TMP/remote.git" merge-base --is-ancestor main "$DYN_HEAD"
+  remote_ledger | grep -q 'a breaks (fix: small) (PR: foo/bar#7)$'
+  remote_ledger | grep -q 'b breaks (fix: small) (PR: foo/bar#6)$'
+  grep -q '^pr merge 7 --squash --repo foo/bar$' "$GH_MOCK_TRACE"
 }

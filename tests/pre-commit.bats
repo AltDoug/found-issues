@@ -177,3 +177,38 @@ EOF
   run "$HOOK"
   [ "$status" -eq 0 ]
 }
+
+@test "pre-commit: validates a staged differently-cased Docs/Found-Issues.md (#164)" {
+  mkdir -p Docs
+  echo "- [OPEN] 2026-05-08 src/foo.py:42 — bug" > Docs/Found-Issues.md
+  git add Docs/Found-Issues.md
+  run "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lowercase"* ]]
+}
+
+@test "pre-commit: allows a valid staged docs/FOUND-ISSUES.md (#164)" {
+  mkdir -p docs
+  echo "- [open] 2026-05-08 src/foo.py:42 — bug (PR: org/repo#5)" > docs/FOUND-ISSUES.md
+  git add docs/FOUND-ISSUES.md
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "pre-commit: a staged recased docs ledger beats a staged .found-issues.md (#164)" {
+  mkdir -p Docs
+  echo "- [open] 2026-05-08 src/ok.py:1 — fine (PR: org/repo#5)" > .found-issues.md
+  echo "- [OPEN] 2026-05-08 src/foo.py:42 — bug" > Docs/Found-Issues.md
+  git add .found-issues.md Docs/Found-Issues.md
+  run "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lowercase"* ]]
+}
+
+@test "pre-commit: an exact-case docs ledger beats a staged recased docs ledger (#164)" {
+  mkdir -p docs
+  echo "- [open] 2026-05-08 src/ok.py:1 — fine (PR: org/repo#5)" > docs/found-issues.md
+  git add docs/found-issues.md
+  run "$HOOK"
+  [ "$status" -eq 0 ]
+}
