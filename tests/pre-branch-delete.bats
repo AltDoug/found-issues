@@ -438,3 +438,42 @@ EOF
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
 }
+
+@test "pre-branch-delete: compares the ledger main tracks, not a stray docs ledger on the branch (#164)" {
+  printf '# found-issues\n\n- [open] 2026-05-08 src/foo.py:1 — main entry\n' > .found-issues.md
+  git add .found-issues.md; git commit -q -m "init"
+  git checkout -q -b feat/stray
+  printf -- '- [open] 2026-05-09 src/branch_only.py:1 — branch-only\n' >> .found-issues.md
+  mkdir -p docs
+  printf '# found-issues\n' > docs/found-issues.md
+  git add .found-issues.md docs/found-issues.md; git commit -q -m "branch entry plus stray docs ledger"
+  git checkout -q main
+
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/stray"}}'
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"branch_only.py"* ]]
+}
+
+@test "pre-branch-delete: a branch tracking main's ledger spelling costs no ls-tree walk (#164)" {
+  printf '# found-issues\n\n- [open] 2026-05-08 src/foo.py:1 — main entry\n' > .found-issues.md
+  git add .found-issues.md; git commit -q -m "init"
+  git checkout -q -b feat/quick
+  printf -- '- [open] 2026-05-09 src/branch_only.py:1 — branch-only\n' >> .found-issues.md
+  git add .found-issues.md; git commit -q -m "branch entry"
+  git checkout -q main
+
+  real_git="$(command -v git)"
+  mkdir -p "$BATS_TEST_TMPDIR/shim"
+  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s/git-calls.log"\nexec "%s" "$@"\n' "$BATS_TEST_TMPDIR" "$real_git" > "$BATS_TEST_TMPDIR/shim/git"
+  chmod +x "$BATS_TEST_TMPDIR/shim/git"
+
+  input='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git branch -d feat/quick"}}'
+  run bash -c "echo '$input' | PATH='$BATS_TEST_TMPDIR/shim:$PATH' '$HOOK'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"branch_only.py"* ]]
+  grep -q 'cat-file' "$BATS_TEST_TMPDIR/git-calls.log"
+  if grep -q 'ls-tree.*feat/quick' "$BATS_TEST_TMPDIR/git-calls.log"; then
+    false
+  fi
+}

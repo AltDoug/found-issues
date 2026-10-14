@@ -71,17 +71,14 @@ fi_af_wt_ledger() {
 # spelled in the worktree or at <ref> (a recased ledger the fixer deleted is
 # only at <ref>), found case-insensitively like fi_docs_ledger.
 fi_af_reset_ledger() {
-  local wt="$1" ref="$2" p d seen=$'\n' docs
+  local wt="$1" ref="$2" p seen=$'\n' docs
   local -a paths=(docs/found-issues.md docs/found-issues-archive.md .found-issues.md)
   if docs="$(fi_docs_ledger "$wt")"; then
     paths[${#paths[@]}]="${docs#"$wt"/}"
   fi
-  while IFS= read -r d || [[ -n "$d" ]]; do
-    case "$d" in [Dd][Oo][Cc][Ss]) ;; *) continue ;; esac
-    while IFS= read -r p || [[ -n "$p" ]]; do
-      case "$p" in "$d"/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]) paths[${#paths[@]}]="$p" ;; esac
-    done < <(git -C "$wt" ls-tree --name-only "$ref:$d" 2>/dev/null | sed "s|^|$d/|")
-  done < <(git -C "$wt" ls-tree --name-only "$ref" 2>/dev/null)
+  if docs="$(fi_docs_ledger_at_ref "$ref" "$wt")"; then
+    paths[${#paths[@]}]="$docs"
+  fi
   for p in "${paths[@]}"; do
     [[ "$seen" == *$'\n'"$p"$'\n'* ]] && continue
     seen+="$p"$'\n'

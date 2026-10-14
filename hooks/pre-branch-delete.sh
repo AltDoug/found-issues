@@ -373,10 +373,20 @@ while IFS= read -r _fi_dir; do
     fi
 
     # Get branch's version of the issues file
-    # The branch may spell its ledger differently from the default branch.
-    branch_rel="$(fi_docs_ledger_at_ref "$branch" 2>/dev/null \
-      || fi_docs_ledger_at_ref "origin/$branch" 2>/dev/null || true)"
-    [[ -n "$branch_rel" ]] || branch_rel="$rel_path"
+    # Read the SAME ledger the default branch uses (rel_path); one git fork
+    # when the branch tracks it. Only on a miss, and only when rel_path is a
+    # docs ledger, look for the branch's differently-cased spelling of it.
+    branch_rel="$rel_path"
+    if ! git cat-file -e "$branch:$rel_path" 2>/dev/null \
+        && ! git cat-file -e "origin/$branch:$rel_path" 2>/dev/null; then
+      case "$rel_path" in
+        [Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd])
+          _fi_alt="$(fi_docs_ledger_at_ref "$branch" 2>/dev/null \
+            || fi_docs_ledger_at_ref "origin/$branch" 2>/dev/null || true)"
+          [[ -n "$_fi_alt" ]] && branch_rel="$_fi_alt"
+          ;;
+      esac
+    fi
     branch_content="$(git show "$branch:$branch_rel" 2>/dev/null \
       || git show "origin/$branch:$branch_rel" 2>/dev/null \
       || true)"
