@@ -24,12 +24,26 @@ fi
 
 # Determine which file to check (prefer docs/, fall back to .found-issues.md)
 target=""
+staged_names="$(git diff --cached --name-only 2>/dev/null || true)"
 for candidate in "docs/found-issues.md" ".found-issues.md"; do
-  if git diff --cached --name-only 2>/dev/null | grep -Fxq -- "$candidate"; then
+  if printf '%s\n' "$staged_names" | grep -Fxq -- "$candidate"; then
     target="$candidate"
     break
   fi
 done
+# 3.10.1: the docs ledger may be spelled Docs/Found-Issues.md or
+# docs/FOUND-ISSUES.md (#164, same match as fi_docs_ledger); an exact-case
+# staged ledger wins above, otherwise the first case-insensitive match.
+if [[ -z "$target" ]]; then
+  while IFS= read -r candidate || [[ -n "$candidate" ]]; do
+    case "$candidate" in
+      [Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd])
+        target="$candidate"
+        break
+        ;;
+    esac
+  done <<<"$staged_names"
+fi
 
 # Nothing relevant staged — allow
 if [[ -z "$target" ]]; then

@@ -139,3 +139,20 @@ linked_session() { # the session runs in a linked worktree of the repo
 @test "fix.md: fix ship passes --source from fix workspace" {
   grep -q 'found-issues fix ship <worktree> --source <source>' "$TEST_REPO_ROOT/commands/fix.md"
 }
+
+@test "fix ship: a recased Docs/Found-Issues.md is annotated on the source and the PR branch (#164)" {
+  mkdir -p Docs && git mv docs/found-issues.md Docs/Found-Issues.md
+  git commit -qm "recase ledger" && git push -q origin main && git fetch -q origin
+  ws
+  sed -i.bak 's/ - / + /' "$WT/src/calc.sh"; rm -f "$WT/src/calc.sh.bak"
+  git -C "$WT" commit -qam "fix: add subtracts (found-issues src/calc.sh:1)"
+  printf 'b\n' > "$TMP/body"
+  run "$FI_BIN" fix ship "$WT" --title "fix: add" --body-file "$TMP/body" --pick src/calc.sh:1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR #11"* ]]
+  grep -q '(PR: foo/bar#11)' Docs/Found-Issues.md
+  br="$(git -C "$WT" rev-parse --abbrev-ref HEAD)"
+  git -C "$TMP/remote.git" show "$br:Docs/Found-Issues.md" | grep -q '(PR: foo/bar#11)'
+  ! git -C "$TMP/remote.git" cat-file -e "$br:docs/found-issues.md" 2>/dev/null || false
+  [ -z "$(git -C "$WT" status --porcelain)" ]
+}

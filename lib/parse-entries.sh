@@ -39,6 +39,33 @@ fi_docs_ledger() {
   return 1
 }
 
+# fi_docs_ledger_at_ref <ref> [<repo_dir>] — print the repo-relative path of the
+# docs ledger TRACKED at <ref> (a branch, tag or sha), return 1 if none. 3.10.1
+# (#164): git trees are case-sensitive on every file system, so a ledger
+# tracked as Docs/Found-Issues.md is not docs/found-issues.md to `git show`
+# even where the working tree answers to both. Same match as fi_docs_ledger:
+# the exact-case path wins, else the first case-insensitive match. Forks git,
+# so not for the statusline hot path.
+fi_docs_ledger_at_ref() {
+  local ref="$1" repo="${2:-.}" d p
+  if git -C "$repo" cat-file -e "$ref:docs/found-issues.md" 2>/dev/null; then
+    printf '%s' "docs/found-issues.md"
+    return 0
+  fi
+  while IFS= read -r d || [[ -n "$d" ]]; do
+    case "$d" in [Dd][Oo][Cc][Ss]) ;; *) continue ;; esac
+    while IFS= read -r p || [[ -n "$p" ]]; do
+      case "$p" in
+        [Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd])
+          printf '%s' "$d/$p"
+          return 0
+          ;;
+      esac
+    done < <(git -C "$repo" ls-tree --name-only "$ref:$d" 2>/dev/null)
+  done < <(git -C "$repo" ls-tree --name-only "$ref" 2>/dev/null)
+  return 1
+}
+
 # Walk up from start_dir looking for the issues file.
 # Prefers <dir>/docs/found-issues.md, falls back to <dir>/.found-issues.md.
 # Inside a git repo the walk stops at the repo root (a directory holding a
