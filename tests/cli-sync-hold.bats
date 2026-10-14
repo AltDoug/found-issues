@@ -251,3 +251,98 @@ seed_removed_file() {
   [ "$status" -eq 0 ]
   grep -q '^- \[fixed\] .*plain thing.*(verified: ai) (fixed: ' docs/found-issues.md
 }
+
+# 3.10.1: the hold decision runs BEFORE any closure probe. A held entry used to
+# cost the gh PR call and the git history probes on every SessionStart sync and
+# then have the result walked back; a probe that records a side effect would
+# have leaked a closure for it.
+
+# A git on PATH that logs every call, then runs the real one.
+git_trace_shim() {
+  local real_git
+  real_git="$(command -v git)"
+  mkdir -p "$TMP/git-shim"
+  cat > "$TMP/git-shim/git" <<SHIM
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$TMP/git-trace"
+exec "$real_git" "\$@"
+SHIM
+  chmod +x "$TMP/git-shim/git"
+  : > "$TMP/git-trace"
+  export PATH="$TMP/git-shim:$PATH"
+}
+
+@test "hold: sync makes no gh PR call for a held entry and still checks a plain one" {
+  fi_use_gh_shim
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_TRACE="$TMP/gh-trace"
+  : > "$GH_MOCK_TRACE"
+  export GH_MOCK_PR_VIEW=$'42\t{"state":"MERGED","baseRefName":"main","mergedAt":"2026-05-01T12:00:00Z","isDraft":false}\n43\t{"state":"MERGED","baseRefName":"main","mergedAt":"2026-05-01T12:00:00Z","isDraft":false}\n44\t{"state":"MERGED","baseRefName":"main","mergedAt":"2026-05-01T12:00:00Z","isDraft":false}'
+  mkdir -p src docs
+  printf 'x\n' > src/foo.py
+  cat > docs/found-issues.md <<'LEDGER'
+- [open] [!] 2026-05-01 src/foo.py:1 — critical with a merged PR (PR: foo/bar#42)
+- [open] 2026-05-01 src/foo.py:2 — held by a human (PR: foo/bar#43) (hold: waiting on QA)
+- [open] 2026-05-01 src/foo.py:3 — plain control (PR: foo/bar#44)
+LEDGER
+
+  PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
+  [ "$status" -eq 0 ]
+  # The plain control proves the trace works and the PR path ran.
+  grep -q 'pr view 44' "$GH_MOCK_TRACE"
+  run grep -c 'pr view 4[23]' "$GH_MOCK_TRACE"
+  [ "$output" = "0" ]
+  # The plain entry closes; the held ones are marked and left open.
+  grep -q '^- \[fixed\].*plain control.*(PR: foo/bar#44)' docs/found-issues.md
+  grep -q '^- \[open\] \[!\].*critical with a merged PR (PR: foo/bar#42) (hold: needs human verify)$' docs/found-issues.md
+  grep -q '^- \[open\] .*held by a human (PR: foo/bar#43) (hold: waiting on QA)$' docs/found-issues.md
+}
+
+@test "hold: sync summary still counts and lists held entries when probes are skipped" {
+  fi_use_gh_shim
+  fi_init_github_repo foo/bar main
+  export GH_MOCK_PR_VIEW=$'42\t{"state":"MERGED","baseRefName":"main","mergedAt":"2026-05-01T12:00:00Z","isDraft":false}\n44\t{"state":"MERGED","baseRefName":"main","mergedAt":"2026-05-01T12:00:00Z","isDraft":false}'
+  mkdir -p src docs
+  printf 'x\n' > src/foo.py
+  cat > docs/found-issues.md <<'LEDGER'
+- [open] [!] 2026-05-01 src/foo.py:1 — critical with a merged PR (PR: foo/bar#42)
+- [open] 2026-05-01 src/foo.py:3 — plain control (PR: foo/bar#44)
+LEDGER
+
+  PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Closed: 1 (1 PR + 0 commit + 0 tombstone)"* ]]
+  [[ "$output" == *"Held: 1 entry for human verification (NOT closed):"* ]]
+  [[ "$output" == *"critical with a merged PR"* ]]
+  [[ "$output" == *"[hold: needs human verify]"* ]]
+}
+
+@test "hold: sync runs no git history probe for a held entry and still probes a plain one" {
+  seed_removed_file
+  mkdir -p src
+  printf 'export const gone = 1;\n' > src/gone2.ts
+  printf 'export const gone = 1;\n' > src/gone3.ts
+  git add src/gone2.ts src/gone3.ts
+  git commit -q -m "add gone2 gone3"
+  git rm -q src/gone2.ts src/gone3.ts
+  git commit -q -m "delete gone2 gone3"
+  mkdir -p docs
+  cat > docs/found-issues.md <<'LEDGER'
+- [open] [!] 2026-05-01 src/gone.ts:1 — critical in a removed file
+- [open] 2026-05-01 src/gone2.ts:1 — held in a removed file (hold: waiting on QA)
+- [open] 2026-05-01 src/gone3.ts:1 — plain control in a removed file
+LEDGER
+  git_trace_shim
+
+  PATH="$TEST_REPO_ROOT/bin:$PATH" fi_run sync
+  [ "$status" -eq 0 ]
+  # The plain control proves the wrapper sees the probes.
+  grep -q 'src/gone3.ts' "$TMP/git-trace"
+  run grep -c 'src/gone.ts\|src/gone2.ts' "$TMP/git-trace"
+  [ "$output" = "0" ]
+  fi_run sync
+  [[ "$output" == *"Held: 2 entries for human verification (NOT closed):"* ]]
+  grep -q '^- \[fixed\].*plain control in a removed file.*closure: tombstone' docs/found-issues.md
+  grep -q '^- \[open\] \[!\].*critical in a removed file (hold: needs human verify)$' docs/found-issues.md
+  grep -q '^- \[open\] .*held in a removed file (hold: waiting on QA)$' docs/found-issues.md
+}
