@@ -735,3 +735,53 @@ EOF
   result="$(fi_find_issues_file)"
   [ "$(cat "$result")" = "# docs" ]
 }
+
+# === 3.10.1: fi_docs_ledger_at_ref names the ledger as git tracks it (#164) ===
+
+ledger_ref_repo() {
+  fi_init_git
+}
+
+@test "docs_ledger_at_ref: prints the exact-case path when tracked" {
+  ledger_ref_repo
+  mkdir -p docs && echo "# x" > docs/found-issues.md
+  git add docs/found-issues.md && git commit -q -m init
+  run fi_docs_ledger_at_ref HEAD
+  [ "$status" -eq 0 ]
+  [ "$output" = "docs/found-issues.md" ]
+}
+
+@test "docs_ledger_at_ref: finds Docs/Found-Issues.md as tracked (#164)" {
+  ledger_ref_repo
+  mkdir -p Docs && echo "# x" > Docs/Found-Issues.md
+  git add Docs/Found-Issues.md && git commit -q -m init
+  run fi_docs_ledger_at_ref HEAD
+  [ "$status" -eq 0 ]
+  [ "$output" = "Docs/Found-Issues.md" ]
+}
+
+@test "docs_ledger_at_ref: finds docs/FOUND-ISSUES.md on another branch and via -C (#164)" {
+  ledger_ref_repo
+  git commit -q --allow-empty -m init
+  git checkout -q -b other
+  mkdir -p docs && echo "# x" > docs/FOUND-ISSUES.md
+  git add docs/FOUND-ISSUES.md && git commit -q -m other
+  git checkout -q main
+  run fi_docs_ledger_at_ref main
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  cd /
+  run fi_docs_ledger_at_ref other "$TMP"
+  [ "$status" -eq 0 ]
+  [ "$output" = "docs/FOUND-ISSUES.md" ]
+}
+
+@test "docs_ledger_at_ref: an untracked ledger or a lone root .found-issues.md is none" {
+  ledger_ref_repo
+  echo "# x" > .found-issues.md
+  mkdir -p docs && echo "# y" > docs/found-issues.md
+  git add .found-issues.md && git commit -q -m init
+  run fi_docs_ledger_at_ref HEAD
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}

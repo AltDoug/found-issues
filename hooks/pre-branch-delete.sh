@@ -328,6 +328,12 @@ while IFS= read -r _fi_dir; do
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
   rel_path="docs/found-issues.md"
   [[ ! -f "$repo_root/$rel_path" ]] && rel_path=".found-issues.md"
+  # 3.10.1 (#164): the ledger the default branch tracks, in whatever case it
+  # is spelled there (git paths are case-sensitive even where the working
+  # tree is not).
+  _fi_main_rel="$(fi_docs_ledger_at_ref "origin/$default_branch" 2>/dev/null \
+    || fi_docs_ledger_at_ref "$default_branch" 2>/dev/null || true)"
+  [[ -n "$_fi_main_rel" ]] && rel_path="$_fi_main_rel"
 
   # Short-circuit when the default branch does not track the issues file at
   # all. The guard's contract — "promote entries to the default branch
@@ -367,8 +373,12 @@ while IFS= read -r _fi_dir; do
     fi
 
     # Get branch's version of the issues file
-    branch_content="$(git show "$branch:$rel_path" 2>/dev/null \
-      || git show "origin/$branch:$rel_path" 2>/dev/null \
+    # The branch may spell its ledger differently from the default branch.
+    branch_rel="$(fi_docs_ledger_at_ref "$branch" 2>/dev/null \
+      || fi_docs_ledger_at_ref "origin/$branch" 2>/dev/null || true)"
+    [[ -n "$branch_rel" ]] || branch_rel="$rel_path"
+    branch_content="$(git show "$branch:$branch_rel" 2>/dev/null \
+      || git show "origin/$branch:$branch_rel" 2>/dev/null \
       || true)"
     [[ -z "$branch_content" ]] && continue
     # Nothing [open] or [deferred] on the branch = nothing to lose (a

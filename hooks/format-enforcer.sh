@@ -33,8 +33,10 @@ IFS= read -r -d '' input || true
 # this hook, and it used to fork cat + two jq before learning the file was
 # not a ledger. Both accepted targets end in "found-issues.md", which JSON
 # escaping cannot hide except through \u — so a payload without either
-# substring cannot be a ledger edit.
-[[ "$input" == *found-issues.md* || "$input" == *'\u'* ]] || exit 0
+# substring cannot be a ledger edit. 3.10.1: matched case-insensitively with
+# bracket classes (bash 3.2 safe, no fork), the docs ledger may be spelled
+# Docs/Found-Issues.md (#164).
+[[ "$input" == *[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]* || "$input" == *'\u'* ]] || exit 0
 
 # Extract fields via jq (with grep fallback)
 get_field() {
@@ -63,7 +65,7 @@ if [[ "$tool_name" == "apply_patch" ]]; then
       '*** Delete File: '*|'*** End Patch'*) _fi_cur="" ;;
       +*)
         case "$_fi_cur" in
-          *docs/found-issues.md|*.found-issues.md|found-issues.md) _fi_patch_content+="${_fi_pl#+}"$'\n'; file_path="$_fi_cur" ;;
+          *[Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]|*.found-issues.md|found-issues.md) _fi_patch_content+="${_fi_pl#+}"$'\n'; file_path="$_fi_cur" ;;
         esac
         ;;
     esac
@@ -71,9 +73,11 @@ if [[ "$tool_name" == "apply_patch" ]]; then
   [[ -z "$_fi_patch_content" ]] && exit 0
 fi
 
-# Only fire for found-issues files
+# Only fire for found-issues files. 3.10.1: the docs ledger may be spelled
+# Docs/Found-Issues.md or docs/FOUND-ISSUES.md (#164), so match it
+# case-insensitively like fi_docs_ledger.
 case "$file_path" in
-  *docs/found-issues.md|*.found-issues.md) ;;
+  *[Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]|*.found-issues.md) ;;
   *) exit 0 ;;
 esac
 
