@@ -787,11 +787,13 @@ EOF
 # then one pointer line. Each line is clipped to 160 bytes.
 fi_render_ledger_lean() {
   local crit pathless shown root
-  # Ledger path -> repo root, the two layouts of lib/segment-cache.sh.
+  # Ledger path -> repo root, the two layouts of lib/segment-cache.sh. 3.10.2
+  # (#164): the docs ledger in any case (fi_docs_ledger_root), so a nested
+  # Docs/Found-Issues.md resolves paths against its own package, not the
+  # git toplevel.
   case "$issues_file" in
-    */docs/found-issues.md) root="${issues_file%/docs/found-issues.md}" ;;
-    */.found-issues.md)     root="${issues_file%/.found-issues.md}" ;;
-    *) root="$(git -C "$(dirname "$issues_file")" rev-parse --show-toplevel 2>/dev/null || dirname "$(dirname "$issues_file")")" ;;
+    */.found-issues.md) root="${issues_file%/.found-issues.md}" ;;
+    *) root="$(fi_docs_ledger_root "$issues_file" 2>/dev/null || git -C "$(dirname "$issues_file")" rev-parse --show-toplevel 2>/dev/null || dirname "$(dirname "$issues_file")")" ;;
   esac
   crit="$(printf '%s\n' "$list_entries" | grep -E '^- \[open\] \[!\] ' | tail -n 5 || true)"
   pathless=""
