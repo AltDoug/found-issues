@@ -7,7 +7,6 @@
 # Compatible with bash 3.2+ (macOS system bash).
 #
 # Functions:
-#   fi_af_ledger_paths <wt>
 #   fi_af_reset_ledger <wt> <base>
 #   fi_af_diff <wt> <base>
 #   fi_af_run_tests <wt> <cmd> <log>
@@ -25,25 +24,6 @@
 
 FI_AF_PR="" FI_AF_MERGE="" FI_AF_TESTCMD="" FI_AF_VERDICT_REASON=""
 FI_SELF="${FI_BIN_DIR:-}/found-issues"
-
-# The worktree's own ledger files, relative. Only paths INSIDE the worktree:
-# fi_find_issues_file would walk up into the source checkout when the
-# worktree has none (Review Focus 2). 3.10.0: the docs ledger may be spelled
-# Docs/Found-Issues.md or docs/FOUND-ISSUES.md (fi_docs_ledger finds it), so
-# the resolved file is listed beside the lowercase defaults.
-fi_af_ledger_paths() {
-  local wt="$1" p docs=""
-  if docs="$(fi_docs_ledger "$wt")"; then
-    docs="${docs#"$wt"/}"
-    printf '%s\n' "$docs"
-  else
-    docs=""
-  fi
-  for p in docs/found-issues.md docs/found-issues-archive.md .found-issues.md; do
-    [[ "$p" != "$docs" && -f "$wt/$p" ]] && printf '%s\n' "$p"
-  done
-  return 0
-}
 
 # The ledger a worktree annotates, relative to <wt>; rc 1 when it has none.
 # 3.10.1 (#164): the docs ledger in whatever case it is spelled. The spelling
@@ -69,15 +49,26 @@ fi_af_wt_ledger() {
 # fixed list, not just the files that still exist, or a deleted ledger
 # would ship as a deletion. 3.10.0: the list adds the docs ledger as it is
 # spelled in the worktree or at <ref> (a recased ledger the fixer deleted is
-# only at <ref>), found case-insensitively like fi_docs_ledger.
+# only at <ref>), found case-insensitively like fi_docs_ledger. 3.10.2 (#164):
+# the same for the archive, in the spelling git tracks. A literal default that
+# is not tracked at <ref> but is the SAME FILE as a tracked recased one (a
+# case-insensitive volume) is left to that tracked spelling: `rm` would delete
+# the tracked file and the next `git add -A` would stage the deletion.
 fi_af_reset_ledger() {
-  local wt="$1" ref="$2" p seen=$'\n' docs
+  local wt="$1" ref="$2" p t seen=$'\n' docs lp lt
   local -a paths=(docs/found-issues.md docs/found-issues-archive.md .found-issues.md)
+  local -a tracked=()
   if docs="$(fi_docs_ledger "$wt")"; then
     paths[${#paths[@]}]="${docs#"$wt"/}"
   fi
+  if docs="$(fi_docs_archive "$wt")"; then
+    paths[${#paths[@]}]="${docs#"$wt"/}"
+  fi
   if docs="$(fi_docs_ledger_at_ref "$ref" "$wt")"; then
-    paths[${#paths[@]}]="$docs"
+    paths[${#paths[@]}]="$docs"; tracked[${#tracked[@]}]="$docs"
+  fi
+  if docs="$(fi_docs_archive_at_ref "$ref" "$wt")"; then
+    paths[${#paths[@]}]="$docs"; tracked[${#tracked[@]}]="$docs"
   fi
   for p in "${paths[@]}"; do
     [[ "$seen" == *$'\n'"$p"$'\n'* ]] && continue
@@ -85,6 +76,13 @@ fi_af_reset_ledger() {
     if git -C "$wt" cat-file -e "$ref:$p" 2>/dev/null; then
       git -C "$wt" checkout -q "$ref" -- "$p" 2>/dev/null || true
     else
+      lp="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')"
+      if (( ${#tracked[@]} )); then
+        for t in "${tracked[@]}"; do
+          lt="$(printf '%s' "$t" | tr '[:upper:]' '[:lower:]')"
+          [[ "$lp" == "$lt" && "$wt/$p" -ef "$wt/$t" ]] && continue 2
+        done
+      fi
       rm -f "$wt/$p"
     fi
   done

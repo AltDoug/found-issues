@@ -107,7 +107,7 @@ crlf_ledger() {
 
 # --- finding 3: a differently-cased ledger in a fixer worktree ---
 
-@test "ship: a differently-cased ledger is listed and reverted in the worktree" {
+@test "ship: a differently-cased ledger is reverted in the worktree" {
   fi_af_fixture
   mkdir -p Docs
   git mv docs/found-issues.md Docs/Found-Issues.md
@@ -117,14 +117,6 @@ crlf_ledger() {
   ref="$(git -C "$wt" rev-parse HEAD)"
   printf -- '- [fixed] 2026-10-01 src/calc.sh:1 — fixer edit\n' >> "$wt/Docs/Found-Issues.md"
   source "$FI_BIN"; fi_af_context
-  run fi_af_ledger_paths "$wt"
-  [ "$status" -eq 0 ]
-  # The listed path names the ledger in whatever case the file system keeps
-  # (a case-insensitive volume also answers to docs/found-issues.md).
-  [ -n "$output" ]
-  first="${lines[0]}"
-  [ -f "$wt/$first" ]
-  [ "$(printf '%s' "$first" | tr 'A-Z' 'a-z')" = "docs/found-issues.md" ]
   fi_af_reset_ledger "$wt" "$ref"
   ! grep -q 'fixer edit' "$wt/Docs/Found-Issues.md" || false
   [ -z "$(git -C "$wt" status --porcelain)" ]
@@ -144,4 +136,53 @@ crlf_ledger() {
   git -C "$wt" add -A
   [ -z "$(git -C "$wt" status --porcelain)" ]
   git -C "$wt" ls-files | grep -q '^Docs/Found-Issues.md$'
+}
+
+# --- 3.10.2 (#164): the archive is reset in the case git tracks it ---
+
+recased_archive_wt() {
+  # $1 = tracked archive path, $2 = tracked ledger path
+  fi_af_fixture
+  mkdir -p Docs
+  git mv docs/found-issues.md "$2"
+  printf '# archive\n\n- [fixed] 2026-09-01 old.sh:1 — old (verified: ai)\n' > "$1"
+  git add -A && git commit -q -m "recase docs"
+  wt="$TMP/wt"
+  git worktree add -q "$wt" HEAD
+  ref="$(git -C "$wt" rev-parse HEAD)"
+  source "$FI_BIN"; fi_af_context
+}
+
+@test "ship: a tracked Docs/found-issues-archive.md is kept, and a fixer edit reverted (#164)" {
+  recased_archive_wt Docs/found-issues-archive.md Docs/Found-Issues.md
+  printf -- '- [fixed] 2026-10-01 x.sh:1 — fixer edit\n' >> "$wt/Docs/found-issues-archive.md"
+  fi_af_reset_ledger "$wt" "$ref"
+  [ -f "$wt/Docs/found-issues-archive.md" ]
+  ! grep -q 'fixer edit' "$wt/Docs/found-issues-archive.md" || false
+  git -C "$wt" add -A
+  [ -z "$(git -C "$wt" status --porcelain)" ]
+}
+
+@test "ship: a tracked Docs/Found-Issues-Archive.md fixer edit is reverted (#164)" {
+  recased_archive_wt Docs/Found-Issues-Archive.md Docs/Found-Issues.md
+  printf -- '- [fixed] 2026-10-01 x.sh:1 — fixer edit\n' >> "$wt/Docs/Found-Issues-Archive.md"
+  fi_af_reset_ledger "$wt" "$ref"
+  [ -f "$wt/Docs/Found-Issues-Archive.md" ]
+  ! grep -q 'fixer edit' "$wt/Docs/Found-Issues-Archive.md" || false
+  git -C "$wt" add -A
+  [ -z "$(git -C "$wt" status --porcelain)" ]
+}
+
+@test "ship: an archive the fixer created is removed, a recased one too (#164)" {
+  fi_af_fixture
+  mkdir -p Docs
+  git mv docs/found-issues.md Docs/Found-Issues.md
+  git commit -q -m "recase ledger"
+  wt="$TMP/wt"
+  git worktree add -q "$wt" HEAD
+  ref="$(git -C "$wt" rev-parse HEAD)"
+  printf '# a\n' > "$wt/Docs/Found-Issues-Archive.md"
+  source "$FI_BIN"; fi_af_context
+  fi_af_reset_ledger "$wt" "$ref"
+  [ -z "$(git -C "$wt" status --porcelain --untracked-files=all)" ]
 }

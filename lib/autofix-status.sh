@@ -256,7 +256,8 @@ fi_af_stuck_update() {
   # Only a base found green ends the streak (fi_af_base_tests clears it):
   # a cancel, a prune or a no-longer-eligible retire says nothing about the
   # base, so it neither counts nor resets.
-  [[ "$outcome" == stale && "$text" == "tests fail at base" ]] || return 0
+  # Prefix match: 3.10.2 appends an auto-detected command's hint to the text.
+  [[ "$outcome" == stale && "$text" == "tests fail at base"* ]] || return 0
   if fi_af_stuck_read "$f"; then
     n="$FI_AF_STUCK_N" names="$FI_AF_STUCK_NAMES"
     # A streak whose last failure is over a week old has aged out: start again.

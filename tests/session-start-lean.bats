@@ -261,3 +261,39 @@ make_due_ledger() {
   [[ "$out" == *"additionalContext"* ]]
   [[ "$out" == *"Issues found and not tracked"* ]]
 }
+
+@test "lean session start: a nested differently-cased Docs/Found-Issues.md resolves paths against its own package (#164)" {
+  mkdir -p "$TMP/home/.claude"
+  fi_init_git
+  mkdir -p pkg/app/Docs pkg/app/src
+  printf '1\n' > pkg/app/src/real.sh
+  { printf '# found-issues\n\n'
+    printf -- '- [open] 2026-09-03 src/real.sh:1 — REAL-FILE-ENTRY\n'
+    printf -- '- [open] 2026-09-04 workflow/release — TOPIC-Z\n'
+  } > pkg/app/Docs/Found-Issues.md
+  git add -A . >/dev/null && git commit -qm init
+  cd pkg/app
+  out="$(run_hook '{"source":"startup","session_id":"s1"}')"
+  [[ "$out" == *"TOPIC-Z"* ]]
+  [[ "$out" != *"REAL-FILE-ENTRY"* ]]
+}
+
+@test "lean session start: a nested lowercase ledger still resolves to its package with an older CLI lib on PATH" {
+  # An older CLI's lib has no fi_docs_ledger_root: the lowercase layout must
+  # not fall back to the git toplevel and show a real-file entry as pathless.
+  mkdir -p "$TMP/home/.claude" "$TMP/oldlib"
+  cp "$TEST_REPO_ROOT"/lib/*.sh "$TMP/oldlib/"
+  printf '\nunset -f fi_docs_ledger_root\n' >> "$TMP/oldlib/parse-entries.sh"
+  fi_init_git
+  mkdir -p pkg/app/docs pkg/app/src
+  printf '1\n' > pkg/app/src/real.sh
+  { printf '# found-issues\n\n'
+    printf -- '- [open] 2026-09-03 src/real.sh:1 — REAL-FILE-ENTRY\n'
+    printf -- '- [open] 2026-09-04 workflow/release — TOPIC-Z\n'
+  } > pkg/app/docs/found-issues.md
+  git add -A . >/dev/null && git commit -qm init
+  cd pkg/app
+  out="$(FOUND_ISSUES_LIB_DIR="$TMP/oldlib" run_hook '{"source":"startup","session_id":"s1"}')"
+  [[ "$out" == *"TOPIC-Z"* ]]
+  [[ "$out" != *"REAL-FILE-ENTRY"* ]]
+}

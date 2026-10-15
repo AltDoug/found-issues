@@ -1140,3 +1140,27 @@ EOF
   [ "$block_ln" -eq 2 ]
   grep -Fq 'echo "static line${__FI_SEG}"  # found-issues:seg' tmp/sl.sh
 }
+
+@test "uninstall-statusline --target: stages beside the target, works with an unusable TMPDIR, leaves no scratch" {
+  mkdir -p tmp/sub && cat > tmp/sub/sl.sh <<'EOF'
+#!/bin/bash
+LINE1="$REPO | $BRANCH"
+echo "$LINE1"
+EOF
+  chmod 750 tmp/sub/sl.sh
+  local original_content
+  original_content="$(cat tmp/sub/sl.sh)"
+  fi_run install-statusline --target tmp/sub/sl.sh --apply
+  [ "$status" -eq 0 ]
+  # TMPDIR points at a directory that does not exist: any scratch file staged
+  # there (the old behaviour) cannot be created, so the uninstall fails.
+  TMPDIR="$BATS_TEST_TMPDIR/no-such-tmpdir" fi_run uninstall-statusline --target tmp/sub/sl.sh
+  [ "$status" -eq 0 ]
+  [ "$(cat tmp/sub/sl.sh)" = "$original_content" ]
+  # mode preserved
+  [ "$(ls -l tmp/sub/sl.sh | cut -c1-10)" = "-rwxr-x---" ]
+  # the target's directory holds the target and its fi-bak backups only (no stray scratch)
+  local stray
+  stray="$(ls -A tmp/sub | grep -v -e '^sl\.sh$' -e '^sl\.sh\.fi-bak-' || true)"
+  [ -z "$stray" ]
+}

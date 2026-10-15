@@ -16,7 +16,7 @@
 #   fi_target_is_v14x_broken <file>
 #   fi_target_is_v15x_broken <file>
 #   fi_strip_target_markers <file>
-#   fi_strip_to_scratch <file>
+#   fi_strip_to_scratch <file> <language> [<stage-dir>]
 #   fi_statusline_command_path <command-string>
 
 # === Subcommand: install-statusline ===
@@ -349,7 +349,9 @@ fi_strip_target_markers() {
   esac
 
   local tmp
-  tmp="$(mktemp "${TMPDIR:-/tmp}/fi-strip.XXXXXX")"
+  # Beside the file being stripped (callers pass a scratch copy), so an
+  # unusable $TMPDIR cannot break the strip.
+  tmp="$(mktemp "$(dirname "$path")/.found-issues-strip.tmp.XXXXXX")" || return 1
   # v1.5.x call-form splice fragments are CONSTANT strings emitted by the
   # installers (deferred __fiSeg(dir)/_fi_seg(_dir) with a fixed fallback
   # expression). Their nested parens defeat the ERE `[^)]*` patterns below
@@ -429,10 +431,19 @@ fi_strip_target_markers() {
 # install handlers: the user's file must stay untouched until the apply-mode
 # atomic rename, so dry-run never mutates and the backup captures the
 # pre-migration original.
+#
+# Optional $3 = directory to stage the scratch in. A caller that renames the
+# scratch onto the target (uninstall) passes the target's own directory so the
+# final mv is a same-filesystem atomic rename; callers that only read the
+# scratch keep the default $TMPDIR (their dry-run must work on a read-only dir).
 fi_strip_to_scratch() {
-  local path="$1" language="$2"
+  local path="$1" language="$2" dir="${3:-}"
   local scratch
-  scratch="$(mktemp "${TMPDIR:-/tmp}/fi-target-migrate.XXXXXX")" || return 1
+  if [[ -n "$dir" ]]; then
+    scratch="$(mktemp "$dir/.found-issues-statusline.tmp.XXXXXX")" || return 1
+  else
+    scratch="$(mktemp "${TMPDIR:-/tmp}/fi-target-migrate.XXXXXX")" || return 1
+  fi
   cp "$path" "$scratch" || { rm -f "$scratch"; return 1; }
   fi_strip_target_markers "$scratch" "$language" || { rm -f "$scratch"; return 1; }
   printf '%s' "$scratch"

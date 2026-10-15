@@ -66,6 +66,54 @@ fi_docs_ledger_at_ref() {
   return 1
 }
 
+# fi_docs_ledger_root <ledger-path> — print the directory a docs ledger belongs
+# to (the one holding its docs/ folder), return 1 when the path is not a docs
+# ledger. 3.10.2 (#164): a pure string match in any case, so a differently-cased
+# Docs/Found-Issues.md names its root the same on every file system.
+fi_docs_ledger_root() {
+  case "$1" in
+    */[Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd])
+      printf '%s' "${1%/*/*}"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# fi_docs_archive <dir> — print the docs archive inside <dir> in whatever case it
+# is spelled on disk (a bracket-class glob lists the real directory entries even
+# on a case-insensitive volume), return 1 if none. 3.10.2 (#164).
+fi_docs_archive() {
+  local dir="$1" f
+  for f in "$dir"/[Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].[Mm][Dd]; do
+    if [[ -f "$f" ]]; then
+      printf '%s' "$f"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# fi_docs_archive_at_ref <ref> [<repo_dir>] — the repo-relative path of the docs
+# archive TRACKED at <ref>, in any case; return 1 if none. Same walk as
+# fi_docs_ledger_at_ref (git trees are case-sensitive on every file system).
+# 3.10.2 (#164).
+fi_docs_archive_at_ref() {
+  local ref="$1" repo="${2:-.}" d p
+  while IFS= read -r d || [[ -n "$d" ]]; do
+    case "$d" in [Dd][Oo][Cc][Ss]) ;; *) continue ;; esac
+    while IFS= read -r p || [[ -n "$p" ]]; do
+      case "$p" in
+        [Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss]-[Aa][Rr][Cc][Hh][Ii][Vv][Ee].[Mm][Dd])
+          printf '%s' "$d/$p"
+          return 0
+          ;;
+      esac
+    done < <(git -C "$repo" ls-tree --name-only "$ref:$d" 2>/dev/null)
+  done < <(git -C "$repo" ls-tree --name-only "$ref" 2>/dev/null)
+  return 1
+}
+
 # Walk up from start_dir looking for the issues file.
 # Prefers <dir>/docs/found-issues.md, falls back to <dir>/.found-issues.md.
 # Inside a git repo the walk stops at the repo root (a directory holding a

@@ -222,6 +222,34 @@ teardown() { fi_teardown_tmp; }
   [ ! -d "$ST/lock" ]
 }
 
+# 3.10.2 (ledger lib/autofix-queue.sh:651): a red base under a GUESSED test
+# command says so, with the setting that fixes a wrong guess.
+auto_red_base() { # no configured command; the base tree's Makefile is detected
+  git config --unset found-issues.autofix.testCommand
+  printf 'test:\n\techo run >> %s/base-runs; echo "not ok 1 red"; exit 1\n' "$TMP" > Makefile
+  git add Makefile && git commit -qm "red make test" && git push -q origin main
+}
+
+@test "autofix claim: a red base under an auto-detected command names the command and the setting" {
+  auto_red_base
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"tests fail at base (auto-detected: make test; set found-issues.autofix.testCommand)"* ]]
+  grep -q '^result=stale: tests fail at base (auto-detected: make test; set found-issues.autofix.testCommand)$' "$ST/done/$ID"
+}
+
+@test "autofix claim: a known-red skip under an auto-detected command carries the same hint" {
+  auto_red_base
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 5 ]
+  "$FI_BIN" log --fix small 'test.sh:2 — second entry' >/dev/null
+  ID2="$(ls "$ST/queue" | head -1)"
+  run "$FI_BIN" autofix claim "$ID2"
+  [ "$status" -eq 5 ]
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 2 ]
+  grep -q '^result=stale: tests fail at base (auto-detected: make test; set found-issues.autofix.testCommand)$' "$ST/done/$ID2"
+}
+
 @test "autofix claim: a base suite that exits 124 on its own is red, not a watchdog timeout" {
   git config found-issues.autofix.testCommand 'echo "not ok 1 hung"; exit 124'
   run "$FI_BIN" autofix claim "$ID"

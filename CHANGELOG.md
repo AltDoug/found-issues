@@ -4,6 +4,20 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.2] - 2026-10-14
+
+The known-red base block tracks each landing branch and the configured test command, a red base under a guessed test command says so, and the last places that assumed a lowercase ledger are fixed.
+
+### Fixed
+- **The known-red memo is kept per landing branch** (ledger `lib/autofix-sweep.sh:159`). 3.10.1 kept one `base-red` file per repo, shared by spot fixes and sweeps on every branch, so a spot fix on a session branch could rewrite or clear it and lift a sweep's red-base block on main. Each landing branch now has its own memo; the 3.10.1 single file is ignored and removed on the next write.
+- **Removing a configured `testCommand` lifts a red-base sweep block** (ledger `lib/autofix-sweep.sh:163`). The block's marker now records the configured command, so setting, changing or removing it unblocks the next sweep. Before, removing it (falling back to auto-detection) left sweeps blocked until the base commit moved.
+- **The red-base remote check cannot hang on ssh** (ledger `lib/autofix-sweep.sh:170`). The `git ls-remote` that `log`, `tag`, `decide` and SessionStart sync run while a block is in effect now uses ssh `BatchMode=yes` and a 5-second connect timeout, unless `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` is set. If it fails, the local ref decides, as before.
+- **A red base under a guessed test command says so** (ledger `lib/autofix-queue.sh:651`). With no `found-issues.autofix.testCommand` set, the result reads `tests fail at base (auto-detected: <cmd>; set found-issues.autofix.testCommand)`, so a repo whose guessed command skips a build step its CI runs is told what to configure. `autofix status` and the stuck streak still match it as a red base.
+- **A nested differently-cased ledger resolves paths against its own package at session start** (ledger `hooks/first-touch.sh:51`, #164). The lean SessionStart render found the root of `Docs/Found-Issues.md` at the git toplevel, so in a monorepo package it showed real-file entries as pathless. The first-touch hook and the statusline cache already handled the recased ledger since 3.10.0; the 3.10.1 note saying they still assumed lowercase was wrong.
+- **Auto-fix restores a differently-cased archive instead of deleting it** (ledger `lib/autofix-ship.sh:74`). Before shipping, the ledger reset checked and removed the literal `docs/found-issues-archive.md`; on a case-insensitive filesystem that deleted a tracked `Docs/found-issues-archive.md`, and the deletion was committed. It now restores the archive in the spelling git tracks.
+- **`uninstall-statusline --target` stages its stripped copy beside the target** (ledger `lib/statusline-uninstall.sh:129`). It used `$TMPDIR` and then moved the file onto the target, a non-atomic copy when `$TMPDIR` is on another volume and a failure when `$TMPDIR` is unusable. The move is now a same-directory rename, and a failed move cleans up and exits 14.
+- **Dead code removed** (ledger `lib/autofix-ship.sh:34`): `fi_af_ledger_paths` had no callers since 3.10.0.
+
 ## [3.10.1] - 2026-10-13
 
 A differently-cased ledger counts as the ledger everywhere, sync stops probing held entries, and a sweep skipped at a known-red base keeps the day's slot.
