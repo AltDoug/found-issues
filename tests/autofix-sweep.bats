@@ -481,7 +481,13 @@ gh_mock() {
 red_memo_setup() { # a first sweep runs the red suite; a second claims on the memo
   fi_af_sweep_fixture 4; fi_use_standins
   git config found-issues.autofix.dailySweeps 3
-  git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; exit 1"
+  if [ "${1:-}" = auto ]; then # no configured command: the base tree's Makefile is detected
+    git config --unset found-issues.autofix.testCommand
+    printf 'test:\n\techo run >> %s/base-runs; exit 1\n' "$TMP" > Makefile
+    git add Makefile && git commit -qm "red make test" && git push -q origin main
+  else
+    git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; exit 1"
+  fi
   sweep_queue
   run "$FI_BIN" autofix claim "$SID"
   [ "$status" -eq 5 ]
@@ -568,19 +574,31 @@ remote_moves() { # a second clone pushes to the shared remote; this checkout's o
 }
 
 @test "sweep check: an auto-detected test command that differs in the root checkout still blocks" {
-  red_memo_setup
+  red_memo_setup auto
   run "$FI_BIN" autofix claim "$SID2"
   [ "$status" -eq 5 ]
-  # No configured command: the memo holds what the base tree detected, and the
-  # root checkout (another branch's files) detects something else.
-  git config --unset found-issues.autofix.testCommand
-  local memo; memo="$(cat "$FI_AF_ST/base-red")"
-  printf '%s make test' "${memo%% *}" > "$FI_AF_ST/base-red"
+  # No configured command: the memo holds what the base tree detected (make
+  # test), and the root checkout (another branch's files) detects something
+  # else (bats tests/).
+  grep -q ' make test$' "$FI_AF_ST"/base-red*
   mkdir -p tests && : > tests/extra.bats
   run fi_af_sweep_check
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   [ -z "$(ls "$ST/queue" 2>/dev/null)" ]
+}
+
+# 3.10.2 (ledger lib/autofix-sweep.sh:163): taking the testCommand away is a
+# change of the configured value too, so it lifts the block.
+@test "sweep check: removing the configured test command after a known-red stop unblocks the next trigger" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  git config --unset found-issues.autofix.testCommand
+  printf 'test:\n\ttrue\n' > Makefile
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [[ "$output" == "AUTOFIX-SWEEP-DUE "* ]]
 }
 
 @test "sweep check: when ls-remote fails the local ref decides and an unchanged sha still blocks" {
@@ -607,6 +625,83 @@ remote_moves() { # a second clone pushes to the shared remote; this checkout's o
   [ "$status" -eq 0 ]
   [[ "$output" == "AUTOFIX-SWEEP-DUE "* ]]
   [ ! -e "$TMP/lsr" ]
+}
+
+# 3.10.2 (ledger lib/autofix-sweep.sh:159): the known-red memo is per landing
+# branch, so a spot item on a session branch cannot rewrite main's.
+@test "sweep check: a red spot item on another landing branch does not lift main's red-base block" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  fi_af_remote_branch feat
+  fi_af_queue_spot "$(grep -m1 '^- \[open\]' docs/found-issues.md)" >/dev/null
+  local sid; sid="$(ls "$ST/queue" | head -1)"
+  [ -n "$sid" ]
+  run "$FI_BIN" autofix claim "$sid"
+  [ "$status" -eq 5 ]
+  git switch -q main
+  git config found-issues.autofix.sweepThreshold 2  # the spot item's entry no longer counts
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$(ls "$ST/queue" 2>/dev/null)" ]
+  [ "$(ls "$FI_AF_ST"/base-red* | wc -l | tr -d ' ')" = 2 ]
+}
+
+@test "sweep check: a legacy single base-red file from 3.10.1 does not keep a sweep blocked" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  local memo; memo="$(cat "$FI_AF_ST"/base-red*)"
+  rm -f "$FI_AF_ST"/base-red*
+  printf '%s' "$memo" > "$FI_AF_ST/base-red"
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [[ "$output" == "AUTOFIX-SWEEP-DUE "* ]]
+}
+
+# 3.10.2 (ledger lib/autofix-sweep.sh:170): an SSH origin on a dead network
+# must not stall the call; git's http.lowSpeed* does not bound ssh.
+ls_remote_ssh_shim() { # records GIT_SSH_COMMAND as each ls-remote sees it
+  mkdir -p "$TMP/shim"
+  printf '#!/bin/sh\ncase " $* " in *" ls-remote "*) echo "${GIT_SSH_COMMAND-UNSET}" >> "%s/lsr-env";; esac\nexec "%s" "$@"\n' "$TMP" "$(command -v git)" > "$TMP/shim/git"
+  chmod +x "$TMP/shim/git"
+}
+
+@test "sweep check: the red-base ls-remote gets non-interactive, bounded ssh options by default" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  unset GIT_SSH_COMMAND GIT_SSH
+  ls_remote_ssh_shim
+  PATH="$TMP/shim:$PATH"
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TMP/lsr-env")" = "ssh -o BatchMode=yes -o ConnectTimeout=5" ]
+}
+
+@test "sweep check: the red-base ls-remote leaves the user's own GIT_SSH_COMMAND alone" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  ls_remote_ssh_shim
+  PATH="$TMP/shim:$PATH"
+  GIT_SSH_COMMAND="ssh -i /nonexistent/key" run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TMP/lsr-env")" = "ssh -i /nonexistent/key" ]
+}
+
+@test "sweep check: the red-base ls-remote leaves a configured core.sshCommand alone" {
+  red_memo_setup
+  run "$FI_BIN" autofix claim "$SID2"
+  [ "$status" -eq 5 ]
+  unset GIT_SSH_COMMAND GIT_SSH
+  git config core.sshCommand "ssh -i /nonexistent/key"
+  ls_remote_ssh_shim
+  PATH="$TMP/shim:$PATH"
+  run fi_af_sweep_check
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TMP/lsr-env")" = "UNSET" ]
 }
 
 # 3.2.1 (ledger lib/autofix-sweep.sh:387): a failed ship keeps the branch and

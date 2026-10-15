@@ -145,31 +145,42 @@ _fi_af_untagged_count() {
 }
 
 # 0 while a stop on the known-red memo still holds. Today's sweep-redbase
-# marker (fi_af_sweep_claim) names the base; the block applies only while the
-# known-red memo ($FI_AF_ST/base-red, "<sha> <test command>", the one the
-# claim's fi_af_base_tests reads) still says that sha, and, when a testCommand
-# is configured, that command, so the two cannot disagree: a corrected
-# testCommand or a green run (memo removed) unblocks. The base must also still be at that sha
-# locally and on the remote: one ls-remote, only here, where a block would
-# apply (a fix merged on GitHub moves no local ref until a claim fetches). A
-# failed ls-remote falls back to the local ref, so offline stays blocked.
+# marker (fi_af_sweep_claim) lines are "<base> <sha> <testCommand key>"; the
+# block applies only while the landing branch's own known-red memo
+# ($FI_AF_ST/base-red.<key of base>, "<sha> <test command>", the one the
+# claim's fi_af_base_tests reads) still says that sha and the
+# found-issues.autofix.testCommand setting is what it was when the block was
+# taken: set, changed or removed lifts it (3.10.2, ledger :163). A green run
+# (memo removed) unblocks too. An auto-detected command follows the base
+# tree, so it cannot change while the sha does not, and <root>'s own
+# detection (another branch's files) is never compared. The base must also
+# still be at that sha locally and on the remote: one ls-remote, only here,
+# where a block would apply (a fix merged on GitHub moves no local ref until
+# a claim fetches). A failed ls-remote falls back to the local ref, so
+# offline stays blocked; its ssh is non-interactive and bounded (:170).
 _fi_af_sweep_redbase_hit() { # <root>
-  local line base sha memo cfg remote rc
+  local line base rest sha ckey memo cfgkey remote rc dflt=""
   [[ -f "$FI_AF_ST/day/$(fi_today).sweep-redbase" ]] || return 1
-  memo="$(cat "$FI_AF_ST/base-red" 2>/dev/null)" || return 1
-  # Only a configured testCommand is compared: an auto-detected one follows
-  # the base tree, so it cannot change while the sha does not, and <root>'s
-  # own detection (another branch's files) would never match the memo's.
-  cfg="$(git -C "$1" config --get found-issues.autofix.testCommand 2>/dev/null || true)"
-  if [[ -n "$cfg" && "${memo#* }" != "$cfg" ]]; then return 1; fi
+  cfgkey="$(fi_af_testcmd_cfg_key "$1")"
+  # ssh prompts and a dead network's TCP connect timeout are not bounded by
+  # git's http.lowSpeed*; a user's own ssh command, env or config wins.
+  if [[ -z "${GIT_SSH_COMMAND:-}${GIT_SSH:-}" ]] \
+    && [[ -z "$(git -C "$1" config --get core.sshCommand 2>/dev/null || true)" ]]; then
+    dflt="ssh -o BatchMode=yes -o ConnectTimeout=5"
+  fi
   while IFS= read -r line || [[ -n "$line" ]]; do
-    base="${line%% *}" sha="${line#* }"
-    [[ -n "$base" && -n "$sha" && "$base" != "$line" ]] || continue
+    base="${line%% *}" rest="${line#* }"
+    [[ -n "$base" && "$base" != "$line" ]] || continue
+    sha="${rest%% *}" ckey="-"
+    [[ "$rest" == *" "* ]] && ckey="${rest#* }"
+    [[ -n "$sha" && "$ckey" == "$cfgkey" ]] || continue
+    memo="$(cat "$(fi_af_redmemo_path "$base")" 2>/dev/null)" || continue
     [[ "${memo%% *}" == "$sha" ]] || continue
     [[ "$(git -C "$1" rev-parse -q --verify "refs/remotes/origin/$base" 2>/dev/null)" == "$sha" ]] || continue
     rc=0
-    remote="$(GIT_TERMINAL_PROMPT=0 git -C "$1" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 \
-      ls-remote origin "refs/heads/$base" 2>/dev/null)" || rc=$?
+    remote="$( [[ -z "$dflt" ]] || export GIT_SSH_COMMAND="$dflt"
+      GIT_TERMINAL_PROMPT=0 git -C "$1" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 \
+        ls-remote origin "refs/heads/$base" 2>/dev/null)" || rc=$?
     remote="${remote%%[[:space:]]*}"
     if (( rc == 0 )) && [[ "$remote" =~ ^[0-9a-f]{40,64}$ ]]; then
       [[ "$remote" == "$sha" ]] && return 0
@@ -353,10 +364,11 @@ fi_af_sweep_claim() {
   # ran, the day's slot is spent, or every Stop would queue a new sweep and
   # re-run it. A stop on the known-red memo ran nothing (3.10.1, ledger :313):
   # it keeps the slot and takes a red-at-<base sha> day marker instead, which
-  # fi_af_sweep_check honors until the base moves or the memo changes.
+  # fi_af_sweep_check honors until the base moves, the memo changes or the
+  # testCommand setting does.
   if ! fi_af_base_tests "$id"; then
     if [[ -n "${FI_AF_BASE_MEMO:-}" && -n "${AFI_base_sha:-}" ]]; then
-      fi_af_cap_take sweep-redbase "$AFI_base $AFI_base_sha"
+      fi_af_cap_take sweep-redbase "$AFI_base $AFI_base_sha $(fi_af_testcmd_cfg_key "$AFI_root")"
     else
       (( capped )) || fi_af_cap_take sweep "$id"
     fi

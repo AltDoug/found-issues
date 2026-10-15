@@ -604,20 +604,58 @@ fi_af_worktree_remove() {
   fi
 }
 
+# 3.10.2 (ledger lib/autofix-sweep.sh:159): the known-red memo is one file per
+# landing branch, so a spot item on a session branch cannot rewrite or clear
+# the memo a sweep's red-base block on main reads. The name carries a cksum
+# (CRC and byte count) of the branch name, not a lossy character
+# substitution, so feat/a and feat_a never share a file; no branch name at
+# all uses base-red.nobase. The single base-red file 3.10.1 wrote is never
+# read again (at worst one extra suite run) and is removed on the next write.
+fi_af_text_key() { # <text> -> <crc>-<bytes>; "-" for empty text
+  local crc len
+  [[ -n "$1" ]] || { printf '%s' "-"; return 0; }
+  read -r crc len < <(printf '%s' "$1" | cksum)
+  printf '%s-%s' "$crc" "$len"
+}
+
+fi_af_redmemo_path() { # <landing branch>
+  if [[ -n "${1:-}" ]]; then printf '%s/base-red.%s' "$FI_AF_ST" "$(fi_af_text_key "$1")"
+  else printf '%s/base-red.nobase' "$FI_AF_ST"; fi
+}
+
+# The testCommand setting itself (empty when auto-detected) of <dir>, as a
+# key: a sweep's red-base marker records it so a later set, change or removal
+# lifts the block (ledger lib/autofix-sweep.sh:163).
+fi_af_testcmd_cfg_key() { # <dir>
+  fi_af_text_key "$(git -C "$1" config --get found-issues.autofix.testCommand 2>/dev/null || true)"
+}
+
+# The result text of a red base. An auto-detected command is a guess (ledger
+# lib/autofix-queue.sh:651: cosmo's skipped the build its CI runs), so the
+# text names it and the setting that replaces it; the prefix "tests fail at
+# base" stays what the stuck streak and the retire consumers match.
+_fi_af_base_red_why() { # <test command>
+  local cfg
+  cfg="$(git -C "$AFI_wt" config --get found-issues.autofix.testCommand 2>/dev/null || true)"
+  if [[ -n "$cfg" ]]; then printf '%s' "tests fail at base"
+  else printf '%s' "tests fail at base (auto-detected: $1; set found-issues.autofix.testCommand)"; fi
+}
+
 # 3.2.1 (ledger lib/autofix.sh:127): run the repo's tests once in the fresh
 # worktree. A suite already red at base fails every attempt whatever the fix
 # changes, so the run ends stale before any engine starts. rc 1 = red at
 # base; rc 0 = green, or no test command (the run reports that itself). The
 # worktree is reset after, so nothing the tests left reaches a fixer's diff.
 fi_af_base_tests() {
-  local id="$1" t rc=0 log="$FI_AF_RUNS/$1.base-tests.log" red="$FI_AF_ST/base-red" key=""
+  local id="$1" t rc=0 log="$FI_AF_RUNS/$1.base-tests.log" red key=""
+  red="$(fi_af_redmemo_path "${AFI_base:-}")"
   FI_AF_BASE_WHY="" FI_AF_BASE_MEMO=""
   t="$(fi_af_test_command "$AFI_wt" 2>/dev/null)" || return 0
   # 3.6.0: a base found red is remembered by commit and test command, so the
   # next item on the same base retires without running the suite again.
   [[ -n "${AFI_base_sha:-}" ]] && key="$AFI_base_sha $t"
   if [[ -n "$key" && -f "$red" && "$(cat "$red" 2>/dev/null)" == "$key" ]]; then
-    FI_AF_BASE_WHY="tests fail at base" FI_AF_BASE_MEMO=1
+    FI_AF_BASE_WHY="$(_fi_af_base_red_why "$t")" FI_AF_BASE_MEMO=1
     fi_af_log "$id" "tests fail at base: known red at ${AFI_base_sha:0:7} ($t), not re-run"
     return 1
   fi
@@ -648,8 +686,11 @@ fi_af_base_tests() {
     fi_af_log "$id" "$FI_AF_BASE_WHY ($t)"
     return 1
   fi
-  FI_AF_BASE_WHY="tests fail at base"
-  [[ -z "$key" ]] || printf '%s' "$key" >"$red" 2>/dev/null || true
+  FI_AF_BASE_WHY="$(_fi_af_base_red_why "$t")"
+  if [[ -n "$key" ]]; then
+    rm -f "$FI_AF_ST/base-red"
+    printf '%s' "$key" >"$red" 2>/dev/null || true
+  fi
   fi_af_log "$id" "tests fail at base (exit $rc, $t):"
   fi_af_test_report "$log" 20 >>"$FI_AF_RUNS/$id.log" 2>/dev/null || true
   return 1
