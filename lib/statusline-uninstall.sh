@@ -121,13 +121,19 @@ cmd_uninstall_statusline_custom_target() {
     else language=bash; fi
   }
   local scratch backup mode
-  scratch="$(fi_strip_to_scratch "$path" "$language")" || {
+  # Stage beside the target: same-filesystem, so the mv below is an atomic
+  # rename even when $TMPDIR lives on another volume.
+  scratch="$(fi_strip_to_scratch "$path" "$language" "$(dirname "$path")")" || {
     fi_err "uninstall-statusline --target: could not prepare the stripped copy of $path"
     return 14
   }
   backup="$(fi_save_statusline_backup "$path" || true)"
   mode="$(fi_capture_mode "$path")"
-  mv "$scratch" "$path"
+  mv "$scratch" "$path" || {
+    rm -f "$scratch"
+    fi_err "uninstall-statusline --target: could not replace $path"
+    return 14
+  }
   chmod "$mode" "$path" 2>/dev/null || true
 
   printf 'uninstall-statusline --target: removed segment from %s\n' "$path"
