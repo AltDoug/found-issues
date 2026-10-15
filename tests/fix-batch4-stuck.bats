@@ -49,6 +49,20 @@ retire_one() {
   [[ "$output" == *"🔧stuck"* ]]
 }
 
+# 3.10.2: a red base under an auto-detected command adds a hint to the result;
+# those items still count toward the streak.
+@test "stuck: three base failures under an auto-detected command still mark the repo" {
+  git config --unset found-issues.autofix.testCommand
+  printf 'test:\n\techo "not ok 1 needs donor files"; exit 1\n' > Makefile
+  git add Makefile && git commit -qm "red make test" && git push -q origin main
+  retire_one 1; retire_one 2; retire_one 3
+  grep -q 'auto-detected: make test' "$ST"/done/*
+  run seg
+  [[ "$output" == *"stuck"* ]]
+  run "$FI_BIN" autofix summary
+  [[ "$output" == *"STUCK"* ]]
+}
+
 @test "stuck: any other outcome resets the streak" {
   retire_one 1; retire_one 2; retire_one 3
   run seg
