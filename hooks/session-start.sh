@@ -790,9 +790,11 @@ fi_render_ledger_lean() {
   # Ledger path -> repo root, the two layouts of lib/segment-cache.sh. 3.10.2
   # (#164): the docs ledger in any case (fi_docs_ledger_root), so a nested
   # Docs/Found-Issues.md resolves paths against its own package, not the
-  # git toplevel.
+  # git toplevel. The lowercase arm stays literal: an older CLI's lib on PATH
+  # has no fi_docs_ledger_root.
   case "$issues_file" in
     */.found-issues.md) root="${issues_file%/.found-issues.md}" ;;
+    */docs/found-issues.md) root="${issues_file%/docs/found-issues.md}" ;;
     *) root="$(fi_docs_ledger_root "$issues_file" 2>/dev/null || git -C "$(dirname "$issues_file")" rev-parse --show-toplevel 2>/dev/null || dirname "$(dirname "$issues_file")")" ;;
   esac
   crit="$(printf '%s\n' "$list_entries" | grep -E '^- \[open\] \[!\] ' | tail -n 5 || true)"
