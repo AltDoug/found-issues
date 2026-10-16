@@ -14,7 +14,7 @@
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 [![Codex plugin](https://img.shields.io/badge/Codex-plugin-black.svg)](AGENTS.md#installing-for-codex)
 
-**7 lifecycle hooks · 14 slash commands · 1997 tests on Linux/macOS · zero manual bookkeeping**
+**7 lifecycle hooks · 14 slash commands · 2000 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
@@ -247,7 +247,7 @@ and a Windows regression report is welcome.
 
 ## Status
 
-**v3.10.2** — opt-in auto-fix and auto-sweep on top of the ledger;
+**v3.10.3** — opt-in auto-fix and auto-sweep on top of the ledger;
 actively developed and dogfooded (this repo's own ledger is maintained by
 the plugin). End-to-end runtime probes exercise the generated statusline
 shims against synthetic Claude Code stdin on every CI run, and stand-in

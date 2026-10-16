@@ -466,6 +466,21 @@ _fi_af_doctor_budget() {
   printf "invalid %s '%s' (ignored: no dollar cap)" "$key" "$raw"
 }
 
+# 3.10.3 (ledger lib/autofix-queue.sh:612): auto-fix runs the tests on the PATH
+# of whichever session triggered it, so a repo's toolchain pin is not applied
+# unless the test command goes through the version manager itself.
+_fi_af_doctor_pin() { # <warn marker> <test command, empty when unset>
+  local root f pin=""
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  for f in .mise.toml mise.toml .tool-versions; do
+    [[ -f "$root/$f" ]] && { pin="$f"; break; }
+  done
+  [[ -n "$pin" ]] || return 0
+  case "$2" in *"mise exec"*|*"mise x "*|*"asdf exec"*) return 0 ;; esac
+  printf "%s Toolchain pin (%s): auto-fix runs tests on the PATH of the session that triggered it, not this pin\n" "$1" "$pin"
+  printf "   Wrap the test command: found-issues config autofix.testCommand \"mise exec -- bash -c '%s'\"\n" "${2:-<cmd>}"
+}
+
 # Phase 5 ruling 9: auto-fix readiness at a glance, on or off (spec §8).
 fi_af_doctor() {
   local p="$1" w="$2" x="$3" gh_user="$4" e v rb sb rt st r
@@ -484,6 +499,7 @@ fi_af_doctor() {
   else
     printf '%s Test command: %s (%s)\n' "$p" "$FI_CFG_VAL" "$FI_CFG_SRC"
   fi
+  _fi_af_doctor_pin "$w" "$FI_CFG_VAL"
   fi_cfg_show_line autofix.worktreeFiles
   [[ -z "$FI_CFG_VAL" ]] || printf '%s Local files copied into fix worktrees: %s (%s)\n' "$p" "$FI_CFG_VAL" "$FI_CFG_SRC"
   if [[ -n "$gh_user" ]]; then printf '%s gh authenticated as %s\n' "$p" "$gh_user"
