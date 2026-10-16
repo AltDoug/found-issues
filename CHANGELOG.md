@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.3] - 2026-10-16
+
+`doctor` warns when a repo pins its toolchain but the auto-fix test command does not use it.
+
+### Fixed
+- **A pinned toolchain is no longer bypassed silently** (ledger `lib/autofix-queue.sh:612`). Auto-fix runs the test command on the PATH of the session that triggered it, so a repo pinned with mise or asdf could be tested with other Node or npm versions and read red at base only because of that session (seen on a repo pinned to npm 10 tested with npm 12). `doctor` now warns when the repo has `.mise.toml`, `mise.toml` or `.tool-versions` and the test command is not wrapped in `mise exec` or `asdf exec`, and prints the wrapped command to set. The `autofix.testCommand` docs say the same.
+
 ## [3.10.2] - 2026-10-14
 
 The known-red base block tracks each landing branch and the configured test command, a red base under a guessed test command says so, and the last places that assumed a lowercase ledger are fixed.

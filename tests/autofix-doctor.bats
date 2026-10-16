@@ -113,3 +113,24 @@ teardown() { fi_teardown_tmp; }
   PATH="$TMP/sbin:$PATH" run "$FI_BIN" doctor
   [[ "$output" != *"No Claude sandbox runtime"* ]]
 }
+
+# 3.10.3 (ledger lib/autofix-queue.sh:612): auto-fix runs tests on the PATH of
+# the session that triggered it, so a repo's toolchain pin is not applied.
+@test "doctor auto-fix: a pinned toolchain without a wrapped test command gets a hint" {
+  printf 'node 22.20.0\n' > .tool-versions
+  run "$FI_BIN" doctor
+  [[ "$output" == *"Toolchain pin (.tool-versions)"* ]]
+  [[ "$output" == *"mise exec -- bash -c 'sh test.sh'"* ]]
+}
+
+@test "doctor auto-fix: a test command already wrapped in mise exec gets no pin hint" {
+  printf '[tools]\nnode = "22"\n' > .mise.toml
+  git config found-issues.autofix.testCommand "mise exec -- bash -c 'sh test.sh'"
+  run "$FI_BIN" doctor
+  [[ "$output" != *"Toolchain pin"* ]]
+}
+
+@test "doctor auto-fix: no pin file, no pin hint" {
+  run "$FI_BIN" doctor
+  [[ "$output" != *"Toolchain pin"* ]]
+}
