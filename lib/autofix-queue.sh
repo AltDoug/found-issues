@@ -635,10 +635,19 @@ fi_af_testcmd_cfg_key() { # <dir>
 # text names it and the setting that replaces it; the prefix "tests fail at
 # base" stays what the stuck streak and the retire consumers match.
 _fi_af_base_red_why() { # <test command>
-  local cfg
+  local cfg def behind=""
   cfg="$(git -C "$AFI_wt" config --get found-issues.autofix.testCommand 2>/dev/null || true)"
   if [[ -n "$cfg" ]]; then printf '%s' "tests fail at base"
   else printf '%s' "tests fail at base (auto-detected: $1; set found-issues.autofix.testCommand)"; fi
+  # A landing branch that lacks commits of the default branch may be red only
+  # because the fix is already there (ledger lib/autofix-queue.sh:640).
+  def="$(cd "$AFI_root" && fi_resolve_default_branch 2>/dev/null)" || def=""
+  if [[ -n "$def" && -n "${AFI_base:-}" && "$AFI_base" != "$def" ]]; then
+    behind="$(git -C "$AFI_root" rev-list --count "origin/$AFI_base..origin/$def" 2>/dev/null)" || behind=""
+    if [[ "$behind" =~ ^[1-9][0-9]*$ ]]; then
+      printf '; landing branch is %s commits behind origin/%s; merge it in' "$behind" "$def"
+    fi
+  fi
 }
 
 # 3.2.1 (ledger lib/autofix.sh:127): run the repo's tests once in the fresh

@@ -14,7 +14,7 @@
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-orange.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 [![Codex plugin](https://img.shields.io/badge/Codex-plugin-black.svg)](AGENTS.md#installing-for-codex)
 
-**7 lifecycle hooks · 14 slash commands · 2000 tests on Linux/macOS · zero manual bookkeeping**
+**7 lifecycle hooks · 14 slash commands · 2001 tests on Linux/macOS · zero manual bookkeeping**
 
 ![demo](hero.gif)
 
