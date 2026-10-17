@@ -250,6 +250,21 @@ auto_red_base() { # no configured command; the base tree's Makefile is detected
   grep -q '^result=stale: tests fail at base (auto-detected: make test; set found-issues.autofix.testCommand)$' "$ST/done/$ID2"
 }
 
+# Ledger lib/autofix-queue.sh:640: a red base on a landing branch behind the
+# default branch hints that merging the default branch in may fix it.
+@test "autofix claim: a red base on a landing branch behind origin/main says so" {
+  git checkout -q -b feat && git push -q -u origin feat
+  git checkout -q main
+  echo one >> README.md && git add README.md && git commit -qm one
+  echo two >> README.md && git add README.md && git commit -qm two
+  git push -q origin main
+  git checkout -q feat
+  git config found-issues.autofix.testCommand 'echo "not ok 1 red"; exit 1'
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 5 ]
+  grep -q '^result=stale: tests fail at base; landing branch is 2 commits behind origin/main; merge it in$' "$ST/done/$ID"
+}
+
 @test "autofix claim: a base suite that exits 124 on its own is red, not a watchdog timeout" {
   git config found-issues.autofix.testCommand 'echo "not ok 1 hung"; exit 124'
   run "$FI_BIN" autofix claim "$ID"
