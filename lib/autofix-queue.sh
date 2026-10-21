@@ -623,6 +623,17 @@ fi_af_redmemo_path() { # <landing branch>
   else printf '%s/base-red.nobase' "$FI_AF_ST"; fi
 }
 
+# Ledger lib/autofix-queue.sh:621: a memo goes only when its branch later runs
+# green, so a deleted or abandoned branch kept its file forever. Each memo
+# written prunes the ones nobody wrote or read (the known-red path touches
+# them) for FI_AF_REDMEMO_DAYS days, default 14; a branch still red after that
+# pays one extra suite run.
+fi_af_redmemo_prune() {
+  local days="${FI_AF_REDMEMO_DAYS:-14}"
+  [[ "$days" =~ ^[0-9]+$ ]] || days=14
+  find "$FI_AF_ST" -maxdepth 1 -type f -name 'base-red.*' -mtime +"$days" -exec rm -f {} + 2>/dev/null || true
+}
+
 # The testCommand setting itself (empty when auto-detected) of <dir>, as a
 # key: a sweep's red-base marker records it so a later set, change or removal
 # lifts the block (ledger lib/autofix-sweep.sh:163).
@@ -635,19 +646,22 @@ fi_af_testcmd_cfg_key() { # <dir>
 # text names it and the setting that replaces it; the prefix "tests fail at
 # base" stays what the stuck streak and the retire consumers match.
 _fi_af_base_red_why() { # <test command>
-  local cfg def behind=""
+  local cfg def behind="" why="tests fail at base"
   cfg="$(git -C "$AFI_wt" config --get found-issues.autofix.testCommand 2>/dev/null || true)"
-  if [[ -n "$cfg" ]]; then printf '%s' "tests fail at base"
-  else printf '%s' "tests fail at base (auto-detected: $1; set found-issues.autofix.testCommand)"; fi
   # A landing branch that lacks commits of the default branch may be red only
   # because the fix is already there (ledger lib/autofix-queue.sh:640).
   def="$(cd "$AFI_root" && fi_resolve_default_branch 2>/dev/null)" || def=""
   if [[ -n "$def" && -n "${AFI_base:-}" && "$AFI_base" != "$def" ]]; then
     behind="$(git -C "$AFI_root" rev-list --count "origin/$AFI_base..origin/$def" 2>/dev/null)" || behind=""
     if [[ "$behind" =~ ^[1-9][0-9]*$ ]]; then
-      printf '; landing branch is %s commits behind origin/%s; merge it in' "$behind" "$def"
+      why+="; landing branch is $behind commits behind origin/$def; merge it in"
     fi
   fi
+  # The setting goes before the guessed command: fi_af_finish clips results to
+  # 160 characters, so a long chain loses its own tail, never the hint
+  # (ledger lib/autofix-queue.sh:1080).
+  if [[ -z "$cfg" ]]; then why+=" (set found-issues.autofix.testCommand; auto-detected: $1)"; fi
+  printf '%s' "$why"
 }
 
 # 3.2.1 (ledger lib/autofix.sh:127): run the repo's tests once in the fresh
@@ -665,6 +679,7 @@ fi_af_base_tests() {
   [[ -n "${AFI_base_sha:-}" ]] && key="$AFI_base_sha $t"
   if [[ -n "$key" && -f "$red" && "$(cat "$red" 2>/dev/null)" == "$key" ]]; then
     FI_AF_BASE_WHY="$(_fi_af_base_red_why "$t")" FI_AF_BASE_MEMO=1
+    touch "$red" 2>/dev/null || true
     fi_af_log "$id" "tests fail at base: known red at ${AFI_base_sha:0:7} ($t), not re-run"
     return 1
   fi
@@ -699,6 +714,7 @@ fi_af_base_tests() {
   if [[ -n "$key" ]]; then
     rm -f "$FI_AF_ST/base-red"
     printf '%s' "$key" >"$red" 2>/dev/null || true
+    fi_af_redmemo_prune
   fi
   fi_af_log "$id" "tests fail at base (exit $rc, $t):"
   fi_af_test_report "$log" 20 >>"$FI_AF_RUNS/$id.log" 2>/dev/null || true

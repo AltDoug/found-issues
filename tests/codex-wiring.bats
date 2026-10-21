@@ -175,6 +175,8 @@ seed_codex_plugin() {
 }
 
 @test "session-start (claude): once a day, says the Codex install has no hooks" {
+  # Pinned: two runs straddling midnight are two days (ledger hooks/session-start.sh:291).
+  export FOUND_ISSUES_TODAY=2026-10-17
   seed_codex_plugin
   mkdir -p repo && cd repo && fi_init_git
   run env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
@@ -217,6 +219,8 @@ seed_pre_first_touch() {
 }
 
 @test "session-start (claude): once a day, says the Codex hooks are incomplete" {
+  # Pinned: two runs straddling midnight are two days (ledger hooks/session-start.sh:291).
+  export FOUND_ISSUES_TODAY=2026-10-17
   seed_pre_first_touch
   mkdir -p repo && cd repo && fi_init_git
   run env CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
@@ -239,4 +243,18 @@ seed_pre_first_touch() {
   codex_stop "$(stop_payload "The answer is 4." "$(rollout no)" false "")"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+# Ledger hooks/session-start.sh:291: the once-a-day markers key on
+# FOUND_ISSUES_TODAY when set, so a new day shows the notice again and the
+# same pinned day does not, whatever the wall clock says.
+@test "session-start (claude): the once-a-day Codex notice keys on FOUND_ISSUES_TODAY" {
+  seed_codex_plugin
+  mkdir -p repo && cd repo && fi_init_git
+  run env FOUND_ISSUES_TODAY=2026-10-16 CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
+  [[ "$output" == *"install-codex-hooks"* ]]
+  run env FOUND_ISSUES_TODAY=2026-10-16 CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
+  [[ "$output" != *"install-codex-hooks"* ]]
+  run env FOUND_ISSUES_TODAY=2026-10-17 CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_PLUGIN_ROOT="$TEST_REPO_ROOT" bash "$TEST_REPO_ROOT/hooks/session-start.sh" </dev/null
+  [[ "$output" == *"install-codex-hooks"* ]]
 }

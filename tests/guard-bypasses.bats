@@ -159,6 +159,8 @@ fe_edit() {
 }
 
 @test "session-start: says once per day that the guards are off without jq" {
+  # Pinned: two runs straddling midnight are two days (ledger hooks/session-start.sh:291).
+  export FOUND_ISSUES_TODAY=2026-10-17
   mkdir -p nojq home
   for t in bash sh cat grep sed awk head tail tr cut date git dirname basename mktemp rm mkdir ls wc sort uname readlink printf env find stat cksum cmp mv chmod touch id; do
     p="$(command -v "$t" 2>/dev/null)" && [ -x "$p" ] && ln -sf "$p" "nojq/$t"
