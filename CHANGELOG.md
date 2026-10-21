@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.4] - 2026-10-21
+
+A red base says when its branch is behind the default branch, the hint naming the test-command setting survives long commands, old red-base memos are pruned, and the once-a-day notices honor a pinned date.
+
+### Fixed
+- **A red base on a branch behind the default branch says so** (ledger `lib/autofix-queue.sh:640`, #276). When the landing branch is not the default branch and `origin/<default>` has commits it lacks, the result adds `landing branch is N commits behind origin/<default>; merge it in`. On cosmo every item retired `tests fail at base` for two days while main already fixed both failing tests.
+- **The test-command hint is no longer clipped** (ledger `lib/autofix-queue.sh:1080`). Results are cut at 160 characters, so a guessed test chain longer than about 86 characters lost the `set found-issues.autofix.testCommand` part. The setting now comes first: `tests fail at base (set found-issues.autofix.testCommand; auto-detected: <cmd>)`.
+- **Red-base memos of deleted or abandoned branches are pruned** (ledger `lib/autofix-queue.sh:621`). A branch's memo was removed only when that branch later ran green. Writing a memo now removes the ones nobody wrote or read for 14 days (`FI_AF_REDMEMO_DAYS`); a branch still red after that runs its suite once more.
+- **Once-a-day notices honor `FOUND_ISSUES_TODAY`** (ledger `hooks/session-start.sh:291`). The statusline, missing-jq and Codex wiring notices keyed their daily marker on the wall clock only, so their tests failed when the two runs straddled midnight (seen in an auto-fix ship gate at 00:10). The markers now use the same pinned day as the ledger ages, and the tests pin it.
+
 ## [3.10.3] - 2026-10-16
 
 `doctor` warns when a repo pins its toolchain but the auto-fix test command does not use it.

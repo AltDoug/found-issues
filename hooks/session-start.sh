@@ -177,6 +177,12 @@ EOF
 fi
 fi
 
+# The day every once-a-day marker below is keyed on. FOUND_ISSUES_TODAY pins
+# it (as the ledger age does further down), so a test whose two runs straddle
+# midnight still sees one day (ledger hooks/session-start.sh:291).
+__fi_marker_day="${FOUND_ISSUES_TODAY:-}"
+[[ "$__fi_marker_day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || __fi_marker_day="$(date +%Y-%m-%d 2>/dev/null || echo today)"
+
 # Broken-statusline self-heal nudge — fires at most once per day per machine.
 # Detects pre-v0.1.7 handwritten snippets and v1.0.0/1.0.1 marker-bracketed
 # segments that lack cwd handling (both render the counter empty silently).
@@ -192,7 +198,7 @@ fi
 # hint above (prompt-11).
 if [[ "$harness" == "claude" && "$fi_ss_interactive" == 1 ]]; then
 mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
-STATUSLINE_NUDGE_MARKER="$ONBOARD_DIR/.statusline-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
+STATUSLINE_NUDGE_MARKER="$ONBOARD_DIR/.statusline-nudge-$__fi_marker_day"
 if [[ ! -f "$STATUSLINE_NUDGE_MARKER" ]] && [[ -f "$HOME/.claude/statusline.sh" ]]; then
   # Inline classifier (matches fi_statusline_state in the CLI). Kept in sync
   # by the "hook-sync" tests in tests/session-start.bats.
@@ -263,7 +269,7 @@ fi
 # only (prompt-11), like the notices above.
 if [[ "$fi_ss_interactive" == 1 ]] && ! command -v jq >/dev/null 2>&1; then
   mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
-  __fi_jq_marker="$ONBOARD_DIR/.jq-missing-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
+  __fi_jq_marker="$ONBOARD_DIR/.jq-missing-nudge-$__fi_marker_day"
   if [[ ! -f "$__fi_jq_marker" ]]; then
     cat <<'EOF'
 [found-issues: jq is not installed — the branch-delete and ledger-format guards are inactive until it is. Tell the user once: "found-issues guards are off: install jq".]
@@ -288,7 +294,7 @@ if [[ "$harness" == "claude" && "$fi_ss_interactive" == 1 ]]; then
   if (( __fi_codex_has )); then
     if ! grep -Fq 'env FOUND_ISSUES_HARNESS=codex ' "$__fi_codex_home/hooks.json" 2>/dev/null; then
       mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
-      __fi_codex_marker="$ONBOARD_DIR/.codex-unwired-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
+      __fi_codex_marker="$ONBOARD_DIR/.codex-unwired-nudge-$__fi_marker_day"
       if [[ ! -f "$__fi_codex_marker" ]]; then
         cat <<'EOF'
 [found-issues: the plugin is installed in Codex but none of its hooks are wired, so Codex sessions get no rules, ledger context or log nudge. Tell the user once: "found-issues is inactive in Codex — run `found-issues install-codex-hooks`, then `/hooks` in Codex to trust them".]
@@ -300,7 +306,7 @@ EOF
       # 3.4.0 upgraders: the other hooks are wired through the stable shims but
       # the new first-touch entry is not, so Codex sessions lose file entries.
       mkdir -p "$ONBOARD_DIR" 2>/dev/null || true
-      __fi_codex_marker="$ONBOARD_DIR/.codex-incomplete-nudge-$(date +%Y-%m-%d 2>/dev/null || echo today)"
+      __fi_codex_marker="$ONBOARD_DIR/.codex-incomplete-nudge-$__fi_marker_day"
       if [[ ! -f "$__fi_codex_marker" ]]; then
         cat <<'EOF'
 [found-issues: the plugin's Codex hooks are only partly wired, so Codex sessions no longer see a file's open ledger entries when they first touch it. Tell the user once: "found-issues is incomplete in Codex — run `found-issues install-codex-hooks`, then `/hooks` in Codex to trust the new first-touch hook".]

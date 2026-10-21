@@ -174,6 +174,20 @@ teardown() { fi_teardown_tmp; }
   [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 4 ]
 }
 
+# Ledger lib/autofix-queue.sh:621: memos of deleted or abandoned branches
+# were never removed. Writing a memo prunes those untouched for 14 days.
+@test "autofix claim: writing a red-base memo prunes memos untouched for 14 days" {
+  printf 'abc make test' > "$ST/base-red.111-4"
+  printf 'def make test' > "$ST/base-red.222-5"
+  touch -t 202001010000 "$ST/base-red.111-4"
+  git config found-issues.autofix.testCommand 'echo "not ok 1 red"; exit 1'
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 5 ]
+  [ ! -e "$ST/base-red.111-4" ]
+  [ -f "$ST/base-red.222-5" ]
+  [ "$(ls "$ST"/base-red.* | wc -l | tr -d ' ')" = 2 ]
+}
+
 @test "autofix claim: a flaky base that passes on its re-run is not red" {
   git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; [ \$(wc -l < '$TMP/base-runs') -ge 2 ]"
   run "$FI_BIN" autofix claim "$ID"
@@ -234,8 +248,8 @@ auto_red_base() { # no configured command; the base tree's Makefile is detected
   auto_red_base
   run "$FI_BIN" autofix claim "$ID"
   [ "$status" -eq 5 ]
-  [[ "$output" == *"tests fail at base (auto-detected: make test; set found-issues.autofix.testCommand)"* ]]
-  grep -q '^result=stale: tests fail at base (auto-detected: make test; set found-issues.autofix.testCommand)$' "$ST/done/$ID"
+  [[ "$output" == *"tests fail at base (set found-issues.autofix.testCommand; auto-detected: make test)"* ]]
+  grep -q '^result=stale: tests fail at base (set found-issues.autofix.testCommand; auto-detected: make test)$' "$ST/done/$ID"
 }
 
 @test "autofix claim: a known-red skip under an auto-detected command carries the same hint" {
@@ -247,7 +261,18 @@ auto_red_base() { # no configured command; the base tree's Makefile is detected
   run "$FI_BIN" autofix claim "$ID2"
   [ "$status" -eq 5 ]
   [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 2 ]
-  grep -q '^result=stale: tests fail at base (auto-detected: make test; set found-issues.autofix.testCommand)$' "$ST/done/$ID2"
+  grep -q '^result=stale: tests fail at base (set found-issues.autofix.testCommand; auto-detected: make test)$' "$ST/done/$ID2"
+}
+
+# Ledger lib/autofix-queue.sh:1080: fi_af_finish clips a result to 160
+# characters, so the setting must come before a long guessed command.
+@test "autofix claim: a long auto-detected command still leaves the setting inside the clipped result" {
+  fi_af_context   # setup already sourced the CLI (a second source hits its readonly vars)
+  AFI_wt="$REPO" AFI_root="$REPO" AFI_base=main
+  git config --unset found-issues.autofix.testCommand || true
+  long="npm ci && npm run build:server-deps && npm run test --workspace=@x/server && npm run test --workspace=@x/builtin-plugins"
+  why="$(_fi_af_base_red_why "$long")"
+  [[ "${why:0:160}" == "tests fail at base (set found-issues.autofix.testCommand; auto-detected: npm ci"* ]]
 }
 
 # Ledger lib/autofix-queue.sh:640: a red base on a landing branch behind the
