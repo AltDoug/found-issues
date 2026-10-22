@@ -167,6 +167,36 @@ fi_af_test_failures() {
   ' "$1" 2>/dev/null || true
 }
 
+# The names of the failing tests in a test log, one per line, sorted and
+# unique: TAP "not ok" (number and "# ..." directive dropped), pytest FAILED
+# (" - message" dropped), go "--- FAIL:" (timing dropped), jest FAIL lines,
+# and the indented "× name 12ms" / "✕ name (12 ms)" lines of vitest and jest
+# (the timing dropped: cosmo's vitest prints no FAIL line at all).
+# Read from the whole log, not the 80-line fi_af_test_failures excerpt, so a
+# long run's later failures still count when two runs are compared.
+fi_af_test_failed_names() {
+  awk '
+    /^not ok / { s = $0; sub(/^not ok [0-9]* */, "", s); sub(/ # .*$/, "", s); print s; next }
+    /^FAILED / { s = $0; sub(/^FAILED /, "", s); sub(/ - .*$/, "", s); print s; next }
+    /^--- FAIL: / { s = $0; sub(/^--- FAIL: /, "", s); sub(/ \([0-9.]+s\)$/, "", s); print s; next }
+    /^FAIL / { s = $0; sub(/^FAIL /, "", s); print s; next }
+    /^[ \t]*(×|✕|✗) / {
+      s = $0; sub(/^[ \t]*(×|✕|✗) /, "", s); sub(/ \(?[0-9.]+ ?m?s\)?$/, "", s); print s
+    }
+  ' "$1" 2>/dev/null | LC_ALL=C sort -u
+}
+
+# Ledger lib/autofix-queue.sh:694: rc 0 when two red runs of one suite failed
+# disjoint sets of named tests, so the suite is flaky rather than red. Either
+# run naming no failed test (an unparsed runner, a crash) is not flaky.
+fi_af_runs_flaky() { # <first log> <second log>
+  local a b
+  a="$(fi_af_test_failed_names "$1")"
+  b="$(fi_af_test_failed_names "$2")"
+  [[ -n "$a" && -n "$b" ]] || return 1
+  [[ -z "$(LC_ALL=C comm -12 <(printf '%s\n' "$a") <(printf '%s\n' "$b"))" ]]
+}
+
 # What a fixer reads after a run: the failing tests, then the last <n> lines.
 fi_af_test_report() {
   local f

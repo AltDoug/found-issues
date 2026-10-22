@@ -40,7 +40,7 @@ AFI_engine="" AFI_engine_q="" AFI_queued="" AFI_crashes="0" AFI_pid="" AFI_wt=""
 AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha="" FI_AF_ID=""
 AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
 AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0" AFI_rescued=""
+AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0" AFI_rescued="" AFI_base_flaky=""
 
 fi_af_item_write() {
   local path="$1" tmp
@@ -55,14 +55,14 @@ fi_af_item_read() {
   AFI_base="" AFI_result="" AFI_pr="" AFI_cost="" AFI_tokens="" AFI_base_sha=""
   AFI_launcher="" AFI_launched="" AFI_attempts="0" AFI_verdict="" AFI_verdict_reason="" AFI_verdict_tree=""
   AFI_head="" AFI_cur="0" AFI_fixed="0" AFI_cpgid="" AFI_finished=""
-  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0" AFI_rescued=""
+  AFI_base_why="" AFI_waiting="" AFI_wait_since="" AFI_wait_next="" AFI_ship_tries="0" AFI_cont="" AFI_skip_files="" AFI_held_files="" AFI_more="" AFI_chain_cost="" AFI_chain_tokens="" AFI_outages="0" AFI_pstart="" AFI_wt_retries="0" AFI_rescued="" AFI_base_flaky=""
   [[ -f "$1" ]] || return 1
   local line k
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *=* ]] || continue
     k="${line%%=*}"
     case "$k" in
-      id|kind|root|slug|loc|key|entry|engine|engine_q|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|held_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries|rescued)
+      id|kind|root|slug|loc|key|entry|engine|engine_q|queued|crashes|pid|wt|branch|base|result|pr|cost|tokens|base_sha|launcher|launched|attempts|verdict|verdict_reason|verdict_tree|head|cur|fixed|cpgid|finished|base_why|waiting|wait_since|wait_next|ship_tries|cont|skip_files|held_files|more|chain_cost|chain_tokens|outages|pstart|wt_retries|rescued|base_flaky)
         printf -v "AFI_$k" '%s' "${line#*=}" ;;
     esac
   done <"$1"
@@ -672,7 +672,7 @@ _fi_af_base_red_why() { # <test command>
 fi_af_base_tests() {
   local id="$1" t rc=0 log="$FI_AF_RUNS/$1.base-tests.log" red key=""
   red="$(fi_af_redmemo_path "${AFI_base:-}")"
-  FI_AF_BASE_WHY="" FI_AF_BASE_MEMO=""
+  FI_AF_BASE_WHY="" FI_AF_BASE_MEMO="" FI_AF_BASE_FLAKY=""
   t="$(fi_af_test_command "$AFI_wt" 2>/dev/null)" || return 0
   # 3.6.0: a base found red is remembered by commit and test command, so the
   # next item on the same base retires without running the suite again.
@@ -709,6 +709,16 @@ fi_af_base_tests() {
     FI_AF_BASE_WHY="base tests timed out after $took (raise found-issues.autofix.runTimeoutMin)"
     fi_af_log "$id" "$FI_AF_BASE_WHY ($t)"
     return 1
+  fi
+  # Ledger lib/autofix-queue.sh:694: two runs that failed different tests are
+  # a flaky suite, not a red base (cosmo main: two unit tests, then one e2e
+  # test), so no memo is written and the item goes ahead; its own test runs
+  # re-run a failure once too, and a failed result says the base was flaky.
+  if fi_af_runs_flaky "${log%.log}.first.log" "$log"; then
+    FI_AF_BASE_FLAKY=1
+    fi_af_log "$id" "flaky base: the two base runs failed different tests ($t); running the item anyway"
+    fi_af_test_report "$log" 20 >>"$FI_AF_RUNS/$id.log" 2>/dev/null || true
+    return 0
   fi
   FI_AF_BASE_WHY="$(_fi_af_base_red_why "$t")"
   if [[ -n "$key" ]]; then
@@ -1000,11 +1010,13 @@ fi_af_claim() {
   fi_af_item_set "$r" base_why "$AFI_base_why"
   fi_af_item_set "$r" base_sha "$AFI_base_sha"
   fi_af_log "$id" "claimed: $AFI_wt ($AFI_branch from origin/$AFI_base: $AFI_base_why)"
+  fi_af_item_set "$r" base_flaky ""
   if ! fi_af_base_tests "$id"; then
     FI_AF_WHY="${FI_AF_BASE_WHY:-tests fail at base}"
     fi_af_finish "$id" stale "$FI_AF_WHY"
     return 5
   fi
+  [[ -z "${FI_AF_BASE_FLAKY:-}" ]] || fi_af_item_set "$r" base_flaky 1
 }
 
 # Give a claimed item back to the queue untouched (an engine outage): no
@@ -1103,6 +1115,8 @@ fi_af_finish() {
   fi_af_item_read "$f" || { fi_err "autofix: no queued or running item $id"; return 1; }
   text="${text//$'\n'/ }"
   text="${text:0:160}"
+  # A fix that failed on a flaky base may have failed on the flake alone.
+  if [[ "$outcome" == failed && -n "$AFI_base_flaky" ]]; then text="${text:0:142}; base tests flaky"; fi
   case "$outcome" in
     already-fixed|decide|manual|failed|shipped|stale) ;;
     *) fi_err "autofix: unknown outcome $outcome"; return 2 ;;

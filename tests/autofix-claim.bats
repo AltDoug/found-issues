@@ -196,6 +196,51 @@ teardown() { fi_teardown_tmp; }
   [ -f "$ST/running/$ID" ]
 }
 
+# Ledger lib/autofix-queue.sh:694: cosmo main failed two unit tests, then one
+# e2e test, and every later item skipped as known red. Two runs that fail
+# different tests are a flaky suite: no memo, and the item goes ahead.
+@test "autofix claim: a base whose two runs fail different tests is flaky, not red" {
+  git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; n=\$(wc -l < '$TMP/base-runs'); echo \"ok 1 a\"; echo \"not ok 2 unit \$n\"; exit 1"
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$TMP/base-runs" | tr -d ' ')" = 2 ]
+  [ -f "$ST/running/$ID" ]
+  grep -q '^base_flaky=1$' "$ST/running/$ID"
+  [ -z "$(ls "$ST" | grep '^base-red\.' || true)" ]
+  grep -q 'flaky base: the two base runs failed different tests' "$FI_AF_RUNS/$ID.log"
+}
+
+@test "autofix claim: a base whose two runs share a failing test stays red" {
+  git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; n=\$(wc -l < '$TMP/base-runs'); echo \"not ok 1 always\"; echo \"not ok 2 unit \$n\"; exit 1"
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 5 ]
+  grep -q '^result=stale: tests fail at base$' "$ST/done/$ID"
+  [ -n "$(ls "$ST" | grep '^base-red\.' || true)" ]
+}
+
+@test "autofix claim: failing test names drop TAP numbers, pytest messages and runner timings" {
+  fi_af_context   # setup already sourced the CLI (a second source hits its readonly vars)
+  printf '%s\n' 'not ok 12 bats name # skip nothing' '# diag line' 'FAILED tests/t.py::test_x - AssertionError: 1 != 2' \
+    '--- FAIL: TestY (0.02s)' 'FAIL src/z.test.ts' 'ok 3 passes' \
+    '   × vitest name 1032ms' '    ✕ jest name (5 ms)' '   ✓ passing name 3ms' > "$TMP/a.log"
+  run fi_af_test_failed_names "$TMP/a.log"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' 'TestY' 'bats name' 'jest name' 'src/z.test.ts' 'tests/t.py::test_x' 'vitest name')" ]
+  printf '%s\n' 'not ok 4 bats name' > "$TMP/b.log"
+  ! fi_af_runs_flaky "$TMP/a.log" "$TMP/b.log" || false
+  printf '%s\n' 'Error: crashed' > "$TMP/c.log"
+  ! fi_af_runs_flaky "$TMP/a.log" "$TMP/c.log" || false
+}
+
+@test "autofix claim: a failed fix on a flaky base says the base was flaky" {
+  git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; n=\$(wc -l < '$TMP/base-runs'); echo \"not ok 1 unit \$n\"; exit 1"
+  run "$FI_BIN" autofix claim "$ID"
+  [ "$status" -eq 0 ]
+  run "$FI_BIN" autofix release "$ID" --failed "tests still fail"
+  [ "$status" -eq 0 ]
+  grep -q '^result=failed: tests still fail; base tests flaky$' "$ST/done/$ID"
+}
+
 @test "autofix claim: an entry another open PR already fixes retires stale before any fixer" {
   export GH_MOCK_PR_LIST='[{"number":571,"headRefName":"feat/wanda","files":[{"path":"docs/found-issues.md"}]}]'
   export GH_MOCK_PR_DIFF='+- [open] 2026-10-01 src/calc.sh:1 — add subtracts (fix: small) (PR: foo/bar#571)'
