@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.5] - 2026-10-22
+
+A base whose two test runs fail different tests counts as flaky, not red, so a flaky suite no longer blocks auto-fix on its branch.
+
+### Fixed
+- **Flaky base tests no longer block a branch** (ledger `lib/autofix-queue.sh:694`). The base suite already re-ran once on a failure; when both runs failed but named no failing test in common, the base was still recorded as known red for that commit, and every later item into the branch retired `tests fail at base` without running. On cosmo main two unit tests failed on the first run and one e2e test on the second. Now disjoint failures mean a flaky base: no red-base memo is written, the item goes ahead, its run log says `flaky base`, and a fix that then fails ends with `; base tests flaky` in its result. Failing test names are read from TAP, pytest, go test, jest and vitest output (cosmo prints only vitest's `× name 12ms` lines); a run that names no failing test still counts as red.
+
 ## [3.10.4] - 2026-10-21
 
 A red base says when its branch is behind the default branch, the hint naming the test-command setting survives long commands, old red-base memos are pruned, and the once-a-day notices honor a pinned date.
