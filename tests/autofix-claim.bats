@@ -232,6 +232,14 @@ teardown() { fi_teardown_tmp; }
   ! fi_af_runs_flaky "$TMP/a.log" "$TMP/c.log" || false
 }
 
+@test "autofix claim: the failing-tests excerpt includes vitest and jest indented marker lines" {
+  fi_af_context
+  printf '%s\n' '   ✓ passing name 3ms' '   × vitest name 1032ms' '    ✕ jest name (5 ms)' > "$TMP/v.log"
+  run fi_af_test_failures "$TMP/v.log"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' '   × vitest name 1032ms' '    ✕ jest name (5 ms)')" ]
+}
+
 @test "autofix claim: a failed fix on a flaky base says the base was flaky" {
   git config found-issues.autofix.testCommand "echo run >> '$TMP/base-runs'; n=\$(wc -l < '$TMP/base-runs'); echo \"not ok 1 unit \$n\"; exit 1"
   run "$FI_BIN" autofix claim "$ID"

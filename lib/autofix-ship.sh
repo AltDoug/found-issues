@@ -163,7 +163,8 @@ fi_af_test_failures() {
     /^not ok / { print; n++; tap = 1; next }
     tap && /^#/ { print; n++; next }
     { tap = 0 }
-    /^(FAILED |--- FAIL: |FAIL )/ { print; n++ }
+    /^(FAILED |--- FAIL: |FAIL )/ { print; n++; next }
+    /^[ \t]*(×|✕|✗) / { print; n++ }
   ' "$1" 2>/dev/null || true
 }
 
