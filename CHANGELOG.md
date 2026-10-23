@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.6] - 2026-10-22
+
+An entry logged on a branch that changes only the ledger is fixed on the default branch, and a fixer's failure report now shows vitest and jest failures.
+
+### Fixed
+- **A fix no longer lands on a ledger-only branch** (ledger `lib/autofix-queue.sh:469`). An entry logged with `--fix` in its own PR, or on any branch whose only change against the default branch is `docs/found-issues.md` or its archive, queued an item whose landing branch was that branch: the fix started from it and aimed its PR at a branch deleted as soon as the ledger PR merged. When the landing branch's diff against the default branch touches only the ledger files, the fix now lands on the default branch and the claim log says `<branch> changes only the ledger; landing on <default>`. A branch with code changes, or no change at all, keeps its own base.
+- **Vitest and jest failures reach the fixer** (ledger `lib/autofix-ship.sh:160`, #282, fixed by auto-fix). The "Failing tests:" report and the "re-running once" log line read only TAP, pytest, go and jest `FAIL` lines; the indented `× name 12ms` / `✕ name (5 ms)` lines vitest and jest print were missed, so a cosmo fixer saw only the last 20 lines of output.
+
 ## [3.10.5] - 2026-10-22
 
 A base whose two test runs fail different tests counts as flaky, not red, so a flaky suite no longer blocks auto-fix on its branch.
