@@ -466,7 +466,30 @@ fi_af_fixed_elsewhere() {
 # 3.2.0 (spec section 1): the branch a fix starts from and lands into is the
 # one the session works on, never assumed to be the default branch. Sets
 # AFI_base and AFI_base_why; every fallback is the default branch.
+# 3.10.6 (ledger lib/autofix-queue.sh:469, operator decision 2026-10-22): a
+# branch whose only change against the default branch is the ledger (an
+# entry logged in its own PR, a branch deleted on merge) is no place for a
+# fix, so it lands on the default branch. A branch with no change at all, or
+# one whose diff cannot be read, keeps its base.
 fi_af_landing_branch() {
+  _fi_af_landing_pick
+  local def files f
+  def="$(cd "$AFI_root" && fi_resolve_default_branch)"
+  [[ -n "$def" && -n "$AFI_base" && "$AFI_base" != "$def" ]] || return 0
+  git -C "$AFI_root" fetch -q origin "$AFI_base" "$def" 2>/dev/null || true
+  files="$(git -C "$AFI_root" diff --name-only "origin/$def...origin/$AFI_base" 2>/dev/null)" || return 0
+  [[ -n "$files" ]] || return 0
+  while IFS= read -r f; do
+    case "$(printf '%s' "${f##*/}" | tr '[:upper:]' '[:lower:]')" in
+      found-issues.md|found-issues-archive.md|.found-issues.md) ;;
+      *) return 0 ;;
+    esac
+  done <<< "$files"
+  AFI_base_why="$AFI_base changes only the ledger; landing on $def"
+  AFI_base="$def"
+}
+
+_fi_af_landing_pick() {
   local def cur up b n best="" bestn="" base rc
   def="$(cd "$AFI_root" && fi_resolve_default_branch)"
   AFI_base="$def"

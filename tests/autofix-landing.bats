@@ -356,3 +356,31 @@ push_from_other_clone() {
   grep -q '^result=stale: nothing fixable now$' "$FI_AF_ST/done/$id"
   [ ! -e "$FI_AF_ST/day/$(date +%Y-%m-%d).sweep" ]
 }
+
+# Ledger lib/autofix-queue.sh:469: an entry logged in its own PR queued a fix
+# into that ledger-only branch, which is deleted when it merges.
+@test "landing: a branch that changes only the ledger lands on the default branch" {
+  git switch -q -c docs/log-x
+  printf -- '- [open] 2026-10-22 src/y.sh:1 — y (fix: small)\n' >> docs/found-issues.md
+  git add -A && git commit -q -m log && git push -q -u origin docs/log-x
+  fi_af_landing_branch
+  [ "$AFI_base" = main ]
+  [ "$AFI_base_why" = "docs/log-x changes only the ledger; landing on main" ]
+}
+
+@test "landing: a branch that changes the ledger and code keeps its own base" {
+  git switch -q -c feat/x
+  printf -- '- [open] 2026-10-22 src/y.sh:1 — y (fix: small)\n' >> docs/found-issues.md
+  printf 'y\n' > src/y.sh
+  git add -A && git commit -q -m feat && git push -q -u origin feat/x
+  fi_af_landing_branch
+  [ "$AFI_base" = feat/x ]
+  [ "$AFI_base_why" = "tracks origin/feat/x" ]
+}
+
+@test "landing: a pushed branch with no change of its own keeps its own base" {
+  git switch -q -c feat/empty && git push -q -u origin feat/empty
+  fi_af_landing_branch
+  [ "$AFI_base" = feat/empty ]
+  [ "$AFI_base_why" = "tracks origin/feat/empty" ]
+}
