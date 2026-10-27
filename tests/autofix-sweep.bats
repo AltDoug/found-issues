@@ -1064,9 +1064,13 @@ sweep_branch() { printf 'fi/sweep/%s-%s' "${SID%%-*}" "${SID##*-}"; }
   br2="$(sed -n 's/^branch=//p' "$c")"
   [ -n "$br2" ]
   # Batch 1 keeps today's behaviour: one annotation commit on its branch.
-  git -C "$TMP/remote.git" log --format=%s "main..$br1" | grep -q '^docs(found-issues): annotate 2 entries with PR 9'
+  # Logs are read into variables first: grep -q stops at its first match and,
+  # under pipefail, a git log still writing dies of SIGPIPE (status 141).
+  subj1="$(git -C "$TMP/remote.git" log --format=%s "main..$br1")"
+  subj2="$(git -C "$TMP/remote.git" log --format=%s "main..$br2")"
+  grep -q '^docs(found-issues): annotate 2 entries with PR 9' <<<"$subj1"
   # The continuation commits no ledger change at all.
-  ! git -C "$TMP/remote.git" log --format=%s "main..$br2" | grep -q 'docs(found-issues)' || false
+  ! grep -q 'docs(found-issues)' <<<"$subj2" || false
   [ -z "$(git -C "$TMP/remote.git" log --format=%H "main..$br2" -- docs/found-issues.md)" ]
   grep -q 'PR-branch ledger annotation skipped for a continuation batch' "$FI_AF_RUNS/${c##*/}.log"
   # The source checkout's ledger is annotated for the continuation batches'
