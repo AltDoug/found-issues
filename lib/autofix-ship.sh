@@ -492,11 +492,17 @@ fi_af_merge_when_green() {
   [[ "$settle" =~ ^[0-9]+$ ]] || settle=120
   [[ -n "$slug" ]] || slug="$(fi_repo_id 2>/dev/null || true)"
   [[ -n "$slug" ]] || { fi_err "autofix: merge-when-green needs a GitHub repo (--repo owner/name)"; return 1; }
-  FI_AF_MWG_FIXES=0
+  FI_AF_MWG_FIXES=0 FI_AF_MWG_DEFAULT=""
+  local lrc
   for (( i = 0; i < polls; i++ )); do
     v="$(gh pr view "$n" --repo "$slug" --json state,statusCheckRollup,mergeable,baseRefName,headRefName,headRefOid --jq "$jqf" 2>/dev/null || true)"
     IFS='|' read -r st ck mg ho br hr <<<"$v" || true
     [[ "$st $ck" == "OPEN fail" && "$mg" != CONFLICTING ]] || red_sha=""
+    if [[ "$st" == OPEN ]]; then
+      lrc=0; _fi_af_mwg_landed "$n" "$slug" "$br" "$guard" || lrc=$?
+      (( lrc == 2 )) && return 1
+      (( lrc == 0 )) && { nones=0; sleep "$pause"; continue; }
+    fi
     if [[ "$st" == OPEN && "$mg" == CONFLICTING ]]; then
       _fi_af_mwg_unconflict "$n" "$slug" "$br" "$hr" || return 1
       nones=0; sleep "$pause"; continue
@@ -585,6 +591,43 @@ _fi_af_guard_lock() {
 _fi_af_guard_unlock() {
   [[ -n "$FI_AF_GUARD_LOCK" && "$(readlink "$FI_AF_GUARD_LOCK" 2>/dev/null || true)" == "$$" ]] && rm -f "$FI_AF_GUARD_LOCK"
   FI_AF_GUARD_LOCK=""
+  return 0
+}
+
+FI_AF_MWG_DEFAULT=""
+
+# 3.10.9 (ledger lib/autofix-ship.sh:658): a fix PR's landing branch was
+# merged into the default branch but kept (delete_branch_on_merge off), so
+# GitHub never retargeted the PR (sayciao #320 into gsd/phase-24-resume after
+# #318). When the branch's tip is still exactly the head that merged, the PR
+# is retargeted to the default branch and the usual flow goes on: a conflict
+# brings in _fi_af_mwg_squashed, which reads the manual base change. A branch
+# with work after its merge stays the base (sayciao's moved on: a fix merged
+# there reaches main with its next PR); a deleted one GitHub retargets itself.
+# rc 0 = retargeted; rc 1 = nothing to do; rc 2 = the retarget failed.
+_fi_af_mwg_landed() {
+  local n="$1" slug="$2" base="$3" guard="${4:-0}" def m oid tip enc
+  [[ -n "$base" ]] || return 1
+  if [[ -z "$FI_AF_MWG_DEFAULT" ]]; then
+    FI_AF_MWG_DEFAULT="$(gh repo view "$slug" --json defaultBranchRef --jq '.defaultBranchRef.name // ""' 2>/dev/null || true)"
+    [[ -n "$FI_AF_MWG_DEFAULT" ]] || FI_AF_MWG_DEFAULT="-"   # unknown: no retarget, no second lookup
+  fi
+  def="$FI_AF_MWG_DEFAULT"
+  [[ "$def" != "-" && "$base" != "$def" ]] || return 1
+  m="$(gh pr list --repo "$slug" --head "$base" --base "$def" --state merged --limit 1 --json number,headRefOid,baseRefName \
+    --jq '.[0] // {} | "\(.number // "")|\(.headRefOid // "")|\(.baseRefName // "")"' 2>/dev/null || true)"
+  [[ "${m##*|}" == "$def" ]] || return 1
+  m="${m%|*}" oid="${m#*|}" m="${m%%|*}"
+  [[ "$m" =~ ^[0-9]+$ && "$oid" =~ ^[0-9a-f]{40}$ ]] || return 1
+  enc="$(jq -rn --arg b "$base" '$b | @uri')"
+  tip="$(gh api "repos/$slug/branches/$enc" --jq '.commit.sha // ""' 2>/dev/null || true)"
+  [[ "$tip" == "$oid" ]] || return 1
+  if ! gh pr edit "$n" --repo "$slug" --base "$def" >/dev/null 2>&1; then
+    fi_err "autofix: PR #$n: its landing branch $base was merged into $def (PR #$m), and retargeting it to $def failed — not merging"; return 2
+  fi
+  printf 'PR #%s: its landing branch %s was merged into %s (PR #%s) with nothing since; retargeted to %s\n' "$n" "$base" "$def" "$m" "$def"
+  # A base change can drop an armed auto-merge; the guard arms it again.
+  if (( guard )); then gh pr merge "$n" --auto --squash --repo "$slug" >/dev/null 2>&1 || true; fi
   return 0
 }
 
@@ -707,7 +750,8 @@ _fi_af_is_ledger() {
 
 # 3.10.7 (ledger lib/autofix-ship.sh:656): GitHub retargets a fix PR to the
 # default branch when the session branch it was cut from merges and is
-# deleted. After a squash merge the PR still carries that branch's commits,
+# deleted (3.10.9: or _fi_af_mwg_landed retargets it when the branch was
+# kept, a BaseRefChangedEvent). After a squash merge the PR still carries that branch's commits,
 # so merging the base in conflicts with more than the PR's own annotation.
 # Then the PR's own change since it was cut (the merge base of the merged
 # PR's head and this PR's head) is rebuilt as one commit on the base, the
@@ -718,9 +762,9 @@ _fi_af_is_ledger() {
 _fi_af_mwg_squashed() {
   local n="$1" slug="$2" wt="$3" base="$4" head="$5" ev old m oid cut was why f lrc subj cmd
   local ann="(PR: $slug#$n)" code=() ledgers=() tlog="${3%/*}/rebuild-tests.log"
-  local q='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){timelineItems(itemTypes:[AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT],last:1){nodes{... on AutomaticBaseChangeSucceededEvent{oldBase newBase}}}}}}'
+  local q='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){timelineItems(itemTypes:[AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT,BASE_REF_CHANGED_EVENT],last:1){nodes{... on AutomaticBaseChangeSucceededEvent{oldBase newBase} ... on BaseRefChangedEvent{previousRefName currentRefName}}}}}}'
   ev="$(gh api graphql -f query="$q" -f o="${slug%%/*}" -f r="${slug#*/}" -F n="$n" \
-    --jq '.data.repository.pullRequest.timelineItems.nodes[-1] // {} | "\(.oldBase // "")|\(.newBase // "")"' 2>/dev/null || true)"
+    --jq '.data.repository.pullRequest.timelineItems.nodes[-1] // {} | "\(.oldBase // .previousRefName // "")|\(.newBase // .currentRefName // "")"' 2>/dev/null || true)"
   old="${ev%%|*}"
   [[ -n "$old" && "$old" != "$base" && "${ev#*|}" == "$base" ]] || return 1
   # Only the PR that merged that branch into this base (a reused name or a
