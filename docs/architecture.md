@@ -18,7 +18,12 @@ How the pieces fit together.
                     │  • /found-issues:annotate-commit │     agent-invocable
                     │  • /found-issues:promote         │
                     │  • /found-issues:status          │
-                    │  • /found-issues:setup           │
+                    │  • /found-issues:fix, :decide,   │
+                    │    :defer, :archive, :setup ...  │
+                    │                                  │
+                    │  Plugin agents (auto-fix, B):    │
+                    │  • found-issues-fixer            │
+                    │  • found-issues-sweeper          │
                     │                                  │
                     │  Hooks (auto-fire):              │
                     │  • SessionStart  ──────► sync    │
@@ -31,6 +36,8 @@ How the pieces fit together.
                     │      └► post-bash-dispatch       │
                     │  • PostToolUse(Read/Edit/Write)  │
                     │      └► first-touch              │
+                    │  • UserPromptSubmit              │
+                    │      └► prompt-nudge             │
                     └────────────────┬─────────────────┘
                                      │
                                      │ shell out
@@ -43,7 +50,9 @@ How the pieces fit together.
                     │  • sync  ─── annotation/tomb     │
                     │  • status ── counters            │
                     │  • annotate-pr/commit            │
-                    │  • promote                       │
+                    │  • promote, resolve, tag, decide │
+                    │  • autofix … (queue → worktree → │
+                    │    fixer → verifier → PR → merge)│
                     └────────────────┬─────────────────┘
                                      │
                                      │ source
@@ -68,6 +77,8 @@ How the pieces fit together.
                     │    annotate*.sh, sync.sh,        │
                     │    promote.sh — the §12 split,   │
                     │    complete as of v2.2.9         │
+                    │  • autofix-*.sh — the v3 auto-fix│
+                    │    pipeline (14 modules)         │
                     └────────────────┬─────────────────┘
                                      │
                                      │ reads/writes
@@ -113,7 +124,10 @@ to promote, what the format is.
 
 ### Slash commands (user/agent surface)
 
-Markdown files in `commands/` invoked as `/found-issues:<name>`. Each is
+Markdown files in `commands/` invoked as `/found-issues:<name>` (14 of
+them: `log`, `sync`, `status`, `annotate-pr`, `annotate-commit`, `promote`,
+`promote-deferred`, `defer`, `decide`, `archive`, `fix`, `doctor`, `setup`,
+`uninstall`). Each is
 a thin instruction file that tells Claude what to do — most just delegate
 to the CLI. Two exceptions carry real procedure: `/found-issues:sync`
 (Claude reads code and verifies unannotated entries) and
@@ -169,14 +183,17 @@ install time. On Codex, that path is dead — Codex CLI 0.144.5 removed
 the `plugin_hooks` feature, so a plugin's `hooks.json` pointer never
 loads (`.codex-plugin/plugin.json`'s `"hooks"` key is inert there). The
 same scripts still work on Codex; they just have to be registered a
-different way: `found-issues install-codex-hooks` copies the same five
-hook entries (Stop included since 2.10.0) into Codex's own stable user-level
-`$CODEX_HOME/hooks.json`, each command prefixed with `env
-FOUND_ISSUES_HARNESS=codex` so the script self-identifies without
+different way: `found-issues install-codex-hooks` writes six hook
+entries (SessionStart, the format enforcer, the branch-delete guard, the
+PostToolUse annotator, first-touch and the Stop nudge) into Codex's own
+stable user-level `$CODEX_HOME/hooks.json`, each command prefixed with
+`env FOUND_ISSUES_HARNESS=codex` so the script self-identifies without
 needing `PLUGIN_DATA` (which a hook run outside the plugin manifest
-never receives). Re-running it after `codex plugin update` is required —
-the installer strips-then-reinstalls its own entries every time, so
-stale plugin-cache paths from a prior version self-heal.
+never receives). Since 2.10.3 each entry runs a stable shim under
+`$CODEX_HOME/found-issues/hooks/` that picks the newest found-issues in
+Codex's plugin cache at run time, so the entries stay byte-identical
+across `codex plugin` updates and need no re-run or new `/hooks` review.
+The installer is idempotent: it strips and reinstalls its own entries.
 
 `lib/harness.sh` is the one harness-detection point: `fi_detect_harness`
 honors `FOUND_ISSUES_HARNESS` first, then falls back to
@@ -207,6 +224,13 @@ Subcommands:
 | `list [--status=...] [--json]` | Conflict-aware entry listing (default: open); `--json` emits structured entries feeding `/found-issues:fix` |
 | `annotate-pr <N> [--pick <loc>,...] [--all]` | Append `(PR: org/repo#N)` to matching entries; ambiguous file-level matches require explicit selection |
 | `annotate-commit [<sha>]` | Append `(commit: <sha>)` to matching entries |
+| `resolve <match> [--verified ai\|review\|human]` | Flip `[open]` to `[fixed]` with `(verified: …) (fixed: <date>)`; the only supported close besides sync |
+| `unannotate <match> <ref>` | Strip one `(PR:)`/`(PR-auto:)`/`(commit:)`/`(commit-auto:)` marker, to undo a mis-annotation |
+| `tag <match> --fix S\|M\|L \| --decide … \| --manual … \| --hold …` | Set an entry's one v3 fix tag (off-limits paths are forced to `manual`) |
+| `decide [--count] \| decide <match> --answer …` | The v3 decision queue: list `(decide: …)` entries, record the answer |
+| `config [<key> [<value>\|--unset]] [--global]` | Read and write `found-issues.*` git config settings |
+| `autofix …` | The v3 auto-fix family: `on`/`off`, `status`, `summary`, `ready`, `cancel`, `run`, the launcher-B steps (`claim`, `brief`, `next`, `search`, `test`, `verify`, `diff`, `ship`, `release`) and `merge-when-green` (see Auto-fix below) |
+| `fix workspace\|test\|ship` | Plumbing for the interactive `/found-issues:fix` command, on the auto-fix worktree and ship code |
 | `promote` | List branch-only `[open]` entries needing consolidation |
 | `archive` | Move old `[fixed]` entries to `docs/found-issues-archive.md` |
 | `defer` / `promote-deferred` | Flip `[open]` ⇄ `[deferred]` with touch/cycle bookkeeping |
@@ -218,13 +242,72 @@ Subcommands:
 
 ### lib (shared bash)
 
-Pure-function libraries sourced by the CLI and (some) hooks:
+Function libraries sourced by the CLI and (some) hooks. Each file's
+header lists its functions.
 
-| File | Functions |
+| File | Job |
 |---|---|
 | `canonicalize.sh` | path/symptom normalization, dedup key generation |
-| `parse-entries.sh` | find file, parse one line, filter by status, count by category |
+| `parse-entries.sh` | find the ledger, parse one line, filter by status, count by category |
 | `detect-mode.sh` | auto-detect mode (`local`/`git`/`github-direct`/`github-pr`) with 1h cache |
+| `repo-id.sh` | the origin `org/repo` slug, shared by the CLI and `post-bash-dispatch.sh` |
+| `harness.sh` | which harness runs a hook, and how to emit its context |
+| `hook-gate.sh` | zero-fork relevance gates for the Bash-matcher hooks |
+| `session-context.sh` | entry selectors for the lean SessionStart block and first-touch |
+| `segment-cache.sh` | builtin-only cache for `status --format=segment` |
+| `rules-full.md` | the complete agent rules SessionStart injects by default |
+| `log.sh`, `resolve.sh`, `defer.sh`, `promote-deferred.sh`, `promote.sh`, `archive.sh`, `tag.sh`, `decide.sh`, `unannotate.sh`, `list-status.sh`, `sync.sh` | one module per ledger subcommand |
+| `annotate.sh`, `annotate-commands.sh` | the shared annotate engine, and the `annotate-pr`/`annotate-commit` subcommands |
+| `statusline-core.sh`, `statusline-install.sh`, `statusline-target.sh`, `statusline-uninstall.sh` | the statusline segment: state detection, install (canonical and `--target` bash/node/python), uninstall |
+| `doctor.sh`, `help.sh`, `fi-alias.sh`, `codex-hooks.sh`, `codex-rewrite.sh`, `uninstall.sh` | health report, help text, the `/fi` alias, Codex hook wiring and text rewrites, cleanup |
+| `fix-plumbing.sh` | `found-issues fix workspace\|test\|ship` for `/found-issues:fix` |
+| `autofix.sh` | the `autofix` subcommand dispatcher |
+| `autofix-config.sh` | settings, kill switch, state paths, test command, engine |
+| `autofix-tags.sh`, `autofix-classify.sh` | fix tags and off-limits paths; the sweep's read-only classify pass |
+| `autofix-queue.sh` | items, repo lock, caps, crash reaping, landing branch, worktree, base tests, claim and release |
+| `autofix-ready.sh` | per-repo readiness: measured base suite, sized watchdog, queue gate |
+| `autofix-hook.sh` | hook-side launcher choice (A headless or B in-session) and the Stop fallback |
+| `autofix-engine.sh` | launcher A's headless fixer and verifier children (`claude -p` / `codex exec`) under a watchdog |
+| `autofix-b.sh` | the launcher-B CLI steps the in-session fixer agent calls |
+| `autofix-sweep.sh` | auto-sweep: candidates, claim, per-entry commits, batches, one PR |
+| `autofix-ship.sh` | tests, commit, push, PR, annotation, auto-merge, and `merge-when-green` (ledger-conflict resolution, squash-retarget rebuild) |
+| `autofix-status.sh` | `status`, `cancel`, the statusline state, the SessionStart summary, the doctor section |
+
+### Auto-fix (v3)
+
+Opt-in (`found-issues autofix on`, per repo or `--global`). Spec:
+`docs/superpowers/specs/2026-10-03-autofix-v3-design.md`.
+
+1. **Queue** — `log` of a `(fix: small)` entry (or `tag --fix`) writes a
+   key=value item to `~/.claude/found-issues/autofix/<repo>/queue/<id>` and
+   prints `AUTOFIX-QUEUED <id>`; enough fixable entries queue a sweep
+   (`AUTOFIX-SWEEP-DUE`). A directory move (`queue` → `running` → `done`)
+   is each state change.
+2. **Launch** — `post-bash-dispatch.sh` sees the marker and picks a
+   launcher: **B** (Claude Code in auto or bypass mode) asks the main agent
+   to start the `found-issues-fixer` / `-sweeper` plugin agent in the
+   background; **A** (any other mode, and Codex) starts a detached
+   `found-issues autofix run <id>`. The Stop hook catches items no launcher
+   took.
+3. **Claim** — repo lock, daily caps, readiness gate, a landing branch (the
+   branch the entry was logged on, or the default branch when that branch
+   changes only the ledger), a worktree under `.claude/worktrees/fi-*`, and
+   one base test run (a red base retires the item; a flaky one is noted).
+4. **Fix and verify** — the fixer (headless child for A, the plugin agent
+   for B) only edits files in the worktree; bash runs the tests, then a
+   read-only verifier that approves or rejects the diff, and records the
+   approved tree.
+5. **Ship** — bash commits, pushes, opens the PR into the landing branch,
+   annotates the entry on the PR branch and in the source ledger, and arms
+   auto-merge (or spawns `merge-when-green`).
+6. **Merge** — a `merge-when-green --guard` watcher resolves ledger-only
+   conflicts by merging the base in, and rebuilds the PR on the default
+   branch when GitHub retargeted it after its landing branch was
+   squash-merged. Anything else that conflicts stops for a person. Run
+   logs: `~/.cache/found-issues/autofix/<repo>/runs/<id>.log`.
+
+Neither fixer ever runs git, gh or writes the ledger; every git, gh and
+ledger step is a single bash `found-issues autofix …` call.
 
 ## Data flow: one issue, end to end
 
