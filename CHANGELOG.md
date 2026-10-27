@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.8] - 2026-10-27
+
+A fix PR whose checks fail once on a CI hiccup gets its failed runs re-run once instead of stopping for good.
+
+### Fixed
+- **A one-off CI failure no longer strands a fix PR** (ledger `lib/autofix-ship.sh:511`). merge-when-green stopped at the first failed check with `checks failed — not merging`, and nothing re-ran it; the message reached only the auto-fix spawn log while the item's own log said `shipped`. On sayciao #320 the `supabase-legs` job failed pulling its images (`toomanyrequests: Data limit exceeded`) while every other check was green, and the PR sat open for days. Now a head that reads red on two polls in a row has that commit's failed GitHub Actions runs re-run once (`gh run rerun --failed`) and the watch goes on (one red read just after a push can still be the previous head, as the live test showed); a red read right after the re-run, before GitHub shows it pending, is not counted. A second failure on the same head stops as before, now saying `checks failed again after a re-run`. A new head (the PR was updated) gets its own re-run. The `--guard` watcher for an armed auto-merge re-runs the same way. Checks that are not Actions runs, or a re-run gh refuses, stop at the first failure as before. `FOUND_ISSUES_AUTOFIX_RERUN_CHECKS=off` turns re-runs off.
+
 ## [3.10.7] - 2026-10-26
 
 A fix PR whose landing branch was squash-merged under it is rebuilt on the default branch and merges, instead of stopping for a person.

@@ -471,6 +471,12 @@ _fi_af_publish() {
 # A guard sleeps FOUND_ISSUES_AUTOFIX_GUARD_SLEEP (default five merge sleeps,
 # 300 s): one per armed PR polls gh all day, so a slower look keeps 20-30
 # open fix PRs at about 12 calls an hour each, not 60.
+#
+# 3.10.8 (ledger lib/autofix-ship.sh:511): a failed check re-runs the head's
+# failed Actions runs once per head (_fi_af_mwg_rerun), after two red reads
+# of that head in a row (a read just after a push can still be the old head);
+# up to 3 red reads before the re-run shows as pending are not a second
+# failure.
 fi_af_merge_when_green() {
   local n="$1" slug="${2:-}" guard="${3:-0}" i v st ck mg br hr nones=0 polls="${FOUND_ISSUES_AUTOFIX_MERGE_POLLS:-60}" pause="${FOUND_ISSUES_AUTOFIX_MERGE_SLEEP:-60}"
   if (( guard )); then
@@ -480,13 +486,14 @@ fi_af_merge_when_green() {
     pause="${FOUND_ISSUES_AUTOFIX_GUARD_SLEEP:-$(( 5 * 10#$pause ))}"
     [[ "$pause" =~ ^[0-9]+$ ]] || pause=300
   fi
-  local jqf='[.state, ([.statusCheckRollup[]? | (.conclusion // .state // "")] | if length == 0 then "none" elif any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STARTUP_FAILURE") then "fail" elif all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL") then "green" else "pending" end), (.mergeable // ""), (.baseRefName // ""), (.headRefName // "")] | join("|")'
+  local jqf='[.state, ([.statusCheckRollup[]? | (.conclusion // .state // "")] | if length == 0 then "none" elif any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STARTUP_FAILURE") then "fail" elif all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL") then "green" else "pending" end), (.mergeable // ""), (.baseRefName // ""), (.headRefName // ""), (.headRefOid // "")] | join("|")'
+  local ho rr_sha="" rr_wait=0 red_sha=""
   [[ -n "$slug" ]] || slug="$(fi_repo_id 2>/dev/null || true)"
   [[ -n "$slug" ]] || { fi_err "autofix: merge-when-green needs a GitHub repo (--repo owner/name)"; return 1; }
   FI_AF_MWG_FIXES=0
   for (( i = 0; i < polls; i++ )); do
-    v="$(gh pr view "$n" --repo "$slug" --json state,statusCheckRollup,mergeable,baseRefName,headRefName --jq "$jqf" 2>/dev/null || true)"
-    IFS='|' read -r st ck mg br hr <<<"$v" || true
+    v="$(gh pr view "$n" --repo "$slug" --json state,statusCheckRollup,mergeable,baseRefName,headRefName,headRefOid --jq "$jqf" 2>/dev/null || true)"
+    IFS='|' read -r st ck mg br hr ho <<<"$v" || true
     if [[ "$st" == OPEN && "$mg" == CONFLICTING ]]; then
       _fi_af_mwg_unconflict "$n" "$slug" "$br" "$hr" || return 1
       nones=0; sleep "$pause"; continue
@@ -505,11 +512,24 @@ fi_af_merge_when_green() {
         _fi_af_mwg_merge "$n" "$slug" && return 0
         _fi_af_mwg_refused "$n" "$slug" "$br" "$hr" || return 1 ;;
       "OPEN fail")
+        # Ledger :511 — the head's failed runs are re-run once per head;
+        # GitHub can still show the old red for a few reads after that.
+        if [[ "$ho" == "$rr_sha" ]] && (( rr_wait > 0 )); then
+          rr_wait=$((rr_wait - 1)); sleep "$pause"; continue
+        fi
+        # Only a head read red twice in a row: the first read after a push
+        # can still be the previous head (live e2e, fi-rerun-e2e #2).
+        if [[ "$ho" != "$rr_sha" ]] && _fi_af_mwg_rerun_on; then
+          if [[ "$ho" != "$red_sha" ]]; then red_sha="$ho"; sleep "$pause"; continue; fi
+          if _fi_af_mwg_rerun "$n" "$slug" "$ho"; then rr_sha="$ho" rr_wait=3; sleep "$pause"; continue; fi
+        fi
         # The armed auto-merge outlives a failed check (a re-run can still
         # turn it green), so the guard keeps watching for a conflict.
         (( guard )) && { sleep "$pause"; continue; }
+        [[ -n "$ho" && "$ho" == "$rr_sha" ]] && { fi_err "autofix: PR #$n checks failed again after a re-run — not merging"; return 1; }
         fi_err "autofix: PR #$n checks failed — not merging"; return 1 ;;
-      *) nones=0 ;;
+      "OPEN pending") nones=0 rr_wait=0 red_sha="" ;;
+      *) nones=0 red_sha="" ;;
     esac
     sleep "$pause"
   done
@@ -566,6 +586,30 @@ _fi_af_mwg_merge() {
   fi
   [[ -z "$FI_AF_MWG_ERR" ]] || printf '%s\n' "$FI_AF_MWG_ERR" >&2
   return 1
+}
+
+# Re-run the failed GitHub Actions runs of head <sha> (ledger :511: a one-off
+# CI infrastructure failure stranded sayciao#320). rc 0 = at least one run
+# was re-run; rc 1 = switched off (FOUND_ISSUES_AUTOFIX_RERUN_CHECKS=off), no
+# head sha, nothing to re-run (a check that is not an Actions run), or gh
+# refused every re-run.
+_fi_af_mwg_rerun_on() {
+  case "${FOUND_ISSUES_AUTOFIX_RERUN_CHECKS:-}" in off|0|false|no) return 1 ;; esac
+  return 0
+}
+
+_fi_af_mwg_rerun() {
+  local n="$1" slug="$2" sha="$3" ids id ok=""
+  _fi_af_mwg_rerun_on || return 1
+  [[ "$sha" =~ ^[0-9a-f]+$ ]] || return 1
+  ids="$(gh run list --repo "$slug" --commit "$sha" --limit 50 --json databaseId,conclusion \
+    --jq '.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled" or .conclusion == "startup_failure") | .databaseId' 2>/dev/null || true)"
+  for id in $ids; do
+    [[ "$id" =~ ^[0-9]+$ ]] || continue
+    gh run rerun "$id" --failed --repo "$slug" >/dev/null 2>&1 && ok+=" $id"
+  done
+  [[ -n "$ok" ]] || return 1
+  printf 'PR #%s: checks failed; re-running its failed runs once (%s)\n' "$n" "${ok# }"
 }
 
 # After a refused merge: GitHub computes mergeable lazily, so a PR it called
