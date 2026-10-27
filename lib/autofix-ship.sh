@@ -585,7 +585,8 @@ _fi_af_mwg_refused() {
 
 # Merge origin/<base> into the PR branch <head> in a throwaway worktree of
 # the checkout merge-when-green runs in, and push it (a merge commit, so no
-# force). Only ledger conflicts are resolved: the code then merges exactly as
+# force; a PR retargeted after a squash merge is instead rebuilt and
+# force-pushed with a lease, _fi_af_mwg_squashed). Only ledger conflicts are resolved: the code then merges exactly as
 # GitHub would have merged a PR that did not conflict, and the PR's checks
 # run again on the new head before it merges. A head that already contains
 # its base is GitHub's stale mergeable value, not a conflict: nothing is
@@ -643,20 +644,24 @@ _fi_af_is_ledger() {
 # so merging the base in conflicts with more than the PR's own annotation.
 # Then the PR's own change since it was cut (the merge base of the merged
 # PR's head and this PR's head) is rebuilt as one commit on the base, the
-# ledger as _fi_af_mwg_ledger resolves it, and force-pushed with a lease.
+# ledger as _fi_af_mwg_ledger resolves it, the repo's test command run on
+# it (twice before it counts as red), and force-pushed with a lease.
 # rc 0 = rebuilt and pushed; rc 1 = not that case (the ordinary merge
 # applies); rc 2 = that case, but it needs a person.
 _fi_af_mwg_squashed() {
-  local n="$1" slug="$2" wt="$3" base="$4" head="$5" ev old m oid cut was why f lrc
-  local ann="(PR: $slug#$n)" code=() ledgers=()
+  local n="$1" slug="$2" wt="$3" base="$4" head="$5" ev old m oid cut was why f lrc subj cmd
+  local ann="(PR: $slug#$n)" code=() ledgers=() tlog="${3%/*}/rebuild-tests.log"
   local q='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){timelineItems(itemTypes:[AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT],last:1){nodes{... on AutomaticBaseChangeSucceededEvent{oldBase newBase}}}}}}'
-  ev="$(gh api graphql -f query="$q" -F o="${slug%%/*}" -F r="${slug#*/}" -F n="$n" \
+  ev="$(gh api graphql -f query="$q" -f o="${slug%%/*}" -f r="${slug#*/}" -F n="$n" \
     --jq '.data.repository.pullRequest.timelineItems.nodes[-1] // {} | "\(.oldBase // "")|\(.newBase // "")"' 2>/dev/null || true)"
   old="${ev%%|*}"
   [[ -n "$old" && "$old" != "$base" && "${ev#*|}" == "$base" ]] || return 1
-  m="$(gh pr list --repo "$slug" --head "$old" --state merged --limit 1 --json number,headRefOid \
-    --jq '.[0] // {} | "\(.number // "")|\(.headRefOid // "")"' 2>/dev/null || true)"
-  oid="${m#*|}" m="${m%%|*}"
+  # Only the PR that merged that branch into this base (a reused name or a
+  # fork's branch of the same name is another PR).
+  m="$(gh pr list --repo "$slug" --head "$old" --base "$base" --state merged --limit 1 --json number,headRefOid,baseRefName \
+    --jq '.[0] // {} | "\(.number // "")|\(.headRefOid // "")|\(.baseRefName // "")"' 2>/dev/null || true)"
+  [[ "${m##*|}" == "$base" ]] || return 1
+  m="${m%|*}" oid="${m#*|}" m="${m%%|*}"
   [[ "$m" =~ ^[0-9]+$ && "$oid" =~ ^[0-9a-f]{40}$ ]] || return 1
   # The deleted branch's head survives as refs/pull/<M>/head.
   git -C "$wt" fetch -q origin "refs/pull/$m/head" >/dev/null 2>&1 || return 1
@@ -666,14 +671,16 @@ _fi_af_mwg_squashed() {
   git -C "$wt" merge-base --is-ancestor "$cut" "refs/remotes/origin/$base" && return 1
   why="autofix: PR #$n: its landing branch $old was squash-merged into $base (PR #$m)"
   was="$(git -C "$wt" rev-parse HEAD)"
-  while IFS= read -r f || [[ -n "$f" ]]; do
+  # NUL-separated and rename-free: a quoted path or a rename's old side
+  # would otherwise drop out of the rebuilt diff.
+  while IFS= read -r -d '' f || [[ -n "$f" ]]; do
     [[ -n "$f" ]] || continue
     if _fi_af_is_ledger "$f"; then ledgers+=("$f"); else code+=("$f"); fi
-  done < <(git -C "$wt" diff --name-only "$cut" "$was")
+  done < <(git -C "$wt" diff -z --no-renames --name-only "$cut" "$was")
   if ! git -C "$wt" checkout -q --detach "refs/remotes/origin/$base" >/dev/null 2>&1; then
     fi_err "$why, and checking out $base failed — not merging"; return 2
   fi
-  if (( ${#code[@]} )) && ! git -C "$wt" diff --binary "$cut" "$was" -- "${code[@]}" \
+  if (( ${#code[@]} )) && ! git -C "$wt" --literal-pathspecs diff --binary --no-renames "$cut" "$was" -- "${code[@]}" \
        | git -C "$wt" apply -q --3way --index >/dev/null 2>&1; then
     fi_err "$why, and its fix does not apply on $base; it needs a person — not merging"; return 2
   fi
@@ -688,8 +695,18 @@ _fi_af_mwg_squashed() {
   if git -C "$wt" diff --cached --quiet; then
     fi_err "$why, and its change is already on $base — not merging"; return 2
   fi
-  if ! git -C "$wt" commit -q -m "$(git -C "$wt" log -1 --format=%s "$was") (rebuilt on $base after #$m was squash-merged)" >/dev/null 2>&1; then
+  # The subject of the PR's first own commit: the fix, not its annotation.
+  subj=""; IFS= read -r subj < <(git -C "$wt" log --reverse --no-merges --format=%s "$cut..$was") || true
+  if ! git -C "$wt" commit -q -m "${subj:-fix} (rebuilt on $base after #$m was squash-merged)" >/dev/null 2>&1; then
     fi_err "$why, and the rebuilt commit was refused — not merging"; return 2
+  fi
+  # The rebuilt tree was never tested (the fix was verified on the old
+  # branch), and a repo without checks would merge it on the next poll.
+  if ! cmd="$(fi_af_test_command "$wt")"; then
+    fi_err "$why, and no test command is set to check the rebuild; it needs a person — not merging"; return 2
+  fi
+  if ! fi_af_run_tests "$wt" "$cmd" "$tlog" && ! fi_af_run_tests "$wt" "$cmd" "$tlog"; then
+    fi_err "$why, and the tests fail on the rebuild; it needs a person — not merging"; return 2
   fi
   if ! git -C "$wt" push -q --force-with-lease="refs/heads/$head:$was" origin "HEAD:refs/heads/$head" >/dev/null 2>&1; then
     fi_err "$why, and pushing its rebuilt change failed — not merging"; return 2

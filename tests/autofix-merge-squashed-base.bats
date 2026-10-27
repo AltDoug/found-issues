@@ -36,7 +36,7 @@ if [[ "$1 $2" == "api graphql" ]]; then
   exit 0
 fi
 if [[ "$1 $2" == "pr list" && " $* " == *" --head phase "* ]]; then
-  printf '[{"number":5,"headRefOid":"%s"}]' "$SQ_OLD_TIP" | jq -r "$jq_filter"
+  printf '[{"number":5,"headRefOid":"%s","baseRefName":"%s"}]' "$SQ_OLD_TIP" "${GH_SQ_OLD_BASE:-main}" | jq -r "$jq_filter"
   exit 0
 fi
 exec "$SQ_SHIM" "$@"
@@ -50,6 +50,9 @@ setup() {
   fi_setup_tmp; fi_af_fixture
   export GH_MOCK_TRACE="$TMP/gh.trace" FOUND_ISSUES_AUTOFIX_MERGE_SLEEP=0 FOUND_ISSUES_AUTOFIX_MERGE_POLLS=6
   sq_gh
+  # The rebuild runs the repo's test command; the fixture's own test.sh
+  # tests calc.sh, which no fix here touches.
+  git config found-issues.autofix.testCommand 'true'
   L=docs/found-issues.md
   printf -- '- [open] 2026-10-02 src/a.sh:1 — a breaks (fix: small)\n- [open] 2026-10-03 src/b.sh:1 — b breaks (fix: small)\n' >>"$L"
   git commit -qam "two more entries" && git push -q origin main
@@ -86,6 +89,8 @@ remote_ledger() { git -C "$TMP/remote.git" show "$SQ_HEAD:$L"; }
   # The PR branch is now main plus one commit: the fix and its annotation only.
   [ "$(git -C "$TMP/remote.git" rev-parse "$SQ_HEAD~1")" = "$(git -C "$TMP/remote.git" rev-parse main)" ]
   [ "$(git -C "$TMP/remote.git" diff --name-only main "$SQ_HEAD" | sort | tr '\n' ' ')" = "docs/found-issues.md src/a.sh " ]
+  # It keeps the fix commit's subject, not the annotation commit's.
+  [ "$(git -C "$TMP/remote.git" log -1 --format=%s "$SQ_HEAD")" = "fix: a breaks (rebuilt on main after #5 was squash-merged)" ]
   remote_ledger | grep -qx -- '- \[open\] 2026-10-02 src/a.sh:1 — a breaks (fix: small) (PR: foo/bar#7)'
   remote_ledger | grep -qx -- '- \[open\] 2026-10-03 src/b.sh:1 — b breaks (fix: small) (PR: foo/bar#6)'
   remote_ledger | grep -qx -- '- \[open\] 2026-10-04 src/p.sh:1 — p is new (fix: small)'
@@ -129,4 +134,32 @@ remote_ledger() { git -C "$TMP/remote.git" show "$SQ_HEAD:$L"; }
   [ "$(git -C "$TMP/remote.git" rev-parse "$SQ_HEAD")" = "$before" ]
   ! grep -q '^pr merge 7 --squash' "$GH_MOCK_TRACE" || false
   [ "$(git worktree list | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "merge-when-green: a squash rebuild whose tests fail is not pushed" {
+  git config found-issues.autofix.testCommand 'false'
+  before="$(git -C "$TMP/remote.git" rev-parse "$SQ_HEAD")"
+  run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"squash-merged"*"tests fail on the rebuild"* ]]
+  [ "$(git -C "$TMP/remote.git" rev-parse "$SQ_HEAD")" = "$before" ]
+  ! grep -q '^pr merge 7 --squash' "$GH_MOCK_TRACE" || false
+  [ "$(git worktree list | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "merge-when-green: a squash rebuild carries a rename's deletion too" {
+  git switch -q "$SQ_HEAD"
+  git mv src/calc.sh src/sum.sh && git commit -qm "rename calc" && git push -q origin "$SQ_HEAD"
+  run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar
+  [ "$status" -eq 0 ]
+  git -C "$TMP/remote.git" cat-file -e "$SQ_HEAD:src/sum.sh"
+  ! git -C "$TMP/remote.git" cat-file -e "$SQ_HEAD:src/calc.sh" 2>/dev/null || false
+}
+
+@test "merge-when-green: a merged PR of the same branch name into another base is not used" {
+  export GH_SQ_OLD_BASE=release
+  run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"more than its"*"annotation"* ]]
+  ! grep -q '^pr merge 7 --squash' "$GH_MOCK_TRACE" || false
 }
