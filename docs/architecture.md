@@ -270,7 +270,7 @@ header lists its functions.
 | `autofix-engine.sh` | launcher A's headless fixer and verifier children (`claude -p` / `codex exec`) under a watchdog |
 | `autofix-b.sh` | the launcher-B CLI steps the in-session fixer agent calls |
 | `autofix-sweep.sh` | auto-sweep: candidates, claim, per-entry commits, batches, one PR |
-| `autofix-ship.sh` | tests, commit, push, PR, annotation, auto-merge, and `merge-when-green` (ledger-conflict resolution, squash-retarget rebuild) |
+| `autofix-ship.sh` | tests, commit, push, PR, annotation, auto-merge, and `merge-when-green` (ledger-conflict resolution, squash-retarget rebuild, one re-run of failed checks) |
 | `autofix-status.sh` | `status`, `cancel`, the statusline state, the SessionStart summary, the doctor section |
 
 ### Auto-fix (v3)
