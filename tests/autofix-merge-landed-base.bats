@@ -22,12 +22,12 @@ printf '%s\n' "$*" >>"$GH_MOCK_TRACE"
 jq_filter=""; prev=""
 for a in "$@"; do [[ "$prev" == --jq ]] && jq_filter="$a"; prev="$a"; done
 base="$(cat "$LB_BASE_FILE")"
-if git -C "$LB_REMOTE" merge-base --is-ancestor "$base" "$LB_HEAD" 2>/dev/null; then m=MERGEABLE; else m=CONFLICTING; fi
+if [[ -n "${LB_MERGEABLE:-}" ]] || git -C "$LB_REMOTE" merge-base --is-ancestor "$base" "$LB_HEAD" 2>/dev/null; then m=MERGEABLE; else m=CONFLICTING; fi
 case "$1 $2" in
   "pr view")
     printf '{"state":"OPEN","mergeable":"%s","baseRefName":"%s","headRefName":"%s","statusCheckRollup":[]}' "$m" "$base" "$LB_HEAD" | jq -r "$jq_filter" ;;
   "pr merge")
-    [[ " $* " == *" --auto "* ]] && exit 0
+    [[ " $* " == *" --auto "* || " $* " == *" --disable-auto "* ]] && exit 0
     [[ "$m" == CONFLICTING ]] && { echo "GraphQL: Pull Request has merge conflicts (mergePullRequest)" >&2; exit 1; }
     exit 0 ;;
   "pr edit")
@@ -35,10 +35,14 @@ case "$1 $2" in
     nb=""; prev=""; for a in "$@"; do [[ "$prev" == --base ]] && nb="$a"; prev="$a"; done
     printf '%s' "$nb" >"$LB_BASE_FILE" ;;
   "repo view")
+    if [[ -n "${LB_REPO_VIEW_FAIL_ONCE:-}" && ! -e "$LB_REPO_VIEW_FAIL_ONCE" ]]; then
+      : >"$LB_REPO_VIEW_FAIL_ONCE"; echo "gh: HTTP 502" >&2; exit 1
+    fi
     printf '{"defaultBranchRef":{"name":"main"}}' | jq -r "$jq_filter" ;;
   "pr list")
     if [[ " $* " == *" --head phase "* && -z "${LB_NO_MERGED:-}" ]]; then
-      printf '[{"number":5,"headRefOid":"%s","baseRefName":"main"}]' "$LB_OLD_TIP" | jq -r "$jq_filter"
+      fork='' ; [[ -n "${LB_FORK:-}" ]] && fork='{"number":9,"headRefOid":"0000000000000000000000000000000000000009","baseRefName":"main","isCrossRepository":true},'
+      printf '[%s{"number":5,"headRefOid":"%s","baseRefName":"main","isCrossRepository":false}]' "$fork" "$LB_OLD_TIP" | jq -r "$jq_filter"
     else printf '[]' | jq -r "$jq_filter"; fi ;;
   "api graphql")
     if [[ "$base" == main ]]; then nodes='[{"previousRefName":"phase","currentRefName":"main"}]'; else nodes='[]'; fi
@@ -47,7 +51,7 @@ case "$1 $2" in
     ep=""; for a in "${@:2}"; do case "$a" in -*|.*) ;; *) [[ -z "$ep" ]] && ep="$a" ;; esac; done
     b="${ep#repos/foo/bar/branches/}"; b="${b//%2F//}"
     sha="$(git -C "$LB_REMOTE" rev-parse --verify -q "refs/heads/$b")" || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
-    printf '{"commit":{"sha":"%s"}}' "$sha" | jq -r "$jq_filter" ;;
+    printf '{"commit":{"sha":"%s"},"protected":%s}' "$sha" "${LB_PROTECTED:-false}" | jq -r "$jq_filter" ;;
   *) exit 1 ;;
 esac
 EOF
@@ -140,4 +144,49 @@ teardown() { fi_teardown_tmp; }
   grep -q '^pr merge 7 --auto --squash --repo foo/bar$' "$GH_MOCK_TRACE"
   ! grep -q '^pr merge 7 --squash --repo foo/bar$' "$GH_MOCK_TRACE" || false
   [ "$(git -C "$TMP/remote.git" rev-parse "$LB_HEAD~1")" = "$(git -C "$TMP/remote.git" rev-parse main)" ]
+}
+
+@test "landed base: the guard turns auto-merge off when the retarget is refused" {
+  export LB_EDIT_FAIL=1 FOUND_ISSUES_AUTOFIX_GUARD_POLLS=3
+  run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar --guard
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"retargeting it to main failed"* ]]
+  [[ "$output" == *"auto-merge turned off"* ]]
+  grep -q '^pr merge 7 --disable-auto --repo foo/bar$' "$GH_MOCK_TRACE"
+}
+
+@test "landed base: a retargeted PR GitHub calls mergeable is still rebuilt on main before it merges" {
+  export LB_MERGEABLE=1
+  run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"retargeted to main"* ]]
+  [[ "$output" == *"squash-merged"* ]]
+  [ "$(git -C "$TMP/remote.git" rev-parse "$LB_HEAD~1")" = "$(git -C "$TMP/remote.git" rev-parse main)" ]
+  [ "$(git -C "$TMP/remote.git" diff --name-only main "$LB_HEAD" | sort | tr '\n' ' ')" = "docs/found-issues.md src/a.sh " ]
+  grep -q '^pr merge 7 --squash --repo foo/bar$' "$GH_MOCK_TRACE"
+}
+
+@test "landed base: a protected landing branch stays the base" {
+  export LB_PROTECTED=true
+  run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar
+  [ "$status" -eq 0 ]
+  ! grep -q '^pr edit' "$GH_MOCK_TRACE" || false
+  [ "$(cat "$LB_BASE_FILE")" = phase ]
+}
+
+@test "landed base: a fork PR merged from a branch of the same name is ignored" {
+  export LB_FORK=1
+  run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"(PR #5) with nothing since; retargeted to main"* ]]
+  [[ "$output" == *"squash-merged into main (PR #5)"* ]]
+  grep -q '^pr merge 7 --squash --repo foo/bar$' "$GH_MOCK_TRACE"
+}
+
+@test "landed base: a failed default-branch lookup is tried again on the next poll" {
+  export LB_REPO_VIEW_FAIL_ONCE="$TMP/repo-view-failed"
+  run "$FI_BIN" autofix merge-when-green 7 --repo foo/bar
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^repo view' "$GH_MOCK_TRACE")" -eq 2 ]
+  [[ "$output" == *"retargeted to main"* ]]
 }

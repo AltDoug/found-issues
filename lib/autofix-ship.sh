@@ -493,18 +493,36 @@ fi_af_merge_when_green() {
   [[ -n "$slug" ]] || slug="$(fi_repo_id 2>/dev/null || true)"
   [[ -n "$slug" ]] || { fi_err "autofix: merge-when-green needs a GitHub repo (--repo owner/name)"; return 1; }
   FI_AF_MWG_FIXES=0 FI_AF_MWG_DEFAULT=""
-  local lrc
+  local lrc landed=0
   for (( i = 0; i < polls; i++ )); do
     v="$(gh pr view "$n" --repo "$slug" --json state,statusCheckRollup,mergeable,baseRefName,headRefName,headRefOid --jq "$jqf" 2>/dev/null || true)"
     IFS='|' read -r st ck mg ho br hr <<<"$v" || true
     [[ "$st $ck" == "OPEN fail" && "$mg" != CONFLICTING ]] || red_sha=""
     if [[ "$st" == OPEN ]]; then
-      lrc=0; _fi_af_mwg_landed "$n" "$slug" "$br" "$guard" || lrc=$?
-      (( lrc == 2 )) && return 1
-      (( lrc == 0 )) && { nones=0; sleep "$pause"; continue; }
+      lrc=0; _fi_af_mwg_landed "$n" "$slug" "$br" || lrc=$?
+      if (( lrc == 2 )); then
+        # The guard's armed auto-merge would still merge into the dead branch.
+        (( guard )) && _fi_af_mwg_disarm "$n" "$slug"
+        return 1
+      fi
+      (( lrc == 0 )) && { landed=1; nones=0; sleep "$pause"; continue; }
     fi
-    if [[ "$st" == OPEN && "$mg" == CONFLICTING ]]; then
-      _fi_af_mwg_unconflict "$n" "$slug" "$br" "$hr" || return 1
+    # After a retarget the PR still carries the landing branch's own commits
+    # and checks run against that branch, so it is brought up to date with
+    # the default branch (rebuilt after a squash merge) even when GitHub
+    # reports no conflict.
+    if [[ "$st" == OPEN && ( "$mg" == CONFLICTING || "$landed" == 1 ) ]]; then
+      if ! _fi_af_mwg_unconflict "$n" "$slug" "$br" "$hr"; then
+        (( landed && guard )) && _fi_af_mwg_disarm "$n" "$slug"
+        return 1
+      fi
+      if (( landed )); then
+        landed=0
+        # A base change can drop an armed auto-merge; the guard arms it again.
+        if (( guard )) && ! gh pr merge "$n" --auto --squash --repo "$slug" >/dev/null 2>&1; then
+          fi_err "autofix: PR #$n: arming auto-merge again after the retarget failed — it will not merge on its own"
+        fi
+      fi
       nones=0; sleep "$pause"; continue
     fi
     case "$st $ck" in
@@ -600,35 +618,47 @@ FI_AF_MWG_DEFAULT=""
 # merged into the default branch but kept (delete_branch_on_merge off), so
 # GitHub never retargeted the PR (sayciao #320 into gsd/phase-24-resume after
 # #318). When the branch's tip is still exactly the head that merged, the PR
-# is retargeted to the default branch and the usual flow goes on: a conflict
-# brings in _fi_af_mwg_squashed, which reads the manual base change. A branch
-# with work after its merge stays the base (sayciao's moved on: a fix merged
-# there reaches main with its next PR); a deleted one GitHub retargets itself.
+# is retargeted to the default branch; the caller then brings it up to date
+# (_fi_af_mwg_unconflict, whose _fi_af_mwg_squashed reads the manual base
+# change and rebuilds after a squash merge). A branch with work after its
+# merge stays the base (sayciao's moved on: a fix merged there reaches main
+# with its next PR), and so does a protected one (a kept develop or release
+# branch); a deleted one GitHub retargets itself. Fork PRs that share the
+# branch name are ignored.
 # rc 0 = retargeted; rc 1 = nothing to do; rc 2 = the retarget failed.
 _fi_af_mwg_landed() {
-  local n="$1" slug="$2" base="$3" guard="${4:-0}" def m oid tip enc
+  local n="$1" slug="$2" base="$3" def m oid tip enc
   [[ -n "$base" ]] || return 1
   if [[ -z "$FI_AF_MWG_DEFAULT" ]]; then
+    # Only a successful lookup is kept: a failed one is tried on the next poll.
     FI_AF_MWG_DEFAULT="$(gh repo view "$slug" --json defaultBranchRef --jq '.defaultBranchRef.name // ""' 2>/dev/null || true)"
-    [[ -n "$FI_AF_MWG_DEFAULT" ]] || FI_AF_MWG_DEFAULT="-"   # unknown: no retarget, no second lookup
+    [[ -n "$FI_AF_MWG_DEFAULT" ]] || return 1
   fi
   def="$FI_AF_MWG_DEFAULT"
-  [[ "$def" != "-" && "$base" != "$def" ]] || return 1
-  m="$(gh pr list --repo "$slug" --head "$base" --base "$def" --state merged --limit 1 --json number,headRefOid,baseRefName \
-    --jq '.[0] // {} | "\(.number // "")|\(.headRefOid // "")|\(.baseRefName // "")"' 2>/dev/null || true)"
+  [[ "$base" != "$def" ]] || return 1
+  m="$(gh pr list --repo "$slug" --head "$base" --base "$def" --state merged --limit 5 --json number,headRefOid,baseRefName,isCrossRepository \
+    --jq '[.[] | select(.isCrossRepository | not)][0] // {} | "\(.number // "")|\(.headRefOid // "")|\(.baseRefName // "")"' 2>/dev/null || true)"
   [[ "${m##*|}" == "$def" ]] || return 1
   m="${m%|*}" oid="${m#*|}" m="${m%%|*}"
   [[ "$m" =~ ^[0-9]+$ && "$oid" =~ ^[0-9a-f]{40}$ ]] || return 1
   enc="$(jq -rn --arg b "$base" '$b | @uri')"
-  tip="$(gh api "repos/$slug/branches/$enc" --jq '.commit.sha // ""' 2>/dev/null || true)"
-  [[ "$tip" == "$oid" ]] || return 1
+  tip="$(gh api "repos/$slug/branches/$enc" --jq '"\(.commit.sha // "")|\(.protected // false)"' 2>/dev/null || true)"
+  [[ "${tip#*|}" == false && "${tip%%|*}" == "$oid" ]] || return 1
   if ! gh pr edit "$n" --repo "$slug" --base "$def" >/dev/null 2>&1; then
     fi_err "autofix: PR #$n: its landing branch $base was merged into $def (PR #$m), and retargeting it to $def failed — not merging"; return 2
   fi
   printf 'PR #%s: its landing branch %s was merged into %s (PR #%s) with nothing since; retargeted to %s\n' "$n" "$base" "$def" "$m" "$def"
-  # A base change can drop an armed auto-merge; the guard arms it again.
-  if (( guard )); then gh pr merge "$n" --auto --squash --repo "$slug" >/dev/null 2>&1 || true; fi
   return 0
+}
+
+# Turn off <N>'s armed auto-merge when the guard gives up on a PR that would
+# otherwise merge where it should not.
+_fi_af_mwg_disarm() {
+  if gh pr merge "$1" --disable-auto --repo "$2" >/dev/null 2>&1; then
+    fi_err "autofix: PR #$1: auto-merge turned off"
+  else
+    fi_err "autofix: PR #$1: turning auto-merge off failed — it may still merge into its old base"
+  fi
 }
 
 # Squash-merge <N>; a refusal's message is kept in FI_AF_MWG_ERR.
@@ -769,8 +799,8 @@ _fi_af_mwg_squashed() {
   [[ -n "$old" && "$old" != "$base" && "${ev#*|}" == "$base" ]] || return 1
   # Only the PR that merged that branch into this base (a reused name or a
   # fork's branch of the same name is another PR).
-  m="$(gh pr list --repo "$slug" --head "$old" --base "$base" --state merged --limit 1 --json number,headRefOid,baseRefName \
-    --jq '.[0] // {} | "\(.number // "")|\(.headRefOid // "")|\(.baseRefName // "")"' 2>/dev/null || true)"
+  m="$(gh pr list --repo "$slug" --head "$old" --base "$base" --state merged --limit 5 --json number,headRefOid,baseRefName,isCrossRepository \
+    --jq '[.[] | select(.isCrossRepository | not)][0] // {} | "\(.number // "")|\(.headRefOid // "")|\(.baseRefName // "")"' 2>/dev/null || true)"
   [[ "${m##*|}" == "$base" ]] || return 1
   m="${m%|*}" oid="${m#*|}" m="${m%%|*}"
   [[ "$m" =~ ^[0-9]+$ && "$oid" =~ ^[0-9a-f]{40}$ ]] || return 1
