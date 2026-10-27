@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.7] - 2026-10-26
+
+A fix PR whose landing branch was squash-merged under it is rebuilt on the default branch and merges, instead of stopping for a person.
+
+### Fixed
+- **A fix PR is no longer stranded when its landing branch is squash-merged first** (ledger `lib/autofix-ship.sh:656`). A fix cut from a session's branch opens its PR into that branch. When the session's own PR is squash-merged and the branch deleted, GitHub retargets the fix PR to the default branch, where it still carries the session branch's whole pre-squash history (bruhsailer-helper #112: 54 files for a 2-file fix). Merging the base in then conflicted on the ledger with more than the PR's own annotation, and merge-when-green stopped with `needs a person`. It now reads GitHub's automatic base change, finds the merged PR of the old branch, and rebuilds only the fix PR's own change since it was cut as one commit on the default branch (the ledger keeps the base's version plus this PR's annotation), force-pushed with a lease; checks run again before it merges. A fix that no longer applies there, or a ledger change beyond the annotation, still stops for a person, now naming the squash merge.
+- **The first-touch timing test is bounded by a bash-spawn baseline** (ledger `tests/first-touch.bats:136`, #285, fixed by auto-fix). Test-only: the 150-entry slow-path check measured against a fixed limit and failed on a loaded machine.
+
 ## [3.10.6] - 2026-10-22
 
 An entry logged on a branch that changes only the ledger is fixed on the default branch, and a fixer's failure report now shows vitest and jest failures.

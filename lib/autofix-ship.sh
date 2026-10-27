@@ -612,7 +612,13 @@ _fi_af_mwg_unconflict() {
   fi
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/fi-mwg.XXXXXX")" || { fi_err "autofix: PR #$n: no temp dir — not merging"; return 1; }
   if git -C "$root" worktree add -q --detach "$tmp/wt" "refs/remotes/origin/$head" >/dev/null 2>&1; then
-    _fi_af_mwg_update "$n" "$slug" "$tmp/wt" "$base" "$head" || rc=$?
+    local sq=0
+    _fi_af_mwg_squashed "$n" "$slug" "$tmp/wt" "$base" "$head" || sq=$?
+    if (( sq == 1 )); then
+      _fi_af_mwg_update "$n" "$slug" "$tmp/wt" "$base" "$head" || rc=$?
+    elif (( sq )); then
+      rc=1
+    fi
     git -C "$root" worktree remove --force "$tmp/wt" >/dev/null 2>&1 || true
   else
     fi_err "autofix: PR #$n has merge conflicts and a worktree of $head could not be made — not merging"; rc=1
@@ -621,20 +627,83 @@ _fi_af_mwg_unconflict() {
   return "$rc"
 }
 
+# 3.10.1 (#164): the docs ledger may be spelled Docs/Found-Issues.md; the
+# archive beside it is always lowercase-named.
+_fi_af_is_ledger() {
+  case "$1" in
+    [Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]) return 0 ;;
+    [Dd][Oo][Cc][Ss]/found-issues-archive.md|.found-issues.md) return 0 ;;
+  esac
+  return 1
+}
+
+# 3.10.7 (ledger lib/autofix-ship.sh:656): GitHub retargets a fix PR to the
+# default branch when the session branch it was cut from merges and is
+# deleted. After a squash merge the PR still carries that branch's commits,
+# so merging the base in conflicts with more than the PR's own annotation.
+# Then the PR's own change since it was cut (the merge base of the merged
+# PR's head and this PR's head) is rebuilt as one commit on the base, the
+# ledger as _fi_af_mwg_ledger resolves it, and force-pushed with a lease.
+# rc 0 = rebuilt and pushed; rc 1 = not that case (the ordinary merge
+# applies); rc 2 = that case, but it needs a person.
+_fi_af_mwg_squashed() {
+  local n="$1" slug="$2" wt="$3" base="$4" head="$5" ev old m oid cut was why f lrc
+  local ann="(PR: $slug#$n)" code=() ledgers=()
+  local q='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){timelineItems(itemTypes:[AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT],last:1){nodes{... on AutomaticBaseChangeSucceededEvent{oldBase newBase}}}}}}'
+  ev="$(gh api graphql -f query="$q" -F o="${slug%%/*}" -F r="${slug#*/}" -F n="$n" \
+    --jq '.data.repository.pullRequest.timelineItems.nodes[-1] // {} | "\(.oldBase // "")|\(.newBase // "")"' 2>/dev/null || true)"
+  old="${ev%%|*}"
+  [[ -n "$old" && "$old" != "$base" && "${ev#*|}" == "$base" ]] || return 1
+  m="$(gh pr list --repo "$slug" --head "$old" --state merged --limit 1 --json number,headRefOid \
+    --jq '.[0] // {} | "\(.number // "")|\(.headRefOid // "")"' 2>/dev/null || true)"
+  oid="${m#*|}" m="${m%%|*}"
+  [[ "$m" =~ ^[0-9]+$ && "$oid" =~ ^[0-9a-f]{40}$ ]] || return 1
+  # The deleted branch's head survives as refs/pull/<M>/head.
+  git -C "$wt" fetch -q origin "refs/pull/$m/head" >/dev/null 2>&1 || return 1
+  [[ "$(git -C "$wt" rev-parse FETCH_HEAD 2>/dev/null)" == "$oid" ]] || return 1
+  cut="$(git -C "$wt" merge-base "$oid" HEAD 2>/dev/null)" || return 1
+  # A merge that kept the branch's commits needs nothing here.
+  git -C "$wt" merge-base --is-ancestor "$cut" "refs/remotes/origin/$base" && return 1
+  why="autofix: PR #$n: its landing branch $old was squash-merged into $base (PR #$m)"
+  was="$(git -C "$wt" rev-parse HEAD)"
+  while IFS= read -r f || [[ -n "$f" ]]; do
+    [[ -n "$f" ]] || continue
+    if _fi_af_is_ledger "$f"; then ledgers+=("$f"); else code+=("$f"); fi
+  done < <(git -C "$wt" diff --name-only "$cut" "$was")
+  if ! git -C "$wt" checkout -q --detach "refs/remotes/origin/$base" >/dev/null 2>&1; then
+    fi_err "$why, and checking out $base failed — not merging"; return 2
+  fi
+  if (( ${#code[@]} )) && ! git -C "$wt" diff --binary "$cut" "$was" -- "${code[@]}" \
+       | git -C "$wt" apply -q --3way --index >/dev/null 2>&1; then
+    fi_err "$why, and its fix does not apply on $base; it needs a person — not merging"; return 2
+  fi
+  for f in "${ledgers[@]+"${ledgers[@]}"}"; do
+    lrc=0; _fi_af_mwg_ledger "$wt" "$f" "$cut" "$ann" "$was" HEAD || lrc=$?
+    if (( lrc == 2 )); then
+      fi_err "$why, and an entry it annotates in $f changed on $base, so $ann cannot be carried over; it needs a person — not merging"; return 2
+    elif (( lrc )); then
+      fi_err "$why, and it changes $f by more than its own annotation $ann; it needs a person — not merging"; return 2
+    fi
+  done
+  if git -C "$wt" diff --cached --quiet; then
+    fi_err "$why, and its change is already on $base — not merging"; return 2
+  fi
+  if ! git -C "$wt" commit -q -m "$(git -C "$wt" log -1 --format=%s "$was") (rebuilt on $base after #$m was squash-merged)" >/dev/null 2>&1; then
+    fi_err "$why, and the rebuilt commit was refused — not merging"; return 2
+  fi
+  if ! git -C "$wt" push -q --force-with-lease="refs/heads/$head:$was" origin "HEAD:refs/heads/$head" >/dev/null 2>&1; then
+    fi_err "$why, and pushing its rebuilt change failed — not merging"; return 2
+  fi
+  printf 'PR #%s: its landing branch %s was squash-merged into %s (PR #%s); rebuilt its own change on %s, waiting for checks again\n' "$n" "$old" "$base" "$m" "$base"
+}
+
 _fi_af_mwg_update() {
   local n="$1" slug="$2" wt="$3" base="$4" head="$5" files f bad="" mb out lrc=0
   local ann="(PR: $slug#$n)"
   if ! out="$(git -C "$wt" merge -q --no-edit "refs/remotes/origin/$base" 2>&1)"; then
     files="$(git -C "$wt" diff --name-only --diff-filter=U 2>/dev/null || true)"
     while IFS= read -r f || [[ -n "$f" ]]; do
-      case "$f" in
-        "") ;;
-        # 3.10.1 (#164): the docs ledger may be spelled Docs/Found-Issues.md;
-        # the archive beside it is always lowercase-named.
-        [Dd][Oo][Cc][Ss]/[Ff][Oo][Uu][Nn][Dd]-[Ii][Ss][Ss][Uu][Ee][Ss].[Mm][Dd]) ;;
-        [Dd][Oo][Cc][Ss]/found-issues-archive.md|.found-issues.md) ;;
-        *) bad="${bad:+$bad, }$f" ;;
-      esac
+      [[ -z "$f" ]] || _fi_af_is_ledger "$f" || bad="${bad:+$bad, }$f"
     done <<<"$files"
     if [[ -z "$files" ]]; then
       git -C "$wt" merge --abort >/dev/null 2>&1 || true
@@ -675,12 +744,14 @@ _fi_af_mwg_update() {
 # exactly that annotation, the only ledger change an auto-fix PR makes; rc 2
 # when an entry it annotated is no longer on the base under the same key
 # (re-anchored, reworded, archived), so the annotation would be dropped.
+# <ours> and <theirs> default to HEAD and MERGE_HEAD; a squash rebuild passes
+# the PR head and the base it checked out.
 _fi_af_mwg_ledger() {
-  local wt="$1" p="$2" mb="$3" ann="$4" ours line cr keys=$'\n' want=0 got=0 tmpf
+  local wt="$1" p="$2" mb="$3" ann="$4" oref="${5:-HEAD}" tref="${6:-MERGE_HEAD}" ours line cr keys=$'\n' want=0 got=0 tmpf
   [[ -n "$mb" ]] || return 1
   git -C "$wt" cat-file -e "$mb:$p" 2>/dev/null || return 1
-  git -C "$wt" cat-file -e "MERGE_HEAD:$p" 2>/dev/null || return 2
-  ours="$(git -C "$wt" show "HEAD:$p" 2>/dev/null)" || return 1
+  git -C "$wt" cat-file -e "$tref:$p" 2>/dev/null || return 2
+  ours="$(git -C "$wt" show "$oref:$p" 2>/dev/null)" || return 1
   [[ "${ours//" $ann"/}" == "$(git -C "$wt" show "$mb:$p")" ]] || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == *" $ann"* ]] || continue
@@ -700,7 +771,7 @@ _fi_af_mwg_ledger() {
       got=$((got + 1))
     fi
     printf '%s%s\n' "$line" "$cr"
-  done < <(git -C "$wt" show "MERGE_HEAD:$p" 2>/dev/null) >"$tmpf"
+  done < <(git -C "$wt" show "$tref:$p" 2>/dev/null) >"$tmpf"
   if (( got < want )); then rm -f "$tmpf"; return 2; fi
   cat "$tmpf" >"$wt/$p" && rm -f "$tmpf"
   git -C "$wt" add -- "$p"
