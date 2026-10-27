@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.9] - 2026-10-27
+
+A fix PR whose landing branch was merged but kept is moved to the default branch, instead of merging into a branch nothing reads any more.
+
+### Fixed
+- **A fix PR no longer merges into a landing branch that was merged and kept** (ledger `lib/autofix-ship.sh:658`). A fix cut from a session's branch opens its PR into that branch. 3.10.7 handled the case where the session's PR merges and the branch is deleted, because GitHub then moves the fix PR to the default branch on its own. With `delete_branch_on_merge` off the branch stays, GitHub moves nothing, and the fix PR merged into a branch that had already landed, so the fix never reached the default branch. merge-when-green (and the `--guard` watcher for an armed auto-merge) now checks the PR's base: when it was merged into the default branch and its tip is still exactly the head that merged, the PR is retargeted to the default branch (`retargeted to <default>` in the log). After a squash merge the retargeted PR conflicts, and the 3.10.7 rebuild now also reads this manual base change, so only the fix's own change is rebuilt on the default branch. A landing branch with commits after its merge is still in use and stays the base (sessions reuse their branch). A retarget gh refuses stops the watch without merging; the guard arms auto-merge again after a retarget.
+- **A sweep test no longer fails on SIGPIPE** (ledger `tests/autofix-sweep.bats:1067`). Test-only: `git log | grep -q` under `pipefail` could fail with status 141 when grep stopped at its first match; the log is now read into a variable first.
+
 ## [3.10.8] - 2026-10-27
 
 A fix PR whose checks fail once on a CI hiccup gets its failed runs re-run once instead of stopping for good.
