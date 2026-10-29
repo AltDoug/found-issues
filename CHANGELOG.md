@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.10] - 2026-10-29
+
+A clone that never fetched a commit no longer marks its `(commit:)` annotation stale, so sync stops dirtying pull-only clones.
+
+### Fixed
+- **A commit missing from this clone is no longer taken as gone** (agent-config ledger `docs/found-issues.md:1`). sync demoted `(commit: <sha>)` to `(commit-stale: <sha>)` whenever the SHA did not resolve locally. A pull-only clone that never fetched the branch a commit was made on (measured on a Windows box's agent-config clone: 4 entries citing `a46fa6b`, `e672651`, `d7e9245`) demoted refs the author's clone still resolved, so two clones of one ledger disagreed, and the uncommitted ledger edit made the box's next `git pull --ff-only` abort ("local changes would be overwritten"), again after every SessionStart sync. A SHA missing locally is now demoted only when the absence is evidence: the repo has no remote (unchanged), or GitHub answers that it has no such commit (`gh api repos/<o>/<r>/commits/<sha>` → HTTP 422, one call per SHA per run). A 404 (a repo the signed-in gh account cannot see), a failed lookup, or a non-GitHub remote leaves the annotation alone, as a shallow clone already did.
+
 ## [3.10.9] - 2026-10-27
 
 A fix PR whose landing branch was merged but kept is moved to the default branch, instead of merging into a branch nothing reads any more.
