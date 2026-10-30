@@ -330,6 +330,10 @@ cmd_doctor() {
     printf '%s FOUND_ISSUES_AUTOSYNC_CMD is set  (background sync runs this override instead of found-issues sync)\n' "$section_warn"
     any_off=1
   fi
+  if fi_sync_readonly; then
+    printf '%s sync is read-only in this clone  (found-issues.readonly / FOUND_ISSUES_READONLY: no sync writes the ledger)\n' "$section_warn"
+    any_off=1
+  fi
   if (( any_off == 0 )); then
     printf '%s All hooks default-active. See docs/configuration.md for the opt-out list.\n' "$section_pass"
   fi
