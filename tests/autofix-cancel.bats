@@ -8,9 +8,12 @@ setup() {
   fi_setup_tmp; fi_af_fixture; fi_use_standins; fi_af_queue_fixture
   ST="$FI_AF_ST"
   export GH_MOCK_TRACE="$TMP/gh.trace"
+  # Sleep lengths unique to this test process, so the teardown below kills
+  # only this test's sleeps, never those of a test running beside it.
+  NAP_ENGINE="9${$}3" NAP_FOREIGN="9${$}4"
 }
 # A failing cancel must not leave the stand-in sleeping for an hour.
-teardown() { pkill -f 'sleep 471[34]' 2>/dev/null || true; fi_teardown_tmp; }
+teardown() { pkill -f "^sleep (${NAP_ENGINE}|${NAP_FOREIGN})\$" 2>/dev/null || true; fi_teardown_tmp; }
 
 # The engine child's group, once it runs: claim's base test run (3.2.1) has
 # its own, already finished, child group first.
@@ -77,7 +80,7 @@ wait_engine() {
 }
 
 @test "autofix cancel: an A run and its engine child are stopped" {
-  export FI_STANDIN_SLEEP=4713
+  export FI_STANDIN_SLEEP="$NAP_ENGINE"
   "$FI_BIN" autofix run "$ID" --engine claude >/dev/null 2>&1 &
   rpid=$!
   wait_engine
@@ -101,7 +104,7 @@ wait_engine() {
 }
 
 @test "autofix cancel: a pid that is not an autofix run is never signalled" {
-  sleep 4714 & spid=$!
+  sleep "$NAP_FOREIGN" & spid=$!
   wt="$("$FI_BIN" autofix claim "$ID")"
   printf 'pid=%s\n' "$spid" >>"$ST/running/$ID"
   run "$FI_BIN" autofix cancel "$ID"
@@ -111,7 +114,7 @@ wait_engine() {
 }
 
 @test "autofix cancel: a stale running item never signals the run that moved on" {
-  export FI_STANDIN_SLEEP=4713
+  export FI_STANDIN_SLEEP="$NAP_ENGINE"
   "$FI_BIN" autofix run "$ID" --engine claude >/dev/null 2>&1 &
   rpid=$!
   wait_engine

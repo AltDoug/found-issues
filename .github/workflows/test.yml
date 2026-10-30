@@ -174,8 +174,9 @@ jobs:
 
       - name: Install bats-core + jq
         run: |
+          # GNU parallel lets bats run tests side by side (--jobs, below).
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            brew install bats-core jq
+            brew install bats-core jq parallel
           elif [[ "$RUNNER_OS" == "Windows" ]]; then
             # bats-core ships an npm package that drops a Windows-compatible
             # bats wrapper on PATH. jq is preinstalled on windows-latest.
@@ -183,7 +184,7 @@ jobs:
             jq --version
           else
             sudo apt-get update
-            sudo apt-get install -y bats jq
+            sudo apt-get install -y bats jq parallel
           fi
 
       - name: Verify dependencies
@@ -198,8 +199,20 @@ jobs:
           git config --global user.email "ci@example.com"
           git config --global user.name "CI"
 
+      # One job per CPU (serial on the Mac took 48 min for 2055 tests,
+      # 2026-10-29; 14 jobs took 4 min). Serial when GNU parallel is absent.
       - name: Run test suite
-        run: bats tests/
+        run: |
+          jobs=1
+          if command -v parallel >/dev/null 2>&1; then
+            jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+          fi
+          echo "bats jobs: $jobs"
+          if (( jobs > 1 )); then
+            bats --jobs "$jobs" tests/
+          else
+            bats tests/
+          fi
 
   shellcheck:
     needs: changes

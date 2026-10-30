@@ -8,7 +8,7 @@ most things can ship quickly if they fit the design.
 1. **Fork** the repo and clone locally
 2. **Branch** off `main`: `git checkout -b your-branch-name`
 3. **Make changes** — see "What kinds of contributions are welcome" below
-4. **Run tests**: `bats tests/` (install via `brew install bats-core` if needed)
+4. **Run tests**: `bats --jobs 8 tests/` (install via `brew install bats-core parallel` if needed; plain `bats tests/` runs the same suite serially, about 10x slower)
 5. **Open a PR** against `main` with a description of the change
 
 ## What kinds of contributions are welcome
@@ -89,9 +89,14 @@ tests/             bats-core test suite
 The bats test suite is the primary safety net:
 
 ```bash
-bats tests/                    # run all
+bats --jobs 8 tests/           # run all, 8 at a time (needs GNU parallel)
+bats tests/                    # run all, one at a time
 bats tests/canonicalize.bats   # run one file
 ```
+
+Tests run side by side under `--jobs`, so a test keeps its state in its own
+temp dirs (`fi_setup_tmp`, `$BATS_TEST_TMPDIR`) and never kills processes by a
+pattern another test could also match.
 
 When adding code, add tests. Existing files in `tests/` are good
 reference — they cover lib functions, CLI subcommands, and hooks.
