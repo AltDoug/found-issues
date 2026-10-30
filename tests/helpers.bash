@@ -27,6 +27,18 @@ export FOUND_ISSUES_SEGMENT_AUTOSYNC=off
 # --jobs) shared and mixed one another's logs.
 export FOUND_ISSUES_CACHE_DIR="${BATS_TEST_TMPDIR:-${BATS_RUN_TMPDIR:-${TMPDIR:-/tmp}}}/fi-test-cache"
 
+# A HOME of its own for every test (ledger tests/helpers.bash:25): tests that
+# kept the real one wrote the CLI's caches into the operator's ~/.cache, and
+# shared them with every test running beside them. The XDG variables would
+# point back outside it, so they go too; tests that need one set their own.
+# Git identity for commits made without fi_init_git comes from this HOME's
+# own .gitconfig (CI's global identity lived in the old HOME).
+export HOME="${BATS_TEST_TMPDIR:-${BATS_RUN_TMPDIR:-${TMPDIR:-/tmp}}}/home"
+mkdir -p "$HOME"
+[[ -f "$HOME/.gitconfig" ]] \
+  || printf '[user]\n\tname = Test\n\temail = test@example.com\n' > "$HOME/.gitconfig"
+unset XDG_CACHE_HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME
+
 # A suite started inside an auto-fix run inherits FOUND_ISSUES_AUTOFIX_CHILD=1,
 # which makes session-start take its headless path and fails every test of
 # the interactive one, and FI_AF_PID, which a test's claim records and its
