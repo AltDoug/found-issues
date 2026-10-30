@@ -172,6 +172,37 @@ cmd_sync() {
   local shallow_repo=0
   [[ "$(git rev-parse --is-shallow-repository 2>/dev/null || true)" == "true" ]] && shallow_repo=1
 
+  # The same holds for a clone with a remote: a SHA missing here may sit on a
+  # branch this clone never fetched (a pull-only clone, measured 2026-10-29:
+  # it demoted refs the author's clone still resolved, and the uncommitted
+  # ledger edit then blocked its own `git pull --ff-only`). A missing local
+  # object is not evidence. With no remote, this repo is the whole history.
+  local has_remote=0
+  [[ -n "$(git remote 2>/dev/null || true)" ]] && has_remote=1
+
+  # Is <sha> gone upstream too? Asked only for a SHA missing locally. Yes
+  # only on GitHub's answer for a commit the repo does not have (HTTP 422
+  # "No commit found"); a 404 is a repo gh cannot see (wrong account), and
+  # any other failure is "cannot tell" -- both leave the annotation alone,
+  # as does a non-GitHub remote, which has no cheap lookup.
+  # Memo lines: "\n<sha>\x1e<0|1>".
+  local _fi_gone_memo=$'\n'
+  _fi_commit_gone_upstream() {
+    local sha="$1" key=$'\n'"$1"$'\x1e' err ans=1
+    (( has_remote )) || return 0
+    [[ -n "$repo_id" ]] || return 1
+    if [[ "$_fi_gone_memo" == *"$key"* ]]; then
+      ans="${_fi_gone_memo#*"$key"}"
+      return "${ans%%$'\n'*}"
+    fi
+    if ! err="$( { gh api "repos/$repo_id/commits/$sha" --jq .sha >/dev/null; } 2>&1 )" \
+       && [[ "$err" == *"No commit found for SHA"* && "$err" == *"(HTTP 422)"* ]]; then
+      ans=0
+    fi
+    _fi_gone_memo+="$sha"$'\x1e'"$ans"$'\n'
+    return "$ans"
+  }
+
   # Loop-invariant; was one `git rev-parse` per path entry (audit ledger-5).
   local repo_root
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -355,7 +386,7 @@ cmd_sync() {
                || [[ "$(git cat-file -t "$sha" 2>&1 || true)" == *ambiguous* ]]; then
             : # Git cannot tell here (shallow history / ambiguous short SHA) —
               # leave the annotation for a full clone to judge.
-          else
+          elif _fi_commit_gone_upstream "$sha"; then
             # B1/B2: SHA doesn't resolve (squash-merge dropped it, force-push removed it) → demote
             demote_commit_refs+=("$sha")
           fi

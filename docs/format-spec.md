@@ -237,6 +237,7 @@ However, if a linked PR is closed without merge or a commit SHA becomes unreacha
 
 - `(PR: ...)` → `(PR-closed: ...)` — entry stays `[open]`, eligible for AI re-verification since the closure signal is stale
 - `(commit: ...)` → `(commit-stale: ...)` — entry stays `[open]`, eligible for AI re-verification since the SHA no longer resolves on default branch
+  - A SHA this clone cannot resolve is demoted only when that absence is evidence: the repo has no remote, or GitHub answers that it has no such commit (HTTP 422). A clone with a remote may simply never have fetched the commit, so a GitHub repo gh cannot see (404), a failed lookup, or a non-GitHub remote leaves `(commit: ...)` alone (3.10.10).
 
 These demoted forms are written **only** by `found-issues sync` during its audit phase; they are never produced by user commands or `/found-issues:annotate-*` calls. They serve as an audit trail of link staleness.
 
