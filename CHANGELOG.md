@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.11.0] - 2026-10-29
+
+A clone can be marked read-only, so no sync ever writes its ledger and its `git pull --ff-only` keeps working.
+
+### Added
+- **Read-only sync for pull-only clones** (ledger `lib/sync.sh:770`, operator decision 2026-10-29). 3.10.10 stopped one cause of ledger edits on a clone that only pulls; sync could still close merged-PR entries, tombstone, demote, wake deferred entries and, on an explicit run, auto-archive there, and any of those left an uncommitted edit that made git refuse the next `git pull --ff-only` (measured 2026-10-29: refused even when upstream had committed the byte-identical archive). `git config found-issues.readonly true` marks a clone read-only: every sync in it (SessionStart, statusline autosync, the post-merge hook, an explicit `found-issues sync`) becomes a dry run that prints what it would have done, headed `Read-only clone (found-issues.readonly) — nothing written.` `FOUND_ISSUES_READONLY=1` does the same from the environment; `FOUND_ISSUES_READONLY=0` overrides the git config for one command. Reads, counts and the SessionStart entry list are unchanged, and `found-issues doctor` lists the setting under Hook opt-outs. Commands someone runs on purpose (`log`, `resolve`, `archive`) still write.
+
 ## [3.10.10] - 2026-10-29
 
 A clone that never fetched a commit no longer marks its `(commit:)` annotation stale, so sync stops dirtying pull-only clones.

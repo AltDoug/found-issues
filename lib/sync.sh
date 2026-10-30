@@ -30,6 +30,10 @@ runs never archive.
   --dry-run   Report what would change; write nothing.
   -h, --help  Show this help.
 
+In a clone marked read-only (git config found-issues.readonly true, or
+FOUND_ISSUES_READONLY=1), every sync is a dry run: for pull-only clones,
+where an uncommitted ledger edit blocks the next `git pull --ff-only`.
+
 Closures are not reversible — there is no command that reopens a [fixed]
 entry. Use --dry-run first when in doubt.
 EOF
@@ -84,6 +88,24 @@ fi_sq() {
   printf "'%s'" "${t//\'/$q}"
 }
 
+# fi_sync_readonly — 0 when sync must write nothing in this clone. A clone
+# that only ever pulls (a deploy box) cannot carry an uncommitted ledger
+# edit: git refuses its next `pull --ff-only` even when upstream made the
+# byte-identical change (measured 2026-10-29). FOUND_ISSUES_READONLY, when
+# set, wins over `git config found-issues.readonly`.
+fi_sync_readonly() {
+  local v="${FOUND_ISSUES_READONLY-}"
+  if [[ -n "$v" ]]; then
+    v="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')"
+  else
+    v="$(git config --bool --get found-issues.readonly 2>/dev/null || true)"
+  fi
+  case "$v" in
+    1|true|yes|on) return 0 ;;
+  esac
+  return 1
+}
+
 cmd_sync() {
   # Unknown flags used to be ignored entirely: `sync --help` parsed nothing and
   # ran a full mutating pass, so reaching for help performed irreversible
@@ -105,6 +127,14 @@ cmd_sync() {
         ;;
     esac
   done
+
+  # Read-only clone: every pass is a dry run, whoever started it (SessionStart,
+  # the statusline, the post-merge route or a person). Counts still print.
+  local readonly_clone=0
+  if fi_sync_readonly; then
+    readonly_clone=1
+    dry_run=1
+  fi
 
   local file
   file="$(fi_find_issues_file)" || {
@@ -674,6 +704,7 @@ cmd_sync() {
   if [[ "$total_closed" -gt 0 || "$total_demoted" -gt 0 || "$renamed_count" -gt 0 || "$woke" -gt 0 ]]; then
     local summary="Synced."
     (( dry_run )) && summary="Dry run — nothing written."
+    (( readonly_clone )) && summary="Read-only clone (found-issues.readonly) — nothing written."
     if (( total_closed > 0 )); then
       summary+="$(printf ' Closed: %d (%d PR + %d commit + %d tombstone).' \
         "$total_closed" "$closed_pr" "$closed_commit" "$closed_tomb")"

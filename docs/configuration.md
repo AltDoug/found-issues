@@ -180,6 +180,26 @@ to find this page:
 If a hook is misbehaving and there's no helpful message, that's a bug —
 open an issue.
 
+## Read-only clones (v3.11.0)
+
+A clone that only ever pulls (a deploy box, a consumer machine) must not get
+an uncommitted ledger edit: git refuses the next `git pull --ff-only` even
+when upstream committed the byte-identical change. Mark such a clone
+read-only and every sync there (SessionStart, statusline autosync, the
+post-merge hook and an explicit `found-issues sync`) reports what it would
+close, demote or archive, and writes nothing:
+
+```bash
+git config found-issues.readonly true    # this clone only
+```
+
+`FOUND_ISSUES_READONLY=1` does the same from the environment, and
+`FOUND_ISSUES_READONLY=0` turns it off for one command whatever git config
+says (the env var, when set, wins). Reads, counts and the SessionStart entry
+list are unchanged. `found-issues doctor` shows the setting under Hook
+opt-outs. Other commands (`log`, `resolve`, `archive`) still write: they
+only run when someone asks for them.
+
 ## Auto-fix settings (v3)
 
 Auto-fix is configured in git config, not env vars: `--global` sets the
