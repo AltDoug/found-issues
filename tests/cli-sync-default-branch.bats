@@ -5,12 +5,14 @@ setup() {
   fi_setup_tmp
   fi_init_git
   fi_use_gh_shim
+  # The default-branch cache lives under XDG_CACHE_HOME: give each test its
+  # own, inside $TMP. A shared ~/.cache plus a teardown that emptied it let
+  # one test delete another's cache when they ran side by side (bats --jobs).
+  export XDG_CACHE_HOME="$TMP/xdg-cache"
 }
 
 teardown() {
   fi_teardown_tmp
-  # Clean up any cache files this test created (they live globally in ~/.cache)
-  rm -rf ~/.cache/found-issues/default-branch-* 2>/dev/null || true
 }
 
 @test "sync: uses gh repo view fallback when origin/HEAD is unset and gh available" {

@@ -22,7 +22,10 @@ export FOUND_ISSUES_SEGMENT_AUTOSYNC=off
 
 # Segment renders write a cache (lib/segment-cache.sh) under the cache dir;
 # keep it out of the real ~/.cache. Tests that inspect it set their own.
-export FOUND_ISSUES_CACHE_DIR="${BATS_RUN_TMPDIR:-${TMPDIR:-/tmp}}/fi-test-cache"
+# One per test (BATS_TEST_TMPDIR exists when this file loads): auto-fix keeps
+# its run logs there (FI_AF_RUNS), and tests running in parallel (bats
+# --jobs) shared and mixed one another's logs.
+export FOUND_ISSUES_CACHE_DIR="${BATS_TEST_TMPDIR:-${BATS_RUN_TMPDIR:-${TMPDIR:-/tmp}}}/fi-test-cache"
 
 # A suite started inside an auto-fix run inherits FOUND_ISSUES_AUTOFIX_CHILD=1,
 # which makes session-start take its headless path and fails every test of

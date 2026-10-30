@@ -10,7 +10,7 @@ setup() {
   fi_setup_tmp
   TMP_TOP="$TMP"
 }
-teardown() { pkill -f 'sleep 471[34]' 2>/dev/null || true; TMP="$TMP_TOP"; fi_teardown_tmp; }
+teardown() { TMP="$TMP_TOP"; fi_teardown_tmp; }
 
 long_dir() { printf "$1%.0s" $(seq 1 100); }
 
