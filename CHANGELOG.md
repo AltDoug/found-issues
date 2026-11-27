@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.12.1] - 2026-11-27
+
+The rule for the `--decide` tag no longer sends an entry to the operator just because it has more than one valid fix.
+
+### Changed
+- **`--decide` is for a real choice, not for any entry with two possible fixes.** The session rules, the `log` command and the Codex `fi-log` skill said an entry "needs the operator's call" when there are "several valid fixes". An agent following that tagged a bug with one clearly better fix as a decision, and it waited for a person to pick the answer the agent had already recommended (operator, 2026-11-27: "why is this a decision for me? the answer here is obvious"). The session rules now say "no clear best fix" (same length as before: that text has a size budget). The `log` command and the Codex skill spell it out: several valid fixes **and no clear better one** is `--decide`; several valid fixes with a clear better one is `--fix`, with the pick named in `(suggested: ...)`. No code changed: the tags, the queue and `found-issues decide` work as before.
+
 ## [3.12.0] - 2026-11-27
 
 A pull request opened with T3 Code's own tool now gets the same annotation suggestions as one opened with `gh pr create`.
