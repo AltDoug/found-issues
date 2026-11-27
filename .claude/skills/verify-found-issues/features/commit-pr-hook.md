@@ -1,17 +1,18 @@
 ---
 feature: Suggestions after a commit or PR
-also-called: post-bash-dispatch, commit-auto, PR-auto, annotation suggestions
+also-called: post-bash-dispatch, commit-auto, PR-auto, annotation suggestions, annotate reminder, T3 pull request tool
 sources:
   - hooks/post-bash-dispatch.sh
   - lib/annotate.sh
 proven-with: hand-built hook payloads (no Claude Code or Codex), mock gh
 proven: 2026-11-27
-proven-hash: 37479ee44372
+proven-hash: b99ba5e850f8
+proven-sources: 7e1352c57948
 ---
 
 ## What it is
 
-After the agent runs `git commit` or `gh pr create`, the hook looks at what changed. When exactly one open entry cites a touched file **and** the change hits that entry's cited line, it writes a non-closing suggestion on it. Otherwise it writes nothing and lists the candidates for the agent to judge. After `gh pr merge`, `close` or `reopen` it starts a background `sync`.
+After the agent runs `git commit` or `gh pr create`, or opens a pull request with T3 Code's own tool (`mcp__t3-code__pull_request_create`), the hook looks at what changed. When exactly one open entry cites a touched file **and** the change hits that entry's cited line, it writes a non-closing suggestion on it. Otherwise it writes nothing and lists the candidates for the agent to judge. After `gh pr merge`, `close` or `reopen` it starts a background `sync`.
 
 ## Parts
 
@@ -19,6 +20,7 @@ After the agent runs `git commit` or `gh pr create`, the hook looks at what chan
 |---|---|---|
 | `this commit produced annotation SUGGESTIONS`, ledger gains `(commit-auto: SHA)` | One entry on the file, cited line changed | a payload with command `git commit ...` and stdout `[branch __HEAD__] subject` |
 | `PR #7 produced annotation SUGGESTIONS`, ledger gains `(PR-auto: org/repo#7)` | The same, for a PR | command `gh pr create --fill`, stdout the PR URL, and the three `GH_MOCK_PR_*` values |
+| The same two lines, with no Bash call at all | A pull request opened with T3 Code's tool | a payload with `tool_name` `mcp__t3-code__pull_request_create` and the tool's result in `tool_response` |
 | `needs annotation judgment`, `[shares a touched file with another entry]`, ledger unchanged | Two entries cite a touched file | log a second entry on the same file |
 | `[cited line not touched by this change]`, ledger unchanged | One entry, other lines changed | a diff that misses the cited line |
 | A prompt only, ledger unchanged. Commit: names `--pick`. PR: `PR #7 touches files referenced by [open] entries` | Suggestions switched off | `FOUND_ISSUES_AUTO_ANNOTATE=off` before the hook name |
@@ -27,7 +29,7 @@ After the agent runs `git commit` or `gh pr create`, the hook looks at what chan
 
 ## How to get to it
 
-Claude Code or Codex fires it after every Bash tool call (PostToolUse). To make a suggestion closing, the agent runs the printed `--pick` command (annotate.md); sync then closes it once it lands (sync.md).
+Claude Code or Codex fires it after every Bash tool call (PostToolUse). Claude Code also fires it after T3 Code's `pull_request_create` tool; that tool has no command, so only the PR route can run. To make a suggestion closing, the agent runs the printed `--pick` command (annotate.md); sync then closes it once it lands (sync.md).
 
 ## Driving it
 
@@ -64,7 +66,7 @@ $F rc "$SB" 1
 $F has "$SB" 'not a valid commit'
 ```
 
-PR route against the `gh` mock: one entry whose line the diff misses (candidates), one whose line it hits (suggestion), then two entries on the file (candidates). A mock row is the PR number, a tab, then the answer. `GH_MOCK_PR_DIFF` is not a row: it is the diff itself, with newlines written as backslash-n.
+PR route against the `gh` mock: one entry whose line the diff misses (candidates), one whose line it hits (suggestion), then two entries on the file (candidates). A mock row is the PR number, a tab, then the answer. `GH_MOCK_PR_DIFF` is not a row: it is the diff itself, with newlines written as backslash-n. The last part sends the same pull request the way T3 Code's tool reports it: no command, the result as JSON text in `tool_response`. Then a pull request in another repository, and a create that failed.
 
 ```bash
 set -eo pipefail
@@ -94,6 +96,23 @@ $F has "$SB" 'src/util.py:6 [shares a touched file with another entry]'
 $F lacks "$SB" 'PR-auto' "$L"
 $F has "$SB" 'pr diff 7' "$SB/gh-calls.log"
 $F snap "$SB" two-entries
+$F registered "$SB" PostToolUse post-bash-dispatch mcp__t3-code__pull_request_create
+T3='{"tool_name":"mcp__t3-code__pull_request_create","cwd":"__REPO__","session_id":"SID","tool_input":{"title":"guard divide","body":"b"},"tool_response":"{\"host\":\"github.com\",\"repository\":\"SLUG\",\"number\":7,\"url\":\"https://github.com/SLUG/pull/7\",\"created\":true}"}'
+t3_hook() { local p="${T3/SID/$1}"; $F hook "$SB" "GH_MOCK_PR_VIEW=$ROW" "GH_MOCK_PR_FILES=$ROW" "GH_MOCK_PR_DIFF=$DIFF" post-bash-dispatch "${p//SLUG/$2}"; }
+$F run "$SB" "rm docs/found-issues.md && found-issues log 'src/util.py:2 — divide has no zero check'"
+t3_hook t0 other/thing
+$F silent "$SB"
+$F lacks "$SB" 'PR-auto' "$L"
+t3_hook t1 fi-sandbox/demo
+$F has "$SB" 'PR #7 produced annotation SUGGESTIONS'
+$F has "$SB" 'found-issues annotate-pr 7 --pick'
+$F has "$SB" '(PR-auto: fi-sandbox/demo#7)' "$L"
+$F lacks "$SB" '(PR: ' "$L"
+$F snap "$SB" t3-tool
+$F run "$SB" "sed -i.bak 's| (PR-auto: [^)]*)||' docs/found-issues.md && rm docs/found-issues.md.bak"
+$F hook "$SB" "GH_MOCK_PR_VIEW=$ROW" post-bash-dispatch '{"tool_name":"mcp__t3-code__pull_request_create","cwd":"__REPO__","session_id":"t2","tool_input":{"title":"t","body":"b"},"tool_response":"Source control provider github failed in createChangeRequest: Validation Failed"}'
+$F silent "$SB"
+$F lacks "$SB" 'PR-auto' "$L"
 ```
 
 Merge route and both off switches. The hook prints nothing, so the proof is the ledger. The control runs first, with the route switched off. The last part turns suggestions off and sends a PR, then a commit.
@@ -129,7 +148,7 @@ $F snap "$SB" annotate-off
 ## What proves it works
 
 - Commit block: the first call prints JSON naming `(commit-auto: SHA)` and the `--pick` command, and the entry is still `[open]`; the repeat prints nothing; sync closes nothing; `--pick` turns the suggestion into `(commit: SHA)`; a bad sha exits 1.
-- PR block: only the single-entry, line-hit case writes `(PR-auto: ...)`. The other two print `needs annotation judgment` with the reason and write nothing.
+- PR block: only the single-entry, line-hit case writes `(PR-auto: ...)`. The other two print `needs annotation judgment` with the reason and write nothing. The T3 Code payload gives the same suggestion and `--pick` line with no Bash command in it; a pull request in another repository and a failed create print nothing and write nothing; `hooks/hooks.json` registers the hook for that tool.
 - Merge block: with the route off the entry stays open; with it on it becomes `[fixed] ... (PR: fi-sandbox/demo#7)`. With suggestions off, both routes print a prompt and write nothing.
 - The first block also checks that `hooks/hooks.json` registers the hook for Bash: a hook nobody registers never fires.
 
@@ -138,7 +157,8 @@ $F snap "$SB" annotate-off
 - Silence is ambiguous: a sha the repo does not have turns the commit route off with **no output** (`git cat-file -e`), and so does a rejected payload.
 - The same HEAD is handled only once per session, so an identical second commit call is silent. The PR block gives each call its own `session_id` for the same reason.
 - Two entries citing one file are never auto-suggested.
+- A pull request opened with T3 Code's tool on another machine (`environmentId` in the tool input) is skipped: it comes from that machine's checkout. Covered by `tests/post-bash-dispatch.bats`, not by the blocks here.
 - The merge-route mock answers MERGED whatever the command was, so a `close` or `reopen` payload would show that a sync starts, not how a really closed PR is handled.
 - Broken: with `FOUND_ISSUES_AUTO_ANNOTATE=off` the PR prompt says to run `/found-issues:annotate-pr N` without `--pick` (`hooks/post-bash-dispatch.sh:172`), and without it only a non-closing suggestion is written. The commit prompt names `--pick`. Logged in `docs/found-issues.md` on 2026-11-27.
 - The PR candidate message gives the `--pick` / `--all` instructions twice. Cosmetic, and not logged.
-- Not driven: `close` and `reopen`, and the auto-fix launch markers (auto-fix stays off). The `hooks.json` line is read, not fired: only a real session shows the host calling the hook.
+- Not driven: `close` and `reopen`, and the auto-fix launch markers (auto-fix stays off). The `hooks.json` lines are read, not fired: only a real session shows the host calling the hook, and for T3 Code's tool only a real T3 thread shows which shape `tool_response` arrives in (the hook reads the JSON text, the object and content blocks alike; `tests/post-bash-dispatch.bats` has one test per shape).

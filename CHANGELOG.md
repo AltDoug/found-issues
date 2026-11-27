@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.12.0] - 2026-11-27
+
+A pull request opened with T3 Code's own tool now gets the same annotation suggestions as one opened with `gh pr create`.
+
+### Added
+- **The pull-request hook also fires after T3 Code's `pull_request_create` tool** (agent-config backlog, 2026-11-24). In a T3 Code thread a pull request is opened with the tool `mcp__t3-code__pull_request_create`, not with a `gh pr create` Bash call, so the hook never saw it and the agent had to remember `annotate-pr` by hand. `hooks/hooks.json` now sends that tool to `hooks/post-bash-dispatch.sh`, which reads the pull request URL from the tool's result (handed over as JSON text, as an object or as content blocks) and takes the same route as before: a line-matched entry gets a non-closing `(PR-auto: ...)` suggestion with its `--pick` command, other candidates are listed for judgment, `FOUND_ISSUES_AUTO_ANNOTATE=off` gives the prompt only, and a pull request in another repository is left alone. A result with no pull request URL (a failed create) does nothing, and so does a pull request opened on another machine through the tool's `environmentId`, because it comes from that machine's checkout. Claude Code only: the Codex hook installer registers Bash alone. Not covered: T3 Code's `pull_request_merge` tool starts no background sync (a `gh pr merge` call does); the next session start or `found-issues sync` closes the entry as before.
+
 ## [3.11.0] - 2026-10-29
 
 A clone can be marked read-only, so no sync ever writes its ledger and its `git pull --ff-only` keeps working.

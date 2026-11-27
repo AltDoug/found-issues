@@ -8,6 +8,7 @@ sources:
 proven-with: no Codex; the generated shim is run by hand
 proven: 2026-11-27
 proven-hash: 17c213d4218a
+proven-sources: 50a3bc72896a
 ---
 
 ## What it is

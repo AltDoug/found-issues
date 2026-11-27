@@ -120,6 +120,168 @@ run_hook_raw() { # $1=raw json
   [[ "$output" == *"not checked"* ]]
 }
 
+# ---- a pull request opened with T3 Code's own tool (no Bash call at all) ----
+#
+# The result shape below is the one T3 Code returned on 2026-11-26
+# (agent-config #861): host, repository, number, url, created. How the harness
+# hands it to a hook is not fixed (the JSON text, a list of content blocks, or
+# the object itself), so each shape has a test.
+T3_OK='{"host":"github.com","repository":"org/repo","number":7,"url":"https://github.com/org/repo/pull/7","created":true}'
+T3_DIFF='diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ -40,6 +40,7 @@\n ctx40\n ctx41\n-old42\n+new42\n+added\n ctx43\n ctx44\n ctx45'
+
+t3_payload() { # $1=tool_response as raw JSON, $2=tool name (optional)
+  jq -nc --argjson r "$1" --arg n "${2:-mcp__t3-code__pull_request_create}" \
+    '{hook_event_name:"PostToolUse", tool_name:$n, tool_input:{title:"t", body:"b"}, tool_response:$r}'
+}
+
+run_t3_hook() { # $1=tool_response as raw JSON, $2=tool name (optional)
+  t3_payload "$1" "${2:-}" | "$HOOK"
+}
+
+@test "t3 pr create: a result handed over as JSON text is SUGGESTED, not annotated" {
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_t3_hook "$(jq -nc --arg s "$T3_OK" '$s')"
+  [ "$status" -eq 0 ]
+  grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
+  [[ "$output" == *"SUGGESTIONS"* ]]
+  [[ "$output" == *"--pick"* ]]
+  run grep -q '(PR:' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "t3 pr create: a result handed over as content blocks is SUGGESTED" {
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_t3_hook "$(jq -nc --arg s "$T3_OK" '[{type:"text", text:$s}]')"
+  [ "$status" -eq 0 ]
+  grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
+  [[ "$output" == *"SUGGESTIONS"* ]]
+}
+
+@test "t3 pr create: content blocks whose text writes slashes as backslash-slash are still read" {
+  # JSON may escape "/" as "\/". Wrapped in a content block and flattened with
+  # tojson, each of those backslashes is doubled, and the URL only matches
+  # because the hook drops backslashes first.
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  esc='{"host":"github.com","repository":"org\/repo","number":7,"url":"https:\/\/github.com\/org\/repo\/pull\/7","created":true}'
+  run run_t3_hook "$(jq -nc --arg s "$esc" '[{type:"text", text:$s}]')"
+  [ "$status" -eq 0 ]
+  grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
+  [[ "$output" == *"SUGGESTIONS"* ]]
+}
+
+@test "t3 pr create: a pull request opened on another machine (environmentId) is not annotated here" {
+  # With environmentId the tool acts in a thread on another machine: the pull
+  # request comes from that machine's checkout, not from the one holding this
+  # ledger, even when both are clones of the same repository.
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_hook_raw "$(jq -nc --argjson r "$T3_OK" \
+    '{hook_event_name:"PostToolUse", tool_name:"mcp__t3-code__pull_request_create", tool_input:{title:"t", body:"b", environmentId:"0a9b197b"}, tool_response:$r}')"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "t3 pr create: a Bash call that only mentions the tool by name is not a pull request" {
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_hook 'rg mcp__t3-code__pull_request_create hooks/' 'https://github.com/org/repo/pull/7'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "t3 pr create: a result handed over as an object is SUGGESTED" {
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_t3_hook "$T3_OK"
+  [ "$status" -eq 0 ]
+  grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
+  [[ "$output" == *"SUGGESTIONS"* ]]
+}
+
+@test "t3 pr create: unmatched-line candidates surface with the pick instruction" {
+  fi_run log "src/foo.py:99 — wrong cast"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_t3_hook "$T3_OK"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"found-issues annotate-pr 7 --pick"* ]]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "t3 pr create: FOUND_ISSUES_AUTO_ANNOTATE=off falls back to the legacy prompt" {
+  export FOUND_ISSUES_AUTO_ANNOTATE=off
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  run run_t3_hook "$T3_OK"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/found-issues:annotate-pr 7"* ]]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "t3 pr create: a pull request opened in another repository is not annotated here" {
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_t3_hook '{"host":"github.com","repository":"other/thing","number":7,"url":"https://github.com/other/thing/pull/7","created":true}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "t3 pr create: a failed create (no pull request URL in the result) is silent" {
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  run run_t3_hook '"Source control provider github failed in createChangeRequest: GitHub returned an error: Validation Failed; No commits between main and main"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "t3 pr create: the result is read with the relevance gate switched off too" {
+  export FOUND_ISSUES_HOOK_GATES=off
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_t3_hook "$T3_OK"
+  [ "$status" -eq 0 ]
+  grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
+}
+
+@test "t3 pr create: another T3 tool whose result carries a pull request URL does nothing" {
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_t3_hook "$T3_OK" mcp__t3-code__pull_request_read
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "t3 pr create: hooks.json sends the tool to this hook" {
+  run jq -r '.hooks.PostToolUse[] | select(.matcher == "mcp__t3-code__pull_request_create") | .hooks[].command' \
+    "$TEST_REPO_ROOT/hooks/hooks.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/hooks/post-bash-dispatch.sh"* ]]
+}
+
 @test "git commit: line-matched entry is SUGGESTED, not annotated" {
   mkdir -p src
   printf 'l1\nl2\nl3\n' > src/foo.py

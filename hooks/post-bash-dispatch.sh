@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# post-bash-dispatch.sh — the plugin's single PostToolUse(Bash) hook.
+# post-bash-dispatch.sh — the plugin's single PostToolUse(Bash) hook. It also
+# receives T3 Code's pull-request tool (mcp__t3-code__pull_request_create,
+# since 3.12.0), which opens a pull request with no Bash call and takes the
+# first route only.
 #
 # Routes on the executed command:
 #   gh pr create            → record line-matched entries as SUGGESTIONS
@@ -53,6 +56,7 @@ if [[ -f "$__fi_hook_dir/../lib/hook-gate.sh" ]] \
   fi_gate_has commit \
     || { fi_gate_has gh && fi_gate_has create merge close reopen; } \
     || [[ "$input" == *AUTOFIX-QUEUED* || "$input" == *AUTOFIX-SWEEP-DUE* ]] \
+    || [[ "$input" == *mcp__t3-code__pull_request_create* ]] \
     || exit 0
 fi
 
@@ -62,10 +66,27 @@ get_field() {
   printf '%s' "$input" | jq -r "$1 // empty" 2>/dev/null || true
 }
 
+# One tool besides Bash comes here: T3 Code's own pull-request tool
+# (hooks.json registers it). A pull request opened that way never passes
+# through a `gh pr create` Bash call, so it has no command and can take the
+# pr-create route only.
 tool_name="$(get_field '.tool_name')"
-[[ "$tool_name" != "Bash" ]] && exit 0
-cmd="$(get_field '.tool_input.command')"
-[[ -z "$cmd" ]] && exit 0
+t3_pr=0
+case "$tool_name" in
+  Bash) ;;
+  mcp__t3-code__pull_request_create) t3_pr=1 ;;
+  *) exit 0 ;;
+esac
+cmd=""
+if (( t3_pr )); then
+  # With environmentId the tool acts in a thread on ANOTHER machine: that pull
+  # request comes from that machine's checkout, not from the one holding this
+  # ledger, even when both are clones of one repository.
+  [[ -n "$(get_field '.tool_input.environmentId')" ]] && exit 0
+else
+  cmd="$(get_field '.tool_input.command')"
+  [[ -z "$cmd" ]] && exit 0
+fi
 # The commit and merge routes match against the command with quoted spans
 # removed, so a command that merely MENTIONS `git commit` / `gh pr merge`
 # inside a string (echo, grep, a commit message) does not trigger them.
@@ -284,8 +305,18 @@ ctx=""
 # a bare substring match) so a commit message that merely mentions the words
 # "gh pr create" doesn't behave differently here than it does anywhere else
 # — the /pull/N stdout guard below is still the main false-positive gate.
-if [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$) ]]; then
-  stdout="$(get_field '.tool_response.stdout')"
+if (( t3_pr )) || [[ "$cmd" =~ (^|[[:space:];|&])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$) ]]; then
+  if (( t3_pr )); then
+    # The tool's result ({host, repository, number, url, created}) reaches a
+    # hook as the object, as its JSON text, or wrapped in content blocks,
+    # depending on the harness. Flatten whichever it is to one text and drop
+    # the backslashes nesting adds: the URL guard below needs nothing else.
+    stdout="$(printf '%s' "$input" \
+      | jq -r '.tool_response | if type == "string" then . else tojson end' 2>/dev/null || true)"
+    stdout="${stdout//\\/}"
+  else
+    stdout="$(get_field '.tool_response.stdout')"
+  fi
   pr_num=""
   re_pr_url='github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([0-9]+)'
   if [[ "$stdout" =~ $re_pr_url ]]; then
