@@ -44,3 +44,6 @@ tmp/
 dist/
 build/
 node_modules/
+
+# Evidence from the verify kit (.claude/skills/verify-found-issues)
+.verify/
