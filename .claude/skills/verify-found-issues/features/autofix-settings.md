@@ -1,6 +1,6 @@
 ---
 feature: Auto-fix settings and status
-also-called: config, autofix off, autofix status, autofix ready, why is auto-fix waiting
+also-called: config, autofix status, autofix ready
 sources:
   - lib/autofix-config.sh
   - lib/autofix-status.sh
@@ -10,17 +10,18 @@ proven: 2026-11-27
 
 ## What it is
 
-Reads and sets auto-fix options in git config, and says whether this repo is able to run it. Auto-fix itself stays off while verifying.
+Reads and sets auto-fix options in git config, and says whether this repo is able to run it. Auto-fix itself stays off while verifying (the runs are in autofix-runs.md).
 
 ## Parts
 
-| What you see | What it does | Handle |
+| What you see | What it does | Drive it by |
 |---|---|---|
-| `config` | Every `found-issues.*` setting with its source | `cmd_config` |
-| `Set found-issues.autofix.dailyFixes = 3 (local)` | `config KEY VALUE`, validated | `cmd_config` |
-| `autofix ready` with a `verdict:` line | Why it can or cannot run here | `lib/autofix-ready.sh` |
-| `autofix status` | Queued, running, done today | `cmd_autofix` |
-| `autofix on, off` | Kill switch for every repo | `cmd_autofix` |
+| Every `found-issues.*` setting with its source | Lists settings | `found-issues config` |
+| `Set found-issues.autofix.dailyFixes = 3 (local)` | Sets one, validated | `config autofix.dailyFixes 3` |
+| `takes a whole number of 1 or more` (exit 2) | Refuses a bad value | `config autofix.dailyFixes abc` |
+| A `verdict:` line | Why auto-fix can or cannot run here | `found-issues autofix ready` |
+| Queued, running, done today | The queue | `autofix status`, in a GitHub repo |
+| A switch for every repo | Stops and resumes auto-fix | `autofix off`, `autofix on` |
 
 ## How to get to it
 
@@ -28,25 +29,35 @@ Reads and sets auto-fix options in git config, and says whether this repo is abl
 
 ## Driving it
 
-Run the whole block as one shell call:
-
 ```bash
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
-eval "$($F new autofix-settings)"
+eval "$($F new autofix-settings)"; trap '$F rm "$SB"' EXIT
 $F run "$SB" 'found-issues config'
-$F run "$SB" 'found-issues config autofix.dailyFixes 3 && git config --get found-issues.autofix.dailyFixes'
-$F run "$SB" 'found-issues config autofix.dailyFixes abc' || true     # exit 2
+$F match "$SB" '^found-issues\.autofix\.dailyFixes +5 +\(default\)$'
+$F run "$SB" 'found-issues config autofix.dailyFixes 3'
+$F is "$SB" 'Set found-issues.autofix.dailyFixes = 3 (local)'
+$F run "$SB" 'git config --get found-issues.autofix.dailyFixes'
+$F is "$SB" '3'
+$F run "$SB" 'found-issues config autofix.dailyFixes abc' || true
+$F rc "$SB" 2
+$F has "$SB" 'takes a whole number of 1 or more'
+$F run "$SB" 'git config --get found-issues.autofix.dailyFixes'
+$F is "$SB" '3'
 $F run "$SB" 'found-issues autofix ready'
+$F has "$SB" 'auto-fix: off (FOUND_ISSUES_AUTOFIX=off)'
+$F has "$SB" 'verdict: waiting: no test command'
 $F run "$SB" 'found-issues autofix status' || true
-$F rm "$SB"
+$F rc "$SB" 1
+$F has "$SB" 'autofix: not in a GitHub repo'
 ```
 
 ## What proves it works
 
-- The set value is read back from git config; the bad value exits 2 with `takes a whole number of 1 or more`.
-- `ready` prints `auto-fix: off (FOUND_ISSUES_AUTOFIX=off)` and `verdict: waiting: no test command ...`.
-- In a sandbox with no GitHub remote, `status` says `autofix: not in a GitHub repo` and exits 1.
+- The default is listed, the set value is read back from git config, and the bad value exits 2 and leaves it.
+- `ready` says auto-fix is off by the environment and waits for a test command.
+- With no GitHub remote, `status` exits 1.
 
 ## Gotchas
 
-Not driven in the proving run: `autofix on` and `off` (the kill switch file), `summary`, and `status` inside a `--github` sandbox.
+- Not driven: `autofix on` and `off` (the kill switch), `summary`, and `status` inside a `--github` sandbox.
+- Never drop `FOUND_ISSUES_AUTOFIX=off` to see another verdict.
