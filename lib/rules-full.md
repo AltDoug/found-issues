@@ -16,7 +16,7 @@
 
 ## Annotation after PR / commit
 
-After `gh pr create` / `git commit` a hook writes a NON-closing suggestion (`(PR-auto: …)` / `(commit-auto: …)`) on entries whose cited line the diff touched, and lists candidates it could not decide. Compare each symptom with what the change did, then run the printed `found-issues annotate-pr <N> --pick <loc>,...` for exactly the entries it fixes — only `--pick` (or `--all`, when every candidate is fixed) writes the closing token. Never pick an entry it does not fix: it closes on merge, irreversibly. Unconfirmed entries never auto-close. No hook (web-UI PR)? Same `--pick` command; commits: `annotate-commit <sha> --pick <loc>`.
+After `gh pr create` (or T3 Code's pull-request tool) / `git commit` a hook writes a NON-closing suggestion (`(PR-auto: …)` / `(commit-auto: …)`) on entries whose cited line the diff touched, and lists candidates it could not decide. Compare each symptom with what the change did, then run the printed `found-issues annotate-pr <N> --pick <loc>,...` for exactly the entries it fixes — only `--pick` (or `--all`, when every candidate is fixed) writes the closing token. Never pick an entry it does not fix: it closes on merge, irreversibly. Unconfirmed entries never auto-close. No hook (web-UI PR)? Same `--pick` command; commits: `annotate-commit <sha> --pick <loc>`.
 
 ## Sync
 
