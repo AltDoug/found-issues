@@ -123,7 +123,8 @@ retire_one() {
 @test "wrench: a local-mode ledger nested under a repo does not inherit its wrench count" {
   mkdir -p "$FOUND_ISSUES_STATE_DIR/autofix/seg" "$REPO/notes"
   printf '2\n' > "$FOUND_ISSUES_STATE_DIR/autofix/seg/${REPO//[^A-Za-z0-9._-]/_}"
-  printf '# found-issues\n\n- [open] 2026-10-01 n.sh:1 — nested note\n' > "$REPO/notes/.found-issues.md"
+  # today's date: an entry older than 30 days is counted as stale, and the count below would not say "issue"
+  printf '# found-issues\n\n- [open] %s n.sh:1 — nested note\n' "$(date +%Y-%m-%d)" > "$REPO/notes/.found-issues.md"
   run seg "$REPO/notes"
   [[ "$output" == *"issue"* ]]
   [[ "$output" != *"🔧"* ]] || false

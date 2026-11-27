@@ -98,6 +98,10 @@ Tests run side by side under `--jobs`, so a test keeps its state in its own
 temp dirs (`fi_setup_tmp`, `$BATS_TEST_TMPDIR`) and never kills processes by a
 pattern another test could also match.
 
+To see a change work for real (the CLI, a hook or a statusline shim in a
+throwaway sandbox, never your own ledger), follow
+[`.claude/skills/verify-found-issues/SKILL.md`](.claude/skills/verify-found-issues/SKILL.md).
+
 When adding code, add tests. Existing files in `tests/` are good
 reference — they cover lib functions, CLI subcommands, and hooks.
 
