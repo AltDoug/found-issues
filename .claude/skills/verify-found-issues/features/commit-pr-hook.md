@@ -6,7 +6,8 @@ sources:
   - lib/annotate.sh
 proven-with: hand-built hook payloads (no Claude Code or Codex), mock gh
 proven: 2026-11-27
-proven-hash: 37479ee44372
+proven-hash: b99ba5e850f8
+proven-sources: 7e1352c57948
 ---
 
 ## What it is
@@ -156,6 +157,7 @@ $F snap "$SB" annotate-off
 - Silence is ambiguous: a sha the repo does not have turns the commit route off with **no output** (`git cat-file -e`), and so does a rejected payload.
 - The same HEAD is handled only once per session, so an identical second commit call is silent. The PR block gives each call its own `session_id` for the same reason.
 - Two entries citing one file are never auto-suggested.
+- A pull request opened with T3 Code's tool on another machine (`environmentId` in the tool input) is skipped: it comes from that machine's checkout. Covered by `tests/post-bash-dispatch.bats`, not by the blocks here.
 - The merge-route mock answers MERGED whatever the command was, so a `close` or `reopen` payload would show that a sync starts, not how a really closed PR is handled.
 - Broken: with `FOUND_ISSUES_AUTO_ANNOTATE=off` the PR prompt says to run `/found-issues:annotate-pr N` without `--pick` (`hooks/post-bash-dispatch.sh:172`), and without it only a non-closing suggestion is written. The commit prompt names `--pick`. Logged in `docs/found-issues.md` on 2026-11-27.
 - The PR candidate message gives the `--pick` / `--all` instructions twice. Cosmetic, and not logged.

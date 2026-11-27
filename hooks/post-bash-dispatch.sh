@@ -56,7 +56,7 @@ if [[ -f "$__fi_hook_dir/../lib/hook-gate.sh" ]] \
   fi_gate_has commit \
     || { fi_gate_has gh && fi_gate_has create merge close reopen; } \
     || [[ "$input" == *AUTOFIX-QUEUED* || "$input" == *AUTOFIX-SWEEP-DUE* ]] \
-    || [[ "$input" == *pull_request_create* ]] \
+    || [[ "$input" == *mcp__t3-code__pull_request_create* ]] \
     || exit 0
 fi
 
@@ -78,7 +78,12 @@ case "$tool_name" in
   *) exit 0 ;;
 esac
 cmd=""
-if (( ! t3_pr )); then
+if (( t3_pr )); then
+  # With environmentId the tool acts in a thread on ANOTHER machine: that pull
+  # request comes from that machine's checkout, not from the one holding this
+  # ledger, even when both are clones of one repository.
+  [[ -n "$(get_field '.tool_input.environmentId')" ]] && exit 0
+else
   cmd="$(get_field '.tool_input.command')"
   [[ -z "$cmd" ]] && exit 0
 fi

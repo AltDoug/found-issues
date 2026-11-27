@@ -161,6 +161,46 @@ run_t3_hook() { # $1=tool_response as raw JSON, $2=tool name (optional)
   [[ "$output" == *"SUGGESTIONS"* ]]
 }
 
+@test "t3 pr create: content blocks whose text writes slashes as backslash-slash are still read" {
+  # JSON may escape "/" as "\/". Wrapped in a content block and flattened with
+  # tojson, each of those backslashes is doubled, and the URL only matches
+  # because the hook drops backslashes first.
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  esc='{"host":"github.com","repository":"org\/repo","number":7,"url":"https:\/\/github.com\/org\/repo\/pull\/7","created":true}'
+  run run_t3_hook "$(jq -nc --arg s "$esc" '[{type:"text", text:$s}]')"
+  [ "$status" -eq 0 ]
+  grep -q '(PR-auto: org/repo#7)' docs/found-issues.md
+  [[ "$output" == *"SUGGESTIONS"* ]]
+}
+
+@test "t3 pr create: a pull request opened on another machine (environmentId) is not annotated here" {
+  # With environmentId the tool acts in a thread on another machine: the pull
+  # request comes from that machine's checkout, not from the one holding this
+  # ledger, even when both are clones of the same repository.
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_hook_raw "$(jq -nc --argjson r "$T3_OK" \
+    '{hook_event_name:"PostToolUse", tool_name:"mcp__t3-code__pull_request_create", tool_input:{title:"t", body:"b", environmentId:"0a9b197b"}, tool_response:$r}')"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
+@test "t3 pr create: a Bash call that only mentions the tool by name is not a pull request" {
+  fi_run log "src/foo.py:42 — null check"
+  export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'
+  export GH_MOCK_PR_DIFF="$T3_DIFF"
+  run run_hook 'rg mcp__t3-code__pull_request_create hooks/' 'https://github.com/org/repo/pull/7'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run grep -q '(PR' docs/found-issues.md
+  [ "$status" -ne 0 ]
+}
+
 @test "t3 pr create: a result handed over as an object is SUGGESTED" {
   fi_run log "src/foo.py:42 — null check"
   export GH_MOCK_PR_VIEW=$'7\tsrc/foo.py'

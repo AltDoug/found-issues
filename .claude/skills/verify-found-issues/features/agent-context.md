@@ -10,6 +10,7 @@ sources:
 proven-with: hand-built hook payloads (no Claude Code or Codex)
 proven: 2026-11-27
 proven-hash: 63beb74e1127
+proven-sources: dd68e34ab295
 ---
 
 ## What it is
