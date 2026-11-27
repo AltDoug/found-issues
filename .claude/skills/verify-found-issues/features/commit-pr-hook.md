@@ -139,6 +139,6 @@ $F snap "$SB" annotate-off
 - The same HEAD is handled only once per session, so an identical second commit call is silent. The PR block gives each call its own `session_id` for the same reason.
 - Two entries citing one file are never auto-suggested.
 - The merge-route mock answers MERGED whatever the command was, so a `close` or `reopen` payload would show that a sync starts, not how a really closed PR is handled.
-- Broken: with `FOUND_ISSUES_AUTO_ANNOTATE=off` the PR prompt says to run `/found-issues:annotate-pr N` without `--pick` (`hooks/post-bash-dispatch.sh:172`), and without it only a non-closing suggestion is written. The commit prompt names `--pick`. Not in the ledger yet.
-- Broken: the PR candidate message gives the `--pick` / `--all` instructions twice. Not in the ledger yet.
+- Broken: with `FOUND_ISSUES_AUTO_ANNOTATE=off` the PR prompt says to run `/found-issues:annotate-pr N` without `--pick` (`hooks/post-bash-dispatch.sh:172`), and without it only a non-closing suggestion is written. The commit prompt names `--pick`. Logged in `docs/found-issues.md` on 2026-11-27.
+- The PR candidate message gives the `--pick` / `--all` instructions twice. Cosmetic, and not logged.
 - Not driven: `close` and `reopen`, and the auto-fix launch markers (auto-fix stays off). The `hooks.json` line is read, not fired: only a real session shows the host calling the hook.

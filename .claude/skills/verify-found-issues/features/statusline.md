@@ -102,8 +102,8 @@ $F is "$SB" 'host'
 
 ## Gotchas
 
-- Broken: a bash host that prints an unquoted word (`printf host`, as an argument of its own with no quotes) gets `printf host${__FI_SEG}`; the segment then splits into extra `printf` arguments and **no counter shows**, while the install says `applied` and exits 0. Not in the ledger yet. The default install is not affected.
+- Broken: a bash host that prints an unquoted word (`printf host`, as an argument of its own with no quotes) gets `printf host${__FI_SEG}`; the segment then splits into extra `printf` arguments and **no counter shows**, while the install says `applied` and exits 0. Logged in `docs/found-issues.md` on 2026-11-27. The default install is not affected.
 - A node or python host without a `dir` or `cwd` variable shows no segment when `CLAUDE_PROJECT_DIR` points elsewhere, though the install exits 0. That is the fixture's fault, not a failed splice.
-- Broken: after a good default install, `doctor-statusline-runtime` prints `✓ Segment rendered` and then `cause: splice gap`, advising a `--target ... --apply` re-run. The splice check in `lib/statusline-install.sh` runs even for the default block. Not in the ledger yet. The block checks only the `✓` line.
-- Broken: the node and python splices drop the segment's leading space (`host-node| 1 issue`, bash shows `host-bash | 1 issue`). Not in the ledger yet. The checks accept both, so a fix does not fail them.
+- Broken: after a good default install, `doctor-statusline-runtime` prints `✓ Segment rendered` and then `cause: splice gap`, advising a `--target ... --apply` re-run. The splice check in `lib/statusline-install.sh` runs even for the default block. Logged in `docs/found-issues.md` on 2026-11-27. The block checks only the `✓` line.
+- Broken: the node and python splices drop the segment's leading space (`host-node| 1 issue`, bash shows `host-bash | 1 issue`). Logged in `docs/found-issues.md` on 2026-11-27. The checks accept both, so a fix does not fail them.
 - Not driven: Claude Code rendering it, the Windows branches, and migration of old marker blocks.
