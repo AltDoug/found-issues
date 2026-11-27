@@ -7,6 +7,7 @@ sources:
   - commands/archive.md
   - codex-skills/fi-archive/
 proven: 2026-11-27
+proven-hash: e7f42c2a7ed2
 ---
 
 ## What it is
@@ -33,6 +34,7 @@ The sync command's AI pass and a person who checked the code use `resolve`. `/fo
 Resolve: a held entry, a miss, an ambiguous match, then the close.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new resolve)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md
@@ -58,6 +60,7 @@ $F snap "$SB" final
 Archive: the dry run writes nothing, the real run moves the one `[fixed]` entry.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new archive)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md; A=docs/found-issues-archive.md

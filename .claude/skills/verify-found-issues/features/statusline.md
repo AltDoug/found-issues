@@ -9,6 +9,7 @@ sources:
   - lib/segment-cache.sh
 proven-with: hand-built statusline stdin and small host scripts (not Claude Code)
 proven: 2026-11-27
+proven-hash: a02d7d4a4ca3
 ---
 
 ## What it is
@@ -37,6 +38,7 @@ Adds the open-issue count to the user's statusline, either appended to `~/.claud
 Splice into three custom hosts, then **execute** each. Hosts must read the workspace folder from stdin; node and python hosts must hold it in a variable named `dir` or `cwd`; a bash host must quote what it prints. `CLAUDE_PROJECT_DIR=/nonexistent` is deliberate: the folder taken from stdin must win over it. In order: a preview that writes nothing, the splice, a control with an empty ledger, the render with one entry, removal, and a target that does not exist.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new statusline-shims)"; trap '$F rm "$SB"' EXIT
 cat > "$SB/make-hosts.sh" <<'EOF'
@@ -73,6 +75,7 @@ $F gone "$SB" "$SB/missing.sh"
 The default target (its block is appended, not spliced, so the host's own line is left alone): install, execute, both checks, then uninstall and execute again.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new statusline-default)"; trap '$F rm "$SB"' EXIT
 $F run "$SB" "found-issues log 'src/util.py:2 — divide has no zero check'"

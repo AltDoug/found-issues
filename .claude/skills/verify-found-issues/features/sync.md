@@ -7,6 +7,7 @@ sources:
   - codex-skills/fi-sync/
 proven-with: mock gh for PR closure
 proven: 2026-11-27
+proven-hash: e240efe5cd5b
 ---
 
 ## What it is
@@ -34,6 +35,7 @@ Reconciles the ledger with git and GitHub: an entry flips to `[fixed]` when its 
 Commit closure. The entry is annotated first (annotate.md). A second entry is linked to a commit that never touched its file, and must stay open.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new sync-commit)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md
@@ -54,6 +56,7 @@ $F snap "$SB" after-merge
 PR closure against the `gh` mock: an open PR closes nothing, a PR merged into `main` closes the entry.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new sync-pr --github)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md
@@ -72,6 +75,7 @@ $F snap "$SB" after-sync
 Removed files: a dry run and a read-only clone write nothing; the real run tombstones the ordinary entry and holds the critical one.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new sync-tombstone)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md

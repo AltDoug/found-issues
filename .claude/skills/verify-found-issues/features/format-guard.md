@@ -6,6 +6,7 @@ sources:
   - hooks/pre-commit.sh
 proven-with: hand-built hook payloads (no Claude Code or Codex)
 proven: 2026-11-27
+proven-hash: 168f2b2dbd41
 ---
 
 ## What it is
@@ -30,6 +31,7 @@ It fires before the agent's Write, Edit or MultiEdit; the git hook is offered by
 The agent-side guard on a GitHub repo: block, switch off, and a good line.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new format-guard --github)"; trap '$F rm "$SB"' EXIT
 $F registered "$SB" PreToolUse format-enforcer Write
@@ -46,6 +48,7 @@ $F silent "$SB"
 Plain git, no GitHub remote: the same bad line only warns.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new format-warn)"; trap '$F rm "$SB"' EXIT
 $F hook "$SB" format-enforcer '{"tool_name":"Write","cwd":"__REPO__","tool_input":{"file_path":"__REPO__/docs/found-issues.md","content":"# found-issues\n\n- [open] 2026-11-27 src/util.py:2 - hyphen not em dash\n"}}'
@@ -57,6 +60,7 @@ $F has "$SB" 'separator must be'
 The git hook: a bad ledger cannot be committed, a good one can.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new pre-commit)"; trap '$F rm "$SB"' EXIT
 $F run "$SB" 'cp "$FI_ROOT/hooks/pre-commit.sh" .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit && mkdir -p docs && printf "# found-issues\n\n- [open] 2026-11-27 src/util.py:2 - bad separator\n" > docs/found-issues.md && git add docs && git commit -qm bad' || true

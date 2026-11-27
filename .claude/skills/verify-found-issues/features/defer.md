@@ -9,6 +9,7 @@ sources:
   - codex-skills/fi-defer/
   - codex-skills/fi-promote-deferred/
 proven: 2026-11-27
+proven-hash: 70e91f01f372
 ---
 
 ## What it is
@@ -32,6 +33,7 @@ Parks an issue so it leaves the counter but stays tracked. Logging it again coun
 ## Driving it
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new defer)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md

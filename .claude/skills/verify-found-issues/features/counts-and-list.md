@@ -6,6 +6,7 @@ sources:
   - commands/status.md
   - codex-skills/fi-status/
 proven: 2026-11-27
+proven-hash: 8f704cbdfd35
 ---
 
 ## What it is
@@ -32,6 +33,7 @@ Shows how many entries are open, by bucket, and prints the entries themselves. B
 ## Driving it
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new counts)"; trap '$F rm "$SB"' EXIT
 $F run "$SB" "found-issues log --critical 'src/app.sh:3 — empty name'; found-issues log 'src/util.py:2 — no zero check'"

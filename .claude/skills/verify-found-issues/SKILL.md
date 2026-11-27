@@ -146,7 +146,6 @@ Open `features/README.md`, find the feature by its command or message, open its 
 
 ## Keeping this kit true
 
-- You drove a feature and it works: set `proven:` in its file to today's date.
-- The kit was wrong or out of date: fix it in the same pull request as your change.
+- You drove a feature and it works: date it. With the `verification-kit` skill installed, its `scripts/kit_check.py <this folder> --run <feature> --stamp` runs the blocks under the feature's `## Driving it` and writes the date. Without the skill, save each of those blocks to a temporary file outside the repository, run it with `bash <file>` from the repository root, and when every one exits 0 set `proven:` to today's date yourself.
+- The kit was wrong or out of date: fix it in the same pull request as your change. A block you edit has to run again before its date means anything.
 - You added a user-facing feature: add its file and its line in `features/README.md`.
-- With the `verification-kit` skill installed, its `scripts/kit_check.py` checks this folder, and `--run <feature> --stamp` drives a feature and dates it. Without it, follow the three rules above by hand.

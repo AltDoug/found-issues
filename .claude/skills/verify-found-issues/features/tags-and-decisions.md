@@ -8,6 +8,7 @@ sources:
   - commands/decide.md
   - codex-skills/fi-decide/
 proven: 2026-11-27
+proven-hash: 67396a54ffa1
 ---
 
 ## What it is
@@ -31,6 +32,7 @@ Each entry can carry one fix tag, plus a hold. Entries tagged `(decide: ...)` fo
 ## Driving it
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new decisions)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md

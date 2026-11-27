@@ -6,6 +6,7 @@ sources:
   - commands/log.md
   - codex-skills/fi-log/
 proven: 2026-11-27
+proven-hash: a94d8ff75444
 ---
 
 ## What it is
@@ -34,6 +35,7 @@ In an agent session the model runs `/found-issues:log`; at a shell it is `found-
 A log, a duplicate, a critical one, a tagged one, two bad inputs, then the ledger on disk.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new log-an-issue)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md
@@ -63,6 +65,7 @@ $F has "$SB" 'src/util.py:6 — first() raises IndexError (fix: small)' "$L"
 The off-limits rewrite, and local mode in a folder with no git.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new log-offlimits)"; trap '$F rm "$SB"' EXIT
 $F run "$SB" "echo x > untracked.py && found-issues log --fix small 'untracked.py:1 — not in git'"
@@ -72,6 +75,7 @@ $F lacks "$SB" '(fix: small)' docs/found-issues.md
 ```
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new log-local --local)"; trap '$F rm "$SB"' EXIT
 $F run "$SB" "found-issues log 'src/util.py:2 — local mode entry' && found-issues status --format=plain"

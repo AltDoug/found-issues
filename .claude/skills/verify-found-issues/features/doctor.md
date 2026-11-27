@@ -7,6 +7,7 @@ sources:
   - codex-skills/fi-doctor/
 proven-with: mock gh and refusing stand-ins for claude and codex
 proven: 2026-11-27
+proven-hash: f80905e06103
 ---
 
 ## What it is
@@ -31,6 +32,7 @@ One report of whether the install is healthy: ledger, CLI, statusline, gh, mode,
 A healthy ledger first, then one with merge conflict markers, which it must name.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new doctor)"; trap '$F rm "$SB"' EXIT
 $F run "$SB" "found-issues log 'src/util.py:2 — no zero check' >/dev/null; found-issues doctor"

@@ -6,6 +6,7 @@ sources:
   - lib/autofix-status.sh
   - lib/autofix-ready.sh
 proven: 2026-11-27
+proven-hash: 198b5059965c
 ---
 
 ## What it is
@@ -30,6 +31,7 @@ Reads and sets auto-fix options in git config, and says whether this repo is abl
 ## Driving it
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new autofix-settings)"; trap '$F rm "$SB"' EXIT
 $F run "$SB" 'found-issues config'

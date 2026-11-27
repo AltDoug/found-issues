@@ -8,6 +8,7 @@ sources:
   - codex-skills/fi-promote/
 proven-with: hand-built hook payloads (no Claude Code or Codex)
 proven: 2026-11-27
+proven-hash: 0f39d6f80c96
 ---
 
 ## What it is
@@ -30,6 +31,7 @@ The hook fires before any Bash call that deletes a branch.
 ## Driving it
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new branch-guard)"; trap '$F rm "$SB"' EXIT
 $F registered "$SB" PreToolUse pre-branch-delete Bash

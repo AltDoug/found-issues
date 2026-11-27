@@ -9,6 +9,7 @@ sources:
   - codex-skills/fi-setup/
   - codex-skills/fi-uninstall/
 proven: 2026-11-27
+proven-hash: 2dcf8163f01f
 ---
 
 ## What it is
@@ -34,6 +35,7 @@ Getting the plugin set up and taking it off. `/found-issues:setup` is a guided w
 The alias: install, read, remove; then somebody's own `/fi` is left alone by both.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new alias)"; trap '$F rm "$SB"' EXIT
 FI_MD="$SB/home/.claude/commands/fi.md"
@@ -55,6 +57,7 @@ $F has "$SB" 'mine' "$FI_MD"
 Uninstall: the two state folders and our alias go, the ledger stays.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new uninstall)"; trap '$F rm "$SB"' EXIT
 H="$SB/home"

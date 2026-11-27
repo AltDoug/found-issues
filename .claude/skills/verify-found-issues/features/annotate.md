@@ -11,6 +11,7 @@ sources:
   - codex-skills/fi-annotate-commit/
 proven-with: mock gh for the PR form
 proven: 2026-11-27
+proven-hash: 9b37ae229dbc
 ---
 
 ## What it is
@@ -35,6 +36,7 @@ After `gh pr create` or a commit, usually from the hook's printed command (see c
 Commit form and its undo.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new annotate)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md
@@ -53,6 +55,7 @@ $F has "$SB" '- [open] ' "$L"
 PR form against the `gh` mock. A mock row is the PR number, a tab, then the answer.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new annotate-pr --github)"; trap '$F rm "$SB"' EXIT
 $F run "$SB" "found-issues log 'src/util.py:2 — divide has no zero check'"

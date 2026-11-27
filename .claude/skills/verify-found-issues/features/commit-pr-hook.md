@@ -6,6 +6,7 @@ sources:
   - lib/annotate.sh
 proven-with: hand-built hook payloads (no Claude Code or Codex), mock gh
 proven: 2026-11-27
+proven-hash: 37479ee44372
 ---
 
 ## What it is
@@ -35,6 +36,7 @@ The payload is `tool_name`, `cwd`, `session_id`, `tool_input.command` and `tool_
 Commit route: a suggestion, silence on a repeat, no closure by sync, the confirm, then a failing input.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new commit-hook)"; trap '$F rm "$SB"' EXIT
 $F registered "$SB" PostToolUse post-bash-dispatch Bash
@@ -65,6 +67,7 @@ $F has "$SB" 'not a valid commit'
 PR route against the `gh` mock: one entry whose line the diff misses (candidates), one whose line it hits (suggestion), then two entries on the file (candidates). A mock row is the PR number, a tab, then the answer. `GH_MOCK_PR_DIFF` is not a row: it is the diff itself, with newlines written as backslash-n.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new pr-hook --github)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md
@@ -96,6 +99,7 @@ $F snap "$SB" two-entries
 Merge route and both off switches. The hook prints nothing, so the proof is the ledger. The control runs first, with the route switched off. The last part turns suggestions off and sends a PR, then a commit.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new merge-hook --github)"; trap '$F rm "$SB"' EXIT
 L=docs/found-issues.md

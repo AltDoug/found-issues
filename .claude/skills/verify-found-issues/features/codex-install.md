@@ -7,6 +7,7 @@ sources:
   - scripts/gen-codex-skills.sh
 proven-with: no Codex; the generated shim is run by hand
 proven: 2026-11-27
+proven-hash: 17c213d4218a
 ---
 
 ## What it is
@@ -30,6 +31,7 @@ A Codex user runs it once after `codex plugin add`.
 Install next to somebody else's hook, run the SessionStart shim, uninstall, and check the other hook survived.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new codex-wiring)"; trap '$F rm "$SB"' EXIT
 H="$SB/home/.codex"

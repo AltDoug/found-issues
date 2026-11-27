@@ -6,6 +6,7 @@ sources:
   - hooks/prompt-nudge.sh
 proven-with: hand-built hook payloads and transcripts (no Claude Code or Codex)
 proven: 2026-11-27
+proven-hash: a30b1b6de91c
 ---
 
 ## What it is
@@ -31,6 +32,7 @@ Fires on Stop; `prompt-nudge.sh` on UserPromptSubmit delivers the silent form.
 The payload points at a transcript file in JSONL form. The block writes three: a turn that edited a file, the same turn with the marker, and a read-only turn.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new stop-nudge)"; trap '$F rm "$SB"' EXIT
 $F registered "$SB" Stop stop-reminder

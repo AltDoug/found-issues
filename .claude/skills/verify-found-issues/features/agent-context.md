@@ -9,6 +9,7 @@ sources:
   - skills/rules/SKILL.md
 proven-with: hand-built hook payloads (no Claude Code or Codex)
 proven: 2026-11-27
+proven-hash: 63beb74e1127
 ---
 
 ## What it is
@@ -35,6 +36,7 @@ Claude Code or Codex runs it on SessionStart, and `first-touch` after Read, Edit
 Session start: the critical and the topic entry are injected, the ordinary file entry is not.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new session-context)"; trap '$F rm "$SB"' EXIT
 $F registered "$SB" SessionStart session-start
@@ -52,6 +54,7 @@ $F silent "$SB"
 First touch: shown once, shown again after a compaction, nothing for a file with no entry.
 
 ```bash
+set -eo pipefail
 F=.claude/skills/verify-found-issues/scripts/fi-sandbox.sh; export FOUND_ISSUES_AUTOFIX=off
 eval "$($F new first-touch)"; trap '$F rm "$SB"' EXIT
 $F registered "$SB" PostToolUse first-touch Read
