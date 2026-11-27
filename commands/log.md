@@ -27,8 +27,11 @@ Tag every entry with exactly one fix tag (v3):
   dependency manifests and lockfiles, migrations, untracked or outside the
   repo, or no file at all) are tagged `(manual: off-limits: <category>)`
   instead, and the CLI says so.
-- `--decide "<question>"` — needs the operator's call: several valid fixes,
-  an interface or UX choice, anything outside the repo, irreversible steps.
+- `--decide "<question>"` — needs the operator's call: several valid fixes
+  and no clear better one, an interface or UX choice, anything outside the
+  repo, irreversible steps. Several valid fixes with a clear better one is
+  `--fix`: name the one you picked in `(suggested: ...)`. An obvious answer
+  is not the operator's to give.
 - `--manual "<why>"` — no test can prove the fix, or it needs a live payload.
 
 Re-logging an untagged entry with a tag tags it instead of skipping it.
